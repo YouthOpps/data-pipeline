@@ -51,3 +51,18 @@ python -B adapters/hu-fulbright-hungary/adapter.py --publish
 ```
 
 Only `YouthOpps/data-source/datas/hu-fulbright-hungary/{data,metadata}.json` are published, atomically and with conflict-safe reference updates. Successful publication of validated nonempty records advances the durable success timestamp. Later failures preserve last-good data and its success timestamp while recording sanitized failure metadata when possible; a failure before first success creates no source folder. Tests never publish. Production publication was reviewed statically and was not invoked during implementation or QA.
+
+## Homepage parse diagnostics
+
+A missing or duplicated homepage award section fails closed: exactly one
+`section-3` remains required. The sanitized error records the expected and actual
+section counts, final reviewed HTTPS page URL without query or fragment, HTTP
+status, and raw response byte length and SHA-256. These values fingerprint the
+already received response; no HTML, response headers or additional requests are
+retained or introduced. They cannot reconstruct a missing historical response
+or establish that an unexpected document was a bot refusal.
+
+The 11 October 2026 parse failure in [run 38142601920](https://github.com/YouthOpps/data-pipeline/actions/runs/38142601920)
+had no retained response artifact. Earlier and later runs on the same revision
+succeeded, so its specific cause remains unknown. Parsing is not retried or
+relaxed: a failure preserves last-good records and the prior success timestamp.

@@ -70,6 +70,7 @@ class Node:
         self.tag = tag
         self.attrs = dict(attrs)
         self.children = []
+        self.response_evidence = None
 
     def text(self):
         parts = []
@@ -148,7 +149,11 @@ def one(values, description):
 
 def page(url):
     delay = check_robots(url)
-    return PublisherHTML(fetch_source(url, min_interval=delay)).root
+    evidence = {}
+    document = fetch_source(url, min_interval=delay, evidence=evidence)
+    root = PublisherHTML(document).root
+    root.response_evidence = evidence
+    return root
 
 
 def deadline(text):
@@ -177,10 +182,20 @@ def deadline(text):
 
 
 def dated_calls(root):
-    section = one(
-        [n for n in root.walk() if n.attrs.get("id") == "section-3"],
-        "award section",
-    )
+    sections = [n for n in root.walk() if n.attrs.get("id") == "section-3"]
+    if len(sections) != 1:
+        message = (
+            f"Expected one award section; expected=1; actual={len(sections)}"
+        )
+        if root.response_evidence:
+            evidence = root.response_evidence
+            message += (
+                f"; page={evidence['url']}; http={evidence['status']}"
+                f"; response_bytes={evidence['bytes']}"
+                f"; response_sha256={evidence['sha256']}"
+            )
+        raise AdapterError(message, "parse")
+    section = sections[0]
     cards = nodes(section, "div", "box")
     if not cards:
         raise AdapterError("No published award cards", "parse")
@@ -585,7 +600,7 @@ def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
         state.close()
 
 
-def fetch_source(url, min_interval=6):
+def fetch_source(url, min_interval=6, *, evidence=None):
     original = urllib.parse.urlsplit(url)
 
     def checked(value):
@@ -631,7 +646,24 @@ def fetch_source(url, min_interval=6):
                     raise AdapterError(
                         f"Publisher returned HTTP {status}", "fetch", status
                     )
-                return body.decode(headers.get_content_charset() or "utf-8")
+                document = body.decode(headers.get_content_charset() or "utf-8")
+                if evidence is not None:
+                    parsed = urllib.parse.urlsplit(current)
+                    evidence.update(
+                        url=urllib.parse.urlunsplit(
+                            (
+                                parsed.scheme,
+                                parsed.hostname or "",
+                                parsed.path,
+                                "",
+                                "",
+                            )
+                        ),
+                        status=status,
+                        bytes=len(body),
+                        sha256=hashlib.sha256(body).hexdigest(),
+                    )
+                return document
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             if attempt:
                 raise AdapterError(
