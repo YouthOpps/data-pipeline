@@ -1,38 +1,130 @@
 # IPDJ public opportunities
 
-The standalone Python adapter collects 245 reviewed opportunities and programme overviews from IPDJ’s finite public programme navigation, 500 news cards and 499 advertised sitemap locations. It preserves original Portuguese/English titles and provides original English summaries. This includes distinct 2025/2026 volunteer camps, institutional project grants, competitions, internships and educational sessions. Historical closed calls remain historical; dated events are not application deadlines.
+This standalone standard-library adapter discovers the live official
+[programme directory](https://ipdj.gov.pt/programas) and
+[news board](https://ipdj.gov.pt/noticias), then parses the linked public HTML.
+It accepts ordinary title, text, link and date changes and discovers new entries.
+There are no frozen input hashes or embedded opportunity profiles.
 
-Scope is the reviewed IPDJ frontier, not all Portuguese institutions or an external catalogue. Programme umbrellas, same-call announcements, recipient/results lists, administrative registries and completed coverage without an applicant offer are excluded. Ordinary Cuida-te clinical/mobile-health access is excluded; its separately evidenced preventive-project financing remains an institutional grant. The 2020/2021 online educational sessions are historical programme overviews, with present entry unknown.
+## Inventory and limitations
 
-Run the single complete nonpublishing test:
+Every programme-directory card is accounted for. Own programme details are read;
+delegated sites and administrative registration routes are excluded. The complete
+news board delivered by the publisher is inspected, selecting cards that describe
+applications, enrolment, scholarships, internships, volunteering or education.
+Results and award-delivery reports are excluded. A detail page must contain a
+participant/application offer before it becomes a record. The board currently
+delivers a finite recent archive; this adapter does not claim all-time news
+coverage or discover private search APIs. The public applications-calendar
+resource returned an empty response during research and is not treated as an
+opportunity inventory. The public online-session calendar is parsed by year and
+dated entry, including still-published historical sessions. The PEJENE, PAFRH,
+PAAF and academic-scholarship programme sections are also read directly because
+they remain public but are absent from the main programme directory.
+
+The previous 245 hard-coded records included individual PDF workcamps, separate
+regional sessions and recipient tracks, as well as the online-learning calendar.
+Grouped HTML notices are split into explicitly selectable regional sessions,
+training modules, award audiences, programme tracks and volunteer actions.
+Existing deterministic item keys are retained for matching identities. PDF/DOCX-only
+camp details and attachment-only rounds remain coverage limitations; their old
+facts are not carried forward as if newly verified. Other pages absent from the
+named roots and current directory/news board are not discovered automatically.
+Omitting a former identity does not establish cancellation or closure. This
+implementation must not be described as preserving the old inventory in full.
+No delegated PNED/INR, e-goi, ClubeTOP, private form or login is fetched.
+
+The 2026-10-13 census inspected all 500 delivered news cards and 72 directory
+links (two delegated), retrieved 301 distinct own detail URLs plus three roots,
+and emitted 275 records. Of the details, 208 supplied offers, 92 supplied no
+recognised participant offer, and one returned HTTP 404. Exclusions include
+award/result reports, reports on already participating volunteer cohorts,
+regulatory/information pages and health services without an opportunity offer.
+Closed calls are not excluded simply for being closed. Public consultation
+invitations, still-published historical training and programme overviews remain
+represented. Unrecognised invitation phrasing remains a heuristic limitation.
+
+Programmatic comparison with the prior 245 profiles retained 198 IDs after
+one-to-one legacy migration and found 77 new identities. All 30 prior HTML
+suboffers across 11 grouped pages and all 46 calendar identities were retained.
+The 47 omissions are 44 workcamp allocations from two document-library PDFs,
+the attachment-only `PNDpT-IES - bienio 2023-2025` and `Despacho Programa
+Associa-te 2025` rounds, and the news item
+`/-/bolsas-jovens-criadores-2025-nas-areas-da-musica-e-literatura-candidaturas-abertas`,
+absent from the current delivered news board.
+The unavailable `/gabinetes-de-saude-juvenil` page affected no prior identity.
+None of these omissions is evidence of cancellation. Individual PDF allocations
+cannot be claimed as currently verified through their parent HTML overview.
+
+## Live facts and identity
+
+Titles and short factual extracts remain in Portuguese. Categories are derived
+from the actual title and subtitle, with `other` for unsupported classification.
+Grant records distinguish institutional beneficiaries when explicitly present in
+the page. Host and eligible countries are not inferred from publisher location.
+
+Affirmative application-closing clauses containing a year are parsed each run;
+project execution and course end dates do not count as application closings.
+Concise funding and eligibility excerpts beyond the introduction are retained in
+classification evidence, so those material changes also advance updated time.
+Yearless dates remain null unless an unambiguous call edition supplies the year
+for an individual grouped offer. Relative, conflicting or event-only dates remain null. Date-only
+deadlines stay date-only; no time or timezone is invented. A future closing does
+not guarantee available places, so status remains unknown unless closure is
+established. Original details and canonical links retain provenance for terms
+the parser cannot represent.
+
+Notice IDs use the existing source-plus-canonical-URL hash. Publication preserves
+an old ID when URL and title have one unambiguous prior match, or when a URL has
+exactly one old and one new record even after a title edit, keeping created and
+first-seen times. Changed content advances updated time; every success advances
+checked/seen times. Several former participant identities cannot safely inherit
+one aggregate notice ID; independently extracted tracks retain their item keys
+and receive their own category, kind and classification status. Calendar identities retain the source's existing
+title/year/day/month/time key; event times are not application deadlines.
+
+## Access and collection controls
+
+[Robots](https://ipdj.gov.pt/robots.txt), TLS verification and inherited proxy
+settings remain enforced. Public discovery is confined to IPDJ's official host;
+service, login and administrative registration routes are excluded. Short factual
+extracts, attribution and canonical links are published, not whole articles,
+images, full manuals or personal application data. The original source review's
+document and delegated-site copying restrictions remain respected.
+
+The existing publisher-family pacing state and lock remain in place: at least
+six seconds between physical attempts, at most ten starts per rolling minute,
+persisted completion/backoff, native startup recovery and stricter robots delays.
+Missing mature state or locks, refusals, unavailable required pages and malformed
+content fail closed. Timeouts/connection failures and HTTP 503 retain one bounded
+retry. HTML requests negotiate gzip to reduce transfer costs; compressed and
+decoded bodies are both bounded to 8 MiB. Discovered detail HTTP 404/410 responses
+are reported as unavailable, not cancelled; required roots and other HTTP errors
+still fail closed. Collection is bounded to 3,100 seconds and the whole process
+to 3,490 seconds, with reserved publication, failure and export phases. The job
+has 65 minutes for setup and pacing-state handoff. The larger collection budget
+accommodates the current 301-detail frontier without relaxing request pacing.
+On 2026-10-13, 149 genuine compressed responses had an observed mean completion
+interval of 9.15 seconds (including development interruptions): about 46.4 minutes
+for 304 retrievals, versus 51.7 minutes allowed for collection. This is an estimate,
+not a proven cold-run duration; slower publishers still fail safely at the budget.
+Exceeding a discovery ceiling fails rather than returning a partial collection.
+
+## Test and publication
 
 ```sh
 python -B adapters/pt-ipdj/test_adapter.py
 ```
 
-The test prints the complete collection to stdout. It does not publish. Publication uses only `python -B adapters/pt-ipdj/adapter.py --publish` with the existing restricted data-source App token contract.
+The sole live test validates all retrieved records and prints one complete JSON
+array on stdout; diagnostics use stderr. It neither publishes nor receives a
+publication token or writes collection files. Counts are dynamic. Native local
+pacing-state writes remain necessary.
 
-## Source facts and limitations
-
-Cash units distinguish institutional pools/project costs from personal support. Volunteer expense reimbursement is not wages. Portuguese residence is not citizenship; physical hosts are only asserted where reviewed source facts establish them. English summaries retain applicable ages, language, attendance, cofinancing and training conditions. Date-only deadlines stay date-only; unzoned clocks, relative/yearless deadlines and unresolved conflicting dates have no invented UTC closing.
-
-Both complete workcamp brochures are separate editions. Their title/code/date/meeting/host inconsistencies remain explicit, including conditional EUR25 fees in the 2026 participant evaluation versus the brochure’s no-charge wording. Association award geography/mention counts and other materially conflicting rules remain qualified. The PNDpT-IES linked general rules are explicitly a consultation draft; draft clauses are not certified as final conditions. Current PNDpT deliberation is unavailable; older award limits are not silently promoted. The 2025 Férias 5.0 notice supports an organiser-financing call and September 1 closing, but its detailed PDF could not be read; amount and additional terms remain unverified.
-
-Only own IPDJ material is fetched at runtime. Delegated PNED/INR/rules routes were unavailable, e-goi robots disallow collection, and ClubeTOP’s copying/access restriction is respected by excluding delegated runtime collection; no bypass, private form, login or submission is performed. Own dated notices may support limited facts with additional terms unknown. The Cuida manual’s transfer restriction is respected by linking rather than copying it. Source attribution credits IPDJ and named programme administrators; summaries are original factual writing.
-
-## Collection and publication controls
-
-The exact 262-input manifest guards complete visible facts and literal HTML destinations, sitemap locations and original PDF/DOCX bytes. Only the unique CMS relative-age label in its exact reviewed plain span/parent structure is normalized; whole substantive text, absolute dates and links remain guarded. Missing, moved, duplicated or malformed age labels fail rather than widening this exception. Changed or incomplete material fails the whole collection rather than publishing a partial subset. The empty public calendar response is guarded as empty; no private API is guessed. No third-party package, sibling adapter import or runtime PDF extraction is required.
-
-One publisher-family lock preserves the existing IPDJ pacing state: at least six seconds between starts and at most ten in a rolling minute, including robots, redirects and retries. Every physical attempt, including failures and response closure, persists its completion plus the native interval as a minimum next-start time. A monotonic gate also enforces the elapsed interval; stricter reviewed robots delays and longer embargoes remain effective. A collector first acquires the exclusive family lock and preserves a full 60-second startup embargo to age any abandoned prior attempt. Refusals and Retry-After persist before response-body processing; only reviewed HTTPS destinations can be followed after policy checks. TLS verification, CA trust and proxy are inherited. Each response is capped at 8 MiB. A typed network timeout or connection failure may retry the same reviewed GET once after a persisted backoff of at least 30 seconds; HTTP 503 shares this two-attempt ceiling. TLS or certificate failures, other transport errors, policy refusals and material changes remain fatal.
-
-Prepublication has a true 2,400-second deadline; publication and failure handling each have a 180-second cap. The original absolute 2,790-second process budget reserves its final 30 seconds for trusted pacing-state export, with no renewed grace. The workflow lasts at most 55 minutes and mints the restricted one-hour App token immediately before the sole adapter command. Timers cover blocking reads, backoff, parsing and output. A hard runner kill cannot guarantee an artifact.
-
-Publication restores the exact newest completed publisher-family attempt’s validated inert pacing artifact after complete run-history accounting. A missing newest artifact fails closed. Own records and metadata are committed atomically with conditional retries; ambiguous writes reconcile the exact pair and cannot overwrite a newer success. Invalid prior metadata cannot authorize failure writes. Only healthy, fully persisted pacing state exports in finally, and locks release after export. The exporter validates an owned fresh GitHub step-output file, finalizes and checks the inert artifact, then signals readiness bound to the current run and attempt. The upload step requires that positive handoff. A failed completion-state save or artifact finalization cannot upload an older envelope; the newest missing artifact then keeps subsequent publication blocked. If output signaling itself fails after artifact finalization, any surviving positive line refers only to the already durable healthy current-run state.
-
-A missing state file or either missing family lock in an existing pacing directory fails closed. Initial empty state and lock creation are allowed only when this process created the directory; the allowance retires after the first state replacement. Six isolated state regression tests cover initialization, loss, refusal/embargo retention, unsafe state links and failed saves.
-
-The workflow installs a first-family bootstrap supported by [the reviewed public history and timing handoff](https://github.com/YouthOpps/data-pipeline/issues/38#issuecomment-6101961119), with not-before epoch 1791664900.344191. It applies only when complete family history contains no earlier run; it adds timing restrictions and preserves local refusal, embargo and start history. Once any family run exists, restoration requires the newest run’s artifact, including failed attempts; the bootstrap marker cannot replace a missing or invalid artifact. Only a healthy durable current-run export with the fresh collect-step success signal can be uploaded.
-
-
-The optional `diagnose_news195` workflow-dispatch input defaults to false. Operators use this bounded diagnostic once to inspect the fixed news195 URL after a transport failure. It restores the same family's newest pacing artifact, including failed runs, acquires the native collection lock, observes startup recovery and fresh robots policy, and permits at most two physical requests: robots and the exact news195 GET. The diagnostic allows 420 seconds for restoration, startup recovery and the two requests, plus a reserved 30-second export phase (450 seconds overall); each native request retains its 120-second budget check. The target response is closed after headers without reading its body or following any redirect. Output contains status, a bounded destination scheme, hostname and path, credential-free URI structure flags, the existing route-admission result and a Location digest; credentials, query values, fragment values, cookies and authentication headers are excluded. The diagnostic neither authenticates data-source publication nor publishes records. Its native completion and export guards preserve pacing state for the next ordinary run. A diagnostic response does not establish material validity or permission to follow a new destination.
+The Action runs only `python -B adapters/pt-ipdj/adapter.py --publish`, retaining
+manual dispatch, the schedule, own-path main pushes, repository/main guard,
+source-scoped credentials and serialization. The obsolete fixed-URL diagnostic
+dispatch was removed. Data and metadata are atomically source-scoped; first-run
+failure creates no source pair, and later failure preserves last-good data and
+success time. Artifact restore/export and the healthy current-attempt upload
+handoff remain unchanged. Live tests do not prove production publication.

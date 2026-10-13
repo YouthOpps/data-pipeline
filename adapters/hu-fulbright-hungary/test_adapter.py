@@ -12,6 +12,13 @@ class LiveAdapterTest(unittest.TestCase):
         records = adapter.collect()
         adapter.validate_records(records)
         self.assertTrue(records)
+        self.assertEqual(
+            len(records), len({record["id"] for record in records})
+        )
+        self.assertTrue(all(record["summary"] for record in records))
+        self.assertTrue(
+            all(record["classification"]["evidence"] for record in records)
+        )
         self.assertTrue(
             all(record["status"] in ("open", "unknown") for record in records)
         )

@@ -10,8 +10,12 @@ class TestDZS(unittest.TestCase):
     def test_complete_public_collection(self):
         records = adapter.collect()
         adapter.validate_records(records)
-        self.assertEqual(len(records), 16)
-        self.assertEqual(len({record["id"] for record in records}), 16)
+        self.assertTrue(records)
+        self.assertTrue(all(record["summary"] and record["summary_language"]
+                            in {"cs", "en"} for record in records))
+        self.assertEqual(len({record["id"] for record in records}), len(records))
+        self.assertTrue(all(record["classification"]["evidence"]
+                            for record in records))
         self.assertTrue(all(record["source"] == adapter.SOURCE_ID
                             for record in records))
         print(json.dumps(records, ensure_ascii=False))

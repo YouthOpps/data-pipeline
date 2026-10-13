@@ -1,9 +1,9 @@
-"""Collect the reviewed current European Solidarity Corps programme frontier."""
+"""Discover and collect published ESC grants and educational offers."""
 
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -599,12 +599,10 @@ def fetch_public(url):
                 state["observed_at"] = now
                 save_budget(state)
             continue
-        key = next((key for key, info in INPUTS.items()
-                    if info["url"] == url), "unmapped-public-input")
         parsed = urllib.parse.urlsplit(reviewed)
         provenance = parsed.scheme + "://" + parsed.netloc + parsed.path
         raise AdapterError(
-            f"Required publisher input {key} returned HTTP {status}: "
+            f"Required publisher input returned HTTP {status}: "
             + provenance, "fetch", status)
 
 
@@ -1192,6 +1190,8 @@ def validate_records(records):
         length = len(summary.encode("utf-16-le")) // 2
         if length > 600:
             raise AdapterError("Invalid plain summary", "validate")
+        if record.get("summary_language", "en") not in {"en", "cs"}:
+            raise AdapterError("Invalid summary language", "validate")
         for field in ("location", "language", "publisher_country"):
             if (
                 field not in record
@@ -1335,86 +1335,485 @@ def publish_files(snapshot, files):
 
 
 def public_url(value):
-    parsed = urllib.parse.urlsplit(value)
-    clean = urllib.parse.urlunsplit(parsed._replace(fragment=""))
-    allowed = {info["url"] for info in INPUTS.values()}
-    if (clean not in allowed or parsed.scheme != "https"
-            or parsed.username or parsed.password or parsed.port):
-        raise AdapterError("Unreviewed public source route", "access")
-    return clean
-
-
-def html_fingerprint(body):
-    root = document_root(body.decode("utf-8", "strict"))
-    links = sorted({
-        (node.tag, node.attrs.get("rel", ""), node.attrs["href"])
-        for tag in ("a", "link") for node in nodes(root, tag)
-        if node.attrs.get("href")
-    })
-    facts = json.dumps({"text": root.text(), "links": links},
-                       ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(facts.encode()).hexdigest()
-
-
-def read_input(key):
-    info = INPUTS[key]
+    """Constrain discovery to public DZS and delegated training routes."""
     try:
-        status, headers, body = fetch_public(info["url"])
-    except AdapterError as error:
-        raise AdapterError("Required publisher input " + key + ": "
-                           + safe_error(error), error.stage,
-                           error.status) from None
-    if info["format"] == "html":
-        digest = html_fingerprint(body)
-    else:
-        if info["format"] == "pdf" and not body.startswith(b"%PDF-"):
-            raise AdapterError("Invalid material document: " + key, "parse")
-        digest = hashlib.sha256(body).hexdigest()
-    if digest != info["sha256"]:
-        raise AdapterError("Reviewed source facts/frontier changed: " + key,
-                           "parse")
-    return digest
+        parsed = urllib.parse.urlsplit(value)
+        path = urllib.parse.unquote(parsed.path)
+        paging = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        allowed_paging = (
+            parsed.hostname == "www.dzs.cz"
+            and path == "/networking-activities"
+            and set(paging) == {"page"}
+            and len(paging["page"]) == 1
+            and paging["page"][0].isdigit())
+        if (parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.port or parsed.query and not allowed_paging
+                or any(part in {".", ".."} for part in path.split("/"))):
+            raise ValueError()
+        if parsed.hostname == "www.dzs.cz":
+            allowed = (path == "/robots.txt"
+                       or path.startswith("/program/evropsky-sbor-solidarity")
+                       or path.startswith("/udalost/")
+                       or path.startswith("/vyzva")
+                       or path == "/networking-activities")
+        elif parsed.hostname == "www.salto-youth.net":
+            allowed = (path == "/robots.txt" or path.startswith(
+                "/tools/european-training-calendar/training/"))
+        else:
+            allowed = False
+        if not allowed:
+            raise ValueError()
+    except ValueError:
+        raise AdapterError("Unsafe public source route", "access") from None
+    return urllib.parse.urlunsplit(parsed._replace(fragment=""))
+
+
+def read_html(url):
+    _, headers, body = fetch_public(url)
+    if headers.get("Content-Type", "").split(";")[0] != "text/html":
+        raise AdapterError("Expected public HTML: " + url, "parse")
+    return document_root(body.decode("utf-8", "strict"))
+
+
+def links(root, base):
+    for node in nodes(root, "a"):
+        href = node.attrs.get("href", "")
+        if href:
+            yield node.text(), urllib.parse.urljoin(base, href)
+
+
+def training_link(url):
+    parsed = urllib.parse.urlsplit(url)
+    return (parsed.hostname == "www.salto-youth.net" and parsed.path.startswith(
+        "/tools/european-training-calendar/training/"))
 
 
 def read_pages():
-    return {key: read_input(key) for key in INPUTS}
+    """Follow programme links and every advertised training detail."""
+    programme = "https://www.dzs.cz/program/evropsky-sbor-solidarity"
+    seeds = [SOURCE_URL, programme, programme + "/vyjezdy-pobyty",
+             "https://www.dzs.cz/networking-activities"]
+    pages = {"hubs": {}, "events": {}, "delegated": {}, "owners": {}}
+    pending = list(seeds)
+    while pending:
+        url = pending.pop(0)
+        if url in pages["hubs"]:
+            continue
+        if len(pages["hubs"]) >= 40:
+            raise AdapterError("Programme discovery limit exceeded", "parse")
+        root = read_html(url)
+        pages["hubs"][url] = root
+        for _, target in links(root, url):
+            parsed = urllib.parse.urlsplit(target)
+            if parsed.hostname != "www.dzs.cz":
+                continue
+            if (parsed.path.startswith("/vyzva") and not parsed.query
+                    or parsed.path == "/networking-activities"):
+                clean = public_url(target)
+                if clean not in pages["hubs"] and clean not in pending:
+                    pending.append(clean)
+    own_urls = {}
+    delegated_urls = {}
+    for url, root in pages["hubs"].items():
+        for _, target in links(root, url):
+            parsed = urllib.parse.urlsplit(target)
+            if (parsed.hostname == "www.dzs.cz"
+                    and parsed.path.startswith("/udalost/")
+                    and not parsed.query):
+                own_urls[public_url(target)] = url
+            elif training_link(target):
+                delegated_urls[public_url(target)] = url
+    for url, owner in sorted(own_urls.items()):
+        root = read_html(url)
+        pages["events"][url] = root
+        pages["owners"][url] = owner
+        for _, target in links(one(nodes(root, "main"), "event main"), url):
+            if training_link(target):
+                clean = public_url(target)
+                delegated_urls[clean] = url
+    for url, owner in sorted(delegated_urls.items()):
+        pages["delegated"][url] = read_html(url)
+        pages["owners"][url] = owner
+    print(f"Discovery: {len(pages['hubs'])} programme/call pages; "
+          f"{len(pages['events'])} DZS event details; "
+          f"{len(pages['delegated'])} delegated details", file=sys.stderr)
+    return pages
+
+
+_MONTHS = {}
+for _number, _names in enumerate((
+    ("ledna", "leden", "january"), ("února", "únor", "february"),
+    ("března", "březen", "march"), ("dubna", "duben", "april"),
+    ("května", "květen", "may"), ("června", "červen", "june"),
+    ("července", "červenec", "july"), ("srpna", "srpen", "august"),
+    ("září", "september"), ("října", "říjen", "october"),
+    ("listopadu", "listopad", "november"),
+    ("prosince", "prosinec", "december")), 1):
+    _MONTHS.update(dict.fromkeys(_names, _number))
+_DATE_PATTERN = (
+    r"(?P<day>\d{1,2})\.?\s*(?P<month>" + "|".join(
+        sorted(_MONTHS, key=len, reverse=True)) +
+    r")(?:\s+(?P<year>20\d{2}))?|"
+    r"(?P<d>\d{1,2})\.\s*(?P<m>\d{1,2})\.\s*(?P<y>20\d{2})"
+)
+
+
+def published_dates(text, year=None):
+    result = []
+    for match in re.finditer(_DATE_PATTERN, text, re.I):
+        if match["d"]:
+            day, month, actual_year = (
+                int(match["d"]), int(match["m"]), int(match["y"]))
+        else:
+            day = int(match["day"])
+            month = _MONTHS[match["month"].lower()]
+            actual_year = int(match["year"] or year or 0)
+        if not actual_year:
+            raise AdapterError("Published date has no evidenced year", "parse")
+        try:
+            result.append(datetime(actual_year, month, day).date().isoformat())
+        except ValueError:
+            raise AdapterError("Invalid published date", "parse") from None
+    return result
+
+
+# Historical identity aliases only; content always comes from fetched pages.
+_EVENT_KEYS = {
+    "informacni-webinar-pro-zadatele-o-solidarni-projekty-esc30-0":
+        "call-event-2",
+    "webinar-tipy-k-zadosti-pro-zajemce-o-solidarni-projekty-esc30-0":
+        "call-event-4",
+    "informacni-webinar-k-zadosti-o-grant-na-dobrovolnicke-projekty-esc51-0":
+        "call-event-8",
+    "tosca-volunteering-skoleni-podpora-pro-organizace-v-programu-"
+    "evropsky-sbor-solidarity": "tosca",
+    "od-napadu-k-projektu-5": "idea",
+}
+_SALTO_KEYS = {
+    "14430": "delegated-1", "15280": "delegated-2",
+    "15244": "delegated-3", "15320": "delegated-4",
+    "15317": "delegated-5", "15300": "delegated-6",
+    "15356": "delegated-7",
+}
+def short_excerpt(text, limit):
+    """Bound quoted plain text in UTF-16 units without splitting a character."""
+    text = " ".join(text.split())
+    if len(text.encode("utf-16-le")) // 2 <= limit:
+        return text
+    clipped = text.encode("utf-16-le")[:max(0, limit - 3) * 2].decode(
+        "utf-16-le", "ignore")
+    return clipped.rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
+
+
+def factual_blocks(root):
+    """Read body paragraphs and leaf lists, excluding navigation and contacts."""
+    blocks = []
+
+    def visit(node):
+        if not isinstance(node, Node):
+            return
+        classes = node.attrs.get("class", "")
+        if (node.tag in {"nav", "aside", "footer", "script", "style"}
+                or re.search(r"breadcrumbs|timeline|steps__|post-navigation|"
+                             r"entry-meta|description-date|description-tags",
+                             classes)):
+            return
+        if node.tag in {"h2", "h3", "h4"}:
+            blocks.append((node.tag, node.text()))
+            return
+        if (node.tag in {"p", "li"} and not any(
+                nodes(node, tag) for tag in {"ul", "ol"})
+                or "elementor-icon-box-content" in classes):
+            text = node.text()
+            if (len(text) >= 30 and "@" not in text
+                    and not re.search(r"newsletter|Contact for questions|"
+                                      r"All new training offers", text, re.I)):
+                blocks.append(("body", text))
+            return
+        for child in node.children:
+            visit(child)
+
+    visit(root)
+    return blocks
+
+
+def describe(record, blocks, language, timing):
+    """Index brief publisher description, audience and funding excerpts."""
+    bodies = list(dict.fromkeys(text for tag, text in blocks if tag == "body"))
+    selected = bodies[:1]
+    patterns = (
+        r"ve věku|rezident|žijí|určen|eligible|aged|persons|open to|"
+        r"applicants|beneficiar|participants.{0,25}(?:from|who)|ηλικ|δικαι",
+        r"\d[\d ,.]*\s*(?:eur|€)|hrazen|bezplat|zdarma|"
+        r"participation fee|travel costs|travel expenses|budget|"
+        r"accommodation|funding|grants|χρηματοδ",
+    )
+    for pattern in patterns:
+        candidates = [text for text in bodies if text not in selected
+                      and re.search(pattern, text, re.I)]
+        if candidates:
+            selected.append(candidates[0])
+    record["summary_language"] = language
+    for text in selected:
+        record["classification"]["evidence"].append(
+            f"Publisher excerpt ({language}): " + short_excerpt(text, 240))
+    timing = short_excerpt(timing, 240)
+    budget = 600 - len(timing.encode("utf-16-le")) // 2 - 1
+    if selected:
+        allowance = (budget - 3 * (len(selected) - 1)) // len(selected)
+        body = " / ".join(short_excerpt(text, allowance) for text in selected)
+    else:
+        body = {"en": "Publisher description not stated.",
+                "cs": "Popis nabídky není uveden.",
+                "el": "Δεν αναφέρεται περιγραφή."}[language]
+    record["summary"] = short_excerpt((timing + " " + body).strip(), 600)
+
+
+def opportunity(key, title, url, category, deadline, proof, kind="opportunity"):
+    record = make_record(title, url, [category], kind=kind,
+                         method="publisher-html",
+                         evidence=[ATTRIBUTION, "Publisher: " + url] + proof)
+    record["id"] = hashlib.sha256(
+        (SOURCE_ID + "|" + key).encode()).hexdigest()[:24]
+    record["deadline"] = deadline
+    record["summary"] = (
+        "Uzávěrka přihlášek: " + deadline + ". " if deadline else
+        "Uzávěrka přihlášek není uvedena. "
+    )
+    now = datetime.now(timezone.utc)
+    if deadline and "T" in deadline:
+        record["status"] = ("expired" if now >= datetime.fromisoformat(
+            deadline.replace("Z", "+00:00")) else "open")
+    elif deadline:
+        today = now.date().isoformat()
+        record["status"] = ("expired" if today > deadline else
+                            "open" if today < deadline else "unknown")
+    return record
+
+
+def grant_records(pages):
+    records = {}
+    # The current call supersedes older hub rounds of the same annual scheme.
+    hubs = sorted(pages["hubs"].items(),
+                  key=lambda item: "/vyzva" in item[0])
+    for url, root in hubs:
+        if url != SOURCE_URL and "/vyzva" not in url:
+            continue
+        annual = {}
+        for tab in (n for n in nodes(root, "div")
+                    if n.attrs.get("id", "").endswith("-tab")):
+            fragment = tab.attrs["id"][:-4]
+            if fragment == "quality-label":
+                continue
+            for timeline in nodes(tab, "div", "timeline"):
+                heading = " ".join(n.text() for n in
+                                   nodes(timeline, "h3", "timeline__heading"))
+                if not re.search(r"Termíny (?:výz|pro podávání)", heading):
+                    continue
+                year_match = re.search(r"\b20\d{2}\b", heading)
+                for item in nodes(timeline, "li", "timeline__item"):
+                    title = one(nodes(item, "span", "timeline__item-date"),
+                                "grant timeline title").text()
+                    if re.search(r"Quality Label|Značka kvality", title, re.I):
+                        continue
+                    deadlines = published_dates(
+                        item.text(), year_match[0] if year_match else None)
+                    if not deadlines:
+                        raise AdapterError("Grant timeline has no dates: "
+                                           + url, "parse")
+                    years = {date[:4] for date in deadlines}
+                    if len(years) != 1:
+                        raise AdapterError(
+                            "Mixed annual grant timeline", "parse")
+                    year = next(iter(years))
+                    scheme = {
+                        "solidarni-projekty": "solidarity",
+                        "dobrovolnicke-projekty": "volunteering",
+                    }.get(fragment)
+                    if fragment == "centralizovane-aktivity":
+                        if re.search(r"vysokou priorit", title, re.I):
+                            scheme = "priority-teams"
+                        elif re.search(r"humanitární", title, re.I):
+                            scheme = "humanitarian"
+                    key = scheme or fragment + "|" + title
+                    key += "-" + year
+                    canonical = SOURCE_URL + "#" + fragment
+                    record = opportunity(
+                        key, title, canonical, "grants", max(deadlines),
+                        ["Call timeline: " + url + "#" + fragment,
+                         "Published deadlines: " + ", ".join(deadlines)],
+                        kind=("opportunity" if scheme == "solidarity"
+                              else "institutional-grant"))
+                    blocks = factual_blocks(tab)
+                    if fragment == "centralizovane-aktivity":
+                        selected, active = [], False
+                        for tag, text in blocks:
+                            if tag == "h3":
+                                active = bool(re.search(
+                                    r"vysokou priorit" if scheme == "priority-teams"
+                                    else r"humanitární", text, re.I))
+                            if active:
+                                selected.append((tag, text))
+                        blocks = selected
+                    if key in annual:
+                        previous = annual[key]
+                        deadlines = sorted(set(deadlines + previous[1]))
+                        record["deadline"] = max(deadlines)
+                        record["classification"]["evidence"] = sorted(set(
+                            record["classification"]["evidence"]
+                            + previous[0]["classification"]["evidence"]))
+                        record["title"] = min(record["title"], previous[0]["title"])
+                    annual[key] = (record, deadlines, blocks)
+        for key, (record, deadlines, blocks) in annual.items():
+            record["status"] = opportunity(
+                key, record["title"], record["url"], "grants",
+                max(deadlines), [])["status"]
+            describe(record, blocks, "cs",
+                     "Uzávěrky přihlášek: " + ", ".join(sorted(deadlines)) + ".")
+            records[key] = record
+    if not records:
+        raise AdapterError("No grant timelines discovered", "parse")
+    return list(records.values())
+
+
+def event_record(url, root, owner):
+    main = one(nodes(root, "main"), "event main")
+    title = one(nodes(main, "h1"), "event title").text()
+    if re.search(r"individuální konzultace|on.arrival|mid.term", title, re.I):
+        return None
+    text = main.text()
+    if not re.search(r"webinář|školení|seminář|kurz|workshop|konferenc",
+                     text, re.I):
+        raise AdapterError("Unclassified advertised event: " + url, "parse")
+    times = nodes(main, "time")
+    years = {n.attrs.get("datetime", "")[:4] for n in times}
+    years.discard("")
+    year = next(iter(years)) if len(years) == 1 else None
+    # Match only application/registration sentences, never activity dates.
+    contexts = re.findall(
+        r"(?:Registrac[ei]|registrační formulář|přihlášk[ay]|"
+        r"přihlašování|přihlas\w*|Deadline)[^!?]{0,180}?"
+        r"(?:do |je )((?:\d{1,2}\.\s*)[^!?]{0,60})", text, re.I)
+    deadlines = [date for context in contexts
+                 for date in published_dates(context, year)[:1]]
+    deadline = max(deadlines) if deadlines else None
+    key = _EVENT_KEYS.get(urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1],
+                          url)
+    record = opportunity(key, title, url, "training", deadline,
+                         ["Discovered at: " + owner])
+    event_dates = sorted({n.attrs.get("datetime", "")[:10] for n in times
+                          if re.match(r"20\d{2}-\d{2}-\d{2}",
+                                      n.attrs.get("datetime", ""))})
+    if event_dates:
+        record["summary"] += " Termín akce: " + event_dates[0] + "."
+    if re.search(r"\bv (?:Brně|Praze)\b", text):
+        record["host_countries"] = ["CZ"]
+        record["location"] = "Brno" if "v Brně" in text else "Praha"
+    describe(record, factual_blocks(main), "cs", record["summary"])
+    return record
+
+
+def delegated_record(url, root, owner):
+    content = one(nodes(root, "div", "training"), "SALTO training detail")
+    title = one(nodes(content, "h1"), "training title").text()
+    text = content.text()
+    closing = re.search(
+        r"(?:application deadline(?:\s*\([^)]*\))?"
+        r"(?:\s+(?:was|is))?|Apply before)"
+        r"[:\s]+(.{0,100})", text, re.I)
+    if not closing:
+        raise AdapterError("Missing SALTO application deadline: " + url,
+                           "parse")
+    values = published_dates(closing[1])
+    if not values:
+        raise AdapterError("Unparseable SALTO application deadline: " + url,
+                           "parse")
+    deadline = values[0]
+    if re.search(r"24\s*h\s*UTC", closing[0], re.I):
+        deadline = (datetime.fromisoformat(deadline) +
+                    timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+    identifier = re.search(r"\.(\d+)/?$", urllib.parse.urlsplit(url).path)
+    if not identifier:
+        raise AdapterError("Missing SALTO training identity", "parse")
+    key = _SALTO_KEYS.get(identifier[1], "salto-" + identifier[1])
+    record = opportunity(key, title, url, "training", deadline,
+                         ["DZS discovery: " + owner])
+    record["language"] = "en"
+    record["summary"] = "Application deadline: " + deadline + "."
+    organiser = re.search(r"Organiser:\s*(.+?)\s*Contact for questions:",
+                          text, re.I)
+    if organiser:
+        record["classification"]["evidence"].append(
+            "Organiser: " + organiser[1])
+    if "Applications are closed" in text:
+        record["status"] = "expired"
+    category = one(nodes(content, "div", "tool-item-category-container"),
+                   "training dates/location").text()
+    if "|" in category:
+        location = category.split("|", 1)[1].strip()
+        record["location"] = location
+        record["summary"] += " Location: " + location[:100] + "."
+        countries = {
+            "Greece": "GR", "Slovakia": "SK", "Germany": "DE",
+            "Czech Republic": "CZ", "Czechia": "CZ", "Portugal": "PT",
+            "Poland": "PL", "Italy": "IT", "France": "FR",
+            "Austria": "AT", "Belgium": "BE", "Spain": "ES",
+            "Finland": "FI", "Ireland": "IE", "Latvia": "LV",
+            "Lithuania": "LT", "Estonia": "EE", "Netherlands": "NL",
+            "Romania": "RO", "Slovenia": "SI", "Hungary": "HU",
+            "Luxembourg": "LU", "Croatia": "HR", "Serbia": "RS",
+            "Bulgaria": "BG", "Cyprus": "CY", "Malta": "MT",
+            "Denmark": "DK", "Sweden": "SE", "Norway": "NO",
+            "Iceland": "IS", "Türkiye": "TR", "Turkey": "TR",
+            "North Macedonia": "MK", "Switzerland": "CH",
+            "Slovak Republic": "SK",
+        }
+        if not re.search(r"online|on.line|virtual", category, re.I):
+            hosts = {code for country, code in countries.items()
+                     if re.search(r"\b" + re.escape(country) + r"\b",
+                                  location, re.I)}
+            if len(hosts) == 1:
+                record["host_countries"] = sorted(hosts)
+    blocks = [("body", node.text()) for node in
+              nodes(content, "div", "training-summary")]
+    blocks.extend(factual_blocks(content))
+    describe(record, blocks, "en", record["summary"])
+    record["classification"]["evidence"].append(
+        "Advertised closing day: " + values[0])
+    return record
 
 
 def parse_inventory(pages):
-    if set(pages) != set(INPUTS) or any(
-        pages[key] != info["sha256"] for key, info in INPUTS.items()
-    ):
-        raise AdapterError("Incomplete reviewed programme frontier", "parse")
-    records = []
-    now = datetime.now(timezone.utc)
-    for profile in PROFILES:
-        record = make_record(
-            profile["title"], profile["url"], [profile["category"]],
-            kind=profile["kind"], host_countries=profile["hosts"],
-            evidence=[ATTRIBUTION, profile["proof"]],
-        )
-        record["id"] = hashlib.sha256(
-            (SOURCE_ID + "|" + profile["key"]).encode()
-        ).hexdigest()[:24]
-        record["summary"] = profile["summary"]
-        record["deadline"] = profile["deadline"]
-        record["language"] = "en" if profile["key"].startswith(
-            "delegated-"
-        ) else "cs"
-        deadline = profile["deadline"]
-        if "T" in deadline:
-            closed = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
-            record["status"] = "expired" if now >= closed else "open"
+    records = grant_records(pages)
+    own = {}
+    for url, root in pages["events"].items():
+        record = event_record(url, root, pages["owners"][url])
+        if record:
+            own[url] = record
+    for url, root in pages["delegated"].items():
+        owner = pages["owners"][url]
+        record = delegated_record(url, root, owner)
+        if owner in own:
+            # The linked provider is evidence for the same DZS course.
+            parent = own[owner]
+            advertised = next(value.removeprefix("Advertised closing day: ")
+                              for value in record["classification"]["evidence"]
+                              if value.startswith("Advertised closing day: "))
+            if parent["deadline"] and parent["deadline"] != advertised:
+                raise AdapterError("Conflicting DZS/SALTO closing dates",
+                                   "parse")
+            parent["deadline"] = record["deadline"]
+            parent["status"] = record["status"]
+            parent["location"] = record["location"]
+            parent["host_countries"] = record["host_countries"]
+            parent["classification"]["evidence"].append(
+                "Delegated course details: " + url)
+            parent["classification"]["evidence"].extend(
+                record["classification"]["evidence"])
         else:
-            record["status"] = (
-                "expired" if now.date().isoformat() > deadline
-                else "open" if now.date().isoformat() < deadline
-                else "unknown"
-            )
-        records.append(record)
+            records.append(record)
+    records.extend(own.values())
     validate_records(records)
-    if len(records) != 16:
-        raise AdapterError("Incomplete reviewed identity partition", "validate")
     return records
 
 
@@ -1447,7 +1846,7 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "record_count": len(records),
         "message": (
             "Collection failed; last-good data preserved" if error else
-            f"Collected {len(records)} reviewed ESC grants and training offers"
+            f"Collected {len(records)} published ESC grants and training offers"
         ),
         "error": safe_error(error) if error else None,
     }
@@ -1588,725 +1987,6 @@ def main():
         return 1
 
 
-INPUTS = {'allocation': {'url': (
-    'https://www.dzs.cz/sites/default/files/2026-01/Aloka%C4'
-    '%8Dn%C3%AD%20krit%C3%A9ria%202026_Evropsk%C3%BD%20sbor%'
-    '20solidarity_0.pdf'
-),
-                'format': 'pdf',
-                'sha256': (
-                    '78208e95b4c465e7033d1c8f096ff5bae1a7b489e5c1e138b7f6897'
-                    '8a8cfb37f'
-                )},
- 'budget': {'url': (
-     'https://www.dzs.cz/sites/default/files/2025-11/ESS_Rozp'
-     'ocet_CZ_2026.pdf'
- ),
-            'format': 'pdf',
-            'sha256': (
-                'ec59313837a6df82eddbd2e9afbe52bfe8d7d0609c9ec3161631a0b'
-                '9eefc9044'
-            )},
- 'call-event-1': {'url': (
-     'https://www.dzs.cz/udalost/individualni-konzultace-k-so'
-     'lidarnim-projektum-esc30'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      '4bb3186fb96291883b8742275af441d5ab5240d75fab6e6053dd47c'
-                      '5d4956123'
-                  )},
- 'call-event-2': {'url': (
-     'https://www.dzs.cz/udalost/informacni-webinar-pro-zadat'
-     'ele-o-solidarni-projekty-esc30-0'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      'aa0ca2212b21cb2342a8d4914259c9e2d453db4c1c33d83596f4725'
-                      '1403eb5f5'
-                  )},
- 'call-event-3': {'url': (
-     'https://www.dzs.cz/udalost/individualni-konzultace-k-so'
-     'lidarnim-projektum-esc30-0'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      'a53283540afbd754236b649bab73c9ff2d97c94a518955484662fb2'
-                      '0fd35431d'
-                  )},
- 'call-event-4': {'url': (
-     'https://www.dzs.cz/udalost/webinar-tipy-k-zadosti-pro-z'
-     'ajemce-o-solidarni-projekty-esc30-0'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      '82183e2c0cbdb6831bc7d6758b75cc2fdca7658858898fd30cf8650'
-                      '964fed3e0'
-                  )},
- 'call-event-5': {'url': (
-     'https://www.dzs.cz/udalost/individualni-konzultace-k-so'
-     'lidarnim-projektum-esc30-1'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      'e66967c35b6e05272deed4affbdd2000e448a1650f0cbb8ddab36fe'
-                      'ac59554ef'
-                  )},
- 'call-event-6': {'url': (
-     'https://www.dzs.cz/udalost/individualni-konzultace-k-so'
-     'lidarnim-projektum-esc30-2'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      '257145eb72e135f2f4cd750d89ea5e99c9303cbb3d58ce913e42f73'
-                      '0670845f4'
-                  )},
- 'call-event-7': {'url': (
-     'https://www.dzs.cz/udalost/individualni-konzultace-k-so'
-     'lidarnim-projektum-esc30-3'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      'e74c62a1998d8258d2bd3b5f8facd7facd5389de26a52fbe87fd86c'
-                      '1fd2a401f'
-                  )},
- 'call-event-8': {'url': (
-     'https://www.dzs.cz/udalost/informacni-webinar-k-zadosti'
-     '-o-grant-na-dobrovolnicke-projekty-esc51-0'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      '5503ba5c008c067b24509029c87f6e99614bf08f714a7e2a1f067a6'
-                      'cd223afe1'
-                  )},
- 'call': {'url': 'https://www.dzs.cz/vyzva_sbor',
-          'format': 'html',
-          'sha256': (
-              'c87a7484dd2a84fe3a44625c6591bd8c03d7a9dbea2c304701f8461'
-              'fcfeddc50'
-          )},
- 'delegated-1': {'url': (
-     'https://www.salto-youth.net/tools/european-training-cal'
-     'endar/training/spaces-that-empower-rethinking-environme'
-     'nts-for-young-people-in-europe-in-german-language.14430'
-     '/'
- ),
-                 'format': 'html',
-                 'sha256': (
-                     '3010e9e172691a492059285503889f223406f1703b06501b2f33a85'
-                     '03c890a5b'
-                 )},
- 'delegated-2': {'url': (
-     'https://www.salto-youth.net/tools/european-training-cal'
-     'endar/training/massive-open-online-course-on-european-s'
-     'olidarity-corps-2026.15280/'
- ),
-                 'format': 'html',
-                 'sha256': (
-                     '8198b0733f3ea497e89e269d13312d76ac8c9b590c9fd693fb53189'
-                     'aa361b4de'
-                 )},
- 'delegated-3': {'url': (
-     'https://www.salto-youth.net/tools/european-training-cal'
-     'endar/training/co-create-space-with-and-for-youth.15244'
-     '/'
- ),
-                 'format': 'html',
-                 'sha256': (
-                     '1a90a8b6570a9573b834aeaaed693ba350fa6aaa8ce8e66d8c432ce'
-                     'c60a1454a'
-                 )},
- 'delegated-4': {'url': (
-     'https://www.salto-youth.net/tools/european-training-cal'
-     'endar/training/training-for-mentors-2.15320/'
- ),
-                 'format': 'html',
-                 'sha256': (
-                     '5e502eaea11c7e71c1315312db35fb9e95542193c05a08cf1ce5fe1'
-                     '40ee44686'
-                 )},
- 'delegated-5': {'url': (
-     'https://www.salto-youth.net/tools/european-training-cal'
-     'endar/training/volunteering-for-all-slovakia-december-2'
-     '026.15317/'
- ),
-                 'format': 'html',
-                 'sha256': (
-                     'c936c0d1d7684ee0342d4d696045f8165f4c4687dcd8065ce231c9c'
-                     '3d3ed2523'
-                 )},
- 'delegated-6': {'url': (
-     'https://www.salto-youth.net/tools/european-training-cal'
-     'endar/training/ctrl-alt-solidarity-training-course-on-d'
-     'igital-empowerment-in-european-solidarity-corps.15300/'
- ),
-                 'format': 'html',
-                 'sha256': (
-                     'de3a5691c2d5f5037b506c215ad59ebf479e5635b4370765d005a43'
-                     '0bc8edc5b'
-                 )},
- 'delegated-7': {'url': (
-     'https://www.salto-youth.net/tools/european-training-cal'
-     'endar/training/safeguarding-in-esc-organisations-in-pra'
-     'ctice.15356/'
- ),
-                 'format': 'html',
-                 'sha256': (
-                     'ad0b2705859ab70f90bf2563b54106d9392ee02a1176271700331ad'
-                     '17ef94c67'
-                 )},
- 'delegated-8': {'url': (
-     'https://www.salto-youth.net/tools/european-training-cal'
-     'endar/training/tosca-volunteering-training-and-support-'
-     'for-organisations-in-the-european-solidarity-corps.1502'
-     '1/'
- ),
-                 'format': 'html',
-                 'sha256': (
-                     '63c30e9931e8192581d0d8c1ada64371270542b17d9d272018b3fb8'
-                     '49a1415ec'
-                 )},
- 'grants-en': {'url': (
-     'https://www.dzs.cz/en/program/european-solidarity-corps'
-     '/projects-and-grants'
- ),
-               'format': 'html',
-               'sha256': (
-                   'f48b2f56a68d214aa0c16749dcaddf877c93abbfc597f78fa63da34'
-                   '1b4d19d3b'
-               )},
- 'grants': {'url': (
-     'https://www.dzs.cz/program/evropsky-sbor-solidarity/pro'
-     'jekty-granty'
- ),
-            'format': 'html',
-            'sha256': (
-                'd322c3a9d0aa31e5ef781c5dbf64b9fe712587a6c610e07f737e454'
-                'fea6248f6'
-            )},
- 'guide-en': {'url': (
-     'https://www.dzs.cz/sites/default/files/2025-11/european'
-     '_solidarity_corps_guide_2026_EN.pdf'
- ),
-              'format': 'pdf',
-              'sha256': (
-                  'aee8797fe578c09e2d7209d4facc36dac8f56b39914fca87210f78e'
-                  '17277457e'
-              )},
- 'idea': {'url': 'https://www.dzs.cz/udalost/od-napadu-k-projektu-5',
-          'format': 'html',
-          'sha256': (
-              '849221761e68846b28f3d09653a602f3090bd233d7208ba9c7b7b7e'
-              '487eb84bf'
-          )},
- 'infokit': {'url': (
-     'https://www.dzs.cz/sites/default/files/2025-01/InfoKit-'
-     'Volunteers-2024.pdf'
- ),
-             'format': 'pdf',
-             'sha256': (
-                 '7975b70e778e75203e2e0f65e43ef980cf0e64095d8475c1c98f8f5'
-                 '4ad3ba02f'
-             )},
- 'information': {'url': 'https://www.dzs.cz/povinne-zverejnovane-informace',
-                 'format': 'html',
-                 'sha256': (
-                     '97b5fb5d50f57c2970bbe29853570db00f56c5fbd2e67ab8626aeaf'
-                     '73ff22018'
-                 )},
- 'net-support': {'url': (
-     'https://www.dzs.cz/sites/default/files/2024-09/Informa%'
-     'C4%8Dn%C3%AD%20materi%C3%A1l%20pro%20p%C5%99%C3%ADjemce'
-     '_9_2024.pdf'
- ),
-                 'format': 'pdf',
-                 'sha256': (
-                     'f410b10691b062dfc44f01bc669acd067ea67dfb8fc581cdc5e8a25'
-                     '79c824b6d'
-                 )},
- 'net': {'url': 'https://www.dzs.cz/networking-activities',
-         'format': 'html',
-         'sha256': (
-             'd465de205bec389511170762cbadf74b76f25280cce7d6e4320877a'
-             '46c6ae2cc'
-         )},
- 'privacy': {'url': 'https://www.dzs.cz/zpracovani-osobnich-udaju',
-             'format': 'html',
-             'sha256': (
-                 '9978730f8440933a86ef73f8291c049a41a9fbdd55d8d2cb9097f19'
-                 '0032de92c'
-             )},
- 'programme-en': {'url': (
-     'https://www.dzs.cz/en/program/european-solidarity-corps'
- ),
-                  'format': 'html',
-                  'sha256': (
-                      '3fa21cb3a3def9b8c5ea1cd3a70d24bd4c72293d9c85824b976d6a0'
-                      'bd63a1f84'
-                  )},
- 'programme': {'url': 'https://www.dzs.cz/program/evropsky-sbor-solidarity',
-               'format': 'html',
-               'sha256': (
-                   'f8a78383bff2c21b5e3c242ef721ff53a8b292755a59d474cdebf49'
-                   '320d0b74e'
-               )},
- 'repeat': {'url': (
-     'https://www.dzs.cz/sites/default/files/2024-01/Pravidla'
-     '%20pro%20%C3%BA%C4%8Dast%20v%20dobrovolnictv%C3%AD.pdf'
- ),
-            'format': 'pdf',
-            'sha256': (
-                'b62a1bb18ee0e53bd194c7da9d21f6c8507116df6aa4ea70cf72078'
-                'd746073d7'
-            )},
- 'robots': {'url': 'https://www.dzs.cz/robots.txt',
-            'format': 'robots',
-            'sha256': (
-                '8ddfdc6072f037a763a82d6271fca793f2c52e726d3650ebe654230'
-                '23455a0e1'
-            )},
- 'salto-legal': {'url': 'https://www.salto-youth.net/about/legal-notice/',
-                 'format': 'html',
-                 'sha256': (
-                     'd0074a9b164c34186917b04a7c2495f9ff1ccbd5791f2e492cf8782'
-                     '5db17a5fc'
-                 )},
- 'salto-robots': {'url': 'https://www.salto-youth.net/robots.txt',
-                  'format': 'robots',
-                  'sha256': (
-                      '121b801898036dc3ff9daccc435ae53803887aa4565847b7543b2af'
-                      'b0ec0c412'
-                  )},
- 'solid-faq': {'url': (
-     'https://www.dzs.cz/sites/default/files/2026-06/FAQ_SOLI'
-     'D_NEW_2026%201%20%281%29.pdf'
- ),
-               'format': 'pdf',
-               'sha256': (
-                   '03931786c5fe1d309d8575d10081da870c2f47f6438791bfbc49538'
-                   '03764b755'
-               )},
- 'solid-new-faq': {'url': (
-     'https://www.dzs.cz/sites/default/files/2025-01/solpro%2'
-     '0FAQ_0.pdf'
- ),
-                   'format': 'pdf',
-                   'sha256': (
-                       '974670331182695e397372d3b5314ce8353ed53a2fa3d8be6eef76e'
-                       'fc13d5b82'
-                   )},
- 'stays': {'url': (
-     'https://www.dzs.cz/program/evropsky-sbor-solidarity/vyj'
-     'ezdy-pobyty'
- ),
-           'format': 'html',
-           'sha256': (
-               '0122269bf491f801235ba6ea219a29fbab683dc9deb110125460089'
-               '700b3b44f'
-           )},
- 'tosca': {'url': (
-     'https://www.dzs.cz/udalost/tosca-volunteering-skoleni-p'
-     'odpora-pro-organizace-v-programu-evropsky-sbor-solidari'
-     'ty'
- ),
-           'format': 'html',
-           'sha256': (
-               '31587f9422bac90644a0d33460aea1f5fa5331d7876a02a99a88b4f'
-               '16b104577'
-           )},
- 'volunteer-faq': {'url': (
-     'https://www.dzs.cz/sites/default/files/2024-05/FAQ%20Do'
-     'brovolnictv%C3%AD%202024.pdf'
- ),
-                   'format': 'pdf',
-                   'sha256': (
-                       'b10b1897d215f463d45a5db383d1d730bc3fadb011e1683c8fd275d'
-                       'da81b4312'
-                   )},
- 'volunteer-training': {'url': (
-     'https://www.dzs.cz/sites/default/files/2026-06/Registra'
-     'ce%20na%20%C5%A1kolen%C3%AD_koordin%C3%A1to%C5%99i_OA3-'
-     'MT3-OA4-MT4_2026-2027.pdf'
- ),
-                        'format': 'pdf',
-                        'sha256': (
-                            (
-                                '420eb98909f6caee8c4dba41567e11ad8759c5686fa879'
-                                '31735d3b35e432a36c'
-                            )
-                        )}}
-
-PROFILES = [{'key': 'solidarity-2026',
-  'title': 'Solidární projekty',
-  'url': (
-      'https://www.dzs.cz/program/evropsky-sbor-solidarity/pro'
-      'jekty-granty#solidarni-projekty'
-  ),
-  'category': 'grants',
-  'kind': 'opportunity',
-  'hosts': ['CZ'],
-  'deadline': '2026-10-01T10:00:00Z',
-  'summary': 'Groups of at least five Czech residents aged 18–30 can run '
-             'non-profit 2–12 month community projects, optionally through '
-             'an organisation. Funding is EUR 630 per project month plus EUR '
-             '227 per coach day, maximum 12 days, with conditional '
-             'exceptional costs; this is not a personal stipend. Projects '
-             'are primarily in Czechia, with eligible bordering-region '
-             'exceptions. The 2026 rounds closed 18 February and 1 October '
-             'at noon Brussels time. Older English website amounts and dates '
-             'differ.',
-  'proof': '2026 Czech grant/call; guide pp60–66; March2026 financial FAQ'},
- {'key': 'volunteering-2026',
-  'title': 'Dobrovolnické projekty',
-  'url': (
-      'https://www.dzs.cz/program/evropsky-sbor-solidarity/pro'
-      'jekty-granty#dobrovolnicke-projekty'
-  ),
-  'category': 'grants',
-  'kind': 'institutional-grant',
-  'hosts': [],
-  'deadline': '2026-10-01T10:00:00Z',
-  'summary': 'Czech organisations with a valid lead Quality Label apply for '
-             'project funding, not individual paid jobs. Unpaid volunteering '
-             'runs 30–38 h/week; the 2026 call/guide allow individual stays '
-             '2 weeks–12 months, unlike the older hub. Travel, subsistence, '
-             'pocket money and inclusion support are conditional. Ordinary '
-             '2026 allocation limits are EUR 15,373–350,000 per applicant '
-             'project, not guaranteed grants. National rounds closed 18 '
-             'February and 1 October at noon Brussels time. Hosts can be '
-             'domestic or abroad.',
-  'proof': '2026 national call; guide pp37–51; allocation2026; older hub '
-           'conflict'},
- {'key': 'priority-teams-2026',
-  'title': 'Dobrovolnické týmy v oblastech s vysokou prioritou',
-  'url': (
-      'https://www.dzs.cz/program/evropsky-sbor-solidarity/pro'
-      'jekty-granty#centralizovane-aktivity'
-  ),
-  'category': 'grants',
-  'kind': 'institutional-grant',
-  'hosts': [],
-  'deadline': '2026-03-03T16:00:00Z',
-  'summary': 'EACEA organisational grants cover 12,24 or 36 month projects '
-             'up to EUR 400,000 total, not per volunteer. Consortium: at '
-             'least three eligible Quality Label organisations from two '
-             'programme countries; coordinator has lead status. Teams are '
-             'unpaid 2 week–2 month activities for residents aged 18–30. The '
-             'guide targets 40 participants per project in principle; the '
-             'DZS hub calls it a minimum, not 40 per team. Three priority '
-             'themes are not separate awards. Closed 3 March 2026 at 17:00 '
-             'Brussels time.',
-  'proof': 'DZS centralised section;2026 guide pp52–59; project-target '
-           'discrepancy'},
- {'key': 'humanitarian-2026',
-  'title': 'Dobrovolnictví v oblasti humanitární pomoci',
-  'url': (
-      'https://www.dzs.cz/program/evropsky-sbor-solidarity/pro'
-      'jekty-granty#centralizovane-aktivity'
-  ),
-  'category': 'grants',
-  'kind': 'institutional-grant',
-  'hosts': [],
-  'deadline': '2026-04-23T15:00:00Z',
-  'summary': 'EACEA grants up to EUR 650,000 per 12,24 or 36 month project '
-             'support humanitarian volunteering, not individual stipends. At '
-             'least three eligible Quality Label organisations include two '
-             'support bodies from different programme countries and an '
-             'independent host. Participants 18–35 must complete Commission '
-             'training. The guide requires legal EU/associated-country '
-             'residence; DZS says permanent residence, not citizenship. '
-             'Hosts are humanitarian-operation countries without armed '
-             'conflict. Closed 23 April 2026,17:00 Brussels.',
-  'proof': 'DZS humanitarian section;2026 guide pp77–85; residence wording '
-           'conflict'},
- {'key': 'call-event-2',
-  'title': 'Informační webinář pro žadatele o solidární projekty ESC30',
-  'url': (
-      'https://www.dzs.cz/udalost/informacni-webinar-pro-zadat'
-      'ele-o-solidarni-projekty-esc30-0'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': [],
-  'deadline': '2026-09-01',
-  'summary': 'Free online Teams workshop on 2 September 2026 for youth aged '
-             '18–30 preparing community projects and staff of supporting '
-             'organisations. Covers programme priorities, project design, '
-             'budgets and application steps. Registration closed 1 '
-             'September; event times are not deadlines. No physical '
-             'destination or passport restriction is inferred.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.dzs.cz/udalost/informacni-webinar-pro-z'
-      'adatele-o-solidarni-projekty-esc30-0'
-  )},
- {'key': 'call-event-4',
-  'title': 'Webinář: Tipy k žádosti pro zájemce o solidární projekty ESC30',
-  'url': (
-      'https://www.dzs.cz/udalost/webinar-tipy-k-zadosti-pro-z'
-      'ajemce-o-solidarni-projekty-esc30-0'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': [],
-  'deadline': '2026-09-13',
-  'summary': 'Free online Teams workshop on 14 September 2026 for '
-             'prospective Solidarity Project applicants. Covers '
-             'registration, application sections, quality criteria and '
-             'common errors. Registration closed 13 September. The body '
-             'weekday conflicts with the calendar footer; both give 14 '
-             'September. No physical host or citizenship requirement is '
-             'inferred.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.dzs.cz/udalost/webinar-tipy-k-zadosti-p'
-      'ro-zajemce-o-solidarni-projekty-esc30-0'
-  )},
- {'key': 'call-event-8',
-  'title': 'Informační webinář k žádosti o grant na Dobrovolnické projekty '
-           'ESC51',
-  'url': (
-      'https://www.dzs.cz/udalost/informacni-webinar-k-zadosti'
-      '-o-grant-na-dobrovolnicke-projekty-esc51-0'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': [],
-  'deadline': '2026-09-15',
-  'summary': 'Online Teams training on 17 September 2026 for representatives '
-             'of organisations holding a valid lead Quality Label. Explains '
-             'the ESC 51 budget request and project period. Registration '
-             'closed 15 September 2026. The own page does not specify a '
-             'participation fee; this is not advertised as universally free. '
-             'No physical host or citizenship restriction is inferred.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.dzs.cz/udalost/informacni-webinar-k-zad'
-      'osti-o-grant-na-dobrovolnicke-projekty-esc51-0'
-  )},
- {'key': 'tosca',
-  'title': 'TOSCA Volunteering – Školení a podpora pro organizace v programu '
-           'Evropský sbor solidarity',
-  'url': (
-      'https://www.dzs.cz/udalost/tosca-volunteering-skoleni-p'
-      'odpora-pro-organizace-v-programu-evropsky-sbor-solidari'
-      'ty'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': ['CZ'],
-  'deadline': '2026-08-03',
-  'summary': 'Prague training 12–16 October 2026, with online onboarding, '
-             'for English-speaking staff connected to Quality Label '
-             'volunteering organisations. DZS and SALTO support programme '
-             'quality, impact and cooperation. Host accommodation and food '
-             'are covered; participation fees vary by country and travel '
-             'arrangements follow selection. Registration closed 3 August '
-             '2026, not the event date. Source: DZS and SALTO-YOUTH.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.dzs.cz/udalost/tosca-volunteering-skole'
-      'ni-podpora-pro-organizace-v-programu-evropsky-sbor-soli'
-      'darity'
-  )},
- {'key': 'idea',
-  'title': 'Od nápadu k projektu',
-  'url': 'https://www.dzs.cz/udalost/od-napadu-k-projektu-5',
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': ['CZ'],
-  'deadline': '2026-10-25',
-  'summary': 'Free project-development training in Brno 21–22 November 2026 '
-             'for people aged 18–30 with a community idea; a completed '
-             'project is not required. Accommodation in shared two-person '
-             'rooms, food and travel are covered. Registration closes 25 '
-             'October 2026; no clock or timezone is stated. Passport '
-             'eligibility is not inferred.',
-  'proof': 'Actual own/delegated original heading and full conditions: '
-           'https://www.dzs.cz/udalost/od-napadu-k-projektu-5'},
- {'key': 'delegated-1',
-  'title': 'Spaces that Empower: Rethinking Environments for Young People in '
-           'Europe (IN GERMAN LANGUAGE)',
-  'url': (
-      'https://www.salto-youth.net/tools/european-training-cal'
-      'endar/training/spaces-that-empower-rethinking-environme'
-      'nts-for-young-people-in-europe-in-german-language.14430'
-      '/'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': ['LU'],
-  'deadline': '2026-09-30',
-  'summary': 'German-language training in Luxembourg 17–20 November 2026 for '
-             'youth workers, project managers and policymakers on youth '
-             'spaces. Anefore and the national youth service organise it. '
-             'Single-room accommodation and food are covered; national '
-             'participation fees and travel support are conditional. '
-             'Registration closed 30 September 2026. Country participation '
-             'is not a citizenship whitelist. Source: DZS and SALTO-YOUTH.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.salto-youth.net/tools/european-training'
-      '-calendar/training/spaces-that-empower-rethinking-envir'
-      'onments-for-young-people-in-europe-in-german-language.1'
-      '4430/'
-  )},
- {'key': 'delegated-2',
-  'title': 'Massive Open Online Course on European Solidarity Corps 2026',
-  'url': (
-      'https://www.salto-youth.net/tools/european-training-cal'
-      'endar/training/massive-open-online-course-on-european-s'
-      'olidarity-corps-2026.15280/'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': [],
-  'deadline': '2026-09-30',
-  'summary': 'Free online ESC course 5 October–30 November 2026 for '
-             'interested programme actors, coordinated by Leargas and SALTO. '
-             'English content is largely translated into Spanish, Italian, '
-             'German and Turkish. Completion offers digital badges and '
-             'Youthpass. Registration closed 30 September despite the course '
-             'continuing. Ireland is the organiser location, not a physical '
-             'destination or travel benefit. Source: DZS and SALTO-YOUTH.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.salto-youth.net/tools/european-training'
-      '-calendar/training/massive-open-online-course-on-europe'
-      'an-solidarity-corps-2026.15280/'
-  )},
- {'key': 'delegated-3',
-  'title': 'Co-create space with and for youth',
-  'url': (
-      'https://www.salto-youth.net/tools/european-training-cal'
-      'endar/training/co-create-space-with-and-for-youth.15244'
-      '/'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': ['BE'],
-  'deadline': '2026-09-29',
-  'summary': 'JINT English-language training in Brussels 14–18 December 2026 '
-             'with online preparation in November. Youth-work professionals '
-             'explore co-designing a specific local space with young people; '
-             'prior spatial-design experience is not required. Hosting '
-             'accommodation and food are covered unless otherwise specified; '
-             'national fees and travel support are conditional. Registration '
-             'closed 29 September 2026. Source: DZS and SALTO-YOUTH.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.salto-youth.net/tools/european-training'
-      '-calendar/training/co-create-space-with-and-for-youth.1'
-      '5244/'
-  )},
- {'key': 'delegated-4',
-  'title': 'Training for Mentors 2',
-  'url': (
-      'https://www.salto-youth.net/tools/european-training-cal'
-      'endar/training/training-for-mentors-2.15320/'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': ['GR'],
-  'deadline': '2026-10-12T00:00:00Z',
-  'summary': 'English-language mentor training in Ioannina 2–6 November 2026 '
-             'for current or prospective ESC mentors; extensive experience '
-             'is not required. INEDIVIM covers double-room accommodation and '
-             'food. Participation fees vary by country of residence; travel '
-             'support needs agency confirmation. The literal closing is 11 '
-             'October 2026 at 24 hUTC, meaning 12 October 00:00 UTC. '
-             'Programme-country participation is not a passport whitelist. '
-             'Source: DZS and SALTO-YOUTH.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.salto-youth.net/tools/european-training'
-      '-calendar/training/training-for-mentors-2.15320/'
-  )},
- {'key': 'delegated-5',
-  'title': 'Volunteering for ALL - Slovakia December 2026',
-  'url': (
-      'https://www.salto-youth.net/tools/european-training-cal'
-      'endar/training/volunteering-for-all-slovakia-december-2'
-      '026.15317/'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': ['SK'],
-  'deadline': '2026-10-22T00:00:00Z',
-  'summary': 'Slovakia 7–11 December 2026 plus online preparation 23 '
-             'November. For newcomers directly working with disadvantaged '
-             'youth who have never organised ESC volunteering; experienced '
-             'organisers and school-pupil projects are excluded. English '
-             'discussion ability is needed. Selected relevant housing, food, '
-             'travel and visa costs are covered except a variable national '
-             'fee. Closes 21 October at 24 hUTC, meaning 22 October 00:00 '
-             'UTC. Source: DZS, SALTO Inclusion and Iuventa.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.salto-youth.net/tools/european-training'
-      '-calendar/training/volunteering-for-all-slovakia-decemb'
-      'er-2026.15317/'
-  )},
- {'key': 'delegated-6',
-  'title': 'Ctrl+Alt+Solidarity: training course on digital empowerment in '
-           'European Solidarity Corps',
-  'url': (
-      'https://www.salto-youth.net/tools/european-training-cal'
-      'endar/training/ctrl-alt-solidarity-training-course-on-d'
-      'igital-empowerment-in-european-solidarity-corps.15300/'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': ['HR'],
-  'deadline': '2026-10-01',
-  'summary': 'AMEUP English-language training in Zagreb 1–5 December 2026 '
-             'for staff, coordinators, mentors and youth workers in active '
-             'ESC organisations. Focuses on digital youth work, not '
-             'technical IT. No participation fee; single-room accommodation '
-             'and food are covered, travel support is conditional. '
-             'Registration closed 1 October 2026. Origin-country lists do '
-             'not prove citizenship eligibility. Source: DZS and '
-             'SALTO-YOUTH.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.salto-youth.net/tools/european-training'
-      '-calendar/training/ctrl-alt-solidarity-training-course-'
-      'on-digital-empowerment-in-european-solidarity-corps.153'
-      '00/'
-  )},
- {'key': 'delegated-7',
-  'title': 'Safeguarding in ESC organisations in practice',
-  'url': (
-      'https://www.salto-youth.net/tools/european-training-cal'
-      'endar/training/safeguarding-in-esc-organisations-in-pra'
-      'ctice.15356/'
-  ),
-  'category': 'training',
-  'kind': 'opportunity',
-  'hosts': ['RS'],
-  'deadline': '2026-10-02',
-  'summary': 'SALTO SEE safeguarding training in Šabac 2–6 November 2026 for '
-             'staff, mentors and tutors of ESC Quality Label organisations. '
-             'English; housing and food covered, national fees and travel '
-             'support conditional. The body limits programme-country '
-             'organisations but its country table is broader, including '
-             'Western Balkans; eligibility conflict is retained. '
-             'Registration closed 2 October 2026. Source: DZS, SALTO SEE and '
-             'Czech/Italian agencies.',
-  'proof': (
-      'Actual own/delegated original heading and full conditio'
-      'ns: https://www.salto-youth.net/tools/european-training'
-      '-calendar/training/safeguarding-in-esc-organisations-in'
-      '-practice.15356/'
-  )}]
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except Exception as error:
-        print(json.dumps({"source": SOURCE_ID, "status": "fail",
-                          "error": safe_error(error),
-                          "message": (
-                              'Run could not establish a durable outcome'
-                          )}))
-        sys.exit(1)
+    sys.exit(main())

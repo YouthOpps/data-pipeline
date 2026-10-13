@@ -11,11 +11,20 @@ class LiveAdapterTest(unittest.TestCase):
     def test_live_collection(self):
         records = adapter.collect()
         adapter.validate_records(records)
-        self.assertEqual(len(records), 45)
-        self.assertEqual(len({record["id"] for record in records}), 45)
+        self.assertTrue(records)
+        self.assertEqual(
+            len({record["id"] for record in records}), len(records)
+        )
+        self.assertTrue(all(record["summary"] for record in records))
+        self.assertTrue(
+            all(
+                record["url"] in record["classification"]["evidence"]
+                for record in records
+            )
+        )
         print(json.dumps(records, ensure_ascii=False, indent=2))
         print(
-            "Validated 45 Fulbright Austria awards and teaching positions",
+            f"Validated {len(records)} Fulbright Austria awards and teaching positions",
             file=sys.stderr,
         )
 

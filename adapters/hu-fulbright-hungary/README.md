@@ -10,14 +10,26 @@ The adapter identifies itself as YouthOpp, honors robots and Retry-After, and st
 
 ## Opportunity inventory and exclusions
 
-The reviewed live inventory contains ten genuine records:
+The latest live inventory contains ten genuine records; this is evidence, not
+a required count:
 
 - Three active Hungarian calls: lecturer, researcher and Foreign Language Teaching Assistant (FLTA).
 - Two joint lecturer awards at the University of Texas at Austin and Indiana University, explicitly matching the current parent call's academic cycle and application route.
 - Four rolling grants: conference travel for Hungarian alumni, Specialist hosting, Intercountry Lecturing hosting and Outreach Lecturing Fund travel. Hosting grants are classified as institutional grants.
 - One dated U.S. Student Program call for postgraduate study in Hungary.
 
-The collector checks the entire homepage award section and short-term grant sections. It excludes expired deadlines, future announcements, recipient lists and explicitly discontinued programmes. The undated Pittsburgh description has no verified current academic cycle. MTA support supplements an existing research award rather than providing a separate application call. The institutional hosting questionnaire has an expired deadline; its two rolling programmes duplicate the collected Specialist and Intercountry grants. Other U.S. navigation entries are undated programme descriptions without current calls. New unsupported short-term deadlines fail explicitly rather than silently producing an incomplete collection.
+The collector identifies homepage award cards by their titles and deadline
+fields, without depending on the layout's section ID. It reads current detail
+deadlines and explicit citizenship requirements. Short-term sections can contain
+both rolling and newly dated calls; supported future dates are collected using
+their live title, description and official information link. Expired calls,
+future announcements, recipient lists and discontinued programmes are excluded.
+Unrecognized date formats fail explicitly. The undated Pittsburgh description
+has no verified current academic cycle. MTA support supplements an existing
+award rather than providing a separate application. Other undated U.S.
+navigation entries are descriptions without current calls. External pages,
+PDFs and application forms are not parsed, so document-only calls and conditions
+are outside this HTML collection.
 
 ## Identity, dates and eligibility
 
@@ -25,7 +37,14 @@ Identifiers derive from source ID and original URL; dated calls also include the
 
 Hungarian citizenship is recorded only when the official current award detail explicitly requires it. Joint lecturer eligibility and deadline come from their verified shared parent application route. Institutional grants do not imply individual nationality eligibility. Host countries distinguish U.S. study/travel from institutional hosting in Hungary.
 
-Exact Hungarian deadlines use the end of the publisher's Budapest calendar day and are serialized in UTC. Joint award deadlines inherit the current lecturer call's deadline. Rolling applications have no invented deadline. The U.S. Student Program's approximate April-to-mid-October application window remains in its summary; its exact deadline is null, boundary-month status is unknown, and the call is excluded outside the published months. Publication and modification timestamps are not inferred from unrelated dates; collection freshness uses UTC timestamps.
+Hungarian deadlines retain the existing end-of-Budapest-day normalization in
+UTC. English short-term dates without a clock remain date-only; those calls
+remain visible throughout their Budapest closing day with unknown status.
+Joint award deadlines inherit the current lecturer call's deadline. Rolling
+applications have no invented deadline. The U.S. Student Program's approximate
+April-to-mid-October window remains in its summary; its exact deadline is null,
+boundary-month status is unknown, and it is excluded outside the published
+months. Publication and modification times are not inferred from unrelated dates.
 
 ## Run and test
 
@@ -54,15 +73,16 @@ Only `YouthOpps/data-source/datas/hu-fulbright-hungary/{data,metadata}.json` are
 
 ## Homepage parse diagnostics
 
-A missing or duplicated homepage award section fails closed: exactly one
-`section-3` remains required. The sanitized error records the expected and actual
-section counts, final reviewed HTTPS page URL without query or fragment, HTTP
+A homepage with no identifiable award cards fails closed. Repeated responsive
+cards are deduplicated by their source URL. The sanitized error records the
+final HTTPS page URL without query or fragment, HTTP
 status, and raw response byte length and SHA-256. These values fingerprint the
 already received response; no HTML, response headers or additional requests are
 retained or introduced. They cannot reconstruct a missing historical response
-or establish that an unexpected document was a bot refusal.
+or establish that an unexpected document was a bot refusal. A section ID or
+benign layout change alone no longer causes a failure.
 
 The 11 October 2026 parse failure in [run 38142601920](https://github.com/YouthOpps/data-pipeline/actions/runs/38142601920)
 had no retained response artifact. Earlier and later runs on the same revision
-succeeded, so its specific cause remains unknown. Parsing is not retried or
-relaxed: a failure preserves last-good records and the prior success timestamp.
+succeeded, so its specific cause remains unknown. A genuine fetch, parse or
+validation failure preserves last-good records and the prior success timestamp.

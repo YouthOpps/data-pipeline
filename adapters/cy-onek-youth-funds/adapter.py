@@ -1,4 +1,4 @@
-"""Collect genuine ONEK funding rounds and the reviewed information session."""
+"""Discover ONEK funding rounds and public information events."""
 
 import argparse
 import base64
@@ -670,14 +670,10 @@ def fetch_public(url):
                 state["observed_at"] = now
                 save_budget(state)
             continue
-        key = next(
-            (key for key, info in INPUTS.items() if info["url"] == url),
-            "unmapped-public-input",
-        )
         parsed = urllib.parse.urlsplit(reviewed)
         provenance = parsed.scheme + "://" + parsed.netloc + parsed.path
         raise AdapterError(
-            f"Required publisher input {key} returned HTTP {status}: "
+            f"Required publisher input returned HTTP {status}: "
             + provenance,
             "fetch",
             status,
@@ -1262,7 +1258,7 @@ def validate_records(records):
         length = len(summary.encode("utf-16-le")) // 2
         if length > 600:
             raise AdapterError("Invalid plain summary", "validate")
-        if record.get("summary_language") != "en":
+        if record.get("summary_language") not in {"en", "el"}:
             raise AdapterError("Invalid summary language", "validate")
         for field in ("location", "language", "publisher_country"):
             if (
@@ -1412,361 +1408,530 @@ def publish_files(snapshot, files):
 
 
 def public_url(value):
-    """Accept only literal reviewed publisher routes, including public paging."""
+    """Allow public publisher content, never private or application routes."""
     try:
         parsed = urllib.parse.urlsplit(value)
-        clean = urllib.parse.urlunsplit(parsed._replace(fragment=""))
-        allowed = {info["url"] for info in INPUTS.values()} | {
-            "https://youthfunds.onek.org.cy/robots.txt",
-            "https://onek.org.cy/robots.txt",
-        }
-        if (
-            clean not in allowed
-            or parsed.scheme != "https"
-            or parsed.username
-            or parsed.password
-            or parsed.port
-        ):
+        path = urllib.parse.unquote(parsed.path)
+        if (parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.port or parsed.query
+                or parsed.hostname != "youthfunds.onek.org.cy"
+                or not path.startswith("/")
+                or any(part in {".", ".."} for part in path.split("/"))
+                or re.search(r"/(?:wp-admin|wp-json|wp-login|xmlrpc)", path)):
             raise ValueError()
     except ValueError:
-        raise AdapterError("Unreviewed public source route", "access") from None
-    return clean
+        raise AdapterError("Unsafe public source route", "access") from None
+    return urllib.parse.urlunsplit(parsed._replace(fragment=""))
 
 
-def material_root(body, key):
-    """Retain complete own content, rather than a navigation-only synopsis."""
+def material_root(body, key=None):
     root = document_root(body.decode("utf-8", "strict"))
-    if key in {"onek-home", "privacy"}:
-        return root
-    return one(
-        nodes(root, "div", "lendiz-content-wrapper"),
-        "official material content region",
-    )
+    return one(nodes(root, "div", "lendiz-content-wrapper"),
+               "official material content region")
 
 
-def factual_text(root):
-    """Exclude only the reviewed event-view counter; validate its shape."""
-    counters = nodes(root, "div", "wpem-viewed-event")
-    for counter in counters:
-        if counter.attrs.get(
-            "class"
-        ) != "wpem-viewed-event wpem-tooltip wpem-tooltip-bottom" or not re.fullmatch(
-            r"(\d+) \1 people viewed this event\.", counter.text()
-        ):
-            raise AdapterError(
-                "Changed public event counter structure", "parse"
-            )
-
-    def parts(node):
-        if isinstance(node, str):
-            return [node]
-        if node in counters or node.tag in {"script", "style"}:
-            return []
-        return [part for child in node.children for part in parts(child)]
-
-    return " ".join(" ".join(parts(root)).split())
+def read_html(url):
+    _, headers, body = fetch_public(url)
+    if headers.get("Content-Type", "").split(";")[0] != "text/html":
+        raise AdapterError("Expected publisher HTML: " + url, "parse")
+    return material_root(body), body
 
 
-def factual_links(root):
-    """Pin substantive links and encoded contact targets without exporting them."""
-    links = []
+def links(root, base):
     for node in nodes(root, "a"):
         href = node.attrs.get("href", "")
-        if not href:
-            continue
-        if href.startswith("/cdn-cgi/l/email-protection#"):
-            encoded = href.split("#", 1)[1]
-            try:
-                if not re.fullmatch(r"(?:[0-9a-f]{2}){2,128}", encoded):
-                    raise ValueError()
-                raw = bytes.fromhex(encoded)
-                target = bytes(byte ^ raw[0] for byte in raw[1:])
-                target.decode("utf-8", "strict")
-            except (ValueError, UnicodeError):
-                raise AdapterError(
-                    "Invalid reviewed contact target", "parse"
-                ) from None
-            href = (
-                "reviewed-contact-sha256:" + hashlib.sha256(target).hexdigest()
-            )
-        links.append((node.text(), href))
-    return sorted(set(links))
+        if href:
+            yield node.text(), urllib.parse.urljoin(base, href)
 
 
 def calendar_parameters(body, page):
-    """Serialize the observed public filter form using its current nonce."""
+    """Read current public form values; do not bind rotating nonces."""
     root = document_root(body.decode("utf-8", "strict"))
-    form = one(
-        [
-            node
-            for node in nodes(root, "form")
-            if node.attrs.get("id") == "event_filters"
-        ],
-        "public event form",
-    )
-    inputs = nodes(form, "input")
-    expected = [
-        "wpem_filter_nonce",
-        "_wp_http_referer",
-        "search_keywords",
-        "search_location",
-        "search_datetimes[]",
-    ]
-    if [node.attrs.get("name") for node in inputs] != expected:
-        raise AdapterError("Changed public listing filter controls", "parse")
-    values = [
-        (node.attrs["name"], node.attrs.get("value", "")) for node in inputs
-    ]
-    if (
-        not re.fullmatch(r"[0-9a-f]{10}", values[0][1])
-        or values[1][1] != "/en/imerologio-draseon/"
-        or any(value for _, value in values[2:])
-    ):
-        raise AdapterError("Changed public listing filter defaults", "parse")
-    selects = nodes(form, "select")
-    if [node.attrs.get("name") for node in selects] != [
-        "search_categories[]",
-        "search_event_types[]",
-    ] or any(
-        "selected" in option.attrs
-        for node in selects
-        for option in nodes(node, "option")
-    ):
-        raise AdapterError("Changed public listing category defaults", "parse")
-    definitions = re.findall(
-        r"var event_manager_ajax_filters = (\{[^\n]+\});", body.decode("utf-8")
-    )
-    try:
-        config = json.loads(definitions[-1])
-        if (
-            set(config) != {"ajax_url", "nonce", "is_rtl", "lang"}
-            or config["ajax_url"] != "/en/em-ajax/%%endpoint%%/"
-            or config["is_rtl"] != "0"
-            or config["lang"] is not None
-            or not re.fullmatch(r"[0-9a-f]{10}", config["nonce"])
-        ):
-            raise ValueError()
-    except (IndexError, ValueError, TypeError):
-        raise AdapterError(
-            "Changed observed public pagination route", "parse"
-        ) from None
-    return urllib.parse.urlencode(
-        [
-            ("lang", ""),
-            ("search_keywords", ""),
-            ("search_location", ""),
-            ("search_datetimes[]", ""),
-            ("per_page", "10"),
-            ("orderby", "meta_value"),
-            ("order", "ASC"),
-            ("page", str(page)),
-            ("event_online", ""),
-            ("show_pagination", "false"),
-            ("form_data", urllib.parse.urlencode(values)),
-            ("wpem_filter_nonce", values[0][1]),
-        ]
-    ).encode()
-
-
-def html_fingerprint(body, key):
-    root = material_root(body, key)
-    document = document_root(body.decode("utf-8", "strict"))
-    footers = nodes(document, "footer", "site-footer")
-    if key not in {"onek-home", "privacy"} and len(footers) != 1:
-        raise AdapterError("Changed official footer structure", "parse")
-    controls = []
-    if key == "calendar":
-        calendar_parameters(body, 1)
-        for node in root.walk():
-            if node.tag in {"input", "select", "option"}:
-                attrs = dict(node.attrs)
-                if attrs.get("name") == "wpem_filter_nonce":
-                    attrs["value"] = "current-public-nonce"
-                controls.append((node.tag, attrs, node.text()))
-        listings = one(
-            [
-                node
-                for node in nodes(root, "div", "event_listings")
-                if "data-per_page" in node.attrs
-            ],
-            "public listing controls",
-        )
-        controls.append(("listing", listings.attrs, ""))
-    facts = {
-        "text": factual_text(root),
-        "links": factual_links(root),
-        "controls": controls,
-        "footers": [
-            {"text": factual_text(node), "links": factual_links(node)}
-            for node in footers
-        ],
-    }
-    return hashlib.sha256(
-        json.dumps(
-            facts, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
-
-
-def listing_fingerprint(body, key):
-    """Bind the entire observed result and terminal page, including exclusions."""
-    try:
-        result = json.loads(body)
-        if (
-            set(result)
-            != {
-                "found_events",
-                "html",
-                "filter_value",
-                "showing_applied_filters",
-                "showing_links",
-                "max_num_pages",
-            }
-            or type(result["found_events"]) is not bool
-            or type(result["max_num_pages"]) is not int
-            or not isinstance(result["html"], str)
-        ):
-            raise ValueError()
-        root = PublisherHTML(result.pop("html")).root
-        result["material"] = {
-            "text": factual_text(root),
-            "links": factual_links(root),
-        }
-        if key == "calendar-listing-1":
-            urls = {
-                href for _, href in factual_links(root) if "/ekdilosi/" in href
-            }
-            expected = {
-                info["url"]
-                for name, info in INPUTS.items()
-                if name == "first-event" or re.fullmatch(r"event-\d+", name)
-            }
-            if (
-                urls != expected
-                or len(urls) != 10
-                or not result["found_events"]
-            ):
-                raise ValueError()
-        elif result["found_events"] or result["max_num_pages"] != 0:
-            raise ValueError()
-    except (ValueError, TypeError, KeyError, AttributeError):
-        raise AdapterError(
-            "Changed or incomplete public event frontier", "parse"
-        ) from None
-    return hashlib.sha256(
-        json.dumps(
-            result, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
-
-
-def read_input(key, calendar_body=None):
-    info = INPUTS[key]
-    if info["format"] == "json":
-        if calendar_body is None:
-            raise AdapterError("Missing current public listing form", "parse")
-        payload = calendar_parameters(calendar_body, int(key[-1]))
-        check_robots(info["url"])
-        status, headers, body = request_bytes(
-            info["url"],
-            method="POST",
-            payload=payload,
-            publisher=True,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-            },
-        )
-    else:
-        status, headers, body = fetch_public(info["url"])
-    if status != 200:
-        raise AdapterError(
-            "Required public input failed: " + key, "fetch", status
-        )
-    mime = headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-    expected_mime = {
-        "html": "text/html",
-        "json": "application/json",
-        "pdf": "application/pdf",
-    }
-    if mime != expected_mime[info["format"]]:
-        raise AdapterError("Changed public input content type: " + key, "parse")
-    if info["format"] == "html":
-        digest = html_fingerprint(body, key)
-    elif info["format"] == "json":
-        digest = listing_fingerprint(body, key)
-    else:
-        if not body.startswith(b"%PDF-"):
-            raise AdapterError("Invalid public guide: " + key, "parse")
-        digest = hashlib.sha256(body).hexdigest()
-    if digest != info["sha256"]:
-        raise AdapterError(
-            "Reviewed source facts/frontier changed: " + key, "parse"
-        )
-    return digest, body if key == "calendar" else None
+    form = one([node for node in nodes(root, "form")
+                if node.attrs.get("id") == "event_filters"], "event form")
+    values = [(node.attrs["name"], node.attrs.get("value", ""))
+              for node in nodes(form, "input") if node.attrs.get("name")]
+    nonce = dict(values).get("wpem_filter_nonce")
+    if not nonce:
+        raise AdapterError("Missing public calendar nonce", "parse")
+    return urllib.parse.urlencode([
+        ("lang", ""), ("search_keywords", ""), ("search_location", ""),
+        ("search_datetimes[]", ""), ("per_page", "10"),
+        ("orderby", "meta_value"), ("order", "ASC"), ("page", str(page)),
+        ("event_online", ""), ("show_pagination", "false"),
+        ("form_data", urllib.parse.urlencode(values)),
+        ("wpem_filter_nonce", nonce),
+    ]).encode()
 
 
 def read_pages():
-    pages = {}
-    calendar_body = None
-    for key, info in INPUTS.items():
-        if info["format"] != "json":
-            pages[key], retained = read_input(key)
-            if retained is not None:
-                calendar_body = retained
-    for key, info in INPUTS.items():
-        if info["format"] == "json":
-            pages[key], _ = read_input(key, calendar_body)
+    """Discover the current programme, news and calendar frontiers."""
+    base = WEBSITE_URL
+    directory, _ = read_html(base + "programmata/")
+    programme_urls = {url for _, url in links(directory, base)
+                      if re.fullmatch(
+                          re.escape(base) + r"services/[^/]+/", url)}
+    if not programme_urls:
+        raise AdapterError("No funding programmes discovered", "parse")
+    pages = {"programmes": {}, "news": {}, "events": {}}
+    for url in sorted(programme_urls):
+        pages["programmes"][url], _ = read_html(url)
+    pending = [base + "nea-anakoinoseis/"]
+    seen = set()
+    while pending:
+        url = pending.pop(0)
+        if url in seen:
+            continue
+        if len(seen) >= 40:
+            raise AdapterError("News pagination limit exceeded", "parse")
+        seen.add(url)
+        root, _ = read_html(url)
+        cards = nodes(root, "div", "blog-inner")
+        if not cards:
+            raise AdapterError("Missing news listing cards: " + url, "parse")
+        for card in cards:
+            categories = " ".join(n.text() for n in
+                                  nodes(card, "div", "post-category"))
+            if not re.search(r"\b(?:Calls|Extensions|Events)\b", categories):
+                continue
+            title = one(nodes(card, "div", "entry-title"), "news title")
+            candidates = list(links(title, url))
+            _, detail = one(candidates, "news detail link")
+            if detail not in pages["news"]:
+                pages["news"][detail], _ = read_html(detail)
+        for _, target in links(root, url):
+            if re.fullmatch(re.escape(base) +
+                            r"nea-anakoinoseis/(?:page/\d+/)?", target):
+                if target not in seen and target not in pending:
+                    pending.append(target)
+    calendar_url = base + "imerologio-draseon/"
+    _, calendar_body = read_html(calendar_url)
+    endpoint = base + "em-ajax/get_listings/"
+    seen_events = set()
+    for page in range(1, 101):
+        check_robots(endpoint)
+        status, _, body = request_bytes(
+            endpoint, method="POST", publisher=True,
+            payload=calendar_parameters(calendar_body, page),
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        if status != 200:
+            raise AdapterError("Calendar listing failed", "fetch", status)
+        result = json.loads(body)
+        if (type(result.get("found_events")) is not bool
+                or not isinstance(result.get("html"), str)
+                or type(result.get("max_num_pages")) is not int):
+            raise AdapterError("Invalid calendar response", "parse")
+        if not result["found_events"]:
+            if result["max_num_pages"] != 0:
+                raise AdapterError("Inconsistent empty calendar page", "parse")
+            break
+        fragment = PublisherHTML(result["html"]).root
+        urls = {url for _, url in links(fragment, calendar_url)
+                if "/ekdilosi/" in url}
+        if not urls or urls <= seen_events:
+            raise AdapterError("Calendar pagination did not advance", "parse")
+        for url in sorted(urls - seen_events):
+            pages["events"][url], _ = read_html(url)
+        seen_events.update(urls)
+    else:
+        raise AdapterError("Calendar pagination limit exceeded", "parse")
+    print(f"Discovery: {len(pages['programmes'])} programmes; "
+          f"{len(seen)} news pages; {len(pages['news'])} notices; "
+          f"{len(pages['events'])} calendar details", file=sys.stderr)
     return pages
 
 
-def parse_inventory(pages):
-    if set(pages) != set(INPUTS) or any(
-        pages[key] != info["sha256"] for key, info in INPUTS.items()
-    ):
-        raise AdapterError("Incomplete reviewed ONEK frontier", "parse")
-    records = []
+_MONTHS = {name.lower(): number for number, name in enumerate((
+    "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December"), 1)}
+_DATE_PATTERN = (
+    r"\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/(?:\d{4}|\d{2})|"
+    r"\d{1,2}\s+(?:" + "|".join(_MONTHS) + r")\s+\d{4})\b"
+)
+
+
+def dates(text):
+    found = []
+    for match in re.finditer(_DATE_PATTERN, text, re.I):
+        value = match[0]
+        if re.fullmatch(r"20\d{2}-\d{2}-\d{2}", value):
+            year, month, day = map(int, value.split("-"))
+        elif "/" in value:
+            day, month, year = map(int, value.split("/"))
+            if year < 100:
+                year += 2000
+        else:
+            day, month, year = value.split()
+            day, month, year = int(day), _MONTHS[month.lower()], int(year)
+        try:
+            found.append(datetime(year, month, day).date().isoformat())
+        except ValueError:
+            raise AdapterError("Invalid published date", "parse") from None
+    return found
+
+
+def programme_key(text, inventory=()):
+    lower = text.lower()
+    for name, key in (("youth initiatives", "youth-initiatives"),
+                      ("green volunteering", "green-volunteering"),
+                      ("youth and the world", "youth-and-world")):
+        if name in lower:
+            return key
+    matches = [key for name, key in inventory if name.casefold() in text.casefold()]
+    if len(set(matches)) == 1:
+        return matches[0]
+    return None
+
+
+def round_letter(title):
+    """Resolve lettered and ordinal rounds without assuming a first call."""
+    ordinal_names = (
+        "first second third fourth fifth sixth seventh eighth ninth tenth "
+        "eleventh twelfth thirteenth fourteenth fifteenth sixteenth seventeenth "
+        "eighteenth nineteenth").split()
+    ordinals = {name: index + 1 for index, name in enumerate(ordinal_names)}
+    for tens, name in enumerate(
+            ("twenty", "thirty", "forty", "fifty", "sixty", "seventy",
+             "eighty", "ninety"), 2):
+        ordinals[name[:-1] + "ieth"] = tens * 10
+        for index, unit in enumerate(ordinal_names[:9], 1):
+            ordinals[name + "-" + unit] = tens * 10 + index
+    number = re.search(r"\b(\d+)(?:st|nd|rd|th)\s+call\b", title, re.I)
+    value = int(number[1]) if number else None
+    for name, ordinal in ordinals.items():
+        if re.search(r"(?<![\w-])" + name.replace("-", "[- ]")
+                     + r"\s+call\b", title, re.I):
+            value = ordinal
+    if value:
+        letters = ""
+        while value:
+            value, remainder = divmod(value - 1, 26)
+            letters = chr(ord("a") + remainder) + letters
+        return letters or None
+    label = re.search(r"\bCall\s+([A-Z]+)(?:['’]|\s|$)", title)
+    return label[1].lower() if label else None
+
+
+def short_excerpt(text, limit):
+    """Bound quoted plain text in UTF-16 units without splitting a character."""
+    text = " ".join(text.split())
+    if len(text.encode("utf-16-le")) // 2 <= limit:
+        return text
+    clipped = text.encode("utf-16-le")[:max(0, limit - 3) * 2].decode(
+        "utf-16-le", "ignore")
+    return clipped.rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
+
+
+def factual_blocks(root):
+    """Read body paragraphs and leaf lists, excluding navigation and contacts."""
+    blocks = []
+
+    def visit(node):
+        if not isinstance(node, Node):
+            return
+        classes = node.attrs.get("class", "")
+        if (node.tag in {"nav", "aside", "footer", "script", "style"}
+                or re.search(r"breadcrumbs|timeline|steps__|post-navigation|"
+                             r"entry-meta|description-date|description-tags",
+                             classes)):
+            return
+        if node.tag in {"h2", "h3", "h4"}:
+            blocks.append((node.tag, node.text()))
+            return
+        if (node.tag in {"p", "li"} and not any(
+                nodes(node, tag) for tag in {"ul", "ol"})
+                or "elementor-icon-box-content" in classes
+                or "section-description" in classes):
+            text = node.text()
+            if (len(text) >= 30 and "@" not in text
+                    and not re.search(r"newsletter|Contact for questions|"
+                                      r"All new training offers", text, re.I)):
+                blocks.append(("body", text))
+            return
+        for child in node.children:
+            visit(child)
+
+    visit(root)
+    return blocks
+
+
+def describe(record, blocks, language, timing):
+    """Index brief publisher description, audience and funding excerpts."""
+    bodies = list(dict.fromkeys(text for tag, text in blocks if tag == "body"))
+    selected = bodies[:1]
+    patterns = (
+        r"ve věku|rezident|žijí|určen|eligible|aged|persons|open to|"
+        r"applicants|beneficiar|participants.{0,25}(?:from|who)|ηλικ|δικαι",
+        r"\d[\d ,.]*\s*(?:eur|€)|hrazen|bezplat|zdarma|"
+        r"participation fee|travel costs|travel expenses|budget|"
+        r"accommodation|funding|grants|χρηματοδ",
+    )
+    priorities = (
+        r"aged|persons|\d+[-–]\d+|eligible|beneficiar|ηλικ|δικαι",
+        r"\d[\d ,.]*\s*(?:eur|€)|€\s*\d|budget|travel costs|"
+        r"travel expenses|accommodation|participation fee|χρηματοδ",
+    )
+    for pattern, priority in zip(patterns, priorities):
+        candidates = [text for text in bodies if text not in selected
+                      and re.search(pattern, text, re.I)]
+        candidates.sort(key=lambda text: not bool(re.search(priority, text, re.I)))
+        if candidates:
+            selected.append(candidates[0])
+    record["summary_language"] = language
+    for text in selected:
+        record["classification"]["evidence"].append(
+            f"Publisher excerpt ({language}): " + short_excerpt(text, 240))
+    timing = short_excerpt(timing, 240)
+    budget = 600 - len(timing.encode("utf-16-le")) // 2 - 1
+    if selected:
+        allowance = (budget - 3 * (len(selected) - 1)) // len(selected)
+        body = " / ".join(short_excerpt(text, allowance) for text in selected)
+    else:
+        body = {"en": "Publisher description not stated.",
+                "cs": "Popis nabídky není uveden.",
+                "el": "Δεν αναφέρεται περιγραφή."}[language]
+    record["summary"] = short_excerpt((timing + " " + body).strip(), 600)
+
+
+def opportunity(key, title, url, deadline, opens=None, activity=None,
+                category="grants", proof=None):
+    record = make_record(
+        title, url, [category], method="publisher-html",
+        evidence=[ATTRIBUTION, "Publisher: " + url] + (proof or []))
+    record["id"] = hashlib.sha256(
+        (SOURCE_ID + "|" + key).encode()).hexdigest()[:24]
+    record["deadline"] = deadline
+    record["summary_language"] = "en"
+    record["summary"] = (
+        ("Applications: " + opens + " to " + deadline + ". "
+           if opens and deadline else
+           "Application deadline: " + deadline + ". " if deadline else
+           "Application deadline is not stated. ")
+        + ("Activity period: " + activity + ". " if activity else "")
+    )
     today = datetime.now(timezone.utc).date().isoformat()
-    checked = utc_now()
-    for profile in PROFILES:
-        record = make_record(
-            profile["title"],
-            profile["url"],
-            [profile["category"]],
-            host_countries=profile["hosts"],
-            evidence=[ATTRIBUTION, profile["proof"]],
-        )
-        record["id"] = hashlib.sha256(
-            (SOURCE_ID + "|" + profile["key"]).encode()
-        ).hexdigest()[:24]
-        record["summary"] = profile["summary"]
-        record["summary_language"] = "en"
-        record["deadline"] = profile["deadline"]
-        record["status"] = (
-            "expired"
-            if today > profile["deadline"]
-            else (
-                "unknown"
-                if today == profile["deadline"]
-                or profile.get("opens")
-                and today < profile["opens"]
-                else "open"
-            )
-        )
-        for field in (
-            "created_at",
-            "updated_at",
-            "first_seen_at",
-            "last_seen_at",
-            "last_checked_at",
-        ):
-            record[field] = checked
-        records.append(record)
-    validate_records(records)
-    if len(records) != 14:
-        raise AdapterError(
-            "Incomplete reviewed ONEK identity partition", "validate"
-        )
-    return records
+    record["status"] = (
+        "expired" if deadline and today > deadline else
+        "open" if deadline and today < deadline
+        and not (opens and today < opens) else "unknown")
+    if key.startswith("youth-initiatives-"):
+        record["host_countries"] = ["CY"]
+    return record
+
+
+def parse_inventory(pages):
+    """Extract actual round windows and reconcile notices and extensions."""
+    records = {}
+    inventory = []
+    for url, root in pages["programmes"].items():
+        title = one(nodes(root, "h1"), "programme heading").text()
+        inventory.append((title, programme_key(title) or url))
+    for url, root in pages["programmes"].items():
+        title = one(nodes(root, "h1"), "programme heading").text()
+        programme = programme_key(title, inventory)
+        section = re.search(
+            r"Application submission deadlines (.+?)Application Submission",
+            root.text())
+        if not section:
+            raise AdapterError("Missing programme application table: " + url,
+                               "parse")
+        rows = re.findall(r"\bCall(?!s\b)(.*?)(?=\bCall(?!s\b)|$)",
+                          section[1], re.I)
+        if not rows:
+            raise AdapterError("No programme rounds: " + url, "parse")
+        for row in rows:
+            window = dates(row)
+            if len(window) != 4:
+                raise AdapterError("Ambiguous programme date row: " + url,
+                                   "parse")
+            activity_start, activity_end, opens, deadline = window
+            if opens > deadline or activity_start > activity_end:
+                raise AdapterError("Reversed programme window", "parse")
+            label = re.match(r"\s*([A-Z]+|[ΑΒΓ])(?:['’]|\s|$)", row)
+            letter = (label[1].translate(str.maketrans("ΑΒΓ", "ABC")).lower()
+                      if label else None)
+            year = activity_end[:4]
+            if not letter:
+                # Joint action tracks share one advertised application window.
+                matches = [key for key, record in records.items()
+                           if key.startswith((programme or url) + "-" + year)
+                           and record["deadline"] == deadline]
+                if len(matches) != 1:
+                    raise AdapterError("Unidentified programme round", "parse")
+                records[matches[0]]["classification"]["evidence"].append(
+                    "Additional implementation track: " + row.strip())
+                records[matches[0]]["summary"] += (
+                    " Additional activity track: " + activity_start
+                    + " to " + activity_end + ".")
+                continue
+            key = (programme or url) + "-" + year + "-" + letter
+            records[key] = opportunity(
+                key, title, url, deadline, opens,
+                activity_start + " to " + activity_end,
+                proof=["Published application row: " + row.strip()])
+    extensions = []
+    for url, root in pages["news"].items():
+        title = one(nodes(root, "h1"), "notice heading").text()
+        content = one(nodes(root, "div", "entry-content"),
+                      "notice content").text()
+        programme = programme_key(title, inventory)
+        if not programme:
+            linked = {
+                programme_key(one(nodes(page, "h1"), "programme heading").text(),
+                              inventory)
+                for source, page in pages["programmes"].items()
+                if any(target.rstrip("/") == source.rstrip("/")
+                       for _, target in links(one(
+                           nodes(root, "div", "entry-content"), "notice content"), url))}
+            linked.discard(None)
+            if len(linked) == 1:
+                programme = linked.pop()
+        categories = " ".join(n.text() for n in
+                              nodes(root, "div", "post-category"))
+        if "Events" in categories:
+            if not re.search(r"\binvites you\b|\bRSVP\b", content, re.I):
+                continue
+            closing = re.search(r"RSVP by (.{0,80})", content, re.I)
+            deadline = dates(closing[1])[0] if closing and dates(
+                closing[1]) else None
+            key = ("funding-presentation-2024" if urllib.parse.urlsplit(
+                url).path.endswith(
+                    "/41-tropoi-gia-na-kaneis-tin-idea-sou-praxi-"
+                    "parousiasi-ton-chrimatodotikon-programmaton-"
+                    "tou-organismou-neolaias/") else url)
+            records[key] = opportunity(
+                key, title, url, deadline, category="training")
+            event_dates = re.search(r"presentation.*?on (.{0,80})",
+                                    content, re.I)
+            if event_dates and dates(event_dates[1]):
+                records[key]["summary"] += (
+                    " Event date: " + dates(event_dates[1])[0] + ".")
+            if "Eleftheria Square Amphitheatre" in content:
+                records[key]["location"] = "Eleftheria Square Amphitheatre"
+                records[key]["host_countries"] = ["CY"]
+            continue
+        if not programme:
+            # New programmes still get deterministic source-link identities.
+            programme = url
+        closing = re.search(
+            r"(?:extended until|remain open until|Application deadline:)"
+            r"(.{0,100})", content, re.I)
+        window_match = re.search(
+            r"submit their applications from (.+?)(?:,\s*for activities|[.])",
+            content, re.I)
+        window = dates(window_match[1]) if window_match else []
+        deadline = (dates(closing[1])[0]
+                    if closing and dates(closing[1]) else
+                    window[-1] if window else None)
+        if not deadline:
+            raise AdapterError("Call has no parseable closing date: " + url,
+                               "parse")
+        if "Extensions" in categories:
+            extensions.append((programme, title, url, deadline, content))
+            continue
+        year_match = re.search(r"\bfor (20\d{2})\b", title)
+        year = year_match[1] if year_match else deadline[:4]
+        letter = round_letter(title)
+        if not letter and re.search(r"\bA[’']1\b", title):
+            letter = "a"
+        key = programme + "-" + year + "-" + letter if letter else url
+        if (not letter and year == "2025" and urllib.parse.urlsplit(url).path
+                == "/en/business-financing-loans/"):
+            key = "youth-and-world-2025-a"
+        before = records.get(key)
+        opens = window[0] if len(window) == 2 else None
+        record = opportunity(key, title, url, deadline, opens)
+        if before:
+            if before["deadline"] != deadline:
+                raise AdapterError("Conflicting programme/notice deadlines: "
+                                   + url, "parse")
+            record["status"] = before["status"]
+            record["summary"] = before["summary"]
+            record["classification"]["evidence"].extend(
+                before["classification"]["evidence"][1:])
+        records[key] = record
+    for programme, title, url, deadline, content in extensions:
+        candidates = [key for key, record in records.items()
+                      if key.startswith(programme + "-")
+                      and record["deadline"][:4] == deadline[:4]
+                      and record["deadline"] <= deadline
+                      and (datetime.fromisoformat(deadline) -
+                           datetime.fromisoformat(
+                               record["deadline"])).days <= 45]
+        if len(candidates) > 1:
+            raise AdapterError("Ambiguous extension target: " + url, "parse")
+        if candidates:
+            key = candidates[0]
+            record = records[key]
+            old_deadline = record["deadline"]
+            record["deadline"] = deadline
+            record["status"] = opportunity(
+                key, title, url, deadline)["status"]
+            record["summary"] = record["summary"].replace(old_deadline, deadline)
+            record["classification"]["evidence"].append(
+                "Deadline extension: " + url)
+        else:
+            key = ("green-volunteering-2024-b" if
+                   urllib.parse.urlsplit(url).path.endswith(
+                       "/anakoinosi-gia-to-programma-prasinos-ethelontismos/")
+                   else url)
+            records[key] = opportunity(key, title, url, deadline)
+    for url, root in pages["events"].items():
+        text = root.text()
+        if "Δοκιμαστική περιγραφή" in text:
+            continue
+        title = one(nodes(root, "h1"), "calendar event heading").text()
+        closing = re.search(
+            r"(?:Application deadline|Registration deadline|"
+            r"Προθεσμία (?:εγγραφής|εγγραφών|αιτήσεων))\s*:?\s*(.{0,100})",
+            text, re.I)
+        deadline = (dates(closing[1])[0]
+                    if closing and dates(closing[1]) else None)
+        schedule = re.search(
+            r"Date And Time\s+(.+?)(?=Τοποθεσία|Location|Θεματολογία|"
+            r"Event Type|Share With Friends|$)", text, re.I)
+        if not schedule or not dates(schedule[1]):
+            raise AdapterError("Calendar event lacks a dated schedule: " + url,
+                               "parse")
+        for date in dates(schedule[1]):
+            datetime.fromisoformat(date)
+        record = opportunity(url, title, url, deadline, category="training")
+        record["summary"] = (
+            "Event schedule: " + schedule[1].strip()[:160]
+            + ". " + ("Application deadline: " + deadline + ". "
+                       if deadline else "No application deadline stated. "))
+        location = re.search(
+            r"(?:Τοποθεσία|Location)\s+(.+?)(?=Θεματολογία|Event Type|"
+            r"Πόλη|Share With Friends|$)", text)
+        if location:
+            record["location"] = location[1].strip()
+        record["classification"]["evidence"].append(
+            "Published event schedule: " + schedule[1].strip())
+        record["language"] = "el" if re.search("[Α-ω]", title) else "en"
+        if record["language"] == "el":
+            record["summary"] = record["summary"].replace(
+                "Event schedule:", "Πρόγραμμα:").replace(
+                "Application deadline:", "Προθεσμία αιτήσεων:").replace(
+                "No application deadline stated.", "Δεν αναφέρεται προθεσμία αιτήσεων.")
+        records[url] = record
+    for record in records.values():
+        url = record["url"]
+        root = (pages["news"].get(url) or pages["events"].get(url)
+                or pages["programmes"].get(url))
+        content = nodes(root, "div", "entry-content")
+        blocks = factual_blocks(content[0] if content else root)
+        programme = programme_key(record["title"], inventory)
+        if programme:
+            for source, page in pages["programmes"].items():
+                name = one(nodes(page, "h1"), "programme heading").text()
+                if programme_key(name, inventory) == programme and source != url:
+                    blocks.extend(factual_blocks(page))
+                    record["classification"]["evidence"].append(
+                        "Programme description: " + source)
+        describe(record, blocks, record["language"], record["summary"])
+    result = list(records.values())
+    validate_records(result)
+    return result
 
 
 def collect():
@@ -1801,7 +1966,7 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected {len(records)} reviewed ONEK opportunities"
+            else f"Collected {len(records)} published ONEK opportunities"
         ),
         "error": safe_error(error) if error else None,
     }
@@ -2006,461 +2171,6 @@ def main():
     except PhaseExpired:
         return 1
 
-
-INPUTS = {
-    "home": {
-        "url": "https://youthfunds.onek.org.cy/en/",
-        "format": "html",
-        "sha256": "7c411699aa066770ff5edf23385ac4d44ae2b54056ca8b88a3e1e5fe959c5d26",
-    },
-    "programmes": {
-        "url": "https://youthfunds.onek.org.cy/en/programmata/",
-        "format": "html",
-        "sha256": "02cbf0f22cb069da954d6899b127880df8a540b161e085e31aa3573bfa5d9421",
-    },
-    "initiatives": {
-        "url": "https://youthfunds.onek.org.cy/en/services/youth-initiatives/",
-        "format": "html",
-        "sha256": "7441aaa8f2ed0cdfc58db5ee78c2090ac02a4f867be53079bc99d9885c9c20a3",
-    },
-    "green": {
-        "url": "https://youthfunds.onek.org.cy/en/services/green-volunteering/",
-        "format": "html",
-        "sha256": "149bbfe407bce7407937a6484bf58489e2a07da0779b66e0e17141caca6caf91",
-    },
-    "world": {
-        "url": "https://youthfunds.onek.org.cy/en/services/neoi-kai-kosmos/",
-        "format": "html",
-        "sha256": "6b8fa5e62fef259021e7fecc3e513901ecfaf5f4589b4abd94fb49d39b4018f1",
-    },
-    "faq": {
-        "url": "https://youthfunds.onek.org.cy/en/sychnes-erotiseis/",
-        "format": "html",
-        "sha256": "58d2ac26d5ee426edc81491f9411881e5e1798e2a68a448a3dd585fa4de61473",
-    },
-    "news": {
-        "url": "https://youthfunds.onek.org.cy/en/nea-anakoinoseis/",
-        "format": "html",
-        "sha256": "9ce598a0bd34503ae95ba11c0c597907d469197c5c17b82559cc8dd62d728981",
-    },
-    "news-2": {
-        "url": "https://youthfunds.onek.org.cy/en/nea-anakoinoseis/page/2/",
-        "format": "html",
-        "sha256": "201f57abafe703ce0586d6c6f9bdf894c454d8cbe8a1a33e462c3ce2eadaac8e",
-    },
-    "green-call-2027": {
-        "url": "https://youthfunds.onek.org.cy/en/a1-and-a2-calls-for-applications-under-the-green-volunteering-programme-for-2027/",
-        "format": "html",
-        "sha256": "b1e5c9b532b09cb72c1b66f4c3a88cbfdb94f127883a960c61a72ba157995548",
-    },
-    "youth-call-2027": {
-        "url": "https://youthfunds.onek.org.cy/en/first-call-for-applications-under-the-youth-initiatives-programme-for-2027/",
-        "format": "html",
-        "sha256": "0f783c660fb4034ba26d57489b0c05aa2f5729be9cce617cb778cea25875d57b",
-    },
-    "green-call-2026": {
-        "url": "https://youthfunds.onek.org.cy/en/dimosiefthike-i-v-prosklisi-tou-programmatos-prasinos-ethelontismos-gia-to-2026/",
-        "format": "html",
-        "sha256": "84f342885880253e7344823c0d4984425d84528632b1b275a0f993df98c3e2cf",
-    },
-    "world-call-2026": {
-        "url": "https://youthfunds.onek.org.cy/en/dimosiefthike-i-v-prosklisi-tou-programmatos-neoi-kai-kosmos-gia-to-2026/",
-        "format": "html",
-        "sha256": "646f32eeecba0e7ec15ff30b484272526809615c57a05862c4ffe4b005152fb6",
-    },
-    "third-youth-2026": {
-        "url": "https://youthfunds.onek.org.cy/en/dimosiefthike-i-g-prosklisi-tou-programmatos-protovoulies-neon-gia-to-2026/",
-        "format": "html",
-        "sha256": "1d52274d9525300c446c36ed1c7c18fad7bc9ec26317cd8408d5a937f10de793",
-    },
-    "green-guide-news": {
-        "url": "https://youthfunds.onek.org.cy/en/friendly-business-policies/",
-        "format": "html",
-        "sha256": "b51ce55c48269d11b5877da5ccc245bd27923e2de46742597d9fd78d8db66a5f",
-    },
-    "green-extension": {
-        "url": "https://youthfunds.onek.org.cy/en/reduce-your-home-loan-rate/",
-        "format": "html",
-        "sha256": "c53a4821e51bf26e8a6f66c129162cb2206b62b24362204e3dd69748bde25189",
-    },
-    "green-older-announcement": {
-        "url": "https://youthfunds.onek.org.cy/en/anakoinosi-gia-to-programma-prasinos-ethelontismos/",
-        "format": "html",
-        "sha256": "1bd64712387a8a2ee66871fdcb0c9ffa76a146c8c241cc229e484392ae9e3791",
-    },
-    "world-older-call": {
-        "url": "https://youthfunds.onek.org.cy/en/business-financing-loans/",
-        "format": "html",
-        "sha256": "9502a7df6edb54045fe5f7e3dee19e716ab1c3b1d842363b5a30e0544c53d8c8",
-    },
-    "presentation-result": {
-        "url": "https://youthfunds.onek.org.cy/en/chrimatodotika-programmata-onek-41-tropoi-gia-na-kaneis-tin-idea-sou-praxi/",
-        "format": "html",
-        "sha256": "ec54c5a261d0148387a7bc52481f5bfc4cb0c04ad9344a480fb915075335c294",
-    },
-    "presentation-invite": {
-        "url": "https://youthfunds.onek.org.cy/en/41-tropoi-gia-na-kaneis-tin-idea-sou-praxi-parousiasi-ton-chrimatodotikon-programmaton-tou-organismou-neolaias/",
-        "format": "html",
-        "sha256": "ffeb97861a39687aa7922570a0daefa2cfedf1e2424ea71cdab4151b902cde5b",
-    },
-    "online-presentation": {
-        "url": "https://youthfunds.onek.org.cy/en/parousiasi-logismikou-tou-chrimatodotikou-programmatos-protovoulies-neon/",
-        "format": "html",
-        "sha256": "c695b4c2a604f39d7759bf21370a7587bb498d362693ff5fa80752063e7f4332",
-    },
-    "guide-initiatives": {
-        "url": "https://youthfunds.onek.org.cy/wp-content/uploads/2019/04/Odhgos-Protoboylies-Neon.pdf",
-        "format": "pdf",
-        "sha256": "ee08e5e07ac722bbcf8386edd13b513d9efef4eac29cdd7f01f76cc68c230ca1",
-    },
-    "guide-green": {
-        "url": "https://youthfunds.onek.org.cy/wp-content/uploads/2019/04/Odhgos-Prasinos-Ethelontismos.pdf",
-        "format": "pdf",
-        "sha256": "74fe5e1e51c09684dd97171065d69e46499298bd83e7471cb305d7d566450938",
-    },
-    "guide-world": {
-        "url": "https://youthfunds.onek.org.cy/wp-content/uploads/2019/04/Odigos-neoi-kai-kosmos-1.pdf",
-        "format": "pdf",
-        "sha256": "2675de1227ba386fce17a88179154347920930e4f880ce124bdbf8ef06ee2e30",
-    },
-    "calendar": {
-        "url": "https://youthfunds.onek.org.cy/en/imerologio-draseon/",
-        "format": "html",
-        "sha256": "c01c6461d6281543d712fa2fa4467fc097562faaec7c11e6b9fc3e8ac6e32506",
-    },
-    "first-event": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/enimerotiki-imerida-evropaika-programmata-chrimatodotisis-2026/",
-        "format": "html",
-        "sha256": "74274287b11b88950fe650aa2329b1a6c9a62642b1bd9fae67225f57ab4d857f",
-    },
-    "event-2": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/ergastirio-syntaxi-protasis-gia-horizon-europe/",
-        "format": "html",
-        "sha256": "6a9b3e7f3789f57e1a18f98a068842525a7ac3d899f99d341259bd72fea59fe0",
-    },
-    "event-3": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/seminario-chrimatodotisi-neofyon-epicheiriseon/",
-        "format": "html",
-        "sha256": "16d571ad78ab6c316e86f02054d8c292e3b615ae4cd8ca68b4d07ef02be749fa",
-    },
-    "event-4": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/workshop-psifiakos-metaschimatismos-mme/",
-        "format": "html",
-        "sha256": "338dcd068c62231e081f3edf3d84db9de2335cb16ea48ef69a515e35e9fb7265",
-    },
-    "event-5": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/imerida-chrimatodotisi-athlitikon-ypodomon/",
-        "format": "html",
-        "sha256": "2370a10d9a5e62d2b43943b059d333add4ef627be5e9723bb7f38f98bf3b4ec2",
-    },
-    "event-6": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/parousiasi-erasmus-gia-scholeia-kai-organismous/",
-        "format": "html",
-        "sha256": "3c0394735238970ac8b892804b4b28f8b730847e0ef290fd60412c4bc098de59",
-    },
-    "event-7": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/ergastirio-diacheirisi-evropaikon-ergon/",
-        "format": "html",
-        "sha256": "4b9e2fe8232b4eb4592281f9a766bb4b7ba1c1092455e28f2415af8fad4c62b0",
-    },
-    "event-8": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/diavoulefsi-ethniko-schedio-anakampsis-kai-anthektikotitas/",
-        "format": "html",
-        "sha256": "76405f476ed0efd65b8afe96ef088a82ac281d208d2d14355917530a3957e85e",
-    },
-    "event-9": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/seminario-epidotiseis-gia-prasini-energeia/",
-        "format": "html",
-        "sha256": "08675e56fbdefdf0f61cd71dd4b7281b15fe2da9fb98229b0193802daac2d69b",
-    },
-    "event-10": {
-        "url": "https://youthfunds.onek.org.cy/ekdilosi/enimerosi-tameio-synochis-kai-perifereiaki-anaptyxi/",
-        "format": "html",
-        "sha256": "a15e39fd568628e8d808fcb27965ff00d2ae4054eae3ef091fe6039ef73e3e74",
-    },
-    "calendar-listing-1": {
-        "url": "https://youthfunds.onek.org.cy/en/em-ajax/get_listings/",
-        "format": "json",
-        "sha256": "db706b49a3b409d0591088891d69ec34ed04bcf268f56793c7a41dfd85dc1083",
-    },
-    "calendar-listing-2": {
-        "url": "https://youthfunds.onek.org.cy/en/em-ajax/get_listings/",
-        "format": "json",
-        "sha256": "1e7cccd419b3ae0142ced841fe3db4cbadf14992a564907728092680187fcf2c",
-    },
-    "onek-home": {
-        "url": "https://onek.org.cy",
-        "format": "html",
-        "sha256": "a88a9bf4c6054637afa76c6ee1cb805642fb04b7c3a76145eae1ae366b90bb75",
-    },
-    "privacy": {
-        "url": "https://onek.org.cy/poioi-eimaste/politiki-prostasias-prosopikon-dedomenon/",
-        "format": "html",
-        "sha256": "01f4f5c0f9e878a59d8200daa945e74a269224f54f7c37013059d08f2ec50db4",
-    },
-    "initiatives-gr": {
-        "url": "https://youthfunds.onek.org.cy/services/protovoulies-neon/",
-        "format": "html",
-        "sha256": "0f68201cc4af64211621fefccd901617951578e6ce351fa0109903b36d3d6b32",
-    },
-    "green-gr": {
-        "url": "https://youthfunds.onek.org.cy/services/prasinos-ethelontismos/",
-        "format": "html",
-        "sha256": "87414fc6bc8cd46fafb15fc11877173cdf139a6ef3da123e10fac8a59e66b869",
-    },
-    "world-gr": {
-        "url": "https://youthfunds.onek.org.cy/services/neoi-kai-kosmos/",
-        "format": "html",
-        "sha256": "989782788a1daf515fef56c0ad128fb167dd8ec25e92306ef2a592626aded234",
-    },
-    "guide-world-gr": {
-        "url": "https://youthfunds.onek.org.cy/wp-content/uploads/2019/04/Odigos-neoi-kai-kosmos.pdf",
-        "format": "pdf",
-        "sha256": "2675de1227ba386fce17a88179154347920930e4f880ce124bdbf8ef06ee2e30",
-    },
-}
-
-PROFILES = [
-    {
-        "key": "youth-initiatives-2027-a",
-        "title": "First Call for Applications under the “Youth Initiatives” Programme for "
-        "2027",
-        "url": "https://youthfunds.onek.org.cy/en/first-call-for-applications-under-the-youth-initiatives-programme-for-2027/",
-        "category": "grants",
-        "hosts": ["CY"],
-        "deadline": "2026-09-16",
-        "summary": "Grants for eligible non-profit youth activities in Cyprus, for young "
-        "people, groups of 4+, youth centres and organisations. Individual "
-        "applicants have restricted activity eligibility. Current pages say "
-        "13–35; the guide uses a different age cutoff, so confirm age and current "
-        "expense caps before applying. CallA is closed; activities run 1 Dec "
-        "2026–31 Mar 2027.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/first-call-for-applications-under-the-youth-initiatives-programme-for-2027/",
-    },
-    {
-        "key": "youth-initiatives-2027-b",
-        "title": "Youth Initiatives",
-        "url": "https://youthfunds.onek.org.cy/en/services/youth-initiatives/",
-        "category": "grants",
-        "hosts": ["CY"],
-        "deadline": "2027-01-16",
-        "summary": "Grants for eligible non-profit youth activities in Cyprus, for young "
-        "people, groups of 4+, youth centres and organisations. Individual "
-        "applicants have restricted activity eligibility. Current pages say "
-        "13–35; the guide uses a different age cutoff, so confirm age and current "
-        "expense caps before applying. CallB applications run 10 Dec 2026–16 Jan "
-        "2027 for activities 1 Apr–31 Jul 2027; not yet open.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/services/youth-initiatives/",
-        "opens": "2026-12-10",
-    },
-    {
-        "key": "youth-initiatives-2027-c",
-        "title": "Youth Initiatives",
-        "url": "https://youthfunds.onek.org.cy/en/services/youth-initiatives/",
-        "category": "grants",
-        "hosts": ["CY"],
-        "deadline": "2027-05-16",
-        "summary": "Grants for eligible non-profit youth activities in Cyprus, for young "
-        "people, groups of 4+, youth centres and organisations. Individual "
-        "applicants have restricted activity eligibility. Current pages say "
-        "13–35; the guide uses a different age cutoff, so confirm age and current "
-        "expense caps before applying. CallC applications run 10 Apr–16 May 2027 "
-        "for activities 1 Aug–30 Nov 2027; not yet open.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/services/youth-initiatives/",
-        "opens": "2027-04-10",
-    },
-    {
-        "key": "youth-initiatives-2026-c",
-        "title": "Third Call for Applications under the “Youth Initiatives” Programme for "
-        "2026",
-        "url": "https://youthfunds.onek.org.cy/en/dimosiefthike-i-g-prosklisi-tou-programmatos-protovoulies-neon-gia-to-2026/",
-        "category": "grants",
-        "hosts": ["CY"],
-        "deadline": "2026-05-16",
-        "summary": "Grants for eligible non-profit youth activities in Cyprus, for young "
-        "people, groups of 4+, youth centres and organisations. Individual "
-        "applicants have restricted activity eligibility. Current pages say "
-        "13–35; the guide uses a different age cutoff, so confirm age and current "
-        "expense caps before applying. Historical third 2026 call closed 16 May "
-        "2026, for activities 1 Aug–30 Nov 2026.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/dimosiefthike-i-g-prosklisi-tou-programmatos-protovoulies-neon-gia-to-2026/",
-    },
-    {
-        "key": "green-volunteering-2027-a",
-        "title": "A’1 and A’2 Calls for Applications under the “Green Volunteering” "
-        "Programme for 2027",
-        "url": "https://youthfunds.onek.org.cy/en/a1-and-a2-calls-for-applications-under-the-green-volunteering-programme-for-2027/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2026-11-03",
-        "summary": "Environmental volunteer grants for groups of 4+ youths 13–35, secondary "
-        "schools, youth centres and organisations. Eligible costs depend on "
-        "activity; the linked 2024 guide differs from current action numbering, "
-        "so confirm current caps and age rules. Joint 2027 A 1/A 2 applications "
-        "close 3 Nov 2026. A 1 actions 1–4 run 1 Jan–30 Jun 2027; A 2 "
-        "larger/innovative projects run 1 Jan–30 Nov 2027.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/a1-and-a2-calls-for-applications-under-the-green-volunteering-programme-for-2027/",
-        "opens": "2026-10-03",
-    },
-    {
-        "key": "green-volunteering-2027-b",
-        "title": "Green Volunteering",
-        "url": "https://youthfunds.onek.org.cy/en/services/green-volunteering/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2027-06-17",
-        "summary": "Environmental volunteer grants for groups of 4+ youths 13–35, secondary "
-        "schools, youth centres and organisations. Eligible costs depend on "
-        "activity; the linked 2024 guide differs from current action numbering, "
-        "so confirm current caps and age rules. The Greek programme table "
-        "confirms applications 17 May–17 Jun 2027 for activities 1 Jul–30 Nov "
-        "2027. This is a future application window.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/services/green-volunteering/",
-        "opens": "2027-05-17",
-    },
-    {
-        "key": "green-volunteering-2026-b",
-        "title": "Second Call for Applications under the “Green Volunteering” Programme for "
-        "2026",
-        "url": "https://youthfunds.onek.org.cy/en/dimosiefthike-i-v-prosklisi-tou-programmatos-prasinos-ethelontismos-gia-to-2026/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2026-06-17",
-        "summary": "Environmental volunteer grants for groups of 4+ youths 13–35, secondary "
-        "schools, youth centres and organisations. Eligible costs depend on "
-        "activity; the linked 2024 guide differs from current action numbering, "
-        "so confirm current caps and age rules. Historical second 2026 call "
-        "closed 17 Jun 2026; activities run 1 Jul–30 Nov 2026.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/dimosiefthike-i-v-prosklisi-tou-programmatos-prasinos-ethelontismos-gia-to-2026/",
-    },
-    {
-        "key": "green-volunteering-2025-a",
-        "title": "First Call for Applications for 2025 and New “Green Volunteering” "
-        "Programme Guide",
-        "url": "https://youthfunds.onek.org.cy/en/friendly-business-policies/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2024-11-06",
-        "summary": "Environmental volunteer grants for groups of 4+ youths 13–35, secondary "
-        "schools, youth centres and organisations. Eligible costs depend on "
-        "activity; the linked 2024 guide differs from current action numbering, "
-        "so confirm current caps and age rules. Historical first 2025 call opened "
-        "3 Oct 2024; deadline extended to 6 Nov 2024. Actions 1–4 runJan–Jun "
-        "2025, actions 5–6 Jan–Nov 2025.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/friendly-business-policies/",
-    },
-    {
-        "key": "green-volunteering-2024-b",
-        "title": "Announcement on the “Green Volunteering” Programme",
-        "url": "https://youthfunds.onek.org.cy/en/anakoinosi-gia-to-programma-prasinos-ethelontismos/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2024-07-31",
-        "summary": "Environmental volunteer grants for groups of 4+ youths 13–35, secondary "
-        "schools, youth centres and organisations. Eligible costs depend on "
-        "activity; the linked 2024 guide differs from current action numbering, "
-        "so confirm current caps and age rules. Historical round for activities "
-        "20 Sep–30 Nov 2024 extended its deadline to 31 Jul 2024 at 23:59:59; no "
-        "timezone was stated.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/anakoinosi-gia-to-programma-prasinos-ethelontismos/",
-    },
-    {
-        "key": "youth-and-world-2027-a",
-        "title": "Youth and the World",
-        "url": "https://youthfunds.onek.org.cy/en/services/neoi-kai-kosmos/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2027-04-30",
-        "summary": "Travel support for invited or selected international participation by "
-        "youths and youth organisations. The linked guide requires lawful "
-        "permanent Cyprus residence over 6 months; this is not a citizenship "
-        "rule. Confirm current expense caps, age conditions and permitted "
-        "activities. Apply before participating. 2027 CallA applications run 1 "
-        "Nov 2026–30 Apr 2027; activities 1 Dec 2026–31 May 2027. Not yet open "
-        "despite the generic Open badge.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/services/neoi-kai-kosmos/",
-        "opens": "2026-11-01",
-    },
-    {
-        "key": "youth-and-world-2027-b",
-        "title": "Youth and the World",
-        "url": "https://youthfunds.onek.org.cy/en/services/neoi-kai-kosmos/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2027-10-31",
-        "summary": "Travel support for invited or selected international participation by "
-        "youths and youth organisations. The linked guide requires lawful "
-        "permanent Cyprus residence over 6 months; this is not a citizenship "
-        "rule. Confirm current expense caps, age conditions and permitted "
-        "activities. Apply before participating. 2027 CallB applications run 1 "
-        "May–31 Oct 2027; activities 1 Jun–30 Nov 2027. This is a future "
-        "application window.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/services/neoi-kai-kosmos/",
-        "opens": "2027-05-01",
-    },
-    {
-        "key": "youth-and-world-2026-b",
-        "title": "Second Call for Applications under the “Youth and the World” Programme for "
-        "2026",
-        "url": "https://youthfunds.onek.org.cy/en/dimosiefthike-i-v-prosklisi-tou-programmatos-neoi-kai-kosmos-gia-to-2026/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2026-10-31",
-        "summary": "Travel support for invited or selected international participation by "
-        "youths and youth organisations. The linked guide requires lawful "
-        "permanent Cyprus residence over 6 months; this is not a citizenship "
-        "rule. Confirm current expense caps, age conditions and permitted "
-        "activities. Apply before participating. Current second 2026 call closes "
-        "31 Oct 2026, for activities 1 Jun–30 Nov 2026.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/dimosiefthike-i-v-prosklisi-tou-programmatos-neoi-kai-kosmos-gia-to-2026/",
-    },
-    {
-        "key": "youth-and-world-2025-a",
-        "title": "New Application Period for the “Youth and the World” Funding Programme",
-        "url": "https://youthfunds.onek.org.cy/en/business-financing-loans/",
-        "category": "grants",
-        "hosts": [],
-        "deadline": "2025-04-30",
-        "summary": "Travel support for invited or selected international participation by "
-        "youths and youth organisations. The linked guide requires lawful "
-        "permanent Cyprus residence over 6 months; this is not a citizenship "
-        "rule. Confirm current expense caps, age conditions and permitted "
-        "activities. Apply before participating. Historical round accepted "
-        "applications 1 Nov 2024–30 Apr 2025 for activities 1 Dec 2024–31 May "
-        "2025.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/business-financing-loans/",
-    },
-    {
-        "key": "funding-presentation-2024",
-        "title": "“4+1 Ways to Turn Your Idea into Action”: Presentation of the Youth Board "
-        "of Cyprus Funding Programmes",
-        "url": "https://youthfunds.onek.org.cy/en/41-tropoi-gia-na-kaneis-tin-idea-sou-praxi-parousiasi-ton-chrimatodotikon-programmaton-tou-organismou-neolaias/",
-        "category": "training",
-        "hosts": ["CY"],
-        "deadline": "2024-06-13",
-        "summary": "Historical ONEK information session for young people, informal groups "
-        "and youth organisations about funding social, cultural, environmental "
-        "and international activities. Held at the Eleftheria Square Amphitheatre "
-        "on 19 Jun 2024 at 18:30; RSVP closed 13 Jun 2024. No attendance funding "
-        "or fee was specified. The subsequent event report describes the same "
-        "session.",
-        "proof": "Actual published funding/event facts: "
-        "https://youthfunds.onek.org.cy/en/41-tropoi-gia-na-kaneis-tin-idea-sou-praxi-parousiasi-ton-chrimatodotikon-programmaton-tou-organismou-neolaias/",
-    },
-]
 
 
 if __name__ == "__main__":
