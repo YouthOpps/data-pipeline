@@ -54,8 +54,16 @@ Publisher taxonomy is classification evidence, not geographic eligibility:
 continent tags never become host or eligible country codes. Canonical fallback
 also excludes the publisher's appended newsletter and sharing widgets.
 
-IDs use the source slug plus the immutable WordPress post ID, surviving changes
-to article URLs and titles. `published_at` uses the explicitly GMT API date.
+IDs use `opportunities-for-youth-<immutable WordPress post ID>`, surviving
+changes to article URLs and titles and matching the website's kebab-ID contract.
+Fresh collections reject legacy colon IDs. Existing published snapshots may
+contain `opportunities-for-youth:<post ID>`; only snapshot validation accepts
+that legacy format. Successful full refresh migrates this source atomically to
+hyphen IDs while retaining matching records' original creation/first-seen times.
+Failures preserve the unchanged legacy snapshot and last success timestamp.
+Duplicate colon/hyphen representations of the same native post are rejected
+when reading a snapshot. No data-source files are edited manually.
+`published_at` uses the explicitly GMT API date.
 Exact publisher-labelled calendar deadline text is retained in summaries when
 recognized, without inventing a closing instant. Deadline, location and country
 fields remain null or empty because this adapter does not infer them from publisher category geography, titles or unzoned dates.
@@ -83,6 +91,21 @@ Retry-After are honored. HTTP 429/503 retries add at least two minutes of
 backoff and are bounded. The initial six-second traversal received HTTP 429;
 the stricter API interval reflects that observed publisher limit. Exhaustive
 collection normally takes at least eleven minutes.
+
+## Expiry cleanup
+
+The current collector leaves deadlines unknown; unzoned calendar labels remain
+summary evidence and are not invented closing instants. Unknown deadlines stay
+retained; age, status or absence never establishes expiry. Cleanup accepts only
+supported validated deadlines with an explicit timezone and compares their
+closing instant with the current UTC time. Complete, nonempty raw collection is
+validated before filtering. A successful refresh atomically replaces this
+source's entire data/metadata pair, so expired old records cannot persist in the
+next snapshot. If every validated collected record has expired, the same atomic
+refresh publishes an empty dataset with success metadata. Subsequent snapshot
+reads accept that empty result; an empty raw retrieval remains a failure.
+Fetch, parse, validation or publication failure preserves last-good data and its
+success timestamp, including unchanged legacy IDs until migration succeeds.
 
 ## Publication
 
