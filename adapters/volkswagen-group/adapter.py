@@ -8,7 +8,7 @@ Republish minimal original factual summaries and direct official links only.
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -31,6 +31,8 @@ import urllib.request
 import zipfile
 
 SOURCE_ID = "volkswagen-group"
+# Explicit publisher withdrawal notices, verified against the current frontier.
+WITHDRAWN_POSITION_IDS = {"31130", "30024", "29834", "26566"}
 SOURCE_URL = WEBSITE_URL = "https://www.volkswagen-karriere.de/"
 LANGUAGE = "de"
 PUBLISHER_COUNTRY = "DE"
@@ -1566,13 +1568,15 @@ def run_body(publishing):
                     candidate_metadata = json.loads(
                         candidate["files"]["metadata.json"]
                     )
-                    validate_records(candidate_records)
+                    validate_records(candidate_records, allow_empty=True)
                     validate_prior_metadata(
                         candidate_metadata, candidate_records
                     )
                     old, previous = candidate_records, candidate_metadata
                 snapshot = candidate
             records = collect()
+            validate_records(records)
+            records = remove_expired_records(records)
             checked = utc_now()
             fresh_records(records, old, attempt, checked)
             outcome = metadata(attempt, previous, records, checked_at=checked)
@@ -1605,7 +1609,7 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif previous and latest["files"] == snapshot["files"]:
                         publish_files(
                             latest,
                             {
@@ -1621,7 +1625,7 @@ def run_body(publishing):
                     "Run failed; durable outcome unconfirmed. "
                     "No newer source pair was overwritten."
                 )
-        elif not old:
+        elif not previous:
             outcome["message"] = "Collection failed; no publication attempted"
     arm_alarm(_RUN_END - EXPORT_TIMEOUT)
     print(json.dumps(outcome, ensure_ascii=False))
@@ -2141,11 +2145,44 @@ def validate_owned_records(records):
             raise AdapterError("Invalid Volkswagen AG chronology", "validate")
 
 
-def validate_records(records):
+def remove_expired_records(records, now=None):
+    """Filter a validated refresh; never mutate the prior published snapshot."""
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(timezone(timedelta(hours=-12))).date()
+    retained = []
+    for record in records:
+        value = record.get("deadline")
+        expired = False
+        if isinstance(value, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    expired = datetime.fromisoformat(value).date() < today
+                else:
+                    closing = datetime.fromisoformat(
+                        value.replace("Z", "+00:00")
+                    )
+                    expired = closing.tzinfo is not None and closing < now
+            except ValueError:
+                # Ambiguous deadlines never establish expiry.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False, require_complete=False):
     if (
         not isinstance(records, list)
-        or not records
-        or len(records) != len(PROFILES)
+        or (not records and not allow_empty)
+        or (
+            require_complete
+            and {record.get("id") for record in records}
+            != {
+                profile_identity(profile)
+                for profile in PROFILES
+                if profile["identity"] not in WITHDRAWN_POSITION_IDS
+            }
+        )
     ):
         raise AdapterError(
             "Incomplete reviewed Volkswagen AG identity inventory", "validate"
@@ -2235,8 +2272,12 @@ def parse_inventory(pages):
         raise AdapterError(
             "Incomplete reviewed Volkswagen AG material frontier", "parse"
         )
-    records = [make_record(profile) for profile in PROFILES]
-    validate_records(records)
+    records = [
+        make_record(profile)
+        for profile in PROFILES
+        if profile["identity"] not in WITHDRAWN_POSITION_IDS
+    ]
+    validate_records(records, require_complete=True)
     return records
 
 
@@ -2276,7 +2317,10 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected {len(records)} reviewed Volkswagen AG individual opportunities"
+            else (
+                f"Validated refresh retains {len(records)} "
+                "Volkswagen AG individual opportunities"
+            )
         ),
         "error": safe_error(error) if error else None,
     }
@@ -2307,7 +2351,7 @@ def fresh_records(records, old, attempt, checked):
             last_checked_at=checked,
         )
     records.sort(key=lambda record: record["id"])
-    validate_records(records)
+    validate_records(records, allow_empty=True)
 
 
 def validate_prior_metadata(previous, records):
@@ -2525,11 +2569,17 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-033': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-30419/1415635033/',
                'format': 'html',
-               'sha256': '7e484258ce7fda0a8675bc0fbe9aab4a35ccdaf978e69e2007ca12eedada8c13',
+               'sha256': (
+                   '1be1fc6c2da85cde83e00f3d431323f2'
+                   '892e3ed722debccdbe6115ace764f76b'
+               ),
                'role': 'German individual all-level detail'},
  'input-034': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-30419/1415645233/',
                'format': 'html',
-               'sha256': 'ddae5a8ad34fe2e98e661944637d6d585c3e4b06d1e3803aa167fd361eac9c06',
+               'sha256': (
+                   '6b5cb9bf9c5e124c77d89d3c165ceb10'
+                   'e0737175811464e5818f31da46de660b'
+               ),
                'role': 'German individual all-level detail'},
  'input-035': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-30419/1413693433/',
                'format': 'html',
@@ -2549,11 +2599,17 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-039': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-30419/1415741333/',
                'format': 'html',
-               'sha256': 'dcc52d7f92e433d639178913693a5ac3f9a0a5b2f403ef34c43b4a7b2d56fcf8',
+               'sha256': (
+                   '1ca04e903ce249bb56513281680e7f23'
+                   '744e5f8d55bd5350cdfe3c749fa42b8e'
+               ),
                'role': 'German individual all-level detail'},
  'input-040': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-30419/1415752133/',
                'format': 'html',
-               'sha256': '0f79b52efe00ebc7e03921f81522bdd33c76c176454035147a95316dd150bb91',
+               'sha256': (
+                   '8d929555218bba42f8299fae810eb773'
+                   '36cba15012b762a27811055a9f35dce9'
+               ),
                'role': 'German individual all-level detail'},
  'input-041': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Beschaffung-Interieur-%28wmd%29-30419/1441031833/',
                'format': 'html',
@@ -2561,7 +2617,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-042': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Data-Analytics%2C-Business-Intelligence-&-K%C3%BCnstliche-Intelligenz-%28wmd%29-30419/1446004133/',
                'format': 'html',
-               'sha256': '2b7fd7ef5711df1f42c99e1b9dd002597327a11d1b57774fdde2d08e09113997',
+               'sha256': (
+                   '966699ddb20642eb89a21346acd7f036'
+                   '82b9c3e42db1aad98d69c1795aef57e2'
+               ),
                'role': 'German individual all-level detail'},
  'input-043': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Inboundlogistik-Just-in-Sequence-%28wmd%29-30419/1443606233/',
                'format': 'html',
@@ -2669,7 +2728,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-069': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-34219/1415578133/',
                'format': 'html',
-               'sha256': '58ec151babc453b94f2e9100581f1e218653c50598c9905498415400d2b5cfa6',
+               'sha256': (
+                   'e76ff3958a156ef1d36de7b68531d60d'
+                   '0e5b33c1300408f2f708e077197399e7'
+               ),
                'role': 'German individual all-level detail'},
  'input-070': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Elektrotechnik-%28wmd%29-2027-34219/1405129433/',
                'format': 'html',
@@ -2693,7 +2755,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-075': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-CO2-Einsatz-als-Rohstoff-inkl_-Analytik-%28wmd%29/1426505833/',
                'format': 'html',
-               'sha256': '016d2c2f86f59f5728858e61e201698f48770ef92c03c840c4def808bf47a3ee',
+               'sha256': (
+                   '5adb91a4936eaf6176705c874455e12b'
+                   '40ff13335183a33e3ab2d62bd9bbad33'
+               ),
                'role': 'German individual all-level detail'},
  'input-076': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-Kunststoffrecycling-%28wmd%29/1444149733/',
                'format': 'html',
@@ -2769,7 +2834,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'English duplicate-JobID alias detail'},
  'input-094': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Associate-Principal-oder-Senior-Project-Manager-in-der-Volkswagen-Group-Consulting-%28wmd%29-38436/1024301901/',
                'format': 'html',
-               'sha256': 'ac39dd2b857ecf9eb49f75ccb15ffdb73602aba5cac766c99a691e86b80011e1',
+               'sha256': (
+                   '28fccb74fe8541210a8f227a66f81e14'
+                   '99d5c0dd6c11cd5a32e15e08168af98b'
+               ),
                'role': 'German individual all-level detail'},
  'input-095': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38436/1411195433/',
                'format': 'html',
@@ -2837,19 +2905,31 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-111': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38436/1415714633/',
                'format': 'html',
-               'sha256': '01f5e9a877f05ba90af9e5726eb52a5afdd38806505ad518ebb65fc3fbb72ba0',
+               'sha256': (
+                   'd9d21714d388312c3bb4a3027f26d5a4'
+                   'b9276eadca5bb1f891ded21356bb4299'
+               ),
                'role': 'German individual all-level detail'},
  'input-112': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Elektro-und-Informations%C2%ADtechnik-%28wmd%29-2027-38436/1415718033/',
                'format': 'html',
-               'sha256': '1411b1a367859c966b00135a231681fef25c4c7b59bcb96b20db9cd1a1d2497f',
+               'sha256': (
+                   '5f90df679860c74ed7cc362fd7d18ea8'
+                   '0732d2a63b7706b33c9117dc9eee2b6e'
+               ),
                'role': 'German individual all-level detail'},
  'input-113': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-WING-Elektro-und-Informationstechnik-%28wmd%29-2027-38436/1415719733/',
                'format': 'html',
-               'sha256': '76c33b3ea8746c379db3572ebce2f8641b0cc20f20c07b5e5ae22b666f6d3bfc',
+               'sha256': (
+                   '4e4e97b507e6c70778fa62072a15d892'
+                   '24cbf7efc50b1c82aa4fec3882ee543e'
+               ),
                'role': 'German individual all-level detail'},
  'input-114': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Wirtschaftsingenieurwesen-Maschinenbau-%28wmd%29-2027-38436/1415722433/',
                'format': 'html',
-               'sha256': 'e79cad2e89105d60ad94113d15f2ccb8ca5825927d778fc69b8afec59ebc8cc7',
+               'sha256': (
+                   '138bfe9a90bc6fd66208cf61241f7998'
+                   'd58ee2e1c1173cdbca7fc687f99c78bd'
+               ),
                'role': 'German individual all-level detail'},
  'input-115': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1407454333/',
                'format': 'html',
@@ -2881,67 +2961,115 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-122': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-AI-Engineering-%28wmd%29-2027-38436/1444719633/',
                'format': 'html',
-               'sha256': 'd7b161c4087236edb456a52c0b4532ac57da686932f3b4b152c80d06e72e1c37',
+               'sha256': (
+                   'de5bbbac655a4319b6c175c4bc568edd'
+                   '592578af01cce35c8b446dcef7be6c05'
+               ),
                'role': 'German individual all-level detail'},
  'input-123': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Bauingenieurwesen-%28wmd%29-2027-38436/1415728933/',
                'format': 'html',
-               'sha256': 'a6f90cb75f9bd0f7b27f0fe151fb8ae2846bcfaf1a25b4a64c06088e00ebd74a',
+               'sha256': (
+                   'b1a8a7d79e0c2f65ca1c39daecff74f7'
+                   '270cd9da4f6d2fed0801932fbbeee3f8'
+               ),
                'role': 'German individual all-level detail'},
  'input-124': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Betriebswirtschaft-%28wmd%29-2027-38436/1415731233/',
                'format': 'html',
-               'sha256': '6b7f30973d9e6869ae813f6a9fa606474b810dfe8d6cda5e2f553c1cc25e9bb3',
+               'sha256': (
+                   '877df07929bb61579fcfa3c4985ed804'
+                   '98550b800708f95a20c9a4f73c11cbef'
+               ),
                'role': 'German individual all-level detail'},
  'input-125': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Chemie-%28wmd%29-2027-38436/1415727933/',
                'format': 'html',
-               'sha256': 'f8fefc63af9a6587319a3a8af42fd92b52caac00d9a331581d0ce0023335578b',
+               'sha256': (
+                   'ba675aa2b13f88483202154f8d181c8c'
+                   '9244c8f7003392c7a0704fbd570e96b0'
+               ),
                'role': 'German individual all-level detail'},
  'input-126': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Energie-und-Geb%C3%A4udetechnik-%28wmd%29-2027-38436/1415742833/',
                'format': 'html',
-               'sha256': '695be6a09124d708d2adc2708cbd1492f76ebc1ffa6490578e7e93c9c8ef3895',
+               'sha256': (
+                   '7af5676cae4209a8e2a1c3a98fb8dd50'
+                   'd0d19ddab8e77f2e770f7fd75043d09b'
+               ),
                'role': 'German individual all-level detail'},
  'input-127': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38436/1415744133/',
                'format': 'html',
-               'sha256': '1a66b134c4d4364178eb3586c99eea73da25ff025bb7c0ea30624d8be838228d',
+               'sha256': (
+                   'f3d70ec1fd1b324b6b6949800c7c21ef'
+                   'd5901f50e8a500b70704dcdb0229cab0'
+               ),
                'role': 'German individual all-level detail'},
  'input-128': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeugtechnik-%28wmd%29-2027-38436/1415746333/',
                'format': 'html',
-               'sha256': '018a83cfadaf734251316910b6c9a5abb0ee1f4282b789b117b3ff2d9b9af3a5',
+               'sha256': (
+                   '75ddcd9a3c4a25f7a34bf5cd35a88b65'
+                   'fa111331b6d001f82e5ac9912f470f01'
+               ),
                'role': 'German individual all-level detail'},
  'input-129': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Informatik-%28wmd%29-2027-38436/1415749433/',
                'format': 'html',
-               'sha256': '89fde97fc1311f694b0201a06704757d34cf6efffe4845fb55261365f7b5ab1d',
+               'sha256': (
+                   '49c83a6a6dcd22ab810892dffb7b4d9b'
+                   'ce18ff4f8a711074e3e6cdb1fd221461'
+               ),
                'role': 'German individual all-level detail'},
  'input-130': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-38436/1415753733/',
                'format': 'html',
-               'sha256': '03a7061368e49b3e4c9a3ecca1553715d38d02ff7cab7edb0356b92d8e453af2',
+               'sha256': (
+                   'd225db92d5c393fa824806c33a45d1f6'
+                   'd84c079ceda4d38a3946b4fe5ea80dcb'
+               ),
                'role': 'German individual all-level detail'},
  'input-131': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Internationales-Management-%28wmd%29-2027-38436/1415756733/',
                'format': 'html',
-               'sha256': '1b7ba726717ab233db70953075c4153f3c0d99ab766b09d3846d3dc3f2ce9200',
+               'sha256': (
+                   '9c26ab8b9ee2b8195915f9975a664c4a'
+                   '0bf9a1971aa5d167ed8c54d23c53980d'
+               ),
                'role': 'German individual all-level detail'},
  'input-132': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Lehramt-Bildung-Beruf%2C-Fachrichtung-Wirtschaft-und-Verwaltung-%28wmd%29-2027-38436/1415762233/',
                'format': 'html',
-               'sha256': '31c1f474df1fe9ec5525b391054222927e528eeacb99bc2857f31673aa97a8fa',
+               'sha256': (
+                   '9f30e8b5c98d469d1d970290e3da67aa'
+                   'f852e7f2acf0b026b595c8b7b4bb4680'
+               ),
                'role': 'German individual all-level detail'},
  'input-133': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Logistik-und-Informationsmanagement-%28wmd%29-2027-38436/1415763933/',
                'format': 'html',
-               'sha256': 'e5f2ce9e227a5aaff01641b5ab9b2886ace35d6e07897ed438b2237cd1b6a893',
+               'sha256': (
+                   'ed6d24c61788678679ee6529499cd6af'
+                   '15e2739b4cd5c8fb8f9c0c1542c8773d'
+               ),
                'role': 'German individual all-level detail'},
  'input-134': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Materialwissenschaft-und-Werkzeugtechnik-%28wmd%29-2027-38436/1415767533/',
                'format': 'html',
-               'sha256': 'd020d071887a323273477ad4e8d727ea6ae27d494096a557cede583bb577b137',
+               'sha256': (
+                   '902fa79931e1b2ae6834dab3803c0f28'
+                   '1a0a9bd9243ba12aa1227e675c9c02b0'
+               ),
                'role': 'German individual all-level detail'},
  'input-135': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Smart-Vehicle-Systems-%28wmd%29-2027-38436/1415770133/',
                'format': 'html',
-               'sha256': '31eefef435eb9ea656d5faf282a1d07ba8aecd35ee9660333bb80354ec19ed6e',
+               'sha256': (
+                   '42482c85df1e3ed4198e056f7dc877ef'
+                   'f5e1de87dd3df2c6867dd39e829e08ce'
+               ),
                'role': 'German individual all-level detail'},
  'input-136': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-38436/1415771433/',
                'format': 'html',
-               'sha256': '55581126be6f597ca3dd5a54c44c427addd7bd4029640a30c98fc9e2ac4650ce',
+               'sha256': (
+                   '4d5a3c8c74bab721142a254345bdd26e'
+                   '3bc7af65d6f4a36b26f89f5794ff51c2'
+               ),
                'role': 'German individual all-level detail'},
  'input-137': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsingenieur-Logistik-%28wmd%29-2027-38436/1415778433/',
                'format': 'html',
-               'sha256': '560291a69f30177e9dde7ad3cfb35251aedfd825010fb056c912a3a212af45e4',
+               'sha256': (
+                   '104ded6de6cf37e949cbfa6123da22c4'
+                   '3c902bfe2da026bc0139637dda698b5a'
+               ),
                'role': 'German individual all-level detail'},
  'input-138': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Fach%C3%A4rztin-Facharzt-%28in-Weiterbildung%29-f%C3%BCr-Arbeitsmedizin-%28wmd%29-38436/1372918933/',
                'format': 'html',
@@ -2985,7 +3113,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-148': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-W%C3%A4rmeleitung-%28wmd%29-38436/1439987633/',
                'format': 'html',
-               'sha256': '6a54ff4f87351ef8b877440df6bfc26bf844b38170ee1abc0c1d951c6c34a661',
+               'sha256': (
+                   'e3f0846cc198176fdce4941b93a72013'
+                   '40d8ed187e7da201cdea872e24ad2a87'
+               ),
                'role': 'German individual all-level detail'},
  'input-149': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Bedarfs-&-Anforderungsmanagement-%28wmd%29-38436/1432777033/',
                'format': 'html',
@@ -2993,7 +3124,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-150': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Presswerk-%28wmd%29-38436/1433294733/',
                'format': 'html',
-               'sha256': '4925e8728feb2dfc9bdc237087caaafa1a94f11a8316b5dacec3e8fee3a2fe91',
+               'sha256': (
+                   'c9851a574fe62fd18f40d6cc16efc2be'
+                   '31c922305f8abeda3ba6f5abefc097d8'
+               ),
                'role': 'German individual all-level detail'},
  'input-151': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Werklogistik-%28wmd%29-38436/1437940633/',
                'format': 'html',
@@ -3013,7 +3147,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-155': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Human-Factors-%28wmd%29-38436/1426504333/',
                'format': 'html',
-               'sha256': '989d86063273500558507629cfe4b1371c01d3fce8f9831756d590d01b67d80e',
+               'sha256': (
+                   '009d3543958cf1e3a5ec81be994b4089'
+                   'b622da98ec32ee5379df71d2c2b4e6ab'
+               ),
                'role': 'German individual all-level detail'},
  'input-156': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Marketing-Campaigns-&-Content-%28wmd%29-38436/1388391933/',
                'format': 'html',
@@ -3037,7 +3174,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-161': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-Golf-%28wmd%29-38436/1437042733/',
                'format': 'html',
-               'sha256': 'ac68a7ff807272d4de52f6495d9ffc3634148fdd415828f71e2fac628a8a9cf3',
+               'sha256': (
+                   '5ddd8d0c164fa087f165bfdf4e7137fb'
+                   '648874fe271ac413bfd0462d8beaed0a'
+               ),
                'role': 'German individual all-level detail'},
  'input-162': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Personal-Technische-Bereiche-%28wmd%29-38436/1443182433/',
                'format': 'html',
@@ -3061,7 +3201,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-167': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-Analysezentrum-Gesamtfahrzeug-Elektrik-%28wmd%29-38436/1403184933/',
                'format': 'html',
-               'sha256': '9bb99077806c95153d58c2342254d106395e914f1866dded1d64fb0fa3c8eb15',
+               'sha256': (
+                   '3ccc7c36b0c74340acbd93c2a6b76812'
+                   '2ecefcf8e18ecf4feecccb9164e0d74e'
+               ),
                'role': 'German individual all-level detail'},
  'input-168': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-R%C3%A4der-Reifenentwicklung-%28wmd%29-38436/1443186533/',
                'format': 'html',
@@ -3093,7 +3236,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-175': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Rechtsreferendariat-Integrit%C3%A4t-&-Recht-%28wmd%29-38436/1074619901/',
                'format': 'html',
-               'sha256': '3167a0321863f648fc94f355d0ff4dcce194fb9270e3a272f2a4f9a206121cb1',
+               'sha256': (
+                   '807efd701e167aa8834cb49840150694'
+                   'fa77540437fbf396d746af75b106aa29'
+               ),
                'role': 'German individual all-level detail'},
  'input-176': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Unsolicited-application-%28Senior%29-Consultant%2C-Project-Manager-Volkswagen-Group-Consulting-%28fmd%29-38436/1407460333/',
                'format': 'html',
@@ -3105,7 +3251,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'English duplicate-JobID alias detail'},
  'input-178': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Visiting-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1129477601/',
                'format': 'html',
-               'sha256': '57a319ddf41cae0aff1c0d2c0ab9f34b216b085ae79c4837ece71c97a4b89bc1',
+               'sha256': (
+                   'dae0b41c6ab233e69d24029e66942a97'
+                   '2e6a5db7c59139f7ba92aab82711f3da'
+               ),
                'role': 'German individual all-level detail'},
  'input-179': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28Master%29-VW-Kraftwerk-GmbH-%28wmd%29-38436/1388142733/',
                'format': 'html',
@@ -3133,35 +3282,59 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'German individual all-level detail'},
  'input-185': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=100&locale=de_DE',
                'format': 'html',
-               'sha256': '4042a4b8520a1c8cc2dbbfb299d48dac312d9a9f61cc0685a450403ede9feb0d',
+               'sha256': (
+                   'a282c06d73d0c4c33ef9f5e22317547c'
+                   'ef8aafe7ab6dc14c87cf9210c75ae223'
+               ),
                'role': 'literal finite German pagination'},
  'input-186': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=125&locale=de_DE',
                'format': 'html',
-               'sha256': '8db9ae2e4a9b4e3a7a39fb33de9fba19bd26223d7606f306a4f0c9f0894157aa',
+               'sha256': (
+                   'a3f8252c9f4248365383504dfaf057f9'
+                   '5c873bcfe1d0b0251e4a826d4d30c6f4'
+               ),
                'role': 'literal finite German pagination'},
  'input-187': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=150&locale=de_DE',
                'format': 'html',
-               'sha256': '1db968160c42cc54cac561f0338de22efe9c025c1d6cc8e8acc34d5d048cdc78',
+               'sha256': (
+                   '90970fce6180ce47de6fdea8ed11d805'
+                   '5090b2f3ce34928277a665781fc0d74d'
+               ),
                'role': 'literal finite German pagination'},
  'input-188': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=25&locale=de_DE',
                'format': 'html',
-               'sha256': 'b507dc95815aef78c74a25863b275f89add51eed62e9da83683ef3540232f8d1',
+               'sha256': (
+                   '3eceb3ee8b41d43b52ec5e1509de7bf0'
+                   '1dc16cde4fcfa17c88617331a2470737'
+               ),
                'role': 'literal finite German pagination'},
  'input-189': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=50&locale=de_DE',
                'format': 'html',
-               'sha256': '54e2d6aaeb2999653d4afb67e2eed4b35485bea6e2e47a8a5d0a8fc0251133d1',
+               'sha256': (
+                   '909890d1e6ddd8d51ccd2af35ee2eedc'
+                   '3aef2ed2044b7ed47d17b1dcbbb7d4df'
+               ),
                'role': 'literal finite German pagination'},
  'input-190': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=75&locale=de_DE',
                'format': 'html',
-               'sha256': 'a7f99d93d18d79937f61d3f0f54f5334ad33c570cb20a7a09f83028c7f4a18c8',
+               'sha256': (
+                   'b2d47c0f17c5c4d4e11d1732ca3e2927'
+                   '355f1a2da98c2b370003b7974723d76d'
+               ),
                'role': 'literal finite German pagination'},
  'input-191': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?searchby=location&createNewAlert=false&q=&locationsearch=&geolocation=&optionsFacetsDD_city=&optionsFacetsDD_facility=Volkswagen+AG&optionsFacetsDD_department=&optionsFacetsDD_customfield2=&optionsFacetsDD_shifttype=&optionsFacetsDD_customfield3=&locale=de_DE',
                'format': 'html',
-               'sha256': 'cea6bcce03844332a91f985756f491e757355502755f9505458bef099e9315ab',
+               'sha256': (
+                   '5653fda3ee4b50ad5d3ad8711ef3022e'
+                   '235ba78a98b4f0e6589cde7e226a0902'
+               ),
                'role': 'literal finite German pagination'},
  'input-192': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?searchby=location&createNewAlert=false&q=&locationsearch=&geolocation=&optionsFacetsDD_location=&optionsFacetsDD_facility=Volkswagen+AG&optionsFacetsDD_department=&optionsFacetsDD_customfield2=&optionsFacetsDD_shifttype=&optionsFacetsDD_customfield3=&locale=en_US',
                'format': 'html',
-               'sha256': 'a9fc96fae228225e7c229beaa21a37a577ee0dcc0976390be0b1c3f6a4114ad7',
+               'sha256': (
+                   '83d7d93cafb07a58ff34d248ffe7deee'
+                   '8915dd0205ceb6bdcde34495255c3f41'
+               ),
                'role': 'English finite ten-alias listing'},
  'input-193': {'url': 'https://jobs.volkswagen-group.com/content/Nutzungsbedingungen/?locale=de_DE',
                'format': 'html',
@@ -3177,7 +3350,10 @@ INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job
                'role': 'fresh origin robots/policy'},
  'input-196': {'url': 'https://www.volkswagen-karriere.de/de.html',
                'format': 'html',
-               'sha256': '7fe77a3fe2cbe0f50828963bcb268f3d717b7d38954b7872198f8dada08bcec5',
+               'sha256': (
+                   'f3e7a788aa530d33a4427a0ac1a0254a'
+                   '056ef9e8209139b76b386547e0b94e25'
+               ),
                'role': 'official homepage'},
  'input-197': {'url': 'https://www.volkswagen-karriere.de/de/nutzungsbedingungen.html',
                'format': 'html',
@@ -7832,7 +8008,7 @@ PROFILES = [{'identity': '29435',
  {'identity': '7255',
   'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Rechtsreferendariat-Integrit%C3%A4t-&-Recht-%28wmd%29-38436/1074619901/',
   'application_window': None,
-  'literal_publication_calendar_date': '2026-09-14',
+  'literal_publication_calendar_date': '2026-10-13',
   'fields': {'title': 'Rechtsreferendariat Integrität & Recht (w/m/d)',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Rechtsreferendariat-Integrit%C3%A4t-&-Recht-%28wmd%29-38436/1074619901/',
              'source': 'volkswagen-group',
@@ -7860,7 +8036,7 @@ PROFILES = [{'identity': '29435',
  {'identity': '10163',
   'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Visiting-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1129477601/',
   'application_window': None,
-  'literal_publication_calendar_date': '2026-09-14',
+  'literal_publication_calendar_date': '2026-10-13',
   'fields': {'title': 'Visiting Consultant Volkswagen Group Consulting (w/m/d)',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Visiting-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1129477601/',
              'source': 'volkswagen-group',
@@ -7892,7 +8068,7 @@ PROFILES = [{'identity': '29435',
  {'identity': '29032',
   'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-CO2-Einsatz-als-Rohstoff-inkl_-Analytik-%28wmd%29/1426505833/',
   'application_window': None,
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Praktikum / Abschlussarbeit CO2 Einsatz als Rohstoff inkl. '
                       'Analytik (w/m/d)',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-CO2-Einsatz-als-Rohstoff-inkl_-Analytik-%28wmd%29/1426505833/',
@@ -7927,7 +8103,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Smart Vehicle Systems (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Smart-Vehicle-Systems-%28wmd%29-2027-38436/1415770133/',
              'source': 'volkswagen-group',
@@ -7961,7 +8137,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Fahrzeugtechnik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeugtechnik-%28wmd%29-2027-38436/1415746333/',
              'source': 'volkswagen-group',
@@ -7995,7 +8171,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Logistik und Informationsmanagement (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Logistik-und-Informationsmanagement-%28wmd%29-2027-38436/1415763933/',
              'source': 'volkswagen-group',
@@ -8029,7 +8205,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Chemie (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Chemie-%28wmd%29-2027-38436/1415727933/',
              'source': 'volkswagen-group',
@@ -8064,7 +8240,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Ausbildungsintegriertes Duales Studium Digital Engineering '
                       'Maschinenbau (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38436/1415714633/',
@@ -8099,7 +8275,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Wirtschaftsingenieur Logistik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsingenieur-Logistik-%28wmd%29-2027-38436/1415778433/',
              'source': 'volkswagen-group',
@@ -8133,7 +8309,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Ingenieurinformatik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-38436/1415753733/',
              'source': 'volkswagen-group',
@@ -8167,7 +8343,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Wirtschaftsinformatik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-38436/1415771433/',
              'source': 'volkswagen-group',
@@ -8201,7 +8377,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Bauingenieurwesen (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Bauingenieurwesen-%28wmd%29-2027-38436/1415728933/',
              'source': 'volkswagen-group',
@@ -8236,7 +8412,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Ausbildungsintegriertes Duales Studium '
                       'Wirtschaftsingenieurwesen Maschinenbau (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Wirtschaftsingenieurwesen-Maschinenbau-%28wmd%29-2027-38436/1415722433/',
@@ -8271,7 +8447,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Internationales Management (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Internationales-Management-%28wmd%29-2027-38436/1415756733/',
              'source': 'volkswagen-group',
@@ -8305,7 +8481,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Lehramt - Bildung - Beruf, Fachrichtung '
                       'Wirtschaft und Verwaltung (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Lehramt-Bildung-Beruf%2C-Fachrichtung-Wirtschaft-und-Verwaltung-%28wmd%29-2027-38436/1415762233/',
@@ -8340,7 +8516,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Fahrzeuginformatik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38436/1415744133/',
              'source': 'volkswagen-group',
@@ -8374,7 +8550,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Ausbildungsintegriertes Duales Studium WING Elektro- und '
                       'Informationstechnik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-WING-Elektro-und-Informationstechnik-%28wmd%29-2027-38436/1415719733/',
@@ -8407,7 +8583,7 @@ PROFILES = [{'identity': '29435',
  {'identity': '29077',
   'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Human-Factors-%28wmd%29-38436/1426504333/',
   'application_window': None,
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Praktikum Human Factors (w/m/d)',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Human-Factors-%28wmd%29-38436/1426504333/',
              'source': 'volkswagen-group',
@@ -8440,7 +8616,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Materialwissenschaft und Werkzeugtechnik (w/m/d) '
                       '2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Materialwissenschaft-und-Werkzeugtechnik-%28wmd%29-2027-38436/1415767533/',
@@ -8475,7 +8651,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Informatik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Informatik-%28wmd%29-2027-38436/1415749433/',
              'source': 'volkswagen-group',
@@ -8509,7 +8685,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Ausbildungsintegriertes Duales Studium Elektro- und '
                       'Informations\xadtechnik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Elektro-und-Informations%C2%ADtechnik-%28wmd%29-2027-38436/1415718033/',
@@ -8544,7 +8720,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Betriebswirtschaft (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Betriebswirtschaft-%28wmd%29-2027-38436/1415731233/',
              'source': 'volkswagen-group',
@@ -8578,7 +8754,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Energie- und Gebäudetechnik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Energie-und-Geb%C3%A4udetechnik-%28wmd%29-2027-38436/1415742833/',
              'source': 'volkswagen-group',
@@ -8612,7 +8788,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Ausbildung Fertigungsmechanikerin / Fertigungsmechaniker '
                       '(w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-30419/1415645233/',
@@ -8647,7 +8823,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Ausbildung Fachkraft für Systemgastronomie (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-30419/1415635033/',
              'source': 'volkswagen-group',
@@ -8680,7 +8856,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Ingenieurinformatik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-30419/1415752133/',
              'source': 'volkswagen-group',
@@ -8714,7 +8890,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Elektro- und Informationstechnik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-30419/1415741333/',
              'source': 'volkswagen-group',
@@ -8748,7 +8924,7 @@ PROFILES = [{'identity': '29435',
   'application_window': {'opens': '2026-08-01',
                          'closes': '2027-04-30',
                          'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-12',
+  'literal_publication_calendar_date': '2026-10-11',
   'fields': {'title': 'Duales Studium Wirtschaftsinformatik (w/m/d) 2027',
              'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-34219/1415578133/',
              'source': 'volkswagen-group',

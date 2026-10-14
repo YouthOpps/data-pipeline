@@ -1,5 +1,6 @@
 """Explicit live publisher verification; never publishes results."""
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 
@@ -15,7 +16,8 @@ class LiveAdapterTest(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["source"], adapter.SOURCE_ID)
         self.assertEqual(records[0]["url"], adapter.SOURCE_URL)
-        print(f"{adapter.SOURCE_ID}: {len(records)} validated live records")
+        self.assertEqual(records[0]["deadline"], "2026-12-01")
+        print(json.dumps(records, ensure_ascii=False))
 
 
 if __name__ == "__main__":

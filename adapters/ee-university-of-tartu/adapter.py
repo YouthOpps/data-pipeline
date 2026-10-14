@@ -12,7 +12,7 @@ Individual ENLIGHT course links are preserved without crawling external sites.
 
 import argparse
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -136,11 +136,11 @@ def date_deadline(value, year=None):
             hour=23,
             minute=59,
             second=59,
-            microsecond=999000,
+            microsecond=999999,
             tzinfo=ZoneInfo("Europe/Tallinn"),
         )
         .astimezone(timezone.utc)
-        .isoformat(timespec="milliseconds")
+        .isoformat(timespec="microseconds")
         .replace("+00:00", "Z")
     )
 
@@ -711,8 +711,43 @@ def make_record(
     }
 
 
-def validate_records(records):
-    if not isinstance(records, list) or not records:
+def remove_expired_records(records, checked_at):
+    """Filter validated deadlines after retrieval, before atomic publication.
+
+    Unknown publisher zones use UTC-12 only as a global certainty bound:
+    a date remains eligible until its closing day has ended everywhere.
+    No age, status, missing response or unstated local clock implies expiry.
+    """
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.tzinfo is None:
+        raise AdapterError(
+            "Cleanup requires an aware check timestamp", "validate"
+        )
+    latest_day = checked.astimezone(timezone(timedelta(hours=-12))).date()
+    retained = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if isinstance(deadline, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+                    closing_day = datetime.strptime(deadline, "%Y-%m-%d").date()
+                    expired = closing_day < latest_day
+                else:
+                    cutoff = datetime.fromisoformat(
+                        deadline.replace("Z", "+00:00")
+                    )
+                    expired = cutoff.tzinfo is not None and cutoff < checked
+            except ValueError:
+                # Unsupported or ambiguous deadlines never authorize removal.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -965,7 +1000,7 @@ def metadata(attempt, previous, records, error=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected and validated {len(records)} records"
+            else f"Validated refresh retains {len(records)} records"
         ),
         "error": safe_error(error) if error else None,
     }
@@ -996,7 +1031,7 @@ def main():
         else {}
     )
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish"
@@ -1037,11 +1072,14 @@ def main():
         records.sort(
             key=lambda record: record["published_at"] or "", reverse=True
         )
-        validate_records(records)
+        records = remove_expired_records(records, utc_now())
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(attempt, previous, records, failure)
-    if args.publish and (not failure or old):
+    if args.publish and (
+        not failure or snapshot["files"]["data.json"] is not None
+    ):
         files = {
             "metadata.json": json.dumps(outcome, ensure_ascii=False, indent=2)
             + "\n"
@@ -1064,7 +1102,10 @@ def main():
             )
             try:
                 latest = read_snapshot()
-                if not old or latest["files"] != snapshot["files"]:
+                if (
+                    snapshot["files"]["data.json"] is None
+                    or latest["files"] != snapshot["files"]
+                ):
                     raise AdapterError(
                         "No safe previous snapshot for failure reporting",
                         "publish",

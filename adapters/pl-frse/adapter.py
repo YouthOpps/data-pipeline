@@ -3,7 +3,7 @@
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -1307,9 +1307,9 @@ def make_record(
     }
 
 
-def validate_records(records):
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -2527,7 +2527,7 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected {len(records)} reviewed FRSE opportunities"
+            else f"Validated refresh retains {len(records)} FRSE opportunities"
         ),
         "error": safe_error(error) if error else None,
     }
@@ -2652,7 +2652,36 @@ def fresh_records(records, old, attempt, checked):
             last_checked_at=checked,
         )
     records.sort(key=lambda record: record["id"])
+    validate_records(records, allow_empty=True)
+
+
+def remove_expired_records(records, checked):
+    """Filter the validated replacement, leaving prior publication untouched."""
     validate_records(records)
+    now = datetime.fromisoformat(checked.replace("Z", "+00:00"))
+    if now.tzinfo is None:
+        raise AdapterError("Cleanup clock requires a timezone", "validate")
+    current = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if isinstance(deadline, str):
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+                # Without a documented zone, wait for worldwide day closure.
+                expired = (
+                    datetime.strptime(deadline, "%Y-%m-%d").date()
+                    < now.astimezone(timezone(timedelta(hours=-12))).date()
+                )
+            else:
+                instant = datetime.fromisoformat(
+                    deadline.replace("Z", "+00:00")
+                )
+                expired = instant.tzinfo is not None and instant < now
+        if not expired:
+            current.append(record)
+    # Valid nonempty retrieval may have no remaining eligible records.
+    validate_records(current, allow_empty=True)
+    return current
 
 
 def run_body(publishing):
@@ -2672,7 +2701,7 @@ def run_body(publishing):
                     candidate_metadata = json.loads(
                         candidate["files"]["metadata.json"]
                     )
-                    validate_records(candidate_records)
+                    validate_records(candidate_records, allow_empty=True)
                     validate_prior_metadata(
                         candidate_metadata, candidate_records
                     )
@@ -2680,6 +2709,7 @@ def run_body(publishing):
                 snapshot = candidate
             records = collect()
             checked = utc_now()
+            records = remove_expired_records(records, checked)
             fresh_records(records, old, attempt, checked)
             outcome = metadata(attempt, previous, records, checked_at=checked)
             desired = {
@@ -2711,7 +2741,10 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif (
+                        snapshot["files"]["data.json"] is not None
+                        and latest["files"] == snapshot["files"]
+                    ):
                         publish_files(
                             latest,
                             {

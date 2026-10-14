@@ -61,10 +61,14 @@ def collect():
         raise ValueError("Reviewed programme canonical URL changed or is ambiguous")
     if page.heading is not None or page.headings != [EXPECTED_TITLE]:
         raise ValueError("Expected one exact reviewed programme heading")
-    # A calendar date or closed application message does not establish publication or a deadline.
-    return [make_record(EXPECTED_TITLE, SOURCE_URL, ["scholarships"],
-                        kind="programme-overview", tags=["programme-overview"],
-                        method="editorial-review", evidence=[SOURCE_URL])]
+    # The verified heading explicitly identifies this application's closing day.
+    record = make_record(
+        EXPECTED_TITLE, SOURCE_URL, ["scholarships"],
+        kind="programme-overview", tags=["programme-overview"],
+        method="editorial-review", evidence=[SOURCE_URL],
+    )
+    record["deadline"] = "2026-12-01"
+    return [record]
 
 # All transport, output and publication code below belongs to this adapter.
 # Python standard library only; no imports from another adapter or project module.
@@ -81,7 +85,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 CATEGORIES = ('scholarships', 'internships', 'volunteering', 'fellowships', 'training', 'competitions', 'grants', 'jobs', 'other')
@@ -246,8 +250,8 @@ def make_record(title, url, categories, kind='opportunity', published_at=None, t
             'status': 'unknown', 'classification': {'method': method, 'status': 'unknown' if categories == ['other'] else 'classified', 'evidence': evidence or []}}
 
 
-def validate_records(records):
-    if not isinstance(records, list) or not records:
+def validate_records(records, *, allow_empty=False):
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError('Empty or invalid opportunity collection', 'validate')
     ids = set()
     for record in records:
@@ -268,7 +272,14 @@ def validate_records(records):
                 raise AdapterError('Missing record field: ' + field, 'validate')
             if value is not None:
                 try:
-                    if datetime.fromisoformat(value.replace('Z', '+00:00')).tzinfo is None:
+                    if (field == "deadline" and isinstance(value, str)
+                            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)):
+                        datetime.strptime(value, "%Y-%m-%d")
+                        continue
+                    parsed = datetime.fromisoformat(
+                        value.replace('Z', '+00:00')
+                    )
+                    if parsed.tzinfo is None:
                         raise ValueError()
                 except (ValueError, TypeError, AttributeError):
                     raise AdapterError('Invalid record timestamp: ' + field, 'validate')
@@ -355,13 +366,49 @@ def metadata(attempt, previous, records, error=None):
               'status': 'fail' if error else 'success', 'last_attempt_at': attempt,
               'last_success_at': previous.get('last_success_at') if error else attempt,
               'last_checked_at': previous.get('last_checked_at') if error else attempt,
-              'record_count': len(records), 'message': 'Collection failed; last-good data preserved' if error else f'Collected and validated {len(records)} records',
+              'record_count': len(records),
+              'message': (
+                  'Collection failed; last-good data preserved' if error
+                  else f'Validated refresh retains {len(records)} records'
+              ),
               'error': safe_error(error) if error else None}
     if ATTRIBUTION:
         result['attribution'] = ATTRIBUTION
     if error:
         result['failure_stage'] = getattr(error, 'stage', 'parse')
     return result
+
+
+def remove_expired_records(records, checked_at):
+    """Filter verified deadlines after validating the complete fresh inventory.
+
+    Unzoned closing dates use UTC-12 as a conservative world-wide boundary;
+    no publisher timezone is inferred. Explicit offsets retain their instant.
+    """
+    validate_records(records)
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.tzinfo is None:
+        raise AdapterError(
+            "Cleanup requires an aware check timestamp", "validate"
+        )
+    retained = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if deadline and re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+            closing = datetime.fromisoformat(deadline).date()
+            latest_date = checked.astimezone(
+                timezone(timedelta(hours=-12))
+            ).date()
+            expired = latest_date > closing
+        elif deadline:
+            closing = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            if closing.tzinfo is not None:
+                expired = checked > closing
+        if not expired:
+            retained.append(record)
+    validate_records(retained, allow_empty=True)
+    return retained
 
 
 def main():
@@ -372,13 +419,14 @@ def main():
     old = json.loads(snapshot['files']['data.json']) if snapshot and snapshot['files']['data.json'] is not None else []
     previous = json.loads(snapshot['files']['metadata.json']) if snapshot and snapshot['files']['metadata.json'] is not None else {}
     if snapshot and snapshot['files']['data.json'] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get('source') != SOURCE_ID:
             raise AdapterError('Remote metadata source mismatch; no files changed', 'publish')
     attempt, failure = utc_now(), None
     try:
         records = collect()
         validate_records(records)
+        records = remove_expired_records(records, utc_now())
         prior = {record['id']: record for record in old}
         temporal = {'created_at', 'updated_at', 'first_seen_at', 'last_seen_at', 'last_checked_at'}
         for record in records:
@@ -388,11 +436,13 @@ def main():
                           updated_at=before.get('updated_at', attempt) if same else attempt, last_seen_at=attempt, last_checked_at=attempt)
         records.sort(key=lambda record: record['id'])
         records.sort(key=lambda record: record['published_at'] or '', reverse=True)
-        validate_records(records)
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(attempt, previous, records, failure)
-    if args.publish and (not failure or old):
+    if args.publish and (
+        not failure or snapshot["files"]["data.json"] is not None
+    ):
         files = {'metadata.json': json.dumps(outcome, ensure_ascii=False, indent=2) + '\n'}
         if not failure:
             files['data.json'] = json.dumps(records, ensure_ascii=False, indent=2) + '\n'
@@ -403,7 +453,10 @@ def main():
             outcome = metadata(attempt, previous, old, AdapterError('Publication failed: ' + safe_error(error), 'publish'))
             try:
                 latest = read_snapshot()
-                if not old or latest['files'] != snapshot['files']:
+                if (
+                    snapshot["files"]["data.json"] is None
+                    or latest["files"] != snapshot["files"]
+                ):
                     raise AdapterError('No safe previous snapshot for failure reporting', 'publish')
                 publish_files(latest, {'metadata.json': json.dumps(outcome, ensure_ascii=False, indent=2) + '\n'})
             except Exception:

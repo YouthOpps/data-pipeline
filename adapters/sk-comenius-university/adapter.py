@@ -3,7 +3,7 @@
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -1142,9 +1142,44 @@ def make_record(
     }
 
 
-def validate_records(records):
+def remove_expired_records(records, checked_at):
+    """Filter validated deadlines after retrieval, before atomic publication.
+
+    Unknown publisher zones use UTC-12 only as a global certainty bound:
+    a date remains eligible until its closing day has ended everywhere.
+    No age, status, missing response or unstated local clock implies expiry.
+    """
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.tzinfo is None:
+        raise AdapterError(
+            "Cleanup requires an aware check timestamp", "validate"
+        )
+    latest_day = checked.astimezone(timezone(timedelta(hours=-12))).date()
+    retained = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if isinstance(deadline, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+                    closing_day = datetime.strptime(deadline, "%Y-%m-%d").date()
+                    expired = closing_day < latest_day
+                else:
+                    cutoff = datetime.fromisoformat(
+                        deadline.replace("Z", "+00:00")
+                    )
+                    expired = cutoff.tzinfo is not None and cutoff < checked
+            except ValueError:
+                # Unsupported or ambiguous deadlines never authorize removal.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -1420,117 +1455,91 @@ ROLLING_WIDGETS = {
         "widget": "c54487",
         "header": "c54489",
         "entries": {
-            "/detail-novinky/back_to_page/studium/article/seminar-z-algebraickej-teorie-grafov-yasamin-khaefi-9102026/": {
-                "counterpart": "/detail-novinky/back_to_page/doktorandi-a-doktoranske-studium/article/seminar-z-algebraickej-teorie-grafov-yasamin-khaefi-9102026/",
-                "title": "Seminár "
-                "z "
-                "algebraickej "
-                "teórie "
-                "grafov "
-                "- "
-                "Yasamin "
-                "Khaefi "
-                "(9.10.2026)",
-                "text": "Seminár "
-                "z "
-                "algebraickej "
-                "teórie "
-                "grafov "
-                "- "
-                "Yasamin "
-                "Khaefi...",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "nuklearny-seminar-piotr-homola-14102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/"
+                    "doktorandi-a-doktoranske-studium/article/"
+                    "nuklearny-seminar-piotr-homola-14102026/"
+                ),
+                "title": "Nukleárny seminár - Piotr Homola (14.10.2026)",
+                "text": "Nukleárny seminár - Piotr Homola (14.10.2026)",
             },
-            "/detail-novinky/back_to_page/studium/article/doktorandske-kolokvium-kai-zekeri-adams-12102026/": {
-                "counterpart": "/detail-novinky/back_to_page/doktorandi-a-doktoranske-studium/article/doktorandske-kolokvium-kai-zekeri-adams-12102026/",
-                "title": "Doktorandské "
-                "kolokvium "
-                "KAI "
-                "- "
-                "Zekeri "
-                "Adams "
-                "(12.10.2026)",
-                "text": "Doktorandské "
-                "kolokvium "
-                "KAI "
-                "- "
-                "Zekeri "
-                "Adams "
-                "(12.10.2026)",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-z-teorie-grafov-monica-a-reyes-15102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/"
+                    "doktorandi-a-doktoranske-studium/article/"
+                    "seminar-z-teorie-grafov-monica-a-reyes-15102026/"
+                ),
+                "title": (
+                    "Seminár z teórie grafov - Monica A. Reyes "
+                    "(15.10.2026)"
+                ),
+                "text": (
+                    "Seminár z teórie grafov - Monica A. Reyes "
+                    "(15.10.2026)"
+                ),
             },
-            "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnujuce-volby-do-skas-2027/": {
-                "counterpart": "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnujuce-volby-do-skas-2027/",
-                "title": "Doplňujúce "
-                "voľby "
-                "do "
-                "ŠKAS "
-                "FMFI "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
-                "text": "Doplňujúce "
-                "voľby "
-                "do "
-                "ŠKAS "
-                "FMFI "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-katedry-algebry-a-geometrie-viera-glevitzka-1610"
+                "2026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/"
+                    "doktorandi-a-doktoranske-studium/article/"
+                    "seminar-katedry-algebry-a-geometrie-viera-glevitzka-"
+                    "16102026/"
+                ),
+                "title": (
+                    "Seminár Katedry algebry a geometrie - Viera "
+                    "Glevitzká (16.10.2026)"
+                ),
+                "text": (
+                    "Seminár Katedry algebry a geometrie - Viera "
+                    "Glevitzká..."
+                ),
             },
-            "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnovacie-volby-do-as-uk-2027/": {
-                "counterpart": None,
-                "title": "Doplňovacie "
-                "voľby "
-                "do "
-                "ŠČAS "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
-                "text": "Doplňovacie "
-                "voľby "
-                "do "
-                "ŠČAS "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "klub-astronomov-pluto-fascinujuci-svet-ktory-uz-nie-je-p"
+                "lanetou-22102026-1/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/"
+                    "doktorandi-a-doktoranske-studium/article/"
+                    "klub-astronomov-pluto-fascinujuci-svet-ktory-uz-nie-"
+                    "je-planetou-22102026-1/"
+                ),
+                "title": (
+                    "Klub astronómov - Pluto - fascinujúci svet, ktorý "
+                    "už nie je planétou (22.10.2026)"
+                ),
+                "text": (
+                    "Klub astronómov - Pluto - fascinujúci svet, ktorý "
+                    "už nie je..."
+                ),
             },
-            "/detail-novinky/back_to_page/studium/article/seminar-katedry-teoretickej-fyziky-surajit-das-13102026/": {
-                "counterpart": "/detail-novinky/back_to_page/doktorandi-a-doktoranske-studium/article/seminar-katedry-teoretickej-fyziky-surajit-das-13102026/",
-                "title": "Seminár "
-                "Katedry "
-                "teoretickej "
-                "fyziky "
-                "- "
-                "Surajit "
-                "Das "
-                "(13.10.2026)",
-                "text": "Seminár "
-                "Katedry "
-                "teoretickej "
-                "fyziky "
-                "- "
-                "Surajit "
-                "Das...",
-            },
-            "/detail-novinky/back_to_page/studium/article/obhajoba-dizertacnej-prace-peter-anthony-13102026/": {
-                "counterpart": "/detail-novinky/back_to_page/doktorandi-a-doktoranske-studium/article/obhajoba-dizertacnej-prace-peter-anthony-13102026/",
-                "title": "Obhajoba "
-                "dizertačnej "
-                "práce "
-                "- "
-                "Peter "
-                "Anthony "
-                "(13.10.2026)",
-                "text": "Obhajoba "
-                "dizertačnej "
-                "práce "
-                "- "
-                "Peter "
-                "Anthony "
-                "(13.10.2026)",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-katedry-teoretickej-fyziky-noel-vincze-27102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/"
+                    "doktorandi-a-doktoranske-studium/article/"
+                    "seminar-katedry-teoretickej-fyziky-noel-vincze-27102"
+                    "026/"
+                ),
+                "title": (
+                    "Seminár Katedry teoretickej fyziky - Noel Vincze "
+                    "(27.10.2026)"
+                ),
+                "text": "Seminár Katedry teoretickej fyziky - Noel Vincze...",
             },
         },
     },
@@ -1538,117 +1547,86 @@ ROLLING_WIDGETS = {
         "widget": "c54479",
         "header": "c54478",
         "entries": {
-            "/detail-novinky/back_to_page/studium/article/seminar-z-algebraickej-teorie-grafov-yasamin-khaefi-9102026/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/seminar-z-algebraickej-teorie-grafov-yasamin-khaefi-9102026/",
-                "title": "Seminár "
-                "z "
-                "algebraickej "
-                "teórie "
-                "grafov "
-                "- "
-                "Yasamin "
-                "Khaefi "
-                "(9.10.2026)",
-                "text": "Seminár "
-                "z "
-                "algebraickej "
-                "teórie "
-                "grafov "
-                "- "
-                "Yasamin "
-                "Khaefi...",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "nuklearny-seminar-piotr-homola-14102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "nuklearny-seminar-piotr-homola-14102026/"
+                ),
+                "title": "Nukleárny seminár - Piotr Homola (14.10.2026)",
+                "text": "Nukleárny seminár - Piotr Homola (14.10.2026)",
             },
-            "/detail-novinky/back_to_page/studium/article/doktorandske-kolokvium-kai-zekeri-adams-12102026/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/doktorandske-kolokvium-kai-zekeri-adams-12102026/",
-                "title": "Doktorandské "
-                "kolokvium "
-                "KAI "
-                "- "
-                "Zekeri "
-                "Adams "
-                "(12.10.2026)",
-                "text": "Doktorandské "
-                "kolokvium "
-                "KAI "
-                "- "
-                "Zekeri "
-                "Adams "
-                "(12.10.2026)",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-z-teorie-grafov-monica-a-reyes-15102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "seminar-z-teorie-grafov-monica-a-reyes-15102026/"
+                ),
+                "title": (
+                    "Seminár z teórie grafov - Monica A. Reyes "
+                    "(15.10.2026)"
+                ),
+                "text": (
+                    "Seminár z teórie grafov - Monica A. Reyes "
+                    "(15.10.2026)"
+                ),
             },
-            "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnujuce-volby-do-skas-2027/": {
-                "counterpart": "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnujuce-volby-do-skas-2027/",
-                "title": "Doplňujúce "
-                "voľby "
-                "do "
-                "ŠKAS "
-                "FMFI "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
-                "text": "Doplňujúce "
-                "voľby "
-                "do "
-                "ŠKAS "
-                "FMFI "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-katedry-algebry-a-geometrie-viera-glevitzka-1610"
+                "2026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "seminar-katedry-algebry-a-geometrie-viera-glevitzka-"
+                    "16102026/"
+                ),
+                "title": (
+                    "Seminár Katedry algebry a geometrie - Viera "
+                    "Glevitzká (16.10.2026)"
+                ),
+                "text": (
+                    "Seminár Katedry algebry a geometrie - Viera "
+                    "Glevitzká..."
+                ),
             },
-            "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnovacie-volby-do-as-uk-2027/": {
-                "counterpart": None,
-                "title": "Doplňovacie "
-                "voľby "
-                "do "
-                "ŠČAS "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
-                "text": "Doplňovacie "
-                "voľby "
-                "do "
-                "ŠČAS "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "klub-astronomov-pluto-fascinujuci-svet-ktory-uz-nie-je-p"
+                "lanetou-22102026-1/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "klub-astronomov-pluto-fascinujuci-svet-ktory-uz-nie-"
+                    "je-planetou-22102026-1/"
+                ),
+                "title": (
+                    "Klub astronómov - Pluto - fascinujúci svet, ktorý "
+                    "už nie je planétou (22.10.2026)"
+                ),
+                "text": (
+                    "Klub astronómov - Pluto - fascinujúci svet, ktorý "
+                    "už nie je..."
+                ),
             },
-            "/detail-novinky/back_to_page/studium/article/seminar-katedry-teoretickej-fyziky-surajit-das-13102026/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/seminar-katedry-teoretickej-fyziky-surajit-das-13102026/",
-                "title": "Seminár "
-                "Katedry "
-                "teoretickej "
-                "fyziky "
-                "- "
-                "Surajit "
-                "Das "
-                "(13.10.2026)",
-                "text": "Seminár "
-                "Katedry "
-                "teoretickej "
-                "fyziky "
-                "- "
-                "Surajit "
-                "Das...",
-            },
-            "/detail-novinky/back_to_page/studium/article/obhajoba-dizertacnej-prace-peter-anthony-13102026/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/obhajoba-dizertacnej-prace-peter-anthony-13102026/",
-                "title": "Obhajoba "
-                "dizertačnej "
-                "práce "
-                "- "
-                "Peter "
-                "Anthony "
-                "(13.10.2026)",
-                "text": "Obhajoba "
-                "dizertačnej "
-                "práce "
-                "- "
-                "Peter "
-                "Anthony "
-                "(13.10.2026)",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-katedry-teoretickej-fyziky-noel-vincze-27102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "seminar-katedry-teoretickej-fyziky-noel-vincze-27102"
+                    "026/"
+                ),
+                "title": (
+                    "Seminár Katedry teoretickej fyziky - Noel Vincze "
+                    "(27.10.2026)"
+                ),
+                "text": "Seminár Katedry teoretickej fyziky - Noel Vincze...",
             },
         },
     },
@@ -1656,153 +1634,134 @@ ROLLING_WIDGETS = {
         "widget": "c54479",
         "header": "c54478",
         "entries": {
-            "/detail-novinky/back_to_page/studium/article/doktorandske-kolokvium-kai-zekeri-adams-12102026/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/doktorandske-kolokvium-kai-zekeri-adams-12102026/",
-                "title": "Doktorandské "
-                "kolokvium "
-                "KAI "
-                "- "
-                "Zekeri "
-                "Adams "
-                "(12.10.2026)",
-                "text": "Doktorandské "
-                "kolokvium "
-                "KAI "
-                "- "
-                "Zekeri "
-                "Adams "
-                "(12.10.2026)",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-katedry-teoretickej-fyziky-surajit-das-13102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "seminar-katedry-teoretickej-fyziky-surajit-das-13102"
+                    "026/"
+                ),
+                "title": (
+                    "Seminár Katedry teoretickej fyziky - Surajit Das "
+                    "(13.10.2026)"
+                ),
+                "text": "Seminár Katedry teoretickej fyziky - Surajit Das...",
             },
-            "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnujuce-volby-do-skas-2027/": {
-                "counterpart": "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnujuce-volby-do-skas-2027/",
-                "title": "Doplňujúce "
-                "voľby "
-                "do "
-                "ŠKAS "
-                "FMFI "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
-                "text": "Doplňujúce "
-                "voľby "
-                "do "
-                "ŠKAS "
-                "FMFI "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "obhajoba-dizertacnej-prace-peter-anthony-13102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "obhajoba-dizertacnej-prace-peter-anthony-13102026/"
+                ),
+                "title": (
+                    "Obhajoba dizertačnej práce - Peter Anthony "
+                    "(13.10.2026)"
+                ),
+                "text": (
+                    "Obhajoba dizertačnej práce - Peter Anthony "
+                    "(13.10.2026)"
+                ),
             },
-            "http://fmph.uniba.sk/o-fakulte/akademicky-senat/doplnovacie-volby-do-as-uk-2027/": {
-                "counterpart": None,
-                "title": "Doplňovacie "
-                "voľby "
-                "do "
-                "ŠČAS "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
-                "text": "Doplňovacie "
-                "voľby "
-                "do "
-                "ŠČAS "
-                "UK "
-                "- "
-                "elektronické "
-                "hlasovanie",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "nuklearny-seminar-piotr-homola-14102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "nuklearny-seminar-piotr-homola-14102026/"
+                ),
+                "title": "Nukleárny seminár - Piotr Homola (14.10.2026)",
+                "text": "Nukleárny seminár - Piotr Homola (14.10.2026)",
             },
-            "/detail-novinky/back_to_page/studium/article/seminar-katedry-teoretickej-fyziky-surajit-das-13102026/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/seminar-katedry-teoretickej-fyziky-surajit-das-13102026/",
-                "title": "Seminár "
-                "Katedry "
-                "teoretickej "
-                "fyziky "
-                "- "
-                "Surajit "
-                "Das "
-                "(13.10.2026)",
-                "text": "Seminár "
-                "Katedry "
-                "teoretickej "
-                "fyziky "
-                "- "
-                "Surajit "
-                "Das...",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-z-teorie-grafov-monica-a-reyes-15102026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "seminar-z-teorie-grafov-monica-a-reyes-15102026/"
+                ),
+                "title": (
+                    "Seminár z teórie grafov - Monica A. Reyes "
+                    "(15.10.2026)"
+                ),
+                "text": (
+                    "Seminár z teórie grafov - Monica A. Reyes "
+                    "(15.10.2026)"
+                ),
             },
-            "/detail-novinky/back_to_page/studium/article/obhajoba-dizertacnej-prace-peter-anthony-13102026/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/obhajoba-dizertacnej-prace-peter-anthony-13102026/",
-                "title": "Obhajoba "
-                "dizertačnej "
-                "práce "
-                "- "
-                "Peter "
-                "Anthony "
-                "(13.10.2026)",
-                "text": "Obhajoba "
-                "dizertačnej "
-                "práce "
-                "- "
-                "Peter "
-                "Anthony "
-                "(13.10.2026)",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "seminar-katedry-algebry-a-geometrie-viera-glevitzka-1610"
+                "2026/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "seminar-katedry-algebry-a-geometrie-viera-glevitzka-"
+                    "16102026/"
+                ),
+                "title": (
+                    "Seminár Katedry algebry a geometrie - Viera "
+                    "Glevitzká (16.10.2026)"
+                ),
+                "text": (
+                    "Seminár Katedry algebry a geometrie - Viera "
+                    "Glevitzká..."
+                ),
             },
-            "/detail-novinky/back_to_page/studium/article/eset-science-talks-serge-haroche-o-vede-odvahe-a-zodpovednosti-objavovat-nepoznane/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/eset-science-talks-serge-haroche-o-vede-odvahe-a-zodpovednosti-objavovat-nepoznane/",
-                "title": "ESET "
-                "Science "
-                "Talks "
-                "- "
-                "Serge "
-                "Haroche: "
-                "O "
-                "vede, "
-                "odvahe "
-                "a "
-                "zodpovednosti "
-                "objavovať "
-                "nepoznané",
-                "text": "ESET "
-                "Science "
-                "Talks "
-                "- "
-                "Serge "
-                "Haroche: "
-                "O "
-                "vede, "
-                "odvahe "
-                "a...",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "eset-science-talks-serge-haroche-o-vede-odvahe-a-zodpove"
+                "dnosti-objavovat-nepoznane/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "eset-science-talks-serge-haroche-o-vede-odvahe-a-zod"
+                    "povednosti-objavovat-nepoznane/"
+                ),
+                "title": (
+                    "ESET Science Talks - Serge Haroche: O vede, odvahe "
+                    "a zodpovednosti objavovať nepoznané"
+                ),
+                "text": (
+                    "ESET Science Talks - Serge Haroche: O vede, odvahe "
+                    "a..."
+                ),
             },
-            "/detail-novinky/back_to_page/studium/article/vyzva-na-podavanie-ziadosti-o-jednorazove-mimoriadne-stipendium-call-for-applications-for-ex-9/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/vyzva-na-podavanie-ziadosti-o-jednorazove-mimoriadne-stipendium-call-for-applications-for-ex-9/",
-                "title": "Výzva "
-                "na "
-                "podávanie "
-                "žiadostí "
-                "o "
-                "jednorazové "
-                "mimoriadne "
-                "štipendium "
-                "/ "
-                "Call "
-                "for "
-                "applications "
-                "for "
-                "extraordinary "
-                "scholarship",
-                "text": "Výzva "
-                "na "
-                "podávanie "
-                "žiadostí "
-                "o "
-                "jednorazové "
-                "mimoriadne...",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "vyzva-na-podavanie-ziadosti-o-jednorazove-mimoriadne-sti"
+                "pendium-call-for-applications-for-ex-9/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "vyzva-na-podavanie-ziadosti-o-jednorazove-mimoriadne"
+                    "-stipendium-call-for-applications-for-ex-9/"
+                ),
+                "title": (
+                    "Výzva na podávanie žiadostí o jednorazové "
+                    "mimoriadne štipendium / Call for applications for "
+                    "extraordinary scholarship"
+                ),
+                "text": (
+                    "Výzva na podávanie žiadostí o jednorazové "
+                    "mimoriadne..."
+                ),
             },
-            "/detail-novinky/back_to_page/studium/article/narodny-stipendijny-program-vyzva-3/": {
-                "counterpart": "/detail-novinky/back_to_page/studium/article/narodny-stipendijny-program-vyzva-3/",
-                "title": "Národný " "štipendijný " "program " "- " "výzva",
-                "text": "Národný " "štipendijný " "program " "- " "výzva",
+            (
+                "/detail-novinky/back_to_page/studium/article/"
+                "narodny-stipendijny-program-vyzva-3/"
+            ): {
+                "counterpart": (
+                    "/detail-novinky/back_to_page/studium/article/"
+                    "narodny-stipendijny-program-vyzva-3/"
+                ),
+                "title": "Národný štipendijný program - výzva",
+                "text": "Národný štipendijný program - výzva",
             },
         },
     },
@@ -2085,7 +2044,7 @@ def run_body(publishing):
                     candidate_metadata = json.loads(
                         candidate["files"]["metadata.json"]
                     )
-                    validate_records(candidate_records)
+                    validate_records(candidate_records, allow_empty=True)
                     if (
                         not isinstance(candidate_metadata, dict)
                         or candidate_metadata.get("source") != SOURCE_ID
@@ -2098,6 +2057,8 @@ def run_body(publishing):
             records = collect()
             checked = utc_now()
             fresh_records(records, old, attempt, checked)
+            records = remove_expired_records(records, checked)
+            validate_records(records, allow_empty=True)
             outcome = metadata(attempt, previous, records, checked_at=checked)
             desired = {
                 "data.json": serialize(records),
@@ -2128,7 +2089,10 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif (
+                        snapshot["files"]["data.json"] is not None
+                        and latest["files"] == snapshot["files"]
+                    ):
                         publish_files(
                             latest,
                             {
@@ -2211,14 +2175,18 @@ INPUTS = {
     "doctoral": {
         "url": "https://zona.fmph.uniba.sk/doktorandi-a-doktorandske-studium/",
         "format": "html",
-        "sha256": "8e7be859cbb8cf1013047c84b7839c1e4659277e4c84ea134cdcaa755624f9f9",
+        "sha256": (
+            "0fcf494dfcfb2c811edaa1bf34f5aabda40ff72bd3244ebd1611f24a55af484f"
+        ),
         "raw_sha256": "84959306b5205d817e2a1b4e8857b8c7df656c3c5ea20697e7ead5422ba91b62",
         "bytes": 42256,
     },
     "entry": {
         "url": "https://zona.fmph.uniba.sk/detail-novinky/back_to_page/fmfi-uk-zona/article/vyzva-na-podavanie-ziadosti-o-jednorazove-mimoriadne-stipendium-call-for-applications-for-ex-9/",
         "format": "html",
-        "sha256": "f5971c6124e366fd257bb854680e4a24fb1f6ea822543214b105b99b3be18984",
+        "sha256": (
+            "b1e5c20fb5b002e715a0839b9c43fe52a271dd8df6991a86ce2ba783679a680f"
+        ),
         "raw_sha256": "332cee2a7d07620db3a62d2b158c7bcbad4ed3765ed44edcf0e88013b1f3b420",
         "bytes": 24947,
     },
@@ -2323,14 +2291,18 @@ INPUTS = {
     "job": {
         "url": "https://zona.fmph.uniba.sk/detail-novinky/back_to_page/brigady-a-podujatia/article/lektori-it-a-stem-vzdelavania/",
         "format": "html",
-        "sha256": "fa452c3b50d2526833e9c437b26c1abc7f386a32f45e3455e52e547671296d72",
+        "sha256": (
+            "7c6cc2f2d3bc9f97f31a698305f553e486a0fc94866dadbd103888785d05b438"
+        ),
         "raw_sha256": "401f6d8c26aaa285f1ba1aeb77a3a845b9f9a8b15bf22c8e06a5ee1a3803f3aa",
         "bytes": 23141,
     },
     "kega": {
         "url": "https://zona.fmph.uniba.sk/detail-novinky/back_to_page/grantove-vyzvy/article/kega-2026/",
         "format": "html",
-        "sha256": "f88cc5b6cf0d4e0307a8bd4662cab9fdda7301b54a27afe884dec446490ab284",
+        "sha256": (
+            "303151878d75143c644b7222b76f937acb119a1f666fe3a281f9ac46c09b0144"
+        ),
         "raw_sha256": "a9978d7f2daa05c8c9de33297c634ece6ae01d7e3082f03119cdb6b52912896c",
         "bytes": 22852,
     },
@@ -2344,7 +2316,9 @@ INPUTS = {
     "nsp": {
         "url": "https://zona.fmph.uniba.sk/detail-novinky/back_to_page/brigady-a-podujatia/article/narodny-stipendijny-program-vyzva-3/",
         "format": "html",
-        "sha256": "7268ae434c29746089ef1d8a6f2a3cea2eba059f7da8dca9c67ddf2d2b194747",
+        "sha256": (
+            "cc848adaa08f872e166308a9cb0480adf15336919ed955b8c867600aa5820d23"
+        ),
         "raw_sha256": "10be6d271c8dbd95cdce8ba58c74d52f02d9720a26d6e8741fb93fe8ca0503ae",
         "bytes": 26704,
     },
@@ -2358,14 +2332,18 @@ INPUTS = {
     "scholarships": {
         "url": "https://zona.fmph.uniba.sk/studenti-a-studium/stipendia/",
         "format": "html",
-        "sha256": "d75fca6d89c614e8462ffda74ba04436eb5f7c08551762d51fa3ec10b8ddf7a1",
+        "sha256": (
+            "11db14e3c6a4fa1513b05c239082d5a4364b07701534de55c10657268c7fa106"
+        ),
         "raw_sha256": "5459e1c744f5173301892b25b259dda22c2ed2ca09fbc56ae7ed0adb052c7c45",
         "bytes": 47808,
     },
     "sitemap": {
         "url": "https://zona.fmph.uniba.sk/mapa-stranky/",
         "format": "html",
-        "sha256": "85e01a2cbacda57622e301bfab72c61b7fe8b971b34f670e9f5631ebfbf50119",
+        "sha256": (
+            "244157f321a1f98a9cb2ccb8d04f66f38787f849e972f7873d6633f00e91aea7"
+        ),
         "raw_sha256": "8c7b24d3d02294c6ddc8a7e03d7ce2fe54d9244c61be9d4e60ba1210bc04fe3b",
         "bytes": 68250,
     },
@@ -2400,7 +2378,9 @@ INPUTS = {
     "students": {
         "url": "https://zona.fmph.uniba.sk/studenti-a-studium/",
         "format": "html",
-        "sha256": "16df7fbd3d3748e91d4b662464940f648bc6b913f4423eb95f853d029bc67ad6",
+        "sha256": (
+            "eb71670ec5dafedc21525b8a296aa157cbad191910163c724958731d6859caf5"
+        ),
         "raw_sha256": "d20b08ff3f765dd9b14734eb7aeba6ce682f713f8c45adcfbf7ea02a4d22d439",
         "bytes": 41695,
     },
@@ -2421,7 +2401,9 @@ INPUTS = {
     "talk": {
         "url": "https://zona.fmph.uniba.sk/detail-novinky/back_to_page/brigady-a-podujatia/article/eset-science-talks-serge-haroche-o-vede-odvahe-a-zodpovednosti-objavovat-nepoznane/",
         "format": "html",
-        "sha256": "3334c0c339c294ec331a3ac44bdd2b755468fd321d1a65ab9a84b40b00b140a7",
+        "sha256": (
+            "b29721d1fe3dca7c50c99790b06f996bfcbe61a0aaba7161b5b4bf47d0954004"
+        ),
         "raw_sha256": "69d5024fe474c354aa70f27c5ebdf23adf1b07b9267a729ee9ce9640d08ac946",
         "bytes": 23316,
     },
@@ -2449,7 +2431,9 @@ INPUTS = {
     "vega": {
         "url": "https://zona.fmph.uniba.sk/detail-novinky/back_to_page/grantove-vyzvy/article/vega-2026/",
         "format": "html",
-        "sha256": "6778e211ee323e24986858995b4d9df8dfcf7d3486a50cacc02ed7132c47b6d4",
+        "sha256": (
+            "2e25e2243ca7b163740f2bd308971e54f124bfd1366b86f7ba50b02cde0627dd"
+        ),
         "raw_sha256": "b34cb63b529a49267460b5e167e06e5d9f5e2263a84212cfe821cf1a571dd43f",
         "bytes": 22591,
     },

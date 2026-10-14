@@ -82,3 +82,30 @@ restricted token and serialized publication remain unchanged. Publication writes
 only `datas/dk-dm-and-ma-travel-grant/{data,metadata}.json` in one conflict-safe
 commit. First failure creates no source folder; later failures preserve last-good
 data and success timestamps. Production Actions are not a test harness.
+
+## Expired-record cleanup
+
+
+The travel round uses its published date-only closing; its closing clock
+and timezone are unspecified. Relative or recurring unanchored dates remain null.
+
+After a complete nonempty retrieval passes validation, the successful refresh
+removes records with verified past application deadlines before preparing the
+single atomic data/metadata publication. The next dataset fully replaces the
+old dataset; old records are never merged back, including expired old IDs
+still returned by the publisher. Status, record age, absence from a response
+and missing or ambiguous deadlines do not establish expiry.
+
+For a supported date-only closing without a documented timezone, UTC-12 is
+used only as a conservative global certainty bound, not an inferred publisher
+timezone: retain the record throughout its possible local closing day, and
+remove it only once that date has ended everywhere. Aware timestamps are
+retained at the exact cutoff and removed afterwards.
+
+If every validated retrieved record has expired, publish an empty data array
+and success metadata atomically, with record_count zero. An empty or invalid
+upstream collection still fails. Later runs accept this valid empty prior
+pair; failures preserve it and its last-success timestamp, updating only safe
+failure metadata. No cleanup write precedes successful collection, and no
+other source's files are touched. The live test remains a complete raw
+nonpublishing collection; production publication is reviewed statically.

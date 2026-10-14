@@ -112,3 +112,30 @@ excluding queries and user information. This change supplies actionable hosted
 failure evidence; it does not prove that the hosted access refusal is resolved.
 The identifying user agent, TLS verification, robots enforcement and no-retry
 policy for HTTP 403 remain unchanged.
+
+## Expired-record cleanup
+
+Postdoctoral timestamps retain the publisher's explicit EET (+02:00) offset.
+The doctoral date-only closing and unstated-zone local clock remain date-only;
+the local clock cannot authorize an earlier inferred instant.
+
+After a complete nonempty retrieval passes validation, the successful refresh
+removes records with verified past application deadlines before preparing the
+single atomic data/metadata publication. The next dataset fully replaces the
+old dataset; old records are never merged back, including expired old IDs
+still returned by the publisher. Status, record age, absence from a response
+and missing or ambiguous deadlines do not establish expiry.
+
+For a supported date-only closing without a documented timezone, UTC-12 is
+used only as a conservative global certainty bound, not an inferred publisher
+timezone: retain the record throughout its possible local closing day, and
+remove it only once that date has ended everywhere. Aware timestamps are
+retained at the exact cutoff and removed afterwards.
+
+If every validated retrieved record has expired, publish an empty data array
+and success metadata atomically, with record_count zero. An empty or invalid
+upstream collection still fails. Later runs accept this valid empty prior
+pair; failures preserve it and its last-success timestamp, updating only safe
+failure metadata. No cleanup write precedes successful collection, and no
+other source's files are touched. The live test remains a complete raw
+nonpublishing collection; production publication is reviewed statically.

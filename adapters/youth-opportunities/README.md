@@ -1,0 +1,134 @@
+# Youth Opportunities
+
+Collect every individual announcement in the publisher-maintained
+[Browse Opportunities index](https://www.youthop.com/search/), including every
+pagination page and every listed call without a deadline. This is the complete
+public browse inventory, rather than the homepage's ten latest additions or the
+entire historical WordPress archive. The index supplies original article URLs
+and publisher post identifiers; the public
+[WordPress API](https://www.youthop.com/wp-json/) supplies each corresponding
+article's full eligibility/application content and factual metadata.
+
+## Access, provenance and reuse
+
+The official [robots policy](https://www.youthop.com/robots.txt) disallows only
+`/wp-admin/` and explicitly allows its AJAX endpoint. The reviewed public browse,
+category and post API routes are permitted. Collection rechecks robots and every
+redirect target, honors crawl delay and Retry-After, allows up to 90 seconds per
+response, and fails closed on access errors. It uses no login, JavaScript execution, CAPTCHA or restricted endpoint.
+
+The [Terms and Policies](https://www.youthop.com/policies) page contains the
+publisher's disclaimer and privacy policy. Youth Opportunities describes its
+purpose as promoting access to information and directs readers to the original
+opportunity provider for complete authoritative information. The company address
+is in Bangladesh (`publisher_country=BD`); this does not imply opportunity host
+or applicant nationality. No express copyright licence is claimed. Publication
+contains attributed factual titles, links, taxonomy, dates, location and short
+eligible-region labels, without copying full article prose or images. Publisher
+attribution is `Youth Opportunities`; the
+[contact page](https://www.youthop.com/contact) is the route for rights inquiries.
+No contact submission or permission request was made.
+
+## Inventory and validation
+
+The unfiltered browse page currently exposes 15 opportunity cards plus an
+advertising widget per full page, and 28 pages.
+The adapter follows all declared `sf_paged` pages without an arbitrary cap,
+and excludes only an explicit Google Ads widget with no post ID, original
+article URL or visible content, and an `ins.adsbygoogle` marker. It requires
+consistent page counts and full intermediate opportunity pages, rejects duplicate
+IDs, and rechecks the first page before requesting details to detect a moving
+index. Empty pages, changed structure, mismatched details, unknown taxonomy or
+unresolved article content fail the complete collection.
+
+The public API's historical archive contains substantially more records than
+the maintained browse inventory. Historical announcements absent from the
+publisher's browse index are outside this source-backed scope; no publication
+age, title year or invented deadline is used to exclude them. All current index
+entries are inspected, including no-deadline calls. The API's compact collection
+response omits full content even with `_fields` or `_embed`; each individual
+`/wp-json/wp/v2/posts/<id>` response supplies the genuine article. The published
+batch API rejects GET subrequests, so the adapter does not use write methods to
+simulate bulk reads.
+
+Every record must match its browse card's original URL and numeric post ID and
+have genuine full article content containing application/eligibility/participant
+evidence. Publisher category names supply classification: scholarships and
+scholarship degree tracks, fellowships, internships, competitions/awards, grants,
+jobs, volunteering, and workshops/summer schools map to existing public
+categories. Other genuine
+conference, exchange or miscellaneous calls use `other`, `kind=opportunity` and
+classified article provenance. Multiple taxonomy memberships remain visible;
+incidental mentions in prose do not create categories. There is no title-only
+classifier or broad editorial keyword exclusion.
+
+Stable IDs are `youth-opportunities:<publisher post ID>`, independent of card
+position, title and taxonomy. Separate publisher posts remain separate
+announcements even when programme names repeat; titles are not an identity
+merging rule. Tags preserve publisher category names; original
+article links provide classification evidence. GMT publication dates come from
+`date_gmt` and are explicitly interpreted as UTC.
+
+Affirmative publisher `has-deadline` flags (`true`, `1` or `"1"`) activate
+the `deadline` Unix closing instant. These active epochs are independently
+corroborated by the publisher's UTC Google Calendar links: for example,
+[International Physics Competition 2026](https://www.youthop.com/miscellaneous/join-now-international-physics-competition-2026)
+links to `20261101T235900Z`, matching epoch `1793577540`. The adapter preserves
+that source-stated instant; it does not convert a calendar-only label into an
+invented clock. Unrecognized flags or invalid active epochs fail collection. Disabled or missing
+flags (`false`, `null`, `0`, `"0"` or an empty string) leave the deadline null,
+including legacy residual epochs. The publisher renders these calls as On Going
+and suppresses closing-date/calendar links: the
+[U-Save Foundation Fellowship 2023](https://www.youthop.com/fellowships/the-u-save-foundation-fellowship-program-2023)
+has a null flag and residual epoch `1686869940`, while its public article/card
+has no active closing date. That unused field does not establish expiry. Missing
+active closing instants remain null and status unknown; available instants set status
+relative to collection time, without guaranteeing provider availability.
+
+Location preserves the source's explicit location metadata. Short summaries
+preserve explicit `Eligible Regions` labels from actual article content. Country
+code arrays remain empty because the publisher's free-text regions, continents,
+worldwide labels and institutional affiliations do not constitute complete
+normalized nationality evidence. Empty arrays mean unspecified eligibility,
+not an exclusion of applicants; readers must follow the article and original
+provider. No host or eligible nationality is inferred from the title, publisher
+country, programme name or region visibility.
+
+## Run and publication
+
+```sh
+python -B adapters/youth-opportunities/test_adapter.py
+python -B adapters/youth-opportunities/adapter.py --publish
+```
+
+The sole live test collects real nonempty data, validates every record and prints
+one complete JSON list to stdout; progress and test diagnostics go to stderr.
+It uses no publication credential, mock, fixture or output file. The initial
+browse plus individual details can take about an hour under the request budget;
+the workflow allows three hours and has no per-run inventory cap.
+
+All source endpoints, robots, pagination, retries and redirects share at least
+six seconds between request starts and at most ten starts in any rolling minute.
+The limiter reserves 6.1 seconds to leave a small scheduling margin after the
+budget reservation.
+A local collection lock serializes overlapping test/production runs, and locked
+temporary budget state persists starts and backoff across processes. These state
+files contain no retrieved opportunities or credentials. Independently hosted
+runs and external research must be coordinated under the same publisher budget.
+
+Production automation alone receives `DATA_SOURCE_TOKEN`. A Git tree/commit
+atomically updates only `datas/youth-opportunities/data.json` and `metadata.json`
+with a non-forced main ref update. Publication conflicts retry only if this
+source has not changed. Matching records preserve first-seen timestamps;
+successful refreshes replace the complete source snapshot rather than merging
+old records back into it. Supported expired deadlines are removed after the
+fresh nonempty collection is validated. A valid retrieval that becomes empty
+through expiry can publish an empty successful replacement.
+
+Collection, parsing, validation and publication failures preserve last-good
+data and its success timestamp, and save sanitized failure metadata when safe.
+First-run failure creates no source folder. Failure to record durable metadata
+is explicitly reported. The matching workflow runs every six hours UTC, on
+changes to this adapter or its own workflow merged to main, and on manual
+dispatch. It preserves the repository/main guard, source-scoped credentials and
+serialized publication. Production Actions are not used for implementation QA.

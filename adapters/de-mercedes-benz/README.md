@@ -1,12 +1,43 @@
 # Mercedes-Benz public youth vacancies
 
-This standalone adapter collects the complete reviewed public youth inventory from the official [job portal](https://jobs.mercedes-benz.com/en). It publishes concise original factual summaries and direct official links, without copying creative descriptions, images or logos. Source identifier: `de-mercedes-benz`.
+Collects the official public job-search API linked by
+https://jobs.mercedes-benz.com/en using the publisher's explicit youth
+career-level codes 19–27, EN search language and ascending PositionID order.
+All matching current language variants are retrieved; records group only an
+identical publisher PositionID. Separate J000 identifiers are never merged.
+Stable IDs remain SHA-256 of `de-mercedes-benz|mercedes-public-position|<PositionID>`
+(first 24 hex characters), retaining existing published identity semantics.
 
-The actual portal JavaScript documents the public `jobs.api.mercedes-benz.com/search` and career-level lookup protocol. The adapter uses those literal public GET queries, without accounts, applications, guessed APIs or private intranet endpoints. The reviewed lookup covers internships, theses, doctorates, vacation jobs, vocational and cooperative-university training, work placements, trainees and junior sales programmes. The reviewed inventory contains 1,396 complete language variants representing 492 distinct publisher PositionIDs. Collection reads 15 ascending PositionID windows with three overlapping rows, then rereads all 15 windows after the policy and qualification pages. Both full frontiers must contain exactly all reviewed variants and complete material; this bounded consistency check does not claim an atomic publisher snapshot. Equal-PositionID language ties may reorder only within the reviewed adjacent boundary overlap. Every variant has its complete task, qualification, benefits, location, language, employer, remuneration, publication and start-date material checked. Similar titles and separately issued J000 identifiers are not merged. The original 1396-variant snapshot is intentionally guarded: changes require a new review rather than a partial publication.
+## Inventory and source facts
 
-The reviewed country inventory is AT, CA, DE, HU, SG, TH, TW, US and VN. These are host locations, not applicant nationality restrictions. Source attribution remains the German company; each record uses the actual descriptor's prose language, which can differ from the API's numeric language label. Summaries are original English and at most 580 UTF-16 units. The publisher's preferred English variant is used where it exists, otherwise the actual German or Hungarian variant, while all variants remain material evidence.
+The older reviewed snapshot contained 1,396 variants/492 identities. A paced
+2026-10-14 official research response reports 1,459 variants and new identities
+including J000233950/J000233952. Publishing old known recipes would omit current
+opportunities. The adapter therefore discovers current totals and complete
+100-row windows with three-row overlaps, repeats the full traversal, and requires
+identical complete descriptor maps and exact unique variant totals before
+normalizing. Structural validation replaces the obsolete fixed count/window frontier.
+The 461 complete groups whose variant membership and full material hashes
+match the prior review retain their original substantive factual summaries.
+Fifty-four new/changed groups receive reviewed original summaries and complete
+original factual condition evidence. Each recipe remains bound to exact current
+descriptor hashes: unreviewed new/changed qualifications fail safely, rather than
+being published with generic or stale summaries. Current robots and full
+policy/entry-condition material guards remain. Inventories above 1,552 variants fail safely because
+complete discovery would exceed the bounded physical request allowance.
 
-## Access, rights and additional entry conditions
+Actual career-level labels and titles classify internships as internships,
+working-student/holiday employment and thesis placements as jobs under the
+existing source classification, doctorates as jobs and vocational/dual
+study as training (with explicitly reviewed role-specific exceptions). Work placement alone does not establish an internship:
+explicit working-student titles stay jobs. Hybrid internship/working-student
+routes remain explicit. Classification evidence contains all variant URLs,
+verified descriptor hashes, date facts and original factual condition summaries
+covering actual eligibility, alternatives, application documents, mandatory and
+preferred skills, timing, contract/pay and conditional benefits. Creative task
+prose, recruitment invitations, contact details and wholesale qualification text
+are not republished. The summary stays an original substantive English factual
+summary; readers must consult the linked publisher notice.
 
 ### Current production block
 
@@ -42,38 +73,77 @@ refreshing hashes alone is not a repair.
 
 The [provider notice](https://group.mercedes-benz.com/provider/) reserves rights in creative text, images, media and page arrangements and gives specific terms precedence. The [careers terms](https://group.mercedes-benz.com/careers/general-terms-conditions.html) do not expressly prohibit the reviewed bounded public discovery and minimal original factual summaries. Account, upload and moderation conditions are not an authorization to access private applicant data. The implementation follows fresh actual robots policies for the API and group origins. The API's observed ordinary robots 404 is treated as an absent policy, never as a way around a refusal. HTTP 401, 403 or 429 remains a durable family block.
 
-Four actual qualification-linked pages supply additional requirements only for records that link them:
+Country arrays describe actual API host locations, not nationality eligibility.
+No eligible-country restriction is inferred. API publication-language code 2 is preferred for variant selection.
+Only previously verified prose languages are retained; new recipes may leave
+record language unknown instead of treating numeric API labels as proof of
+the prose language.
+All date-only publication/start/end facts remain in provenance; `published_at`
+and `deadline` stay null because notice publication lifetime and employment start
+are not verified application deadlines. Potential timing conflicts remain visible
+in complete variant evidence rather than being silently reconciled.
 
-- [Dual-study applications](https://group.mercedes-benz.com/karriere/schueler/duales-studium/bewerbung/): technical Abitur average at most 2.7 and mathematics at least 8 points; business average at most 2.5 and mathematics at least 10 points; Fachhochschulreife average and mathematics grade at most 2.0 plus the DHBW aptitude test. Where a programme route is ambiguous, alternatives stay explicit.
-- [Working students](https://group.mercedes-benz.com/karriere/studenten/werkstudenten/): excellent grades, regular study duration plus at most three additional semesters, outstanding examinations and 7–20 hours weekly; relevant internships preferred.
-- [Internships](https://group.mercedes-benz.com/karriere/studenten/praktikum/): study documentation, voluntary-internship study-duration conditions, degree-gap alternatives, and applicable German residence/work documents; accommodation depends on location and capacity.
-- [Theses](https://group.mercedes-benz.com/karriere/studenten/abschlussarbeit/): above-average grades and previous relevant internships, with the applicable study and residence documents.
+## Access and rights
 
-These pages apply to 30 school, 71 working-student, 122 internship and 12 thesis identities respectively, rather than every worldwide role. Individual required and preferred qualifications, driving licences, minimum durations, salary reference periods, conditional housing and mandatory application documents remain distinct. For example, the learning-impairment training route retains its §64 BBiG condition, and the Bremen notice also requires a Federal Employment Agency referral under §66 BBiG. Doctoral roles retain required university supervision and any stated fixed-term duration.
+Fresh official API and group robots policies precede retrieval. Ordinary API
+robots 404 means no robots policy; HTTP 401/403/429 remains a durable family
+block and is never bypassed. The 2026-10-14 whole-page rights/condition review refreshed changed policy
+fingerprints after checking actual current facts; all documented numerical school
+and student-duration requirements, alternatives and residence/document clauses
+remain present. The official
+[provider notice](https://group.mercedes-benz.com/provider/) reserves rights in
+creative material and the
+[careers terms](https://group.mercedes-benz.com/careers/general-terms-conditions.html)
+do not expressly prohibit bounded public factual indexing. This is not a blanket
+content-reuse licence: photographs, branding, media and creative task prose are
+excluded. Publisher provenance and original summaries remain explicit.
 
-## Identities, dates and conflicts
+Four publisher-linked entry-condition pages remain guarded and are identified
+in evidence only for descriptors that actually reference them:
 
-IDs are the first 24 hexadecimal characters of SHA-256 over `de-mercedes-benz|mercedes-public-position|<lowercase publisher PositionID>`. Full reviewed record fields, including attribution and classification, are validated against their factual recipes.
+- [Dual-study applications](https://group.mercedes-benz.com/karriere/schueler/duales-studium/bewerbung/): technical Abitur average at most 2.7/mathematics at least 8 points; business average at most 2.5/mathematics at least 10 points; Fachhochschulreife average and mathematics at most 2.0 plus DHBW aptitude test. These alternatives stay distinct.
+- [Working students](https://group.mercedes-benz.com/karriere/studenten/werkstudenten/): excellent grades, regular study duration plus at most three semesters, outstanding examinations and 7–20 weekly hours, relevant internships preferred.
+- [Internships](https://group.mercedes-benz.com/karriere/studenten/praktikum/): study documentation, voluntary-internship duration, degree-gap alternatives and applicable residence/work documents; accommodation depends on location/capacity.
+- [Theses](https://group.mercedes-benz.com/karriere/studenten/abschlussarbeit/): above-average grades, relevant internships and applicable study/residence documents.
 
-Application deadlines remain null and status remains unknown unless the publisher actually supplies a supported application deadline. PublicationEndDate controls a notice's lifetime and is not an application deadline. Date-only PublicationStartDate is retained as provenance, with `published_at: null`; the adapter does not invent a UTC time. Structured starts are context, not deadlines.
+## Runtime, pacing and publication
 
-Conflicts are explicit rather than silently resolved: MER0004870 says October 2027 in prose versus structured 2026-10-01; MER00048VG says January/February 2026 versus 2027-02-01; MER00048CF prefers April 2027 versus structured 2026-09-21; MER00048Z8 says immediately versus 2026-09-30. Readers must confirm timing. MER000495N has internship title/qualifications but working-student task wording. Missing start dates in alternative MER00042WA language variants do not contradict its explicitly supplied 2027 start. Individual profile language and education conflicts are preserved in summaries.
+Run `python -B adapter.py` for non-publishing run metadata or
+`python -B test_adapter.py` for the actual complete validated live JSON collection.
+The sole live test rejects publication credentials and never writes source data.
+`python -B adapter.py --publish` is reserved for authorized production automation.
+Python standard library only; the folder runs independently when copied.
 
-## Runtime and publication
+The unchanged secure family pacing enforces at least six seconds between physical
+starts, ten starts per rolling minute and a 60-second startup embargo. Two robots,
+six policy/condition pages and at most 32 search windows consume at most 40 nominal
+starts; the hard cap remains 42 including retries/redirects. At most two attempts
+retry typed transient failures/HTTP503 with a persisted 30-second embargo.
+Stricter publisher limits and durable family blocks remain enforced. Responses
+are bounded to 8 MiB each/64 MiB aggregate. Prepublication is bounded to 1,800
+seconds, publication 240, failure metadata 120 and pacing export 120; the absolute
+process ceiling remains 2,280 seconds. Missing latest completed family pacing
+artifacts block production instead of resetting request history. Existing
+source-scoped App authentication, fresh healthy artifact export, schedule,
+manual dispatch and scoped main-push workflow are preserved.
 
-```sh
-python -B adapters/de-mercedes-benz/test_adapter.py
-python -B adapters/de-mercedes-benz/adapter.py --publish
-```
+Publication atomically commits only this source's data/metadata, uses nonforce
+compare-and-update and preserves a concurrently newer pair. Matching records
+retain first-seen/creation times; substantive current evidence advances updated
+time. A fetch/parse/validation/publication failure preserves last-good data and
+success timestamps and records safe failure metadata when possible. First failure
+creates no source folder. Tests/static review do not prove production delivery.
 
-The sole test performs one real non-publishing collection and writes its complete JSON result to stdout. It rejects publication credentials. Python standard library only; copy this folder to run it independently. No source data files, cached fixtures or sibling adapter imports are delivered.
+## Expired-record cleanup
 
-Thirty API window reads, six policy/qualification pages and two fresh robots requests make 38 nominal physical starts. Startup waits a full 60-second window; the minimum nominal floor is 282 seconds before transport, parsing and output. Each 15-window pass contains 1,438 row occurrences, whose exact union must be all 1,396 reviewed variants; overlap never permits a missing variant or changed qualification. A shared secure family state and exclusive collector enforce at least six seconds between physical starts and at most ten starts per rolling minute, including robots, redirects and retries. Actual response completion persists the next-start embargo and a monotonic elapsed gate; stronger robots delays and inherited embargoes remain effective. The original research state is locked and merged by maximum/OR without rewriting its inode. A typed network timeout or connection failure can retry the same permitted GET once after a persisted 30-second embargo; HTTP 503 shares the two-attempt ceiling, while TLS failures and policy refusals do not retry. The hard total is 42 physical publisher starts, including any permitted redirects; redirects consume the allowance and can cause fail-closed incompleteness. Each response is at most 8 MiB and aggregate publisher bytes at most 64 MiB.
-
-Prepublication is bounded to 1,800 seconds; publication to 240; failure metadata to 120; pacing export to 120. The absolute process ceiling is 2,280 seconds, and every wait, open, read and publication operation clips its remaining phase and global budget. The workflow's 45-minute ceiling is separate; its restricted one-hour App token is minted immediately before the sole adapter command.
-
-Successful publication atomically commits only `datas/de-mercedes-benz/data.json` and `metadata.json`. Creation and first-seen clocks retain the original successful START; last-seen uses the current successful START, and last-checked uses END. Updated time changes to END only for substantive material changes. Success metadata uses START for attempt/success and END for checked. A later failure preserves last-good records and success/checked timestamps, updating only failure metadata when safe. First-run failure creates no published source pair. Conditional publication retries reconcile ambiguous writes and never overwrite a newer source pair.
-
-Publisher history must restore the exact latest completed family attempt's verified inert artifact. A missing latest artifact blocks subsequent publication. Export signals readiness only after healthy state is finalized, fsynced and reread; the workflow upload requires that fresh positive handoff bound to the current run and attempt. A failed completion save cannot signal an older artifact. After healthy finalization, an output-signaling I/O failure can leave a positive line only for the already durable current artifact. Tokens, records and secrets are never included in that artifact.
-
-The workflow runs on scoped main pushes, manual dispatch and its schedule, with family `queue: max`. It installs a first-family bootstrap supported by [the reviewed public history and timing handoff](https://github.com/YouthOpps/data-pipeline/issues/115#issuecomment-6102073424), with not-before epoch 1791665675.1339853. It applies only when complete family history contains no earlier run, adds timing restrictions and preserves local refusal, embargo and starts. Once any family run exists, restoration requires the newest completed attempt's artifact, including failed attempts; the marker cannot replace a missing or invalid artifact. Upload requires the healthy durable current-run export and its fresh positive collect-step handoff. Static review and local test evidence do not establish production delivery; merge, successful Actions and full website verification remain separate.
+Complete raw retrieval must validate as nonempty before deadline filtering.
+Supported explicit offset timestamps expire strictly after their closing instant;
+date-only deadlines, if supported by the source validator, wait until the date
+ends worldwide in UTC−12 when no official publisher timezone is established.
+Missing/ambiguous deadlines, status labels, record age and absence from a response
+are never expiry evidence. Current API notice lifetimes are not application
+deadlines. A successful full replacement never merges old records back, so
+expired old entries cannot survive it. All-expired validated raw retrieval
+publishes an empty successful replacement; later retrieval failures preserve
+that empty successful pair and its success timestamp. Cleanup has no separate
+remote deletion and occurs only in the next atomic source publication.

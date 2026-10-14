@@ -162,7 +162,7 @@ Run the one real nonpublishing test, retaining complete JSON only in memory:
 python -B adapters/sk-comenius-university/test_adapter.py
 ```
 
-It performs one collection, validates all15 and emits actual complete JSON.
+It performs one collection, validates all retrieved records and emits actual complete JSON.
 It receives no publication credentials. Production is separate, after
 maintainer merge through the own filtered push, manual dispatch or schedule:
 
@@ -172,3 +172,60 @@ python -B adapters/sk-comenius-university/adapter.py --publish
 
 Author/static/live tests do not prove deployed publication. Maintainer
 source/site Actions and complete consumer verification remain required.
+
+## Expired-record cleanup
+
+The three absolute application cutoffs remain date-only. The publisher's
+unstated-zone wall clocks do not become inferred UTC deadlines. Event and
+payment dates never authorize removal.
+
+After a complete nonempty retrieval passes validation, the successful refresh
+removes records with verified past application deadlines before preparing the
+single atomic data/metadata publication. The next dataset fully replaces the
+old dataset; old records are never merged back, including expired old IDs
+still returned by the publisher. Status, record age, absence from a response
+and missing or ambiguous deadlines do not establish expiry.
+
+For a supported date-only closing without a documented timezone, UTC-12 is
+used only as a conservative global certainty bound, not an inferred publisher
+timezone: retain the record throughout its possible local closing day, and
+remove it only once that date has ended everywhere. Aware timestamps are
+retained at the exact cutoff and removed afterwards.
+
+If every validated retrieved record has expired, publish an empty data array
+and success metadata atomically, with record_count zero. An empty or invalid
+upstream collection still fails. Later runs accept this valid empty prior
+pair; failures preserve it and its last-success timestamp, updating only safe
+failure metadata. No cleanup write precedes successful collection, and no
+other source's files are touched. The live test remains a complete raw
+nonpublishing collection; production publication is reviewed statically.
+
+## Reviewed source change on 14 October 2026
+
+The three current student, doctoral and scholarship hubs changed their rolling
+upcoming-event widgets as earlier seminars and the election stage passed.
+Every currently omitted rolling entry was compared with a unique retained
+monthly-calendar entry by its complete title, literal publisher alias and
+shown text. The exact three maps and complete hub fingerprints were refreshed
+after reading all current hub facts and links; none of the monthly facts,
+nonduplicate entries, application details, material inputs or required 39-input
+frontier was removed. Scholarship means-testing, residence/protection routes,
+merit rankings/ECTS and the qualified October 15 exception remain as documented.
+The reviewed finite 15-identity source partition remains unchanged; general
+research/news announcements and academic staff recruitment outside the named
+STEM teaching offer remain outside this bounded inventory. No fingerprint
+failure is suppressed; future unreviewed changes still fail safely.
+
+The complete 39-input frontier was then retrieved under the existing request
+budget. Seven further changed HTML inputs were reviewed before refreshing exact
+guards: the extraordinary call entry, STEM job, NSP notice, public ESET talk,
+VEGA/KEGA notices and sitemap. The actual scholarship remains the 2026/27
+bachelor/master call closing October 18 with a whole-call EUR 10,000 presumed
+budget, not an individual award. NSP still closes October 31, with the
+incoming original-letter delivery requirement. The STEM offer remains from
+EUR 25/hour and October 2026–May 2027; the October 16 talk is free but requires
+registration, and its event time is not an application deadline. VEGA/KEGA's
+conflicting historic body years/dates still exclude them. Current sitemap
+routes retain the same bounded programme frontier. All 15 profile facts and
+required 39 routes remain unchanged; material PDF and other unmodified guards
+retain their existing exact fingerprints. No content or access refusal is skipped.

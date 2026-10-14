@@ -47,3 +47,27 @@ Collection and both prepublication gates are 900 seconds. Original whole-run cap
 Production restores the newest completed real family workflow attempt from complete stable bounded repository history, including failed/cancelled/rerun attempts. Validate inert pacing artifact size/hash/envelope/repository/source/attempt/schema; missing newest state fails closed without older fallback or reset. First-family bootstrap requires a separately reviewed public evidence binding, not an author-invented default. Preserve refusal/backoff state; an explicit denial requires reviewed recovery before another publisher request.
 
 The single main-push/manual/weekly workflow publishes only `datas/be-study-in-flanders/{data,metadata}.json`. Success atomically creates/replaces both files through source-scoped non-force compare-and-swap, preserving all sibling sources. Validate prior complete own pair before changes. Initial failures create no folder; later failures preserve last-good data and last-success time, updating only safe failure metadata when possible. Uncertain commits are reconciled against exact desired bytes; newer own pairs are never overwritten. Logs distinguish unconfirmed durable outcome from saved failure. Source metadata is the durable status record after first success; pacing artifacts contain infrastructure state only.
+
+## Expired-record cleanup
+
+A refresh first retrieves and validates the complete nonempty publisher inventory.
+Only then are records with a verified past `deadline` removed from the next
+source snapshot, including expired identities from the previous publication.
+The existing full replacement does not merge old records back into the result.
+Date-only deadlines remain eligible through their closing date. With no
+documented publisher timezone, cleanup uses the conservative UTC-12 calendar: the
+closing date must have ended globally before removal.
+Explicit timezone-aware timestamps expire strictly after the stated instant;
+missing deadlines remain eligible; unresolved publisher dates stay null.
+Invalid normalized deadlines fail validation and preserve last-good data. Status, record age and
+absence from a response are not expiry evidence. Publisher inventory coverage
+continues to be checked before filtering.
+
+The refreshed subset and success metadata are published atomically within this
+source. If every validated record has expired, success publishes an empty array;
+an empty raw retrieval still fails validation. Previously published empty arrays
+are valid snapshots. Retrieval, parsing, validation and publication failures
+preserve last-good data and its success timestamp; safe failure metadata may
+be updated. The sole live test remains non-publishing and verifies the complete
+raw inventory. Cleanup and failure boundaries are checked separately without
+production execution.

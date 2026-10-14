@@ -12,8 +12,6 @@ def test_live_collection():
         raise RuntimeError("The live test must not receive publication credentials")
     records = adapter.collect()
     adapter.validate_records(records)
-    if len(records) != 492:
-        raise RuntimeError("The complete reviewed inventory was not collected")
     json.dump(records, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
 

@@ -126,3 +126,36 @@ creates no source folder on first failure, and refuses conflicting newer
 source updates. Metadata preserves the existing cross-run publisher cooldown
 (at least 120 seconds after the last response, or longer Retry-After); later
 publication runs honor it. No production Action is used for testing.
+
+## Expired-record cleanup
+
+
+A refresh first retrieves and validates the complete nonempty publisher inventory.
+Only then are records with a verified past `deadline` removed from the next
+source snapshot, including expired identities from the previous publication.
+The existing full replacement does not merge old records back into the result.
+Date-only deadlines remain eligible through their closing date. With no
+documented publisher timezone, cleanup uses the conservative UTC-12 calendar: the
+closing date must have ended globally before removal.
+Explicit timezone-aware timestamps expire strictly after the stated instant;
+missing deadlines remain eligible; unresolved publisher dates stay null.
+Invalid normalized deadlines fail validation and preserve last-good data. Status, record age and
+absence from a response are not expiry evidence. Publisher inventory coverage
+continues to be checked before filtering.
+
+The refreshed subset and success metadata are published atomically within this
+source. If every validated record has expired, success publishes an empty array;
+an empty raw retrieval still fails validation. Previously published empty arrays
+are valid snapshots. Retrieval, parsing, validation and publication failures
+preserve last-good data and its success timestamp; safe failure metadata may
+be updated. The sole live test remains non-publishing and verifies the complete
+raw inventory. Cleanup and failure boundaries are checked separately without
+production execution.
+
+The official language-course page, reviewed 14 October 2026, now publishes
+the autumn 2026/27 call with an October 15–November 15, 2026 application
+window. The English EKKAV hub and Estonian guest/Estonia-themed lecture
+calls independently publish the same autumn window. All three changed
+substantive fingerprints and the three affected call recipes were updated
+together; the earlier spring edition is replaced by this actual current call.
+No hour or publisher timezone is stated for this cutoff.

@@ -214,3 +214,30 @@ robots fallback, browser imitation, cookies or policy bypass. A successful
 cloud test does not establish that production access is resolved; maintainers
 must verify the changed request once in production and stop if it remains
 blocked.
+
+## Expired-record cleanup
+
+The current NSP call closes on 31 October 2026 at 16:00 CET, normalized to
+2026-10-31T15:00:00Z. The fixed stated CET offset is preserved; original document
+delivery and scholarship start/end dates never replace the application cutoff.
+
+The complete fresh inventory is fetched and validated before cleanup. The next
+source-scoped atomic data/metadata publication replaces the prior dataset rather
+than merging its rows, so expired previously published records cannot survive
+that successful replacement. Current records and records with missing or
+ambiguous deadlines remain eligible; status alone does not determine expiry.
+
+Offset-aware deadlines expire only after the stated instant. A date-only
+deadline with no documented publisher timezone remains eligible through that
+date in every civil timezone: cleanup uses the conservative UTC-12 calendar
+boundary, without guessing a publisher timezone or an unstated closing hour.
+The source recipes and their original deadline fields remain unchanged.
+
+A valid nonempty fresh inventory may produce an empty cleaned dataset; that
+empty result is published atomically with success metadata. An empty upstream
+collection still fails validation. Fetch, parsing, validation and publication
+failures preserve the last-good dataset (including a prior empty success) and
+success timestamp; cleanup never performs a separate deletion or writes another source.
+The sole live test validates the complete nonpublishing inventory, including
+closed records needed to verify source completeness; publication alone applies
+the deadline filter after that validation.

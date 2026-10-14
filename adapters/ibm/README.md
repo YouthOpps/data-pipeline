@@ -45,3 +45,24 @@ The sole live test is `python -B adapters/ibm/test_adapter.py`. It rejects `DATA
 Issue #140 author checks compared all five legacy identities with the dynamically discovered inventory: none removed or added. Genuine research responses were retained only in process RAM for parser checks, then discarded before the fresh final live collection. Late article and hub eligibility/funding changes advanced `updated_at`; unchanged records retained it. Partial closing dates, event dates and project starts did not fabricate deadlines. Review corrections cover unresolved second-track timing, a project start in the same sentence as a closing, and hub-only eligibility/funding/deadline statements while excluding navigation. Independent acceptance and the combined issue PR remain separate handoff gates; production and website delivery require the maintainer workflow.
 
 Timing artifacts are uploaded only after this run validates and durably finalizes a fresh healthy envelope and signals readiness through its fresh step output. A failed publisher completion-state save cannot export prior state; owned stale artifacts are invalidated before any new export.
+
+## Expired-record cleanup
+
+The source does not establish a reliable application timezone for every date-only deadline. Cleanup therefore uses UTC−12 as a conservative certainty bound: a calendar deadline expires only once its closing date has ended in every civil timezone. This does not invent a publisher closing clock. Offset-aware deadlines use their explicit instant.
+
+After complete nonempty collection and validation, the refresh removes only
+records with a validated deadline strictly before the successful check time.
+Missing or ambiguous publisher deadlines remain normalized as null; status, age
+and disappearance are never used as expiry evidence. Invalid normalized dates
+fail validation and preserve last-good data. The source uses complete replacement rather than merging
+old records, so expired previously published rows cannot survive a successful
+refresh, including when they are still present in the publisher response.
+Creation and first-seen history is retained for refreshed eligible identities.
+
+The retained subset and success metadata are published in one source-scoped
+atomic commit. A validated nonempty raw collection whose records all expire
+publishes `[]` with success and a zero count; an empty upstream collection still
+fails. A previously successful empty subset remains a valid last-good snapshot.
+Fetch, parse, validation and publication failures preserve last-good data and
+its success timestamp; only safe failure metadata may change. The sole live test
+continues to emit the complete unfiltered publisher collection without publishing.

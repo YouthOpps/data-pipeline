@@ -24,8 +24,8 @@ the observed `ds:0` callback; it never evaluates scripts or calls guessed APIs.
 Material changes, missing inputs, access challenges or a changed finite frontier
 fail closed. Google's optional outer closing HTML tags are not mistaken for an
 incomplete response; the embedded programme document must be complete, and HTTP
-length/body limits remain enforced. The original redirect JavaScript is sometimes
-served with the observed `gzip` content encoding. Only that reviewed input may
+length/body limits remain enforced. The original redirect shell and JavaScript may return the observed `gzip`
+content encoding. Reviewed publisher routes may
 use one complete gzip member; compressed and decoded bodies are each bounded to
 eight MiB. Invalid checksums, truncated streams, concatenated members, trailing
 bytes and unknown or combined encodings fail closed. Both encoded and decoded
@@ -101,3 +101,38 @@ also enforces the elapsed interval; longer inherited intervals and embargoes
 remain effective. The exclusive family collector preserves a full 60-second
 startup embargo after legacy/artifact restoration to age abandoned attempts.
 A failed completion-state save prevents any further publisher attempt.
+
+## Expired-record cleanup
+
+Google retains supported dated Summer of Code, US Legal Summer Institute and
+Google Ireland scholarship application closings. Null deadlines and conflicting
+programme status wording never authorize removal.
+
+The complete fresh inventory is fetched and validated before cleanup. The next
+source-scoped atomic data/metadata publication replaces the prior dataset rather
+than merging its rows, so expired previously published records cannot survive
+that successful replacement. Current records and records with missing or
+ambiguous deadlines remain eligible; status alone does not determine expiry.
+
+Offset-aware deadlines expire only after the stated instant. A date-only
+deadline with no documented publisher timezone remains eligible through that
+date in every civil timezone: cleanup uses the conservative UTC-12 calendar
+boundary, without guessing a publisher timezone or an unstated closing hour.
+The source recipes and their original deadline fields remain unchanged.
+
+A valid nonempty fresh inventory may produce an empty cleaned dataset; that
+empty result is published atomically with success metadata. An empty upstream
+collection still fails validation. Fetch, parsing, validation and publication
+failures preserve the last-good dataset (including a prior empty success) and
+success timestamp; cleanup never performs a separate deletion or writes another source.
+The sole live test validates the complete nonpublishing inventory, including
+closed records needed to verify source completeness; publication alone applies
+the deadline filter after that validation.
+
+On 14 October 2026, the reviewed original shell at
+https://buildyourfuture.withgoogle.com/ returned HTTP 200 with Content-Encoding
+gzip: its 96,098 decoded bytes matched the existing material fingerprint. The
+bounded standard-library gzip decoder now applies to every reviewed publisher
+route. Wire and decoded byte limits/accounting, fingerprints, robots checks and
+transport policy remain enforced; unsupported encodings still fail with the
+reviewed route in evidence.

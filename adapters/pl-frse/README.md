@@ -45,3 +45,25 @@ The sole live, nonpublishing test validates all actual records and emits the com
 Preparation retains its absolute 1,800-second bound and request-start guard. Total execution remains bounded to 2,190 seconds, with separate publication/failure phases and reserved pacing export. An incomplete or oversized frontier fails rather than publishing partial data.
 
 Production remains `python -B adapters/pl-frse/adapter.py --publish`, atomically publishing only `YouthOpps/data-source/datas/pl-frse/{data,metadata}.json` with conflict detection. First failure creates no folder. Later failure preserves last-good records and success timestamps, updating failure metadata only for an unchanged validated pair. The matching workflow, bootstrap and pacing-artifact handling are unchanged. Tests do not exercise publication; production Actions are not used as tests. Independent review is required before PR handoff.
+
+## Expired-record cleanup
+
+
+Successful refreshes validate the complete fetched inventory before removing
+records with verified past application deadlines. Offset-aware timestamps are
+compared as instants; equality with the closing instant remains eligible.
+No official timezone is established for date-only deadlines. Cleanup waits
+until the date has ended worldwide (UTC−12), a conservative certainty bound,
+not an inferred publisher timezone. Explicit publisher offsets take precedence.
+Missing deadlines, ambiguous deadlines represented as null, status labels,
+record age and absence from a response are never expiry evidence. The existing
+publication contract replaces the complete source inventory; old records are
+not merged back into the replacement. Consequently expired old records cannot
+survive a successful replacement, including when rediscovered with a verified
+past deadline. Current records with missing deadlines remain eligible.
+
+The filtered data (including an empty subset after valid nonempty retrieval)
+and success metadata are committed atomically only
+under this source's paths. An empty/invalid raw response or fetch, parse,
+validation or publication failure preserves last-good data and its success
+timestamp; safe failure metadata may be updated. Tests never publish.
