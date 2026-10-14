@@ -352,11 +352,12 @@ def make_record(
     }
 
 
-def validate_records(records, *, allow_empty=False):
+def validate_records(records, *, allow_empty=False, allow_legacy_ids=False):
     """Validate every record, stable ID, source, date, category and provenance.
 
     Allow empty lists only for existing snapshots and validated expiry cleanup.
-    Fresh collection must produce genuine nonempty records.
+    Fresh collection must produce genuine nonempty records. Legacy IDs are
+    accepted only when explicitly validating a prior published snapshot.
     """
     if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError("Empty or invalid opportunity collection",
@@ -379,12 +380,16 @@ def validate_records(records, *, allow_empty=False):
             if (not isinstance(record.get(field), str) or
                     not record[field].strip()):
                 raise AdapterError("Missing record field: " + field, "validate")
-        if record["id"] in ids:
-            raise AdapterError("Duplicate opportunity identifier", "validate")
-        ids.add(record["id"])
-        if not re.fullmatch(SOURCE_ID + r":\d+", record["id"]):
+        pattern = re.escape(SOURCE_ID) + r"-[1-9][0-9]*"
+        if allow_legacy_ids:
+            pattern = re.escape(SOURCE_ID) + r"[-:][1-9][0-9]*"
+        if not re.fullmatch(pattern, record["id"]):
             raise AdapterError("Invalid stable publisher identifier",
                                "validate")
+        identity = record["id"].replace(SOURCE_ID + ":", SOURCE_ID + "-", 1)
+        if identity in ids:
+            raise AdapterError("Duplicate opportunity identifier", "validate")
+        ids.add(identity)
         url = urllib.parse.urlsplit(record["url"])
         if url.scheme != "https" or url.netloc != "www.youthop.com":
             raise AdapterError("Unexpected publisher record URL", "validate")
@@ -691,7 +696,7 @@ def normalize_entry(entry, card, taxonomy):
         method="publisher-browse-taxonomy-and-article",
         evidence=[entry["link"], SOURCE_URL],
     )
-    record["id"] = SOURCE_ID + ":" + str(entry["id"])
+    record["id"] = SOURCE_ID + "-" + str(entry["id"])
     record["deadline"] = deadline_value(entry)
     record["status"] = ("open" if record["deadline"] >= utc_now() else
                         "expired") if record["deadline"] else "unknown"
@@ -989,7 +994,7 @@ def main():
     previous = (json.loads(snapshot["files"]["metadata.json"]) if snapshot and
                 snapshot["files"]["metadata.json"] is not None else {})
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old, allow_empty=True)
+        validate_records(old, allow_empty=True, allow_legacy_ids=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish")
@@ -998,7 +1003,10 @@ def main():
         records = collect()
         validate_records(records)
         records = remove_expired_records(records, utc_now())
-        prior = {record["id"]: record for record in old}
+        prior = {
+            record["id"].replace(SOURCE_ID + ":", SOURCE_ID + "-", 1): record
+            for record in old
+        }
         temporal = {
             "created_at",
             "updated_at",
