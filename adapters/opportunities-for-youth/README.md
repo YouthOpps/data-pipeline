@@ -96,3 +96,17 @@ before first success creates no source folder. Later failures preserve last-good
 data and the last success timestamp, recording sanitized failure metadata when
 possible. Tests and implementation validation do not invoke production Actions
 or certify production publication.
+
+Existing publications are read at the captured immutable commit. GitHub Contents
+responses that omit large inline content (`encoding: none`) are resolved through
+the declared immutable Git blob SHA. Both inline and blob reads verify the
+source path, file type, declared size, strict base64, Git blob SHA-1 identity and
+UTF-8 before accepting a snapshot. Decoded source files are bounded to 20 MiB;
+only GET requests for immutable blob SHAs in the owning data-source repository
+receive a 32 MiB encoded-response allowance. Publisher responses retain the
+5 MB limit. Outgoing data and metadata obey the same 20 MiB UTF-8 byte limit
+before any remote write, preventing unreadable publications. An oversized
+refresh preserves last-good data and records failure metadata when possible;
+an oversized first publication creates no source folder. Invalid, truncated or
+oversized snapshots fail without overwriting last-good data. The original source-scoped atomic commit, conflict detection
+and failure-metadata behavior remain in place.

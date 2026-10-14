@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+import binascii
 import contextlib
 import datetime
 import email.utils
@@ -42,6 +43,8 @@ CATEGORIES = (
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
 _USER_AGENT = "YouthOpp/1.0 (+https://github.com/YouthOpps/data-pipeline)"
 _ROBOTS_CACHE = {}
+_MAX_SNAPSHOT_BYTES = 20 * 1024 * 1024
+_MAX_GITHUB_BLOB_BYTES = 32 * 1024 * 1024
 
 
 def _feed_text(value):
@@ -139,7 +142,13 @@ def pace(url, interval=6):
         time.sleep(wait)
 
 
-def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
+def request_bytes(url,
+                  *,
+                  interval=6,
+                  method="GET",
+                  headers=None,
+                  payload=None,
+                  max_bytes=5_000_000):
     budget = pace(url, interval)
     request = urllib.request.Request(
         url,
@@ -167,9 +176,12 @@ def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
                                          time.time() + max(0, seconds))
             except (ValueError, TypeError, OverflowError):
                 pass
-        body = response.read(5_000_001)
-        if len(body) > 5_000_000:
-            raise AdapterError("Response exceeds 5 MB", "fetch")
+        body = response.read(max_bytes + 1)
+        if len(body) > max_bytes:
+            raise AdapterError(
+                "Response exceeds permitted byte limit",
+                "publish" if url.startswith(_GITHUB + "/") else "fetch",
+            )
         return response.status, response.headers, body
 
 
@@ -909,6 +921,9 @@ def github(method, path, payload=None, missing_ok=False):
             headers=headers,
             payload=(json.dumps(payload).encode()
                      if payload is not None else None),
+            max_bytes=(_MAX_GITHUB_BLOB_BYTES if method == "GET" and
+                       re.fullmatch(r"/git/blobs/[0-9a-f]{40}", path) else
+                       5_000_000),
         )
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         raise AdapterError(
@@ -922,6 +937,38 @@ def github(method, path, payload=None, missing_ok=False):
     return json.loads(body)
 
 
+def snapshot_file(file, name):
+    """Verify a source file, using its immutable blob when necessary."""
+    if file is None:
+        return None
+    expected_path = f"datas/{SOURCE_ID}/{name}"
+    size, sha = file.get("size"), file.get("sha")
+    if (file.get("type") != "file" or file.get("path") != expected_path or
+            not isinstance(size, int) or isinstance(size, bool) or
+            not 0 <= size <= _MAX_SNAPSHOT_BYTES or not isinstance(sha, str) or
+            not re.fullmatch(r"[0-9a-f]{40}", sha)):
+        raise AdapterError("Invalid existing source file identity or size",
+                           "publish")
+    if file.get("encoding") == "none" and file.get("content") == "":
+        file = github("GET", "/git/blobs/" + sha)
+        if file.get("sha") != sha or file.get("size") != size:
+            raise AdapterError("Existing source blob identity or size mismatch",
+                               "publish")
+    if file.get("encoding") != "base64" or not isinstance(
+            file.get("content"), str):
+        raise AdapterError("Unsupported existing source file encoding",
+                           "publish")
+    try:
+        raw = base64.b64decode("".join(file["content"].split()), validate=True)
+        digest = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw)
+        if len(raw) != size or digest.hexdigest() != sha:
+            raise ValueError()
+        return raw.decode("utf-8")
+    except (binascii.Error, UnicodeError, ValueError) as error:
+        raise AdapterError("Existing source blob content failed validation",
+                           "publish") from error
+
+
 def read_snapshot():
     head = github("GET", "/git/ref/heads/main")["object"]["sha"]
     tree = github("GET", "/git/commits/" + head)["tree"]["sha"]
@@ -932,11 +979,7 @@ def read_snapshot():
             f"/contents/datas/{SOURCE_ID}/{name}?ref={head}",
             missing_ok=True,
         )
-        if file is not None and file.get("encoding") != "base64":
-            raise AdapterError("Unsupported existing source file encoding",
-                               "publish")
-        files[name] = (None if file is None else base64.b64decode(
-            file["content"]).decode("utf-8"))
+        files[name] = snapshot_file(file, name)
     if (files["data.json"] is None) != (files["metadata.json"] is None):
         raise AdapterError(
             "Incomplete remote source snapshot; no files changed", "publish")
@@ -944,6 +987,11 @@ def read_snapshot():
 
 
 def publish_files(snapshot, files):
+    for text in files.values():
+        if (not isinstance(text, str) or
+                len(text.encode("utf-8")) > _MAX_SNAPSHOT_BYTES):
+            raise AdapterError("Source publication file exceeds byte limit",
+                               "publish")
     expected = snapshot["files"].copy()
     desired = {**expected, **files}
     for attempt in range(3):
