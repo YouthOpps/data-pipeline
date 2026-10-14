@@ -3,7 +3,7 @@
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import gzip
@@ -1508,9 +1508,32 @@ def make_record(
     }
 
 
-def validate_records(records):
+def remove_expired_records(records, checked_at):
+    """Filter validated deadlines without guessing missing semantics."""
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    retained = []
+    for record in records:
+        deadline = record["deadline"]
+        if deadline is None:
+            retained.append(record)
+            continue
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+            closing_date = datetime.strptime(deadline, "%Y-%m-%d").date()
+            expired = (
+                checked.astimezone(timezone(timedelta(hours=-12))).date()
+                > closing_date
+            )
+        else:
+            closing = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            expired = checked > closing
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -2749,7 +2772,7 @@ def run_body(publishing):
                     candidate_metadata = json.loads(
                         candidate["files"]["metadata.json"]
                     )
-                    validate_records(candidate_records)
+                    validate_records(candidate_records, allow_empty=True)
                     validate_prior_metadata(
                         candidate_metadata, candidate_records
                     )
@@ -2758,6 +2781,8 @@ def run_body(publishing):
             records = collect()
             checked = utc_now()
             fresh_records(records, old, attempt, checked)
+            records = remove_expired_records(records, checked)
+            validate_records(records, allow_empty=True)
             outcome = metadata(attempt, previous, records, checked_at=checked)
             desired = {
                 "data.json": serialize(records),
@@ -2788,7 +2813,7 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif previous and latest["files"] == snapshot["files"]:
                         publish_files(
                             latest,
                             {

@@ -18,7 +18,7 @@ Ten literal own-site HTML inputs cover the careers homepage, its entry-level and
 
 The public vacancy-search page rendered an empty client-side shell. Its declared API's robots route redirected to the homepage, so no usable API policy or complete vacancy pagination was established; the API was not called. This is a limitation of the separate vacancy-inventory route, not a claim that all IBM access is prohibited. No guessed API, private applicant route or external ATS substitution is used.
 
-The actual [IBM robots policy](https://www.ibm.com/robots.txt) permits the reviewed careers and legal paths. The [terms](https://www.ibm.com/legal/terms), reached through the actual careers footer, expressly permit robots-compliant crawling. The reviewed scope is noncommercial original minimal facts and official links; this is not a blanket licence to reproduce creative content, images, visitor information or submitted tools.
+The actual [IBM robots policy](https://www.ibm.com/robots.txt) permits the reviewed careers and legal paths. The [terms](https://www.ibm.com/legal/terms), at the previously reviewed official legal route, expressly permit robots-compliant crawling. The reviewed scope is noncommercial original minimal facts and official links; this is not a blanket licence to reproduce creative content, images, visitor information or submitted tools.
 
 ## Timing, failure and publication
 
@@ -37,3 +37,51 @@ New records use attempt START for creation, first-seen and last-seen, and succes
 The sole live test is `python -B adapters/ibm/test_adapter.py`. It must emit the complete actual five-record JSON only on stdout; test diagnostics go to stderr. Initial implementation is subject to independent offline review and separately coordinated author and independent live acceptance. Production and website delivery remain separate maintainer gates.
 
 Timing artifacts are uploaded only after this run validates and durably finalizes a fresh healthy envelope and signals readiness through its fresh step output. A failed publisher completion-state save cannot export prior state; owned stale artifacts are invalidated before any new export.
+
+## Expired-record cleanup
+
+The reviewed five IBM programme-information records have no supported application
+deadlines and remain unknown. Source-owned validation rejects newly invented
+deadlines or availability; cleanup therefore retains all five until a separately
+reviewed publisher change establishes a real deadline. The generic boundary rules
+below do not authorize adding deadlines to the current programme recipes.
+
+The source does not establish a reliable application timezone for every date-only deadline. Cleanup therefore uses UTC−12 as a conservative certainty bound: a calendar deadline expires only once its closing date has ended in every civil timezone. This does not invent a publisher closing clock. Offset-aware deadlines use their explicit instant.
+
+After complete nonempty collection and validation, the refresh removes only
+records with a validated deadline strictly before the successful check time.
+Missing or ambiguous publisher deadlines remain normalized as null; status, age
+and disappearance are never used as expiry evidence. Invalid normalized dates
+fail validation and preserve last-good data. The source uses complete replacement rather than merging
+old records, so expired previously published rows cannot survive a successful
+refresh, including when they are still present in the publisher response.
+Creation and first-seen history is retained for refreshed eligible identities.
+
+The retained subset and success metadata are published in one source-scoped
+atomic commit. A validated nonempty raw collection whose records all expire
+publishes `[]` with success and a zero count; an empty upstream collection still
+fails. A previously successful empty subset remains a valid last-good snapshot.
+Fetch, parse, validation and publication failures preserve last-good data and
+its success timestamp; only safe failure metadata may change. The sole live test
+continues to emit the complete unfiltered publisher collection without publishing.
+
+## Reviewed publisher refresh (14 October 2026)
+
+The live check detected changed material fingerprints on all ten official HTML
+inputs. Each complete response was reviewed again, including all literal links
+and controls: the entry-level hub still advertises the four programme cards,
+the entry guide still links the distinct Sales Accelerator programme, and the
+five published factual summaries remain supported. Apprenticeship remains
+full-time earn-and-learn without a four-year degree in the chosen field; co-op
+remains 16 weeks for actively enrolled students; the entry guide still describes
+less than one year of relevant experience; Sales Accelerator retains its two
+tracks and structured progression. No deadlines or current vacancies are invented.
+
+The legal landing still links the terms, which expressly permit crawling under
+robots.txt for noncommercial use. The current server HTML does not expose the
+previous careers legal-footer link; the already reviewed official legal URLs
+remain explicit required inputs. Careers advice, employee stories, general
+occupational pages, external event registrations, learning directories and job
+search/alert forms stay outside the existing programme-information frontier.
+All ten reviewed fingerprints were renewed after factual and route review.
+Future changes still fail closed; no dynamic acceptance or omitted page is used.

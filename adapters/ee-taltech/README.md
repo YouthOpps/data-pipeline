@@ -22,7 +22,7 @@ Different bachelor's/master's statutes remain distinct. The two Metrosert awards
 
 Stable IDs derive from source ID, the publisher's academic-season heading and the normalized original statute URL. Original URLs remain unchanged; source evidence points to the actual HTML accordion headings. Empty collections, duplicate IDs, unsafe URLs, invalid dates/countries/categories and ambiguous repeated awards fail validation.
 
-The main competition explicitly accepts applications from 30 September through 19 October 2026. Its 73 distinct regular awards use 19 October as their date-only deadline, interpreted through the end of that Tallinn calendar day and serialized in UTC. Peep Sürje has an explicit individual 12 October deadline, which overrides the calendar. The other seven special-competition awards lack a reliable individual deadline, so their deadlines remain null and their status unknown. Their mention of `30.09–20.10` concerns exclusion from the main competition's counting rules; it is not treated as their application deadline. Dated records become expired after their deadline rather than remaining perpetually open.
+The main competition explicitly accepts applications from 30 September through 19 October 2026. Its 73 distinct regular awards use 19 October as their date-only deadline, interpreted through the end of that Tallinn calendar day and serialized in UTC at the final representable microsecond of that closing day. Peep Sürje has an explicit individual 12 October deadline, which overrides the calendar. The other seven special-competition awards lack a reliable individual deadline, so their deadlines remain null and their status unknown. Their mention of `30.09–20.10` concerns exclusion from the main competition's counting rules; it is not treated as their application deadline. Dated records become expired after their deadline rather than remaining perpetually open.
 
 All records are scholarships; the Metrosert internship scholarship also carries the internships category. Estonia is the study/host country. Estonian nationality is recorded only where the award body explicitly requires it; university enrollment, local study or the publisher's country do not imply citizenship eligibility. Full academic, allocation and application conditions remain available through the original statute and publisher links. Publication dates are not invented from unrelated page dates; collection freshness timestamps are UTC.
 
@@ -46,3 +46,24 @@ python -B adapters/ee-taltech/adapter.py --publish
 ```
 
 Publication updates only `YouthOpps/data-source/datas/ee-taltech/{data,metadata}.json`, atomically and with conflict-safe reference updates. Successful publication of validated nonempty records advances the durable success timestamp. Later failures preserve last-good data and its success timestamp and record sanitized failure metadata when possible; failure before the first success creates no source folder. Tests never publish. Production publication requires maintainer merge and was not invoked during implementation.
+
+## Expired-record cleanup
+
+TalTech already normalizes the stated closing calendar day to its end in `Europe/Tallinn`; offset-aware timestamps retain that exact instant.
+
+After complete nonempty collection and validation, the refresh removes only
+records with a validated deadline strictly before the successful check time.
+Missing or ambiguous publisher deadlines remain normalized as null; status, age
+and disappearance are never used as expiry evidence. Invalid normalized dates
+fail validation and preserve last-good data. The source uses complete replacement rather than merging
+old records, so expired previously published rows cannot survive a successful
+refresh, including when they are still present in the publisher response.
+Creation and first-seen history is retained for refreshed eligible identities.
+
+The retained subset and success metadata are published in one source-scoped
+atomic commit. A validated nonempty raw collection whose records all expire
+publishes `[]` with success and a zero count; an empty upstream collection still
+fails. A previously successful empty subset remains a valid last-good snapshot.
+Fetch, parse, validation and publication failures preserve last-good data and
+its success timestamp; only safe failure metadata may change. The sole live test
+continues to emit the complete unfiltered publisher collection without publishing.

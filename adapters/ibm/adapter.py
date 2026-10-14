@@ -3,7 +3,7 @@
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -1384,9 +1384,32 @@ def document_root(text, complete=True):
     return root
 
 
-def validate_records(records):
+def remove_expired_records(records, checked_at):
+    """Filter validated deadlines without guessing missing semantics."""
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    retained = []
+    for record in records:
+        deadline = record["deadline"]
+        if deadline is None:
+            retained.append(record)
+            continue
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+            closing_date = datetime.strptime(deadline, "%Y-%m-%d").date()
+            expired = (
+                checked.astimezone(timezone(timedelta(hours=-12))).date()
+                > closing_date
+            )
+        else:
+            closing = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            expired = checked > closing
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError("Empty or invalid opportunity collection", "validate")
     ids = set()
     for record in records:
@@ -1937,13 +1960,15 @@ def run_body(publishing):
                 if candidate["files"]["data.json"] is not None:
                     candidate_records = json.loads(candidate["files"]["data.json"])
                     candidate_metadata = json.loads(candidate["files"]["metadata.json"])
-                    validate_records(candidate_records)
+                    validate_records(candidate_records, allow_empty=True)
                     validate_prior_metadata(candidate_metadata, candidate_records)
                     old, previous = candidate_records, candidate_metadata
                 snapshot = candidate
             records = collect()
             checked = utc_now()
             fresh_records(records, old, attempt, checked)
+            records = remove_expired_records(records, checked)
+            validate_records(records, allow_empty=True)
             outcome = metadata(attempt, previous, records, checked_at=checked)
             desired = {
                 "data.json": serialize(records),
@@ -1974,7 +1999,7 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif previous and latest["files"] == snapshot["files"]:
                         publish_files(
                             latest,
                             {
@@ -2036,61 +2061,81 @@ INPUTS = {
     "entry": {
         "url": "https://www.ibm.com/careers",
         "format": "html",
-        "sha256": "440e60193d74f78f87260c59e1a9e438961cd9dbf0df495d616949629810df41",
+        "sha256": (
+            "31027f9927e2f72783e6937935b0a3893a1ef56a8a5fea9bcef2f4a70fb39f8a"
+        ),
         "raw_research_sha256": "6b68bb5b01a7b3614d81a0ede406f6617e07ad6c802ac368aa165ffc75e6b637",
     },
     "terms": {
         "url": "https://www.ibm.com/legal?lnk=flg-tous-usen",
         "format": "html",
-        "sha256": "422d80560d6a1450d490f45a606827f4e8cda1afd5092e4e37df9ce51d617be4",
+        "sha256": (
+            "4437b1b77b32d8d3ff98a0f347fd34c2d2ed15562717198adb8b366d27862e00"
+        ),
         "raw_research_sha256": "795443f00761e13d00e7ec237e7ff1f4737d5739f5f2c6fce14baf0c68089f1d",
     },
     "terms-full": {
         "url": "https://www.ibm.com/legal/terms",
         "format": "html",
-        "sha256": "04e5a4c678259cd471a212f2a4f341c50f15068c6f8e6580bce3cb09d0a99cfb",
+        "sha256": (
+            "1a2d90b0c16f587b5e4c24842e49ac768d232f11d558323004aaf78bc9e97b06"
+        ),
         "raw_research_sha256": "b927e638542e5489721e824d7db3608c35def7989a40787ab111395edad665e5",
     },
     "internships": {
         "url": "https://www.ibm.com/careers/internships",
         "format": "html",
-        "sha256": "0b02a14e20fa9d3cfab986e05a580fcb1abee6536f6d74a3f911a5ec5828fe4d",
+        "sha256": (
+            "9488e3b9649d2780f032b4814c50ab40933a877a70057642eb7a3cf1dcc99234"
+        ),
         "raw_research_sha256": "3d9ad6a4b45a727eb608ac1387f937c728a2f9816b0df095f6c7af6d3b88b8e8",
     },
     "entry-level": {
         "url": "https://www.ibm.com/careers/career-opportunities",
         "format": "html",
-        "sha256": "d48cb78738d66127415a97dbda5d24a379350f9938d40deeb4f5a3464135bc7d",
+        "sha256": (
+            "3b6760e7089600387f21d3e7692178e01446c26d338a1ebe2ef6e3cb1ba53be5"
+        ),
         "raw_research_sha256": "f4530b9b05481753a7e018769274c963e06a4c90224274986a99c6f423a7b854",
     },
     "apprenticeship": {
         "url": "https://www.ibm.com/careers/blog/the-ibm-apprenticeship-program-no-degree-no-problem",
         "format": "html",
-        "sha256": "4cd9f9a0a8d4424d9655f8959a9af0a45cb0a267ebd1daf48a10c2f5064bc118",
+        "sha256": (
+            "5027a08f0104f1f44d3982056af2b18d9515192f6f2b640783013c74fb348e21"
+        ),
         "raw_research_sha256": "1e8eab200e4600ec0f5ebbad9541d16e54cb6fd6bc0f323877ba1037ed519c4d",
     },
     "coop": {
         "url": "https://www.ibm.com/careers/blog/your-future-starts-here-inside-ibm-co-op-program",
         "format": "html",
-        "sha256": "58ab112c8f6fadff359011d6967158192b20660300a17e140eb47fa5a9be949f",
+        "sha256": (
+            "1ba4c548d7bf33ae85fd7acb1599b0dc4531fe9ec26863898e919afa3c595c3d"
+        ),
         "raw_research_sha256": "f26219345ece43de57d86aff24a4599ad14a4415c16977d1a93d991e4c868100",
     },
     "internship-programme": {
         "url": "https://www.ibm.com/careers/blog/5-things-that-make-the-ibm-internship-programs-unique",
         "format": "html",
-        "sha256": "4c86bed719a1843058d636dbceb334a15afa267192d17e829a31f01c7e55c77e",
+        "sha256": (
+            "cc22c52fe605e759e6935d57aad7a17d3e5d33e3404c699a4aa1f45b0ebb22d7"
+        ),
         "raw_research_sha256": "4b6ee1ad9e27e9b971b317c0b275acc6cfaed225afacbe2655ae4d0cfaf06af0",
     },
     "entry-guide": {
         "url": "https://www.ibm.com/careers/blog/discover-your-potential-entry-level-careers-that-make-a-difference",
         "format": "html",
-        "sha256": "2d7edd4418bba4d65585a6e908a07ec2e735a1d3af84ef7edd4011070c99ac0f",
+        "sha256": (
+            "27acf2be840df133775c1f93beb53c888b7718917ddeee20b0bc9edccc24ef39"
+        ),
         "raw_research_sha256": "5f47caf8ac4ae387da4285d8e596e823b2e9689cd1090c6a48bf55cbbff2de19",
     },
     "sales-accelerator": {
         "url": "https://www.ibm.com/careers/blog/what-is-the-ibm-sales-accelerator-program",
         "format": "html",
-        "sha256": "0c4bb9c3bd8d03014c2ad320fa3be2d6e7408167a8e36cdecf4f5682e14b4cc8",
+        "sha256": (
+            "af0b51c86b19d24b969767912ffaef7fede3c0ef44b7d3b01ac5461a85e88675"
+        ),
         "raw_research_sha256": "f6990ceff0706fa8bd0440f2fa0f119ae8c26c7b19484cc5f093422ebba78349",
     },
 }

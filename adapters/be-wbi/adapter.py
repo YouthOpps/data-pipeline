@@ -1234,9 +1234,32 @@ def make_record(
     }
 
 
-def validate_records(records):
+def remove_expired_records(records, checked_at):
+    """Filter validated deadlines without guessing missing semantics."""
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    retained = []
+    for record in records:
+        deadline = record["deadline"]
+        if deadline is None:
+            retained.append(record)
+            continue
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+            closing_date = datetime.strptime(deadline, "%Y-%m-%d").date()
+            expired = (
+                checked.astimezone(timezone(timedelta(hours=-12))).date()
+                > closing_date
+            )
+        else:
+            closing = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            expired = checked > closing
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -1538,7 +1561,7 @@ def main():
         else {}
     )
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish"
@@ -1581,6 +1604,8 @@ def main():
             key=lambda record: record["published_at"] or "", reverse=True
         )
         validate_records(records)
+        records = remove_expired_records(records, checked_at)
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(
@@ -1590,7 +1615,7 @@ def main():
         failure,
         checked_at=None if failure else checked_at,
     )
-    if args.publish and (not failure or old):
+    if args.publish and (not failure or previous):
         files = {
             "metadata.json": json.dumps(outcome, ensure_ascii=False, indent=2)
             + "\n"
@@ -1613,7 +1638,7 @@ def main():
             )
             try:
                 latest = read_snapshot()
-                if not old or latest["files"] != snapshot["files"]:
+                if not previous or latest["files"] != snapshot["files"]:
                     raise AdapterError(
                         "No safe previous snapshot for failure reporting",
                         "publish",
