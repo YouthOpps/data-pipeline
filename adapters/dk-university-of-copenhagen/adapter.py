@@ -1333,8 +1333,8 @@ def make_record(
     }
 
 
-def validate_records(records):
-    if not isinstance(records, list) or not records:
+def validate_records(records, *, allow_empty=False):
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -1593,7 +1593,7 @@ def metadata(attempt, previous, records, error=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected and validated {len(records)} records"
+            else f"Validated refresh retains {len(records)} records"
         ),
         "error": safe_error(error) if error else None,
     }
@@ -1602,6 +1602,35 @@ def metadata(attempt, previous, records, error=None):
     if error:
         result["failure_stage"] = getattr(error, "stage", "parse")
     return result
+
+
+def remove_expired_records(records, checked):
+    """Filter the validated replacement, leaving prior publication untouched."""
+    validate_records(records)
+    now = datetime.fromisoformat(checked.replace("Z", "+00:00"))
+    if now.tzinfo is None:
+        raise AdapterError("Cleanup clock requires a timezone", "validate")
+    current = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if isinstance(deadline, str):
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+                # Without a documented zone, wait for worldwide day closure.
+                expired = (
+                    datetime.strptime(deadline, "%Y-%m-%d").date()
+                    < now.astimezone(timezone(timedelta(hours=-12))).date()
+                )
+            else:
+                instant = datetime.fromisoformat(
+                    deadline.replace("Z", "+00:00")
+                )
+                expired = instant.tzinfo is not None and instant < now
+        if not expired:
+            current.append(record)
+    # Valid nonempty retrieval may have no remaining eligible records.
+    validate_records(current, allow_empty=True)
+    return current
 
 
 def main():
@@ -1627,7 +1656,7 @@ def main():
         else {}
     )
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish"
@@ -1635,7 +1664,7 @@ def main():
     attempt, failure = utc_now(), None
     try:
         records = collect()
-        validate_records(records)
+        records = remove_expired_records(records, utc_now())
         prior = {record["id"]: record for record in old}
         temporal = {
             "created_at",
@@ -1668,11 +1697,15 @@ def main():
         records.sort(
             key=lambda record: record["published_at"] or "", reverse=True
         )
-        validate_records(records)
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(attempt, previous, records, failure)
-    if args.publish and (not failure or old):
+    if args.publish and (
+        not failure
+        or (snapshot is not None
+            and snapshot["files"]["data.json"] is not None)
+    ):
         files = {
             "metadata.json": json.dumps(outcome, ensure_ascii=False, indent=2)
             + "\n"
@@ -1695,7 +1728,10 @@ def main():
             )
             try:
                 latest = read_snapshot()
-                if not old or latest["files"] != snapshot["files"]:
+                if (
+                    snapshot["files"]["data.json"] is None
+                    or latest["files"] != snapshot["files"]
+                ):
                     raise AdapterError(
                         "No safe previous snapshot for failure reporting",
                         "publish",

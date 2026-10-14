@@ -10,8 +10,8 @@ class TestFRSE(unittest.TestCase):
     def test_complete_public_collection(self):
         records = adapter.collect()
         adapter.validate_records(records)
-        self.assertEqual(len(records), 53)
-        self.assertEqual(len({record["id"] for record in records}), 53)
+        self.assertEqual(len(records), 57)
+        self.assertEqual(len({record["id"] for record in records}), 57)
         self.assertTrue(
             all(record["source"] == adapter.SOURCE_ID for record in records)
         )

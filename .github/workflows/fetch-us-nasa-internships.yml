@@ -1,6 +1,11 @@
 name: fetch-us-nasa-internships
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - adapters/us-nasa-internships/**
+      - .github/workflows/fetch-us-nasa-internships.yml
 permissions:
   contents: read
 concurrency:
