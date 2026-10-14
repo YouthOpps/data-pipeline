@@ -1,5 +1,10 @@
 name: fetch-bg-feba-alumni
 on:
+  push:
+    branches: [main]
+    paths:
+      - adapters/bg-feba-alumni/**
+      - .github/workflows/fetch-bg-feba-alumni.yml
   workflow_dispatch:
   schedule:
     - cron: '13 0/6 * * *'

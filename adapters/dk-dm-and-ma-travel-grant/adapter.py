@@ -2,7 +2,7 @@
 
 import argparse
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -373,10 +373,10 @@ CONDITIONS = {
         "7f689769964c1249934ff2fb239eb23aad21f85911c93dff1fff9161a12077" "f4"
     ),
     "competition": (
-        "227c0075537520f60b7e59276cff555535efd8d6201f47de3717bfc0c3b9b1" "22"
+        "b192253e43cb0238fd7e1da9e5460d89ceb4ac37ede61aebb78dda14914ea596"
     ),
     "cookies": (
-        "d394dd8254d93f54237731a4896de5f40f8e47883b310d3a9abdb204313f0d" "e3"
+        "110ba59a03f1ff10d522a7ef708650a177b9c1d042f9b89d81e809f52380a13b"
     ),
     "danish-benefits": (
         "20f11fdf4155d43f4c8a026a71dc2f33f1e8bb25301089b8688caba6b74653" "c4"
@@ -391,10 +391,10 @@ CONDITIONS = {
         "03ebde57dc2105ba5833d6741512dcecd2767343e58e2dfe9c4c298c939ef4" "91"
     ),
     "danish-professional": (
-        "e3ff894f4eecc82d38a557e2233fea8afbc24b34de7ae9030d3246415ed84c" "3b"
+        "a27b394ab8168f34c5347ff6985265f366f98044a918aed509238e4d1f9e6f76"
     ),
     "danish-students": (
-        "af4dc5bd086c309bd63686c1110c140d1d20fff476e91857a93a03c5c1c8dd" "c3"
+        "14044f19b28899678308d769f953c3cad6e23765d8e91c87f5d2870bdde16e0b"
     ),
     "events": (
         "7f8017b80ea1a74b22cac9960e982d8a30433a15b617d3890a68ea3b326afe" "80"
@@ -406,7 +406,7 @@ CONDITIONS = {
         "338042bd8780fa190033459c57c2eb062d48901476d35e9d666a39d8ad29d0" "91"
     ),
     "home": (
-        "e47d4cd4112b026ebd5ae63e6e40afd45ea679096a6ad14132a1082957d3b0" "55"
+        "4d47e4282ec0cfec4b1615205d768045c95c01f50dbd36836620959a0035bec8"
     ),
     "mentor-specific": (
         "07419e69394a399e2ffa753284bf78bff0983b4f58b9a715967175e90d6949" "6a"
@@ -415,13 +415,13 @@ CONDITIONS = {
         "61e1c450a90cf2304525d026ec017cab39d1264165e39a13101211ffbfe295" "19"
     ),
     "privacy": (
-        "74fe162e321ba0e42cdec5ee5e9316991c116b2c2975966b3d1cdb5e61035d" "dc"
+        "e1bf2dd2bd1991dfb4fc1cc8ba2dd21044b8258c75e55fca11c7029637c85732"
     ),
     "professional": (
         "2df00faa52ea2aa82028ff97c62ebe59c65fcde051ed7f9d5f81a9661e5002" "dc"
     ),
     "reimbursement": (
-        "e4defcd5bd7827036fbd27606cdb43814f8bc90697286bfa48ee42559b4834" "dd"
+        "aa48575d8fac171f106d56cb93ecabbb89de601c5800c28e2139847dc7bac6d8"
     ),
     "sponsorship-danish": (
         "e35c7400fd48fc2dc7434fa5aa0f3eac25d6d897b8985938fcb281d53f8b9c" "2d"
@@ -433,7 +433,7 @@ CONDITIONS = {
         "bba55e098b24a128d8c8e4df45bea8980bc30efc494c507641b2c51df16238" "7b"
     ),
     "terms": (
-        "52cc4207d4bd88f62319f190557b6270206aede83aaad2361f9aa3ad77ad34" "c7"
+        "df851886d519a504a569b37571c81cc496849df4cf2f48f120c8c79f7ada976a"
     ),
     "travel": (
         "2a18383a91ea385b12d9ab50d438fc332b6832b0248e970716c13cbc0d1acf" "e4"
@@ -1088,9 +1088,44 @@ def make_record(
     }
 
 
-def validate_records(records):
+def remove_expired_records(records, checked_at):
+    """Filter validated deadlines after retrieval, before atomic publication.
+
+    Unknown publisher zones use UTC-12 only as a global certainty bound:
+    a date remains eligible until its closing day has ended everywhere.
+    No age, status, missing response or unstated local clock implies expiry.
+    """
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.tzinfo is None:
+        raise AdapterError(
+            "Cleanup requires an aware check timestamp", "validate"
+        )
+    latest_day = checked.astimezone(timezone(timedelta(hours=-12))).date()
+    retained = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if isinstance(deadline, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+                    closing_day = datetime.strptime(deadline, "%Y-%m-%d").date()
+                    expired = closing_day < latest_day
+                else:
+                    cutoff = datetime.fromisoformat(
+                        deadline.replace("Z", "+00:00")
+                    )
+                    expired = cutoff.tzinfo is not None and cutoff < checked
+            except ValueError:
+                # Unsupported or ambiguous deadlines never authorize removal.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -1392,7 +1427,7 @@ def main():
         else {}
     )
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish"
@@ -1434,7 +1469,8 @@ def main():
         records.sort(
             key=lambda record: record["published_at"] or "", reverse=True
         )
-        validate_records(records)
+        records = remove_expired_records(records, utc_now())
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(
@@ -1444,7 +1480,9 @@ def main():
         failure,
         checked_at=None if failure else checked_at,
     )
-    if args.publish and (not failure or old):
+    if args.publish and (
+        not failure or snapshot["files"]["data.json"] is not None
+    ):
         files = {
             "metadata.json": json.dumps(outcome, ensure_ascii=False, indent=2)
             + "\n"
@@ -1467,7 +1505,10 @@ def main():
             )
             try:
                 latest = read_snapshot()
-                if not old or latest["files"] != snapshot["files"]:
+                if (
+                    snapshot["files"]["data.json"] is None
+                    or latest["files"] != snapshot["files"]
+                ):
                     raise AdapterError(
                         "No safe previous snapshot for failure reporting",
                         "publish",

@@ -34,3 +34,51 @@ python3 -B test_adapter.py
 The sole test performs a complete real nonpublishing collection and writes the complete JSON to stdout. Validation covers every record, dates, countries, categories, stable identities and a 600 UTF-16-unit summary limit. Live verification should parse stdout only in memory and compare the complete accepted facts and the actual unchanged website consumer; do not save complete record dumps.
 
 Publication uses `DATA_SOURCE_TOKEN` and `python3 -B adapter.py --publish`. The workflow triggers on its own main-branch files, schedule and manual dispatch. Data and metadata are committed atomically only to this source's folder in YouthOpps/data-source. Initial failures create no partial source folder; later failures preserve last-good data and success/check timestamps. Non-forced compare-and-swap publication safely retries unrelated sibling updates and refuses to overwrite a newer update of this source. Production/source/site Actions and final delivery verification are maintained separately.
+
+## Expired-record cleanup
+
+The travel round uses its published date-only closing; its closing clock
+and timezone are unspecified. Relative or recurring unanchored dates remain null.
+
+After a complete nonempty retrieval passes validation, the successful refresh
+removes records with verified past application deadlines before preparing the
+single atomic data/metadata publication. The next dataset fully replaces the
+old dataset; old records are never merged back, including expired old IDs
+still returned by the publisher. Status, record age, absence from a response
+and missing or ambiguous deadlines do not establish expiry.
+
+For a supported date-only closing without a documented timezone, UTC-12 is
+used only as a conservative global certainty bound, not an inferred publisher
+timezone: retain the record throughout its possible local closing day, and
+remove it only once that date has ended everywhere. Aware timestamps are
+retained at the exact cutoff and removed afterwards.
+
+If every validated retrieved record has expired, publish an empty data array
+and success metadata atomically, with record_count zero. An empty or invalid
+upstream collection still fails. Later runs accept this valid empty prior
+pair; failures preserve it and its last-success timestamp, updating only safe
+failure metadata. No cleanup write precedes successful collection, and no
+other source's files are touched. The live test remains a complete raw
+nonpublishing collection; production publication is reviewed statically.
+
+## Reviewed source change on 14 October 2026
+
+The required competition-terms page changed to include a workplace quiz
+running 6–15 October 2026 alongside the historical AI/Cyber lottery. Its
+complete current facts, original route, navigation and footer/legal links were
+reviewed before refreshing that page's exact fingerprint. These are scoped
+promotional prize-draw terms, not general automation/reuse terms or any of
+the five member programmes. Neither lottery becomes an opportunity record;
+all other programme/policy fingerprints and profile facts remain guarded.
+
+The complete 26-page official frontier was subsequently retrieved and checked
+without skipping any refusal or hash mismatch. Seven additional changed inputs
+were reviewed in full before renewing their guards: cookies, Danish professional
+benefits, Danish student landing, home, privacy, reimbursement and membership
+payment terms. Privacy/cookies describe personal-data processing; payment terms
+expressly regulate membership online purchases/payments, not content reuse.
+Reimbursement still distinguishes CVR invoice and no-CVR expense routes;
+professional benefits retain the same courses/mentoring navigation. Changing
+landing event/advice routes remain excluded from the finite five programmes.
+All substantive programme input fingerprints and every published profile remain
+unchanged; current policy/footer/navigation facts are guarded exactly.
