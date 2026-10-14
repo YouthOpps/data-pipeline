@@ -1,25 +1,72 @@
 # INSAIT public opportunities
 
-This standalone standard-library adapter covers INSAIT at Sofia University and its own EXPLORER programme. It publishes nine reviewed identities: SURF 2026, the combined faculty recruitment call, rolling postdoctoral and PhD recruitment, MIT CSAIL specialisation, the DeepMind scholarship, the historical STARS 2024 programme, the closed EXPLORER 2026 call, and the forthcoming EXPLORER 2027/28 overview.
+This standalone standard-library adapter discovers current programme and call pages
+from INSAIT's Join INSAIT navigation and both publishers' advertised sitemap trees.
+It reads the selected pages on every run. New programme routes and editions are
+eligible for discovery; changing text, links, menus, footers and sitemap timestamps
+do not require updating a stored content hash or a record inventory in code.
 
-The finite reviewed frontier contains 27 required public inputs, including both advertised sitemap indexes and their seven children, programme pages, substantive conditions and the faculty tenure rules PDF. The advertised XML frontier contains 665 entries representing 631 unique URLs. Staff biographies, recipients, research announcements, generic directories, application forms and earlier editions are excluded. SURF news and its programme page corroborate one identity; the two EXPLORER editions remain distinct. Original published titles are retained; the current EXPLORER overview and its summary are Bulgarian, while the other eight records are English.
+## Collection and scope
 
-HTML guards retain visible text and literal link destinations; sitemap guards retain the ordered advertised destinations; the material PDF is guarded by its complete byte digest. A changed material fact or frontier fails collection instead of publishing stale profiles. Sitemap modification timestamps are not programme facts. No private forms or applicant information are collected.
+Official starting points are [Join INSAIT](https://insait.ai/join-insait/),
+[INSAIT's sitemap](https://insait.ai/sitemap_index.xml) and
+[EXPLORER's sitemap](https://explorer.insait.ai/sitemap_index.xml).
+The programme navigation supplements entries missing from the sitemap. Discovery
+includes scholarship, fellowship, internship, research-programme and recruitment
+routes, then validates each page's main content and programme title. Person
+directories, alumni/results stories, categories and application forms are excluded.
+An explicit no-open-positions message contributes no record. SURF announcement
+news for the edition on the canonical SURF page is deduplicated against that page.
+A missing page, incomplete HTML, ambiguous title or
+exceeded traversal limit fails collection rather than publishing a partial result.
+New publisher URL conventions may require extending the discovery rules.
+Publisher-advertised English language alternatives are followed and deduplicated;
+new Bulgarian or EXPLORER programme routes are still eligible for discovery.
+News requires an application closing or an explicit invitation to apply; generic
+programme publicity and recipient stories do not create duplicate opportunities.
+Unrecognized opportunity categories remain `other` rather than stopping updates.
 
-SURF's March 8, 2026, 23:59 EET closing is represented as 21:59 UTC. EXPLORER 2026 closes on February 2, 2026, with date-only precision. Undated rolling calls, MIT's yearless April 30 rule, STARS 2024 and the forthcoming EXPLORER edition retain unknown status and no absolute closing. Historical or forthcoming descriptions do not assert current availability.
+Titles, short factual excerpts, publication dates and explicit application closing
+dates come from live HTML. Navigation and footer content do not supply record
+facts. Unsupported or yearless closing dates remain null. English dates with an
+explicit year are parsed only in application-closing context; EET/EEST/UTC times
+preserve their offsets, while date-only closings retain date-only precision.
+Multiple different closings are left unknown rather than reduced to an invented
+single date. A forthcoming programme remains unknown, even if older dates appear
+elsewhere on its page. Eligibility countries are not inferred from language,
+citizenship or residence wording. Host countries require source evidence.
 
-Material qualifications remain in each summary. PhD programme pages state EUR 39,684 gross annually, while the undated Bulgarian FAQ states EUR 36,000; applicants must confirm the amount. Listed PhD fields are preferences rather than an exclusive degree restriction. A positive tenure evaluation does not oblige INSAIT to offer a permanent contract. MIT requires a tenure-track position offer. DeepMind requires ordinary EU residence and identification as female, rather than an EU passport. STARS states BGN 1,500 monthly for summer 2024. EXPLORER's EUR 36,000 belongs to the 2026 call; funding and dates for 2027/28 are forthcoming, and the FAQ's EUR 1,022 monthly amount explicitly belongs to 2026/27.
+Existing programme identities retain their published keys; SURF and EXPLORER
+edition keys are derived from current source years. Newly discovered programmes
+use their canonical publisher URL. Successful publication preserves first-seen
+timestamps, updates changed record content and replaces this source's inventory.
+Records no longer discovered are removed on a successful complete collection.
 
-Both origins' public robots policies were reviewed. Copyright and cookie notices do not establish an open content licence; the adapter publishes original factual summaries with attribution and links, without copying full articles, images or private documents. Public decision pages include [SURF](https://insait.ai/surf/), [PhD](https://insait.ai/phd/), [faculty](https://insait.ai/faculty/), [MIT](https://insait.ai/mit/) and [EXPLORER](https://explorer.insait.ai/).
+Copyright and cookie notices do not establish an open content licence. Output
+contains brief factual excerpts, attribution and original links, not complete
+articles, images, application forms or applicant information. Public robots policies
+are checked on both origins. Supporting PDF bytes and unrelated contact-link
+encodings are not frozen prerequisites for reading current HTML opportunity facts.
 
-Run the nonpublishing integration test with `python -B adapters/bg-insait/test_adapter.py`. It prints the complete validated collection to stdout. Run publication through the dedicated workflow, whose sole application command is `python -B adapters/bg-insait/adapter.py --publish`.
+## Verification and publication
 
-Both origins share one durable publisher family, a collector lock, at least six seconds between starts and at most ten starts per rolling minute. Robots, redirects and retries consume the same budget. Retry-After is persisted before reading response bodies; HTTP 401, 403 and 429 are classified immediately, and unresolved refusals block further collection. Unreviewed redirects are rejected before their bodies or destinations are fetched. Normal TLS verification, proxy and CA settings remain intact.
+Run `python -B adapters/bg-insait/test_adapter.py` for the sole nonpublishing
+live collection test. It validates every record and prints the complete result
+to stdout. Record counts are dynamic. Publication is performed only by the
+dedicated workflow with
+`python -B adapters/bg-insait/adapter.py --publish`.
 
-The collection and prepublication phase is capped at 900 seconds; publication and conditional failure handling each receive at most 180 seconds. The original absolute run cap is 1,290 seconds, with its final 30 seconds reserved for trusted timing export. Blocking reads and output remain under a real main-thread alarm. These caps bound attempts rather than guarantee completion or artifact upload after a hard process termination. The workflow uses a normal one-hour App token minted immediately before its command and a 30-minute job limit.
+Both origins share one durable publisher family and collector lock, with at least
+six seconds between request starts and at most ten starts per rolling minute.
+Robots, redirects and retries consume the same budget. Retry-After, access refusals,
+TLS verification, bounded execution and source-scoped atomic publication retain
+the existing lifecycle. Public routes are restricted to the two publisher origins;
+private forms and administrative endpoints are excluded.
 
-Publication validates the initial owned record/metadata pair and uses compare-and-swap protection. Ambiguous commits reconcile the exact intended pair before retrying; newer successful data must not be overwritten by failure metadata. Complete family history and the newest validated, run-bound timing artifact must be restored. Initial no-history bootstrap requires separately reviewed public evidence; the workflow includes the [reviewed first-family evidence](https://github.com/YouthOpps/data-pipeline/issues/51#issuecomment-6095058149) and its bounded initial timing value. Existing local pacing state is preserved, never reset.
-
-The EXPLORER FAQ alone has two reviewed Cloudflare-obfuscated public contact anchors. Their per-response masks may rotate. The guard validates the exact nested span structure, both encoded targets against the reviewed contact digest, and the exact count of two before canonicalizing only these contact destinations. It retains all visible text and every other literal link. Changed targets, malformed encodings, different routes or structural/count changes fail closed; no contact address is logged or fetched. The diagnostic comparison established identical current facts and non-contact frontier, rather than retaining the earlier failed collection's response body.
-
-The same mask-only treatment is narrowly extended to one reviewed contact anchor on each of MIT, postdoctoral recruitment, STARS and SURF. Each page retains its exact original attribute sets, nested structure, placeholder and separately approved href/span target digests. STARS' href and displayed-span targets differ in the source; their distinct reviewed digests are preserved rather than equated. The postdoctoral page's additional unfragmented protection route remains an ordinary literal guarded link. All other inputs and programme facts retain their original guards.
+The collection phase is capped at 900 seconds, publication and failure handling
+at 180 seconds each, with a final 30 seconds reserved for timing-state export.
+The workflow restores the latest validated family pacing artifact; its historical
+bootstrap evidence remains
+[recorded on issue 51](https://github.com/YouthOpps/data-pipeline/issues/51#issuecomment-6095058149).
+A fetch, parsing, validation or publication failure preserves last-good data and
+its last-success timestamp, recording failure metadata when possible.

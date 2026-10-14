@@ -1,9 +1,9 @@
-"""Collect the bounded reviewed INSAIT and EXPLORER public programme frontier."""
+"""Discover and collect current public INSAIT and EXPLORER opportunities."""
 
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -40,7 +40,10 @@ _USER_AGENT = (
     "YouthOpps/1.0 (+https://github.com/YouthOpps/data-pipeline; "
     "public opportunity metadata)"
 )
-CATEGORIES = {"scholarships", "grants", "internships", "jobs", "training", "fellowships"}
+CATEGORIES = {
+    "scholarships", "grants", "internships", "jobs", "training", "fellowships",
+    "other",
+}
 FAMILY = "youthopps-insait-publisher-v1"
 FAMILY_SOURCES = {"bg-insait"}
 COLLECTION_TIMEOUT = 900
@@ -658,14 +661,10 @@ def fetch_public(url):
                 state["observed_at"] = now
                 save_budget(state)
             continue
-        key = next(
-            (key for key, info in INPUTS.items() if info["url"] == url),
-            "unmapped-public-input",
-        )
         parsed = urllib.parse.urlsplit(reviewed)
         provenance = parsed.scheme + "://" + parsed.netloc + parsed.path
         raise AdapterError(
-            f"Required publisher input {key} returned HTTP {status}: "
+            f"Publisher page returned HTTP {status}: "
             + provenance,
             "fetch",
             status,
@@ -1411,318 +1410,519 @@ def publish_files(snapshot, files):
 
 
 def public_url(value):
+    """Accept public pages on the two publisher origins, including new calls."""
     try:
         parsed = urllib.parse.urlsplit(value)
-        clean = urllib.parse.urlunsplit(parsed._replace(fragment=""))
-        allowed = {info["url"] for info in INPUTS.values()} | {
-            "https://insait.ai/robots.txt", "https://explorer.insait.ai/robots.txt"
-        }
+        decoded = urllib.parse.unquote(parsed.path)
         if (
-            clean not in allowed or parsed.scheme != "https"
-            or parsed.username or parsed.password or parsed.port
+            parsed.scheme != "https"
+            or parsed.netloc not in {"insait.ai", "explorer.insait.ai"}
+            or parsed.username
+            or parsed.password
+            or parsed.port
+            or parsed.query
+            or re.search(r"[\x00-\x20\x7f\\]", value)
+            or any(part in {".", ".."} for part in decoded.split("/"))
+            or re.search(
+                r"/(?:wp-admin|wp-login\.php|wp-json|xmlrpc\.php|"
+                r"cdn-cgi|my-account|login|apply-for-post-roc)(?:/|$)",
+                decoded,
+                re.I,
+            )
         ):
             raise ValueError()
     except ValueError:
-        raise AdapterError("Unreviewed public source route", "access") from None
-    return clean
+        raise AdapterError("Invalid public publisher route", "access") from None
+    return urllib.parse.urlunsplit(parsed._replace(fragment=""))
 
 
-def html_fingerprint(body, key=None):
-    root = document_root(body.decode("utf-8", "strict"))
-    # Only these exact reviewed contact structures tolerate rotating masks.
-    contact_shapes = {
-        "explorer-faq": [
-            {
-                "tag": "a",
-                "attrs": {
-                    "href": "/cdn-cgi/l/email-protection#target:95a658ec7f1ab783c6f06689029690f4150d094c6b42b832d4aba96ad400adb4"
-                },
-                "children": [
-                    {
-                        "tag": "span",
-                        "attrs": {
-                            "style": "font-weight: 400"
-                        },
-                        "children": [
-                            {
-                                "tag": "span",
-                                "attrs": {
-                                    "class": "__cf_email__",
-                                    "data-cfemail": "target:95a658ec7f1ab783c6f06689029690f4150d094c6b42b832d4aba96ad400adb4"
-                                },
-                                "children": [
-                                    "[email\u00a0protected]"
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            },
-            {
-                "tag": "a",
-                "attrs": {
-                    "href": "/cdn-cgi/l/email-protection#target:95a658ec7f1ab783c6f06689029690f4150d094c6b42b832d4aba96ad400adb4"
-                },
-                "children": [
-                    {
-                        "tag": "span",
-                        "attrs": {
-                            "style": "font-weight: 400"
-                        },
-                        "children": [
-                            {
-                                "tag": "span",
-                                "attrs": {
-                                    "class": "__cf_email__",
-                                    "data-cfemail": "target:95a658ec7f1ab783c6f06689029690f4150d094c6b42b832d4aba96ad400adb4"
-                                },
-                                "children": [
-                                    "[email\u00a0protected]"
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
-        ],
-        "mit": [
-            {
-                "tag": "a",
-                "attrs": {
-                    "href": "/cdn-cgi/l/email-protection#target:c5128c36a566838a870b0e98e091930ea1f554b6f144e5e68c0f0f14f72b1cf7",
-                    "target": "_blank",
-                    "rel": "noreferrer noopener"
-                },
-                "children": [
-                    {
-                        "tag": "span",
-                        "attrs": {
-                            "class": "__cf_email__",
-                            "data-cfemail": "target:c5128c36a566838a870b0e98e091930ea1f554b6f144e5e68c0f0f14f72b1cf7"
-                        },
-                        "children": [
-                            "[email\u00a0protected]"
-                        ]
-                    }
-                ]
-            }
-        ],
-        "postdoc": [
-            {
-                "tag": "a",
-                "attrs": {
-                    "href": "/cdn-cgi/l/email-protection#target:c5128c36a566838a870b0e98e091930ea1f554b6f144e5e68c0f0f14f72b1cf7"
-                },
-                "children": [
-                    {
-                        "tag": "span",
-                        "attrs": {
-                            "class": "__cf_email__",
-                            "data-cfemail": "target:c5128c36a566838a870b0e98e091930ea1f554b6f144e5e68c0f0f14f72b1cf7"
-                        },
-                        "children": [
-                            "[email\u00a0protected]"
-                        ]
-                    }
-                ]
-            }
-        ],
-        "summer-research": [
-            {
-                "tag": "a",
-                "attrs": {
-                    "href": "/cdn-cgi/l/email-protection#target:bf012002a335de3e54b0304d92a821cf5d753910dad3a9690cc4af5c8d237703",
-                    "target": "_blank",
-                    "rel": "noreferrer noopener"
-                },
-                "children": [
-                    {
-                        "tag": "span",
-                        "attrs": {
-                            "class": "__cf_email__",
-                            "data-cfemail": "target:c5128c36a566838a870b0e98e091930ea1f554b6f144e5e68c0f0f14f72b1cf7"
-                        },
-                        "children": [
-                            "[email\u00a0protected]"
-                        ]
-                    }
-                ]
-            }
-        ],
-        "surf": [
-            {
-                "tag": "a",
-                "attrs": {
-                    "href": "/cdn-cgi/l/email-protection#target:bf012002a335de3e54b0304d92a821cf5d753910dad3a9690cc4af5c8d237703",
-                    "target": "_blank",
-                    "rel": "noreferrer noopener"
-                },
-                "children": [
-                    {
-                        "tag": "span",
-                        "attrs": {
-                            "class": "__cf_email__",
-                            "data-cfemail": "target:bf012002a335de3e54b0304d92a821cf5d753910dad3a9690cc4af5c8d237703"
-                        },
-                        "children": [
-                            "[email\u00a0protected]"
-                        ]
-                    }
-                ]
-            }
-        ]
-    }
-    contact_nodes = {}
-    if key in contact_shapes:
-        def contact_digest(value):
-            if not isinstance(value, str) or not re.fullmatch(
-                r"[0-9a-f]{4,256}", value
-            ) or len(value) % 2:
-                raise AdapterError("Changed reviewed contact encoding: " + key, "parse")
-            encoded = bytes.fromhex(value)
-            try:
-                decoded = bytes(char ^ encoded[0] for char in encoded[1:])
-                decoded.decode("utf-8", "strict")
-            except UnicodeError:
-                raise AdapterError("Invalid reviewed contact encoding: " + key, "parse") from None
-            return hashlib.sha256(decoded).hexdigest()
-
-        def contact_structure(node):
-            if isinstance(node, str):
-                return node
-            attributes = dict(node.attrs)
-            if node.tag == "a":
-                match = re.fullmatch(
-                    r"/cdn-cgi/l/email-protection#([0-9a-f]{4,256})",
-                    attributes.get("href", ""),
-                )
-                if not match:
-                    raise AdapterError("Changed reviewed contact route: " + key, "parse")
-                attributes["href"] = "/cdn-cgi/l/email-protection#target:" + contact_digest(match[1])
-            if "data-cfemail" in attributes:
-                attributes["data-cfemail"] = "target:" + contact_digest(attributes["data-cfemail"])
-            return {
-                "tag": node.tag, "attrs": attributes,
-                "children": [contact_structure(child) for child in node.children],
-            }
-
-        protected = [
-            node for node in nodes(root, "span")
-            if "data-cfemail" in node.attrs
-            or node.attrs.get("class") == "__cf_email__"
-        ]
-        anchors = [
-            node for node in nodes(root, "a")
-            if "email-protection#" in node.attrs.get("href", "")
-            or any(span in protected for span in nodes(node, "span"))
-        ]
-        expected = contact_shapes[key]
-        if len(anchors) != len(expected) or len(protected) != len(expected):
-            raise AdapterError("Changed reviewed contact count: " + key, "parse")
-        actual = [contact_structure(node) for node in anchors]
-        if actual != expected:
-            raise AdapterError("Changed reviewed contact target or structure: " + key, "parse")
-        contact_nodes = {
-            node: ("reviewed-faq-contact:" + shape["attrs"]["href"].split("target:")[1]
-                   if key == "explorer-faq" else shape["attrs"]["href"])
-            for node, shape in zip(anchors, actual)
-        }
-    links = sorted({
-        (node.tag, node.attrs.get("rel", ""), contact_nodes.get(node, node.attrs["href"]))
-        for tag in ("a", "link") for node in nodes(root, tag)
-        if node.attrs.get("href")
-    })
-    facts = json.dumps({"text": root.text(), "links": links},
-                       ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(facts.encode()).hexdigest()
-
-
-def xml_fingerprint(body):
-    try:
-        root = ET.fromstring(body)
-        namespace = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
-        if root.tag not in {namespace + "sitemapindex", namespace + "urlset"}:
-            raise ValueError()
-        locations = [child.find(namespace + "loc").text for child in root]
-        if not locations or not all(
-            isinstance(value, str) and value.startswith("https://")
-            for value in locations
-        ):
-            raise ValueError()
-    except (ET.ParseError, AttributeError, ValueError):
-        raise AdapterError("Invalid publisher sitemap frontier", "parse") from None
-    facts = json.dumps({"root": root.tag, "locations": locations},
-                       separators=(",", ":"))
-    return hashlib.sha256(facts.encode()).hexdigest()
-
-def read_input(key):
-    info = INPUTS[key]
-    try:
-        status, headers, body = fetch_public(info["url"])
-    except AdapterError as error:
-        raise AdapterError(
-            "Required publisher input " + key + ": " + safe_error(error),
-            error.stage,
-            error.status,
-        ) from None
-    if info["format"] == "html":
-        digest = html_fingerprint(body, key)
-    elif info["format"] == "xml":
-        digest = xml_fingerprint(body)
-    else:
-        if info["format"] == "pdf" and not body.startswith(b"%PDF-"):
-            raise AdapterError("Invalid material document: " + key, "parse")
-        digest = hashlib.sha256(body).hexdigest()
-    if digest != info["sha256"]:
-        raise AdapterError(
-            "Reviewed source facts/frontier changed: " + key, "parse"
+def opportunity_route(url):
+    """Select programme and call routes, excluding people and result stories."""
+    parsed = urllib.parse.urlsplit(url)
+    path = urllib.parse.unquote(parsed.path).lower()
+    if parsed.hostname == "explorer.insait.ai" and path == "/":
+        return True
+    path = re.sub(r"^/bg/", "/", path)
+    if re.search(
+        r"current-faculty|phd-post-docs|graduate-research-fellows|"
+        r"surfers|research-fellows-\d|program-class|/category/|"
+        r"selected|accepted|full-swing|record-interest|joins-insait|"
+        r"applicants-for|positions-bulgaria|/apply-for-",
+        path,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"^/(?:surf|phd|faculty|post-doc-at-insait|mit)/$|"
+            r"scholarship|internship|fellowship|research-program|"
+            r"(?:open|launch|call|recruit).*(?:application|program|position)|"
+            r"(?:non-academic|staff)-positions?|"
+            r"(?:кандидатств|прием|стипенди|стажант|набира).*(?:програм|20\d{2})|"
+            r"(?:нова|нови).*(?:програм|стипенди)|"
+            r"(?:програм|стипенди).*(?:кандидатств|прием)",
+            path,
         )
-    return digest
+    )
+
+
+def page_document(url):
+    status, headers, body = fetch_public(url)
+    mime = headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+    if status != 200 or mime not in {"text/html", "application/xhtml+xml"}:
+        raise AdapterError("Invalid programme document: " + url, "parse")
+    root = document_root(body.decode("utf-8", "strict"))
+    main = one(nodes(root, "main"), "publisher main content")
+    if not main.text():
+        raise AdapterError("Empty publisher content: " + url, "parse")
+    return root, main
+
+
+def sitemap_routes():
+    """Follow all advertised sitemap pages; never publish a truncated frontier."""
+    pending = [
+        "https://insait.ai/sitemap_index.xml",
+        "https://explorer.insait.ai/sitemap_index.xml",
+    ]
+    seen, routes = set(), set()
+    namespace = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+    while pending:
+        url = pending.pop(0)
+        if url in seen:
+            continue
+        if len(seen) >= 64:
+            raise AdapterError("Publisher sitemap limit exceeded", "parse")
+        seen.add(url)
+        _, _, body = fetch_public(public_url(url))
+        try:
+            root = ET.fromstring(body)
+        except ET.ParseError:
+            raise AdapterError(
+                "Invalid publisher sitemap: " + url, "parse"
+            ) from None
+        if root.tag == namespace + "sitemapindex":
+            entries = root.findall(namespace + "sitemap")
+            tag = "index"
+        elif root.tag == namespace + "urlset":
+            entries = root.findall(namespace + "url")
+            tag = "pages"
+        else:
+            raise AdapterError("Unknown publisher sitemap format", "parse")
+        for entry in entries:
+            location = entry.find(namespace + "loc")
+            if location is None or not location.text:
+                raise AdapterError("Missing sitemap destination", "parse")
+            destination = location.text.strip()
+            if tag == "index":
+                destination = public_url(destination)
+                if not urllib.parse.urlsplit(destination).path.endswith(".xml"):
+                    raise AdapterError("Invalid child sitemap route", "parse")
+                pending.append(destination)
+            else:
+                parsed = urllib.parse.urlsplit(destination)
+                if parsed.scheme != "https" or parsed.netloc not in {
+                    "insait.ai",
+                    "explorer.insait.ai",
+                }:
+                    raise AdapterError(
+                        "Foreign publisher sitemap entry", "parse"
+                    )
+                if opportunity_route(destination):
+                    routes.add(public_url(destination))
+                if len(routes) > 50000:
+                    raise AdapterError(
+                        "Publisher route limit exceeded", "parse"
+                    )
+    if not routes:
+        raise AdapterError("Empty publisher sitemap inventory", "parse")
+    return routes
 
 
 def read_pages():
-    return {key: read_input(key) for key in INPUTS}
+    pages = {}
+    hub_url = "https://insait.ai/join-insait/"
+    hub, _ = page_document(hub_url)
+    candidates = {url for url in sitemap_routes() if opportunity_route(url)}
+    # The navigation includes programmes omitted from the publisher's sitemap.
+    for node in nodes(hub, "a"):
+        href = urllib.parse.urljoin(hub_url, node.attrs.get("href", ""))
+        if urllib.parse.urlsplit(href).hostname not in {
+            "insait.ai",
+            "explorer.insait.ai",
+        }:
+            continue
+        if opportunity_route(href):
+            candidates.add(public_url(href))
+    if not candidates or len(candidates) > 100:
+        raise AdapterError("Invalid programme discovery count", "parse")
+    pending, seen, aliases = sorted(candidates), set(), {}
+    while pending:
+        url = pending.pop(0)
+        if url in seen:
+            continue
+        if len(seen) >= 100:
+            raise AdapterError("Programme traversal limit exceeded", "parse")
+        seen.add(url)
+        root, main = page_document(url)
+        english = {
+            public_url(node.attrs.get("href", ""))
+            for node in nodes(root, "link")
+            if node.attrs.get("rel") == "alternate"
+            and node.attrs.get("hreflang", "").lower() == "en"
+        }
+        if len(english) > 1:
+            raise AdapterError(
+                "Ambiguous English programme alternative", "parse"
+            )
+        if english and url not in english:
+            aliases[url] = next(iter(english))
+            pending.extend(sorted(english - seen))
+            continue
+        pages[url] = (root, main)
+    if any(target not in pages for target in aliases.values()):
+        raise AdapterError("Unresolved programme language alternative", "parse")
+    return pages
+
+
+def programme_title(root, main):
+    titles = list(
+        dict.fromkeys(n.text() for n in nodes(main, "h1") if n.text())
+    )
+    if len(titles) == 1:
+        return titles[0]
+    metadata = [
+        n.attrs.get("content", "").strip()
+        for n in nodes(root, "meta")
+        if n.attrs.get("property") == "og:title"
+    ]
+    if len(metadata) == 1 and metadata[0]:
+        return re.sub(r"\s+[|–-]\s+(?:INSAIT|EXPLORER)$", "", metadata[0])
+    raise AdapterError("Missing unambiguous programme title", "parse")
+
+
+def published_time(root):
+    values = [
+        n.attrs.get("content")
+        for n in nodes(root, "meta")
+        if n.attrs.get("property") == "article:published_time"
+    ]
+    if not values:
+        return None
+    try:
+        result = datetime.fromisoformat(values[0].replace("Z", "+00:00"))
+        if result.tzinfo is None:
+            raise ValueError()
+        return (
+            result.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+    except (ValueError, AttributeError):
+        raise AdapterError(
+            "Invalid publisher publication date", "parse"
+        ) from None
+
+
+def application_deadlines(main):
+    """Read all explicitly dated closings without guessing a year or round."""
+    month_names = (
+        "january february march april may june july august september "
+        "october november december"
+    ).split()
+    month_pattern = (
+        r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+        r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|"
+        r"Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?"
+    )
+    dates = set()
+    for node in main.walk():
+        if node.tag not in {"tr", "p", "li"}:
+            continue
+        for clause in re.split(r"[.!?;]\s+(?=[A-Z])", node.text()):
+            marker = re.search(
+                r"application (?:window|deadlines?)|"
+                r"applications?\b[^.!?;]{0,60}?\b(?:close|until|by|open from)|"
+                r"deadline\s+(?:for|to)\s+(?:applications?|apply)|"
+                r"apply\s+(?:by|until|before)|closing date",
+                clause,
+                re.I,
+            )
+            if marker is None:
+                continue
+            text = clause[marker.end() :]
+            dates.update(closing_dates(text, month_pattern, month_names))
+    return dates
+
+
+def application_deadline(main):
+    """Represent a single unambiguous closing in the public deadline field."""
+    dates = application_deadlines(main)
+    return next(iter(dates)) if len(dates) == 1 else None
+
+
+def closing_dates(text, month_pattern, month_names):
+    """Resolve a dated closing clause, retaining distinct-round ambiguity."""
+    matches = list(
+        re.finditer(
+            rf"\b({month_pattern})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?"
+            r",?\s+(20\d{2})\b",
+            text,
+            re.I,
+        )
+    )
+    matches += list(
+        re.finditer(
+            rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+({month_pattern})"
+            r",?\s+(20\d{2})\b",
+            text,
+            re.I,
+        )
+    )
+    matches.sort(key=lambda item: item.start())
+    if len(matches) == 2 and re.fullmatch(
+        r"\s*(?:to|through|until|[–—-])\s*",
+        text[matches[0].end() : matches[1].start()],
+        re.I,
+    ):
+        matches = matches[1:]
+    dates = set()
+    for match in matches:
+        first, second, year = match.groups()
+        month, day = (second, first) if first.isdigit() else (first, second)
+        month_number = next(
+            index
+            for index, name in enumerate(month_names, 1)
+            if name.startswith(month.lower().rstrip(".")[:3])
+        )
+        try:
+            closing = datetime(int(year), month_number, int(day))
+        except ValueError:
+            raise AdapterError(
+                "Invalid application closing date", "parse"
+            ) from None
+        clock = re.match(
+            r"\s*,?\s*(?:at\s+)?\(?(\d{1,2}):(\d{2})\s*(EET|EEST|UTC)\b",
+            text[match.end() :],
+            re.I,
+        )
+        if clock:
+            hour, minute, zone = clock.groups()
+            offset = {"EET": 2, "EEST": 3, "UTC": 0}[zone.upper()]
+            try:
+                closing = closing.replace(
+                    hour=int(hour),
+                    minute=int(minute),
+                    tzinfo=timezone(timedelta(hours=offset)),
+                )
+            except ValueError:
+                raise AdapterError(
+                    "Invalid application closing time", "parse"
+                ) from None
+            dates.add(
+                closing.astimezone(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+        else:
+            dates.add(closing.date().isoformat())
+    return dates
+
+
+def programme_summary(main, title):
+    """Use a short current factual excerpt, excluding navigation and testimonials."""
+    blocks = []
+    for node in main.walk():
+        if node.tag in {"p", "li", "tr", "h2", "h3"}:
+            text = node.text()
+            if (
+                len(text) >= 30
+                and text != title
+                and not text.startswith(("“", "„", '"'))
+                and not re.search(
+                    r"email protected|cookies|copyright", text, re.I
+                )
+                and re.search(
+                    r"application|eligible|stipend|scholarship|fellowship|"
+                    r"candidates|program|research|прием|кандидат|стипенд|програма",
+                    text,
+                    re.I,
+                )
+            ):
+                blocks.append(text)
+    blocks = list(dict.fromkeys(blocks))
+    blocks.sort(
+        key=lambda text: not bool(
+            re.search(
+                r"application (?:window|deadline)|applications?\b.{0,60}\b(?:from|by).{0,15}\d|"
+                r"\beligib|\b(?:stipend|scholarship|fellowship)s?\b.{0,50}\d|"
+                r"прием\s+20\d{2}|стипендия.{0,50}\d",
+                text,
+                re.I,
+            )
+        )
+    )
+    text = " ".join(blocks) or main.text().removeprefix(title).strip()
+    upcoming = re.search(
+        r"прием\s+20\d{2}[/–-](?:20)?\d{2}\s*[–-]?\s*очаквайте скоро[!]?",
+        main.text(),
+        re.I,
+    )
+    if upcoming:
+        text = upcoming[0] + " " + text
+    text = text.replace("<", "").replace(">", "")
+    if len(text.encode("utf-16-le")) // 2 > 600:
+        text = text.encode("utf-16-le")[:1194].decode("utf-16-le", "ignore")
+        text = text.rsplit(" ", 1)[0].rstrip(" ,;:") + "..."
+    return text
+
+
+def record_identity(url, title, text):
+    """Retain published identities for established programmes and their editions."""
+    suffixes = {
+        "/faculty/": "faculty|tenure-track-and-tenured",
+        "/post-doc-at-insait/": "postdoc|rolling",
+        "/phd/": "PhD|rolling",
+        "/mit/": "MIT-CSAIL|yearless-programme",
+        "/deepmind-phd-scholarships/": "DeepMind|ML-AI-PhD",
+    }
+    path = urllib.parse.urlsplit(url).path
+    if url.startswith("https://insait.ai/") and path in suffixes:
+        return url + "|" + suffixes[path]
+    if path == "/surf/":
+        year = re.search(r"\b20\d{2}\b", title)
+        return url + "|SURF|" + (year[0] if year else "undated")
+    if path == "/summer-ai-research-program-for-students/":
+        year = re.search(r"\bsummer\s+(?:of\s+)?(20\d{2})\b", text, re.I)
+        return (
+            url
+            + "|STARS|"
+            + (year[1] + "-historical-overview" if year else "undated")
+        )
+    if url == "https://explorer.insait.ai/":
+        year = re.search(r"прием\s+(20\d{2})[/–-](?:20)?(\d{2})", text, re.I)
+        return (
+            url
+            + "|EXPLORER|"
+            + (
+                year[1] + "-" + year[2] + "-upcoming-overview"
+                if year
+                else "undated"
+            )
+        )
+    if "explorer" in title.lower():
+        year = re.search(r"\b20\d{2}\b", title)
+        if year:
+            return url + "|EXPLORER|" + year[0] + "-call"
+    return url
 
 
 def parse_inventory(pages):
-    if set(pages) != set(INPUTS) or any(
-        pages[key] != info["sha256"] for key, info in INPUTS.items()
-    ):
-        raise AdapterError("Incomplete reviewed programme frontier", "parse")
+    if not pages:
+        raise AdapterError("Empty programme discovery result", "parse")
     records = []
-    now = datetime.now(timezone.utc)
-    for profile in PROFILES:
-        record = make_record(
-            profile["title"],
-            profile["url"],
-            [profile["category"]],
-            kind=profile["kind"],
-            host_countries=profile["hosts"],
-            evidence=[ATTRIBUTION, profile["proof"]],
+    current_surf = pages.get("https://insait.ai/surf/")
+    surf_title = programme_title(*current_surf) if current_surf else ""
+    for url, (root, main) in pages.items():
+        title = programme_title(root, main)
+        text = main.text()
+        if re.search(
+            r"no (?:open|available) positions|нямаме отворени позиции",
+            text,
+            re.I,
+        ):
+            continue
+        closings = application_deadlines(main)
+        deadline = next(iter(closings)) if len(closings) == 1 else None
+        is_news = any(
+            node.attrs.get("property") == "article:section"
+            and node.attrs.get("content", "").lower() in {"news", "новини"}
+            for node in nodes(root, "meta")
         )
+        if (
+            is_news
+            and not closings
+            and not re.search(
+                r"call for applications|apply now|accepting applications|"
+                r"applications\b[^.!?]{0,40}\bopen|"
+                r"кандидатстването\b[^.!?]{0,40}(?:започ|отвор)|"
+                r"прием\b[^.!?]{0,40}(?:открит|започ)|кандидатствайте",
+                text,
+                re.I,
+            )
+        ):
+            # Programme publicity and recipient stories are not separate calls.
+            continue
+        # Programme news corroborates the same SURF edition, not a second call.
+        if url != "https://insait.ai/surf/" and "surf" in title.lower():
+            edition = re.search(r"\b20\d{2}\b", title)
+            if edition and edition[0] in surf_title:
+                continue
+        lower = (
+            title + " " + urllib.parse.unquote(urllib.parse.urlsplit(url).path)
+        ).lower()
+        if re.search(r"postdoc|post-doc|faculty|position|позици", lower):
+            category = "jobs"
+        elif re.search(r"scholarship|phd|doctoral|explorer|стипенд", lower):
+            category = "scholarships"
+        elif re.search(r"summer|internship|surf", lower):
+            category = "internships"
+        elif re.search(r"fellowship|research program", lower):
+            category = "fellowships"
+        else:
+            category = "other"
+        hosts = []
+        if re.search(r"\bSofia\b|\bBulgaria\b|София|България", text):
+            hosts = ["BG"]
+        if urllib.parse.urlsplit(url).path == "/mit/" and "MIT CSAIL" in text:
+            hosts = ["US"]
+        upcoming = bool(re.search(r"coming soon|очаквайте скоро", text, re.I))
+        record = make_record(
+            title,
+            url,
+            [category],
+            kind="programme-overview" if upcoming else "opportunity",
+            published_at=published_time(root),
+            host_countries=hosts,
+            method="publisher-html",
+            evidence=[ATTRIBUTION, "Current programme content: " + url],
+        )
+        identity = record_identity(url, title, text)
         record["id"] = hashlib.sha256(
-            (SOURCE_ID + "|" + profile["key"]).encode()
+            (SOURCE_ID + "|" + identity).encode()
         ).hexdigest()[:24]
-        record["summary"] = profile["summary"]
-        record["deadline"] = profile["deadline"]
-        record["language"] = profile.get("language", LANGUAGE)
-        record["eligible_countries"] = profile.get("eligible_countries", [])
-        deadline = profile["deadline"]
-        if deadline is not None:
-            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+        record["language"] = "bg" if re.search(r"[А-Яа-я]", title) else LANGUAGE
+        record["summary"] = programme_summary(main, title)
+        if len(closings) > 1:
+            record["classification"]["evidence"].append(
+                "Multiple published application closings: "
+                + ", ".join(sorted(closings))
+            )
+        record["deadline"] = deadline
+        if not record["deadline"] and re.search(r"research program", lower):
+            record["kind"] = "programme-overview"
+        if upcoming:
+            record["deadline"] = None
+        elif record["deadline"]:
+            deadline = record["deadline"]
+            now = datetime.now(timezone.utc)
+            if len(deadline) == 10:
+                today = now.date().isoformat()
                 record["status"] = (
-                    "expired" if now.date().isoformat() > deadline
-                    else "open" if now.date().isoformat() < deadline else "unknown"
+                    "expired"
+                    if today > deadline
+                    else "open" if today < deadline else "unknown"
                 )
             else:
-                closing = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+                closing = datetime.fromisoformat(
+                    deadline.replace("Z", "+00:00")
+                )
                 record["status"] = "expired" if now > closing else "open"
+        elif re.search(
+            r"applications? (?:are |is )?(?:now )?closed|"
+            r"application (?:window|period) (?:has )?closed",
+            text,
+            re.I,
+        ):
+            record["status"] = "expired"
         records.append(record)
     validate_records(records)
-    if len(records) != 9:
-        raise AdapterError(
-            "Incomplete reviewed identity partition", "validate"
-        )
     return records
 
 
@@ -1955,240 +2155,6 @@ def main():
     except PhaseExpired:
         return 1
 
-
-INPUTS = {'assigned-surf-news': {'url': 'https://insait.ai/insait-opens-applications-for-surf-2026-summer-research-internship-program/',
-                        'format': 'html',
-                        'sha256': '768dbf4b7937dc9f2a440456a515c0d1b5b16d87bb0280d217e116c5d9511b84'},
- 'category-sitemap': {'url': 'https://insait.ai/category-sitemap.xml',
-                      'format': 'xml',
-                      'sha256': 'add840347f9a81890e8794b237122d26b2c074bb851459aab99cb58da8884e51'},
- 'deepmind': {'url': 'https://insait.ai/deepmind-phd-scholarships/',
-              'format': 'html',
-              'sha256': '9271fcb2915b3922f296acc4ffaf7cb1c50baa2653371680774738213519e549'},
- 'explorer': {'url': 'https://explorer.insait.ai/',
-              'format': 'html',
-              'sha256': '5da480ca787e7838eec7c498aa30fa9389711975c1057a84d04d5bf34fa39ae2'},
- 'explorer-apply': {'url': 'https://explorer.insait.ai/kandidatstvane/',
-                    'format': 'html',
-                    'sha256': '13a154313febbdbc180e1a8ca2ab635d36bc57df073a74648846508710f0b0ce'},
- 'explorer-category-sitemap': {'url': 'https://explorer.insait.ai/category-sitemap.xml',
-                               'format': 'xml',
-                               'sha256': '8a796ef9b42151039d1c6c659973389261b5f84b397a65c4fcec3e9916373054'},
- 'explorer-faq': {'url': 'https://explorer.insait.ai/vuprosi-i-otgovori/',
-                  'format': 'html',
-                  'sha256': 'b3f963ac32c5035fe7efe6ea68620b8b74227cd2a38f3fc9c4d044da80f6fed9'},
- 'explorer-page-sitemap': {'url': 'https://explorer.insait.ai/page-sitemap.xml',
-                           'format': 'xml',
-                           'sha256': '3706be5d3deddaa29a35a3d8962eaa2b248dd11624128f42bee7b1de3db80d74'},
- 'explorer-post-sitemap': {'url': 'https://explorer.insait.ai/post-sitemap.xml',
-                           'format': 'xml',
-                           'sha256': 'c70d3f8ede38acf447fd44606d3343865747e2f8413297791e2551b5d378c760'},
- 'explorer-sitemap': {'url': 'https://explorer.insait.ai/sitemap_index.xml',
-                      'format': 'xml',
-                      'sha256': '9f0105e864329ad3565dcd4fc69f48c626ddb044cc8fa65bf8391db4dc364b02'},
- 'explorer2026-news': {'url': 'https://insait.ai/with-over-1000000-bgn-in-donations-insait-launches-explorer-2026-a-unique-ai-and-deep-tech-bachelor-program/',
-                       'format': 'html',
-                       'sha256': '3adfaf22d37d28d18d967362445e0ff0fc0bc431c2fbf36914ee1b610218cab4'},
- 'faculty-call': {'url': 'https://insait.ai/faculty/',
-                  'format': 'html',
-                  'sha256': '46991d23056d6b58b158898ea4ffcebd85773f771badd626ca7da6bd8f0927cc'},
- 'join': {'url': 'https://insait.ai/join-insait/',
-          'format': 'html',
-          'sha256': '894db7dcc72ca351600f272a54e0582a504c1a5e53a9b3743fad59a46e39b73f'},
- 'mit': {'url': 'https://insait.ai/mit/',
-         'format': 'html',
-         'sha256': 'a625b43861cb791c4255202feee31608b2b6256317340f1e724499f95603e57e'},
- 'nonacademic-bg': {'url': 'https://insait.ai/bg/non-academic-position-at-insait/',
-                    'format': 'html',
-                    'sha256': '46fd308334c459143a1bac9bd4eeb7b31adaef237467ddf270eccfe51f185126'},
- 'page-sitemap1': {'url': 'https://insait.ai/page-sitemap1.xml',
-                   'format': 'xml',
-                   'sha256': '8b9f7bbc33ded4134d350d57aefabdbdc86b9831747483a91ac03c4102b10d9e'},
- 'page-sitemap2': {'url': 'https://insait.ai/page-sitemap2.xml',
-                   'format': 'xml',
-                   'sha256': '1189819c6efa0108bcca6ef568e81eff5237bface8855206e675a06bfee29302'},
- 'phd': {'url': 'https://insait.ai/phd/',
-         'format': 'html',
-         'sha256': '0d88082461ab52e1586b1c46585f815a300dd1047f2396fa4ef2ecdec9bc8ab5'},
- 'phd-bg': {'url': 'https://insait.ai/bg/phd/',
-            'format': 'html',
-            'sha256': '80fa9dd447791e44b1e465c25b12b6ba31793f3765395016638a5f1df4249c77'},
- 'phd-faq-bg': {'url': 'https://insait.ai/bg/phd-program-frequently-asked-questions/',
-                'format': 'html',
-                'sha256': 'd9e93e4bb8c385c3fb9030bc702d855658ab8a2be71e5dc4cd8dca3ca7504f6c'},
- 'post-sitemap': {'url': 'https://insait.ai/post-sitemap.xml',
-                  'format': 'xml',
-                  'sha256': '7259a4a1ee40bc9bd5a07ff305e06be58f87de10e8ac5b3bce6c6ebe05a3b7c5'},
- 'postdoc': {'url': 'https://insait.ai/post-doc-at-insait/',
-             'format': 'html',
-             'sha256': 'edeb41b26ff1b4ac6cc3904e797549047d0c666d3383f0dcbe81179c83821692'},
- 'sitemap': {'url': 'https://insait.ai/sitemap_index.xml',
-             'format': 'xml',
-             'sha256': '21ba9cf8265a92c29faae18f89b58a97ad68ad39c776d7fdec4a698a8e20d5e0'},
- 'staff-positions-bg': {'url': 'https://insait.ai/bg/staff-positions-at-insait/',
-                        'format': 'html',
-                        'sha256': '377e519ec801acc49760157cb62373bd1cb88caf02feb94da53562dfbfff148a'},
- 'summer-research': {'url': 'https://insait.ai/summer-ai-research-program-for-students/',
-                     'format': 'html',
-                     'sha256': '69f677ca50d3bd85a24e0762868d3a2bc7053921dae5b9b536ccd3f8337f0b34'},
- 'surf': {'url': 'https://insait.ai/surf/',
-          'format': 'html',
-          'sha256': 'cd1ee150f2f77715727d5c49d299d117e73c6aa23a378796dbb2af2766681579'},
- 'tenure-regulations': {'url': 'https://insait.ai/wp-content/uploads/2023/09/Tenure-Track-Regulations.pdf',
-                        'format': 'pdf',
-                        'sha256': 'ecc4e3f6102e7a162e0ae6e5a3423e48191f6a60d171e4e7f9c979144ad494f8'}}
-
-PROFILES = [{'key': 'https://insait.ai/surf/|SURF|2026',
-  'title': 'Summer Undergraduate Research Fellowship 2026',
-  'url': 'https://insait.ai/surf/',
-  'language': 'en',
-  'kind': 'opportunity',
-  'category': 'internships',
-  'hosts': ['BG'],
-  'deadline': '2026-03-08T21:59:00.000Z',
-  'summary': 'Onsite Sofia research, 8–12 weeks in summer 2026; no remote. STEM '
-             'bachelor students at any accredited university, GPA≥3.5/4 or equivalent; '
-             'first-years and spring graduates eligible, no local preference. €1,500 '
-             'MONTHLY plus arranged/paid accommodation and travel; visa assistance. '
-             'Closing March 8,2026 23:59 EET (=21:59 UTC), now historical. Projects '
-             'approximately June 1–August 31,2026.',
-  'proof': 'Published programme facts: https://insait.ai/surf/ '
-           'https://insait.ai/insait-opens-applications-for-surf-2026-summer-research-internship-program/'},
- {'key': 'https://insait.ai/faculty/|faculty|tenure-track-and-tenured',
-  'title': 'Faculty at INSAIT',
-  'url': 'https://insait.ai/faculty/',
-  'language': 'en',
-  'kind': 'opportunity',
-  'category': 'jobs',
-  'hosts': ['BG'],
-  'deadline': None,
-  'summary': 'Faculty research positions: junior tenure track and established tenured '
-             'researchers. Tenure-track contracts start at 2 years, renewed for 3; '
-             'positive final evaluation is required but does NOT oblige INSAIT to '
-             'offer a permanent contract. Outside commercial work requires prior '
-             'written permission. International-comparable salary/package, amount '
-             'unknown. Develop research and supervise students; closing and detailed '
-             'applicant degree criteria not published here.',
-  'proof': 'Published programme facts: https://insait.ai/faculty/ '
-           'https://insait.ai/wp-content/uploads/2023/09/Tenure-Track-Regulations.pdf'},
- {'key': 'https://insait.ai/post-doc-at-insait/|postdoc|rolling',
-  'title': 'Postdoc at INSAIT',
-  'url': 'https://insait.ai/post-doc-at-insait/',
-  'language': 'en',
-  'kind': 'opportunity',
-  'category': 'jobs',
-  'hosts': ['BG'],
-  'deadline': None,
-  'summary': 'Rolling applications for AI/computer-science postdoctoral research. PhD '
-             'in CS, data science, mathematics, physics, statistics or electrical '
-             'engineering must be completed by job start; finishing candidates may '
-             'apply. Strong academic background; research statement, CV, degrees and '
-             'at least 2 references, documents in English/PDF. Applicants receive a '
-             'response within 2 months. Salary amount not stated.',
-  'proof': 'Published programme facts: https://insait.ai/post-doc-at-insait/'},
- {'key': 'https://insait.ai/phd/|PhD|rolling',
-  'title': 'PhD at INSAIT',
-  'url': 'https://insait.ai/phd/',
-  'language': 'en',
-  'kind': 'opportunity',
-  'category': 'scholarships',
-  'hosts': ['BG'],
-  'deadline': None,
-  'summary': 'Rolling full-time PhD at INSAIT/Sofia University; BA/MA completed by '
-             'start. CS, data science, mathematics, physics, statistics and electrical '
-             'engineering preferred, not exclusive. EN/BG programme: €39,684 '
-             'gross/year; undated BG FAQ: €36,000 gross/year—confirm amount. Up to 5 '
-             'years; BA-only entrants complete a master in first 2 supported years. '
-             'International applicants welcome; English working language, strong '
-             'English and English documents. No outside jobs; external-adviser visits '
-             'funded, destinations not fixed.',
-  'proof': 'Published programme facts: https://insait.ai/phd/ '
-           'https://insait.ai/bg/phd/ '
-           'https://insait.ai/bg/phd-program-frequently-asked-questions/'},
- {'key': 'https://insait.ai/mit/|MIT-CSAIL|yearless-programme',
-  'title': 'INSAIT and MIT CSAIL Joint Research Program',
-  'url': 'https://insait.ai/mit/',
-  'language': 'en',
-  'kind': 'programme-overview',
-  'category': 'fellowships',
-  'hosts': ['US'],
-  'deadline': None,
-  'summary': 'One-year physical research specialisation at MIT CSAIL for holders of an '
-             'INSAIT tenure-track-position OFFER. Selected candidates will be employed '
-             'by INSAIT, which pays salary, benefits and health insurance during the '
-             'US stay; amount unknown. Initial cycle supports up to 6 participants. '
-             'Yearly applications by April 30, with no year specified. Faculty '
-             'proposals by May 31; joint selection by July 31.',
-  'proof': 'Published programme facts: https://insait.ai/mit/ '
-           'https://insait.ai/wp-content/uploads/2023/09/Tenure-Track-Regulations.pdf'},
- {'key': 'https://insait.ai/deepmind-phd-scholarships/|DeepMind|ML-AI-PhD',
-  'title': 'DeepMind PhD Scholarships at INSAIT',
-  'url': 'https://insait.ai/deepmind-phd-scholarships/',
-  'language': 'en',
-  'kind': 'opportunity',
-  'category': 'scholarships',
-  'hosts': ['BG'],
-  'deadline': None,
-  'summary': 'Distinct DeepMind-supported ML/AI doctoral scholarship with mentoring. '
-             'Applicants must ordinarily RESIDE in an EU member state AND identify '
-             'with the underrepresented group female; this is not an EU-passport rule. '
-             'Eligible INSAIT PhD applicants with an ML/AI research proposal are '
-             'automatically considered. Scholarship amount, period and closing are not '
-             'stated.',
-  'proof': 'Published programme facts: https://insait.ai/deepmind-phd-scholarships/ '
-           'https://insait.ai/phd/'},
- {'key': 'https://insait.ai/summer-ai-research-program-for-students/|STARS|2024-historical-overview',
-  'title': 'Summer AI Research Program for Students',
-  'url': 'https://insait.ai/summer-ai-research-program-for-students/',
-  'language': 'en',
-  'kind': 'programme-overview',
-  'category': 'internships',
-  'hosts': ['BG'],
-  'deadline': None,
-  'summary': 'Historical summer 2024 STARS research programme. Grades 10–11 students '
-             'at accredited institutions;8 weeks IN PERSON at Sofia Tech Park with '
-             'INSAIT mentors, project plan/report/presentation. Selected students '
-             'receive 1,500 BGN MONTHLY; other support unknown. The planned '
-             'application window was early 2024; exact closing not published. Current '
-             'availability unconfirmed.',
-  'proof': 'Published programme facts: '
-           'https://insait.ai/summer-ai-research-program-for-students/'},
- {'key': 'https://insait.ai/with-over-1000000-bgn-in-donations-insait-launches-explorer-2026-a-unique-ai-and-deep-tech-bachelor-program/|EXPLORER|2026-call',
-  'title': 'With Over 1,000,000 BGN in Donations, INSAIT Launches EXPLORER 2026 – a '
-           'unique AI and Deep Tech bachelor program',
-  'url': 'https://insait.ai/with-over-1000000-bgn-in-donations-insait-launches-explorer-2026-a-unique-ai-and-deep-tech-bachelor-program/',
-  'language': 'en',
-  'kind': 'opportunity',
-  'category': 'scholarships',
-  'hosts': ['BG'],
-  'deadline': '2026-02-02',
-  'summary': 'Closed 2026 EXPLORER call: high-school graduates and first-year students '
-             'in FMI/Sofia University’s bachelor programme (called Computer Science in '
-             'this notice). €36,000 TOTAL for the duration of studies, INSAIT research '
-             'and paid summer engineering internships. Applications Dec 3,2025–Feb '
-             '2,2026, DATEONLY. Programme sponsors donated over 1 millionBGN in '
-             'aggregate.',
-  'proof': 'Published programme facts: '
-           'https://insait.ai/with-over-1000000-bgn-in-donations-insait-launches-explorer-2026-a-unique-ai-and-deep-tech-bachelor-program/'},
- {'key': 'https://explorer.insait.ai/|EXPLORER|2027-28-upcoming-overview',
-  'title': 'EXPLORER – бакалавърска програма в AI и Deep Tech',
-  'url': 'https://explorer.insait.ai/',
-  'language': 'bg',
-  'kind': 'programme-overview',
-  'category': 'scholarships',
-  'hosts': ['BG'],
-  'deadline': None,
-  'summary': 'Прием 2027/28 предстои; сроковете и финансирането още не са обявени. За '
-             '„Информатика“, ФМИ/СУ: кандидат-студентите трябва да се запишат в 1. '
-             'курс; допустими са 1./2. курс, във 2. курс с всички изпити от 1. курс. '
-             'Отличен български И английски, не изискване за гражданство. '
-             'Продължаване: следващ курс, одобрен успех и положителна оценка вINSAIT, '
-             'успешен стаж и съгласувана друга работа.4 години,10-седмични платени '
-             'стажове; проектите през първите 2 години са доброволни.36 000 € '
-             'общо/1022 € месечно за 2026/27 НЕ гарантират финансирането за 2027/28.',
-  'proof': 'Published programme facts: https://explorer.insait.ai/ '
-           'https://explorer.insait.ai/kandidatstvane/ '
-           'https://explorer.insait.ai/vuprosi-i-otgovori/'}]
 
 if __name__ == "__main__":
     sys.exit(main())

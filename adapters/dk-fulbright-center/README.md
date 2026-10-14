@@ -1,41 +1,68 @@
 # Fulbright Denmark
 
-This standalone standard-library adapter collects 32 distinct funding tracks, applicant roles and an institutional lecture programme from Fulbright Denmark. It reads 55 complete own pages, three public guidance PDFs and the declared sitemap index plus its terminal page/category inventories (63 pages and six taxonomies); exact PDF bytes are guarded by reviewed SHA256 digests, without a production PDF parser dependency. Every material page, legal notice, policy and programme frontier must match the reviewed inventory before any record is emitted. Only specifically reviewed personal biography sections and recommendation presentation are excluded.
+This standalone standard-library adapter traverses the publisher's current
+[sitemap index](https://fulbrightcenter.dk/sitemap.xml) and every declared page
+sitemap partition. It discovers public Danish and American programme pages,
+the historical Arctic III framework, host awards and Book a Scholar. Own links
+on those pages extend discovery. Recommendation-card changes and new programme
+URLs no longer have to match a frozen URL list.
 
-Danish student and scholar calls use the explicit February 17, 2027 noon CET closing time (11:00 UTC); Schuman uses December 1, 2026 noon CET. Current incoming and Crown 2028–29 overviews have unknown deadlines. The old incoming student 2027–28 timestamp says EST and UTC−4 inconsistently; it is evidence about that historical round, never a deadline for the current DKK125,000 overview. Amounts preserve monthly versus total units and track-specific tuition conditions. Schuman educator monthly funding is unspecified. Denmark is a known, nonexclusive incoming host; wider Kingdom administration does not guarantee every award’s territorial or financial coverage.
+## Live extraction
 
-Joint agreements are five substantive field/degree/benefit tracks, not university clones. Arts exchange and tuition-waiver exceptions, PhD conditions, Danish citizenship versus affiliation preferences and postdoc residence requirements remain explicit. Thanks to Scandinavia eligibility wording conflicts are retained without promising a waiver or stacked funding. The two maritime awards have different published focus names. Specialist institutional applications and individual roster-supported assignments are separate roles; roster approval is not guaranteed placement. Book a Scholar is a TRAINING / programme-overview educational service with free lectures and funded transport, not a cash award or three speaker records.
+The collector reads current programme titles, academic years, award sections,
+funding, eligibility and deadline fields from HTML. Joint grants, Inger P.
+Davis recipient groups, Crown awards, Thanks to Scandinavia, Schuman tracks,
+maritime awards and Specialist applicant roles have separate records based on
+their live headings and descriptions. It follows an explicitly linked shared
+core-student application route for a dependent programme's deadline.
 
-## Access and reuse
+Dates require a published year. Explicit noon CET is normalized to 11:00 UTC;
+date-only values stay date-only, and missing/yearless/ambiguous dates stay null.
+Historical and closed programmes are not silently discarded. Countries use
+the programme direction and explicit eligibility wording; institutional hosts
+do not imply nationality requirements for individuals.
 
-Requests use an identifying YouthOpp User-Agent, ordinary TLS/proxy settings and current robots policies. Starts are spaced by at least six seconds, with at most ten starts in every rolling 60-second window across own pages, public PDFs, robots, redirects, retries and apex/www aliases. Retry-After is honored; refusal and access challenges fail closed. The PDF paths are allowed by this publisher’s actual robots policy. No application forms, portals or contact operations are used.
+Small compatibility maps retain the former identity keys for the same awards.
+They contain no cached titles, years, eligibility or funding. New programme
+and track identities derive deterministically from the URL and heading.
+Publication preserves first-seen and created timestamps for surviving IDs and
+advances updated-at only when normalized content changes.
 
-Summaries and classification evidence are independently written English facts with publisher attribution and original links. No publisher prose, images or personal biographies are republished; the GDPR policy is not an open content licence. Non-administered external catalogues are excluded.
+## Access and exclusions
 
-Current Arctic Initiative IV is excluded because the Denmark page provides a brief purpose and biographies without material applicant/funding conditions. Its actually linked official page delegates to [IIE terms](https://www.iie.org/terms-and-conditions/) through [its terms page](https://fulbrightscholars.org/terms-conditions). The terms state: “You may not use spiders, robots, data mining techniques or other automated devices or programs to catalog, download or otherwise reproduce, store, analyze or distribute content available on IIE Websites.” All external access stopped on discovery; no external source, external policy fetch or current Arctic IV record is part of this runtime. Permission would require explicit written automation/public-fact delivery authorization via IIE’s official general contact or its stated address: One World Trade Center, 36th Floor, New York, NY 10007. Fulbright Denmark may instead provide an approved own feed/facts. No outreach has been sent; privacy/breach email is not an authorization channel. See [scope evidence](https://github.com/YouthOpps/data-pipeline/issues/58#issuecomment-6074410384). This exclusion does not imply a ban on the accepted own Denmark facts.
+Requests use the identifying YouthOpp user agent, ordinary TLS/proxy settings,
+current robots rules and Retry-After. Starts remain at least six seconds apart
+and at most ten per rolling minute across pages, robots, redirects and retries.
+Local overlapping runs share a lock outside the checkout; runs on different
+machines must not overlap. Only own public pages are fetched, never application
+forms, portals, biography directories or external provider catalogues.
 
-## Run
+The current Arctic IV page still requires external material under
+[IIE terms](https://www.iie.org/terms-and-conditions/) that prohibit automated
+collection. That route remains excluded; the own historical Arctic III page
+is distinct. No external IIE collection or permission outreach is performed.
 
-From this folder, `python -B adapter.py` collects without publishing. `python -B test_adapter.py` runs the sole actual nonpublishing test and prints the complete validated JSON to stdout. The caller should validate stdout in memory. `python -B adapter.py --publish` requires DATA_SOURCE_TOKEN and publishes only this source’s data/metadata as an atomic Git tree/commit with a nonforced reference update. A sibling-source race is retried after reading the latest head; a newer same-source snapshot fails closed. Failed collection never replaces previous records.
+The publisher's privacy notice is not an open content licence. Records carry
+publisher attribution and original evidence links, with short factual funding,
+calendar and eligibility excerpts rather than biographies or complete pages.
 
-The source workflow runs after a matching merge/push, on schedule and by manual dispatch, with global source-publication concurrency. Live delivery requires maintainer execution and website verification; local/mocked checks alone do not certify production.
+The former static profiles and exact page, sitemap and PDF hashes are removed.
+PDFs are not parsed by this standard-library HTML collector. Opportunities or
+conditions available only in attachments are outside the extracted inventory;
+the output does not claim coverage of those documents or external catalogues.
+Bounded summaries are not complete application guidance. Missing required HTML
+structures, access failures and invalid/empty collections still fail safely.
 
-## Initial live failure and bounded correction
+## Run and publication
 
-The initial actual test failed closed after 193.762 seconds because the community-college page fact guard differed; it emitted no records and performed no publication. That exact failing response was not retained, so its original cause is unknown. One authorized later retrieval of the same page showed unchanged programme, canonical, policy, legal and PDF facts, but different random Related grants cards. At that stage, four structurally verified recommendation containers excluded their volatile text and allow only reviewed route/category references. New programme routes, PDFs, policies or legal restrictions inside those cards still fail closed, as do changed facts outside them. This diagnosis demonstrates a harmless later variation without claiming it conclusively explains the original response.
+`python -B adapters/dk-fulbright-center/test_adapter.py` runs the sole live,
+nonpublishing test and emits every validated record as one JSON document on
+stdout. The caller validates complete stdout in memory, without writing data
+files. Counts may change with the publisher's inventory.
 
-The corrected actual test also failed closed after 193.391 seconds on an unreviewed recommendation route, with no records or publication. Its response was not retained either, so that failure’s exact cause remains unknown. One subsequent authorized retrieval of each of the four recommendation pages showed unchanged material facts; only the community-college cards introduced the taxonomy link `/stories/page_category/general/`. Independent review accepted that exact observed category. No broader category pattern or new programme was permitted. Errors now identify the page key and sanitized path without query strings or credentials. Both failed runs remain part of the evidence; later diagnostics do not conclusively identify their original responses.
-
-The later independent actual run failed closed after 193.341 seconds on the previously unreviewed `/go-to-the-us/crown-prince-frederik-fund-2/alumni/` recommendation link. One authorized retrieval of that exact source showed only historical recipient names/degree labels, with no article links or applicant funding/call conditions. Independent review accepted only that exact directory route inside recommendations; it produces no record and is not fetched by the runtime. Other alumni paths and new material programme, PDF, policy or restriction links still fail closed. The earlier successful author run remains evidence for its actual earlier runtime hash, not a fabricated success for this correction.
-
-A second independent actual run failed closed after 193.290 seconds on the previously unreviewed `/shop/` card route. One authorized retrieval showed a normal 301 redirect to the existing homepage, followed by 200; its canonical and complete homepage facts matched the accepted cache. Only this exact observed homepage alias is allowed inside recommendations, with no new record or runtime fetch. The two author failures and two independent failures remain disclosed; a successful earlier author run is still tied to its own217aadc runtime hash. No broad WordPress/admin/category route pattern is accepted, and other unknown routes or material conditions remain fatal.
-
-## Expanded finite source inventory
-
-The historical own Arctic Initiative III page and application support a separate closed2021–22 framework: USD40,000 total,18months with six-week-to-three-month exchanges, DK/Greenland/Faroe citizenship and residence, and known nonexclusive Canada/US meeting hosts (Norway tentative). This own historical evidence is independent of the current IV source excluded on IIE terms. Four Inger P. Davis social-sciences tracks retain their different recipient roles and benefits; only the historical Danish rounds are explicitly closed, while American deadlines remain unknown. Two additional Schuman tracks are US-to-EU with yearlessSeptember16 deadlines, separate from the European-to-US direction. No obsolete core date is copied into these records.
-
-The full declared metadata frontier has63 page URLs and six page-category URLs; lastmod values and image metadata are presentation, not programme identities. The exact URL sets are checked before records are emitted. Recommendation cards may reference only reviewed finite page/category URLs and verified aliases, so every new page/programme/PDF/policy/restriction still requires review. Actual recommendation containers are mapped from all expanded caches. Seven personal/contact/report directories are explicitly metadata/navigation reviewed only; no personal biography directory or news archive is crawled. Brief third-party SU/loan/state-financing references and dated existing-award application webinars remain advice, not additional offered grants/training records.
-
-Mandatory additional insurance and documented J1 funding requirements are preserved; quoted visa-maintenance examples are not cash awards. PhD-duration and host-affiliation differences between main call and advisory pages remain explicit. Earlier25-record actual runs do not certify this materially expanded32-record implementation; new full current32 author and independent tests are required.
-
-A further independent25-record test failed closed at193.838 seconds on the own historical Arctic III application link. Actual own application/parent review established a separate funded2021–22 programme. A bounded declared-sitemap audit and substantive gap review then identified the Inger P. Davis and incoming Schuman variants, expanding the implementation to32. This historical discovery is retained; earlier25-record tests are not represented as current32 production proof.
+The unchanged source workflow runs on filtered main-branch pushes, its schedule
+and manual dispatch. Its sole application command is `adapter.py --publish`.
+Source-scoped GitHub App credentials and global publication serialization are
+preserved. Publication atomically updates only this source's records/metadata;
+failures preserve last-good data, and same-source conflicts reject overwrite.
+Local live tests do not certify production publication.

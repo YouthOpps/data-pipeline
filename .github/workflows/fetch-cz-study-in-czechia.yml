@@ -39,7 +39,7 @@ jobs:
           owner: YouthOpps
           repositories: data-source
           permission-contents: write
-      - name: Collect and publish reviewed source
+      - name: Discover and publish current portal programmes
         run: python -B adapters/cz-study-in-czechia/adapter.py --publish
         env:
           DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}

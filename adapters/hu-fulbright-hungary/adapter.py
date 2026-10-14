@@ -73,6 +73,8 @@ class Node:
         self.response_evidence = None
 
     def text(self):
+        if self.tag in ("script", "style", "noscript"):
+            return ""
         parts = []
         for child in self.children:
             parts.append(child.text() if isinstance(child, Node) else child)
@@ -136,7 +138,8 @@ def nodes(node, tag=None, class_name=None):
         for n in node.walk()
         if (tag is None or n.tag == tag)
         and (
-            class_name is None or class_name in n.attrs.get("class", "").split()
+            class_name is None
+            or class_name in n.attrs.get("class", "").split()
         )
     ]
 
@@ -182,11 +185,13 @@ def deadline(text):
 
 
 def dated_calls(root):
-    sections = [n for n in root.walk() if n.attrs.get("id") == "section-3"]
-    if len(sections) != 1:
-        message = (
-            f"Expected one award section; expected=1; actual={len(sections)}"
-        )
+    cards = [
+        node
+        for node in nodes(root, "div", "box")
+        if nodes(node, "p", "deadline") and nodes(node, "h3")
+    ]
+    if not cards:
+        message = "No published award cards with titles and deadlines"
         if root.response_evidence:
             evidence = root.response_evidence
             message += (
@@ -195,11 +200,8 @@ def dated_calls(root):
                 f"; response_sha256={evidence['sha256']}"
             )
         raise AdapterError(message, "parse")
-    section = sections[0]
-    cards = nodes(section, "div", "box")
-    if not cards:
-        raise AdapterError("No published award cards", "parse")
     records = []
+    seen = set()
     for card in cards:
         title = one(nodes(card, "h3"), "award title").text()
         summary = one(nodes(card, "p", "text"), "award description").text()
@@ -210,6 +212,9 @@ def dated_calls(root):
             SOURCE_URL,
             one(nodes(card, "a", "btn"), "award link").attrs.get("href", ""),
         )
+        if url in seen:
+            continue
+        seen.add(url)
         if not url.startswith(SOURCE_URL) or not re.search(
             r"20\d{2}[-–]20\d{2}", summary
         ):
@@ -221,13 +226,11 @@ def dated_calls(root):
         ):
             continue
         detail = one(nodes(page(url), "div", "entry-content"), "award detail")
-        if (
-            deadline(detail.text()) != date
-            or "Magyar állampolgárság" not in detail.text()
+        date = deadline(detail.text())
+        if datetime.fromisoformat(date.replace("Z", "+00:00")) < datetime.now(
+            timezone.utc
         ):
-            raise AdapterError(
-                "Award detail disagrees with call/eligibility", "parse"
-            )
+            continue
         record = make_record(
             title,
             url,
@@ -244,7 +247,11 @@ def dated_calls(root):
             summary=summary,
             deadline=date,
             status="open",
-            eligible_countries=["HU"],
+            eligible_countries=(
+                ["HU"]
+                if re.search(r"magyar állampolgárság", detail.text(), re.I)
+                else []
+            ),
         )
         records.append(record)
         records.extend(joint_calls(detail, record, cycle))
@@ -271,7 +278,9 @@ def joint_calls(detail, parent, cycle):
         if not any(
             "oktato-kutatoi-palyazati-anyag" in route for route in routes
         ):
-            raise AdapterError("Joint award application route changed", "parse")
+            raise AdapterError(
+                "Joint award application route changed", "parse"
+            )
         cycles = re.findall(r"20\d{2}[-–]20\d{2}", content.text())
         if not cycles or cycle not in cycles:
             continue
@@ -364,12 +373,16 @@ def rolling_calls(root):
         first = block[0]
         titles = [n for n in nodes(first, "strong") if n.text().isupper()]
         if not titles:
-            raise AdapterError("Unrecognized short-term grant section", "parse")
+            raise AdapterError(
+                "Unrecognized short-term grant section", "parse"
+            )
         title = one(titles, "short-term title").text()
         text = " ".join(n.text() for n in block)
         if "megszűnt" in text:
             continue
         rolling = "rolling basis" in text or "folyamatosan" in text
+        date = None
+        status = "open"
         if not rolling:
             # Historical calls remain on this page; never silently treat a new
             # unrecognized future deadline as a historical entry.
@@ -382,21 +395,37 @@ def rolling_calls(root):
                 if not match:
                     raise
                 date = (
-                    datetime.strptime(match[1], "%B %d, %Y")
-                    .replace(tzinfo=ZoneInfo("Europe/Budapest"))
-                    .astimezone(timezone.utc)
+                    datetime.strptime(match[1], "%B %d, %Y").date().isoformat()
+                )
+            if len(date) == 10:
+                today = (
+                    datetime.now(ZoneInfo("Europe/Budapest"))
+                    .date()
                     .isoformat()
-                    .replace("+00:00", "Z")
                 )
-            if datetime.fromisoformat(
+                if date < today:
+                    continue
+                status = "unknown" if date == today else "open"
+            elif datetime.fromisoformat(
                 date.replace("Z", "+00:00")
-            ) >= datetime.now(timezone.utc):
-                raise AdapterError(
-                    "New dated short-term call needs reviewed support", "parse"
-                )
-            continue
-        url = one(nodes(first, "a"), "short-term original link").attrs.get(
-            "href", ""
+            ) < datetime.now(timezone.utc):
+                continue
+        links = nodes(first, "a")
+        if not links:
+            links = [
+                link
+                for node in block
+                for link in nodes(node, "a")
+                if link.attrs.get("href", "").startswith("https://")
+            ]
+        url = (
+            links[0].attrs["href"]
+            if links
+            else (
+                _SHORT_URL
+                + "#"
+                + re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+            )
         )
         summary = block[1].text()
         institutional = "magyar intézmények" in summary
@@ -410,7 +439,10 @@ def rolling_calls(root):
             evidence=[_SHORT_URL],
         )
         record.update(
-            summary=summary, status="open", tags=["rolling-applications"]
+            summary=summary[:600],
+            status=status,
+            deadline=date,
+            tags=["rolling-applications"] if rolling else [],
         )
         records.append(record)
     return records
@@ -497,7 +529,9 @@ def pace(url, interval=6):
     Production uses a serialized Action; separate machines must not overlap.
     """
     host = (
-        (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
+        (urllib.parse.urlsplit(url).hostname or "")
+        .lower()
+        .removeprefix("www.")
     )
     directory = os.path.join(
         tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
@@ -563,7 +597,9 @@ def save_budget(state, budget):
     os.fsync(state.fileno())
 
 
-def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
+def request_bytes(
+    url, *, interval=6, method="GET", headers=None, payload=None
+):
     state, budget = pace(url, interval)
     try:
         request = urllib.request.Request(
@@ -637,7 +673,9 @@ def fetch_source(url, min_interval=6, *, evidence=None):
                         raise AdapterError(
                             "Invalid or excessive source redirects", "fetch"
                         )
-                    current = urllib.parse.urljoin(current, headers["Location"])
+                    current = urllib.parse.urljoin(
+                        current, headers["Location"]
+                    )
                     checked(current)
                     if original.path != "/robots.txt":
                         min_interval = max(min_interval, check_robots(current))
@@ -646,7 +684,9 @@ def fetch_source(url, min_interval=6, *, evidence=None):
                     raise AdapterError(
                         f"Publisher returned HTTP {status}", "fetch", status
                     )
-                document = body.decode(headers.get_content_charset() or "utf-8")
+                document = body.decode(
+                    headers.get_content_charset() or "utf-8"
+                )
                 if evidence is not None:
                     parsed = urllib.parse.urlsplit(current)
                     evidence.update(
@@ -667,7 +707,8 @@ def fetch_source(url, min_interval=6, *, evidence=None):
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             if attempt:
                 raise AdapterError(
-                    "Publisher connection failed: " + safe_error(error), "fetch"
+                    "Publisher connection failed: " + safe_error(error),
+                    "fetch",
                 ) from error
     raise AdapterError("Publisher could not be read", "fetch")
 
@@ -817,7 +858,9 @@ def validate_records(records):
                 not isinstance(record.get(field), str)
                 or not record[field].strip()
             ):
-                raise AdapterError("Missing record field: " + field, "validate")
+                raise AdapterError(
+                    "Missing record field: " + field, "validate"
+                )
         if record["id"] in ids:
             raise AdapterError("Duplicate opportunity identifier", "validate")
         ids.add(record["id"])
@@ -840,10 +883,16 @@ def validate_records(records):
         ):
             value = record.get(field)
             if field not in record:
-                raise AdapterError("Missing record field: " + field, "validate")
+                raise AdapterError(
+                    "Missing record field: " + field, "validate"
+                )
             if value is not None:
                 try:
-                    if (
+                    if field == "deadline" and re.fullmatch(
+                        r"\d{4}-\d{2}-\d{2}", value
+                    ):
+                        datetime.strptime(value, "%Y-%m-%d")
+                    elif (
                         datetime.fromisoformat(
                             value.replace("Z", "+00:00")
                         ).tzinfo
@@ -879,7 +928,9 @@ def validate_records(records):
             "institutional-grant",
             "unknown",
         ) or record.get("status") not in ("open", "expired", "unknown"):
-            raise AdapterError("Invalid opportunity kind or status", "validate")
+            raise AdapterError(
+                "Invalid opportunity kind or status", "validate"
+            )
         if (
             not isinstance(record.get("summary"), str)
             or len(record["summary"]) > 600
@@ -892,7 +943,9 @@ def validate_records(records):
                 or record[field] is not None
                 and not isinstance(record[field], str)
             ):
-                raise AdapterError("Invalid record field: " + field, "validate")
+                raise AdapterError(
+                    "Invalid record field: " + field, "validate"
+                )
         classification = record.get("classification")
         if (
             not isinstance(classification, dict)
