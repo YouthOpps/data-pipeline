@@ -1,4 +1,4 @@
-"""Collect the reviewed FRSE funding, training, jobs and awards frontier."""
+"""Discover FRSE funding, training, jobs and calls from current public HTML."""
 
 import argparse
 import base64
@@ -144,7 +144,8 @@ def nodes(node, tag=None, class_name=None):
         for n in node.walk()
         if (tag is None or n.tag == tag)
         and (
-            class_name is None or class_name in n.attrs.get("class", "").split()
+            class_name is None
+            or class_name in n.attrs.get("class", "").split()
         )
     ]
 
@@ -388,7 +389,9 @@ def load_budget():
     try:
         return validate_budget(json.loads(raw))
     except (ValueError, TypeError):
-        raise AdapterError("Corrupt publisher pacing state", "access") from None
+        raise AdapterError(
+            "Corrupt publisher pacing state", "access"
+        ) from None
 
 
 def save_budget(state):
@@ -518,7 +521,9 @@ def request_bytes(
             current, data=payload, headers=headers, method=method
         )
         try:
-            response = _OPENER.open(request, timeout=request_timeout(publisher))
+            response = _OPENER.open(
+                request, timeout=request_timeout(publisher)
+            )
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, OSError) as error:
@@ -654,7 +659,9 @@ def check_robots(url):
             )
     parser = _ROBOTS[origin]
     if parser is not None and not parser.can_fetch(_USER_AGENT, url):
-        raise AdapterError("Publisher robots excludes required input", "access")
+        raise AdapterError(
+            "Publisher robots excludes required input", "access"
+        )
     if parser is not None:
         delay = parser.crawl_delay(_USER_AGENT)
         if delay and delay > 6:
@@ -689,7 +696,11 @@ def fetch_public(url):
                 save_budget(state)
             continue
         key = next(
-            (key for key, info in INPUTS.items() if info["url"] == url),
+            (
+                key
+                for key, info in ACCESS_POLICIES.items()
+                if info["url"] == url
+            ),
             "unmapped-public-input",
         )
         parsed = urllib.parse.urlsplit(reviewed)
@@ -997,7 +1008,8 @@ def restore_family_artifact():
         try:
             bootstrap = json.loads(raw)
             if (
-                set(bootstrap) != {"schema", "family", "not_before", "evidence"}
+                set(bootstrap)
+                != {"schema", "family", "not_before", "evidence"}
                 or type(bootstrap["schema"]) is not int
                 or bootstrap["schema"] != 1
                 or bootstrap["family"] != FAMILY
@@ -1030,7 +1042,9 @@ def restore_family_artifact():
             or result.get(("total_count")) != len(artifacts)
             or len(artifacts) > 100
         ):
-            raise AdapterError("Incomplete family artifact inventory", "access")
+            raise AdapterError(
+                "Incomplete family artifact inventory", "access"
+            )
         matches = [a for a in artifacts if a.get("name") == expected]
         if len(matches) != 1 or matches[0].get("expired") is not False:
             raise AdapterError(
@@ -1184,7 +1198,8 @@ def preserve_legacy_pacing():
             ]
             if state["starts"]:
                 state["not_before"] = max(
-                    state["not_before"], state["starts"][-1] + state["interval"]
+                    state["not_before"],
+                    state["starts"][-1] + state["interval"],
                 )
             state["observed_at"] = time.time()
             save_budget(state)
@@ -1224,7 +1239,9 @@ def prepare_collection():
         restore_family_artifact()
     with locked_budget():
         state = load_budget()
-        state["not_before"] = max(state["not_before"], _COLLECTION_STARTED + 60)
+        state["not_before"] = max(
+            state["not_before"], _COLLECTION_STARTED + 60
+        )
         state["observed_at"] = time.time()
         save_budget(state)
     _STATE_TRUSTED = True
@@ -1318,7 +1335,9 @@ def validate_records(records):
                 not isinstance(record.get(field), str)
                 or not record[field].strip()
             ):
-                raise AdapterError("Missing record field: " + field, "validate")
+                raise AdapterError(
+                    "Missing record field: " + field, "validate"
+                )
         if record["id"] in ids:
             raise AdapterError("Duplicate opportunity identifier", "validate")
         ids.add(record["id"])
@@ -1341,7 +1360,9 @@ def validate_records(records):
         ):
             value = record.get(field)
             if field not in record:
-                raise AdapterError("Missing record field: " + field, "validate")
+                raise AdapterError(
+                    "Missing record field: " + field, "validate"
+                )
             if value is not None:
                 try:
                     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -1384,7 +1405,9 @@ def validate_records(records):
             "institutional-grant",
             "unknown",
         ) or record.get("status") not in ("open", "expired", "unknown"):
-            raise AdapterError("Invalid opportunity kind or status", "validate")
+            raise AdapterError(
+                "Invalid opportunity kind or status", "validate"
+            )
         summary = record.get("summary")
         if not isinstance(summary, str) or re.search("<[^>]+>", summary):
             raise AdapterError("Invalid plain summary", "validate")
@@ -1397,7 +1420,9 @@ def validate_records(records):
                 or record[field] is not None
                 and not isinstance(record[field], str)
             ):
-                raise AdapterError("Invalid record field: " + field, "validate")
+                raise AdapterError(
+                    "Invalid record field: " + field, "validate"
+                )
         if "summary_language" in record and (
             not isinstance(record["summary_language"], str)
             or not re.fullmatch(
@@ -1422,12 +1447,9 @@ def validate_records(records):
     validate_owned_records(records)
 
 
-def profile_identity(profile):
-    """Bind original URL and, for jobs, the publisher's literal reference."""
-    identity = profile["url"]
-    if profile["key"].startswith("job-FRSE-"):
-        reference = profile["key"].removeprefix("job-").replace("-", "/")
-        identity += "|" + reference
+def record_identity(url, reference=None):
+    """Keep original URL hashes and literal recruitment-reference identities."""
+    identity = url + ("|" + reference if reference else "")
     return hashlib.sha256((SOURCE_ID + "|" + identity).encode()).hexdigest()[
         :24
     ]
@@ -1435,10 +1457,18 @@ def profile_identity(profile):
 
 def validate_owned_records(records):
     """Reject foreign identities and impossible owned record chronologies."""
-    profiles = {profile_identity(profile): profile for profile in PROFILES}
     for record in records:
-        profile = profiles.get(record["id"])
-        if profile is None or record["url"] != profile["url"]:
+        public_url(record["url"])
+        reference = record.get("reference")
+        if record["url"] == SOURCE_URL + "praca-w-frse":
+            references = re.findall(
+                r"\bFRSE/\d+/\d{4}\b",
+                reference or " ".join(record["classification"]["evidence"]),
+            )
+            reference = one(sorted(set(references)), "recruitment reference")
+        elif reference is not None:
+            raise AdapterError("Unexpected recruitment reference", "validate")
+        if record["id"] != record_identity(record["url"], reference):
             raise AdapterError(
                 "Unowned FRSE record identity or URL", "validate"
             )
@@ -1465,9 +1495,14 @@ def validate_owned_records(records):
             record["status"] == "expired"
             and record["deadline"] is None
             and not (
-                profile["status"] == "expired"
-                and profile["kind"] == "institutional-grant"
-                and "institutional competition closed" in profile["proof"]
+                record.get("application_closed") is True
+                or (
+                    record["kind"] == "institutional-grant"
+                    and any(
+                        "institutional competition closed" in value
+                        for value in record["classification"]["evidence"]
+                    )
+                )
             )
         ):
             raise AdapterError("Missing guarded FRSE call closure", "validate")
@@ -1523,7 +1558,9 @@ def read_snapshot():
                 raise AdapterError("Invalid existing blob identity", "publish")
             file = github("GET", "/git/blobs/" + sha)
             if file.get("sha") != sha:
-                raise AdapterError("Existing blob identity mismatch", "publish")
+                raise AdapterError(
+                    "Existing blob identity mismatch", "publish"
+                )
         if file is not None and file.get("encoding") != "base64":
             raise AdapterError(
                 "Unsupported existing source file encoding", "publish"
@@ -1602,184 +1639,857 @@ def publish_files(snapshot, files):
 def public_url(value):
     parsed = urllib.parse.urlsplit(value)
     clean = urllib.parse.urlunsplit(parsed._replace(fragment=""))
-    allowed = {info["url"] for info in INPUTS.values()} | {
-        origin + "/robots.txt" for origin in ROBOTS_ORIGINS
-    }
     if (
-        clean not in allowed
+        "https://" + parsed.netloc not in ROBOTS_ORIGINS
         or parsed.scheme != "https"
         or parsed.username
         or parsed.password
         or parsed.port
+        or re.search(r"[\x00-\x20\\]", value)
+        or any(
+            part in parsed.path.lower().split("/")
+            for part in ("admin", "login", "logout", "api")
+        )
     ):
-        raise AdapterError("Unreviewed public source route", "access")
+        raise AdapterError(
+            "Unreviewed public source origin or route", "access"
+        )
     return clean
 
 
-def newsletter_token(root, key):
-    """Validate the sole observed newsletter token before canonicalizing it."""
-    tokens = [
-        node for node in root.walk() if node.attrs.get("name") == "_token"
-    ]
-    if key != "etwinning-policy":
-        if tokens:
-            raise AdapterError("Unreviewed newsletter token context", "parse")
-        return None
-    forms = [
-        node
-        for node in nodes(root, "form")
-        if "myform2__regnewsletter_form" in node.attrs.get("class", "").split()
-    ]
-    if len(tokens) != 1 or len(forms) != 1:
-        raise AdapterError("Changed newsletter token cardinality", "parse")
-    token, form = tokens[0], forms[0]
-    if (
-        form.duplicate_attrs
-        or token.duplicate_attrs
-        or form.attrs
-        != {
-            "class": (
-                "myform2__regnewsletter_form " "myform2__regnewsletter_form_s"
-            ),
-            "method": "post",
-        }
-        or not form.children
-        or form.children[0] is not token
-        or token.tag != "input"
-        or token.children
-        or set(token.attrs) != {"type", "name", "value"}
-        or token.attrs.get("type") != "hidden"
-        or not isinstance(token.attrs.get("value"), str)
-        or not re.fullmatch(r"[A-Za-z0-9]{40}", token.attrs["value"])
-    ):
-        raise AdapterError("Changed newsletter token structure", "parse")
-
-    def structure(node):
-        return {
-            "duplicate_attributes": node.duplicate_attrs,
-            "tag": node.tag,
-            "attribute_names": sorted(node.attrs),
-            "children": [
-                structure(child) if isinstance(child, Node) else child
-                for child in node.children
-            ],
-        }
-
-    token.newsletter_structure = structure(form)
-    return token
+def policy_content(root, key):
+    """Select the reviewed legal body and its applicable policy links."""
+    selectors = {
+        "etwinning-policy": ("section", "text_desc_box"),
+        "erasmus-policy": ("section", "standard_text_page"),
+        "eks-cookies": ("section", "text_page"),
+        "selfie-cookies": ("section", "text_page"),
+        "edu-rodo": ("section", "text_page"),
+        "edu-cookies": ("section", "text_page"),
+        "data-policy": ("div", "split_view"),
+        "cookies": ("div", "split_view"),
+    }
+    if key not in selectors:
+        raise AdapterError("Unreviewed policy selector", "access")
+    main = one(nodes(root, "main"), "policy main")
+    tag, name = selectors[key]
+    content = one(nodes(main, tag, class_name=name), "policy body")
+    if not content.text() or content.duplicate_attrs:
+        raise AdapterError("Missing or ambiguous policy body", "access")
+    return content
 
 
-def html_fingerprint(body, key=None):
-    """Bind complete visible material, literal links and frontier controls."""
-    root = document_root(body.decode("utf-8", "strict"))
-    token = newsletter_token(root, key)
-    links = sorted(
-        {
-            (node.tag, node.attrs.get("rel", ""), node.attrs["href"])
-            for tag in ("a", "link")
-            for node in nodes(root, tag)
-            if node.attrs.get("href")
-        }
-    )
-    controls = []
-    if token is not None:
-        controls.append(
-            ("reviewed-newsletter-structure", token.newsletter_structure)
-        )
-    for node in root.walk():
-        attrs = {
-            name: value
-            for name, value in node.attrs.items()
-            if name
-            in {
-                "action",
-                "method",
-                "name",
-                "value",
-                "selected",
-                "data-pagescount",
-                "data-activepage",
-                "data-active-page",
-            }
-        }
-        if node is token:
-            attrs["value"] = "reviewed-newsletter-csrf-token"
-        if attrs:
-            controls.append((node.tag, sorted(attrs.items())))
+def policy_fingerprint(root, key):
+    content = policy_content(root, key)
     facts = json.dumps(
-        {"text": root.text(), "links": links, "controls": controls},
+        {
+            "text": content.text(),
+            "links": sorted(
+                {
+                    node.attrs["href"]
+                    for node in nodes(content, "a")
+                    if node.attrs.get("href")
+                }
+            ),
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     )
     return hashlib.sha256(facts.encode()).hexdigest()
 
 
-def read_input(key):
-    info = INPUTS[key]
-    try:
-        status, headers, body = fetch_public(info["url"])
-    except AdapterError as error:
-        raise AdapterError(
-            "Required publisher input " + key + ": " + safe_error(error),
-            error.stage,
-            error.status,
-        ) from None
-    if info["format"] == "html":
-        digest = html_fingerprint(body, key)
-    else:
-        if info["format"] == "pdf" and not body.startswith(b"%PDF-"):
-            raise AdapterError("Invalid material document: " + key, "parse")
-        digest = hashlib.sha256(body).hexdigest()
-    if digest != info["sha256"]:
-        raise AdapterError(
-            "Reviewed source facts/frontier changed: " + key, "parse"
-        )
-    return digest
+def html_fingerprint(body, key=None):
+    return policy_fingerprint(
+        document_root(body.decode("utf-8", "strict")), key
+    )
+
+
+def absolute_link(base, href):
+    """Normalize public links without interpreting forms or fetching assets."""
+    url = urllib.parse.urljoin(base, href)
+    parts = urllib.parse.urlsplit(url)
+    host = "www.frse.org.pl" if parts.netloc == "frse.org.pl" else parts.netloc
+    scheme = "https" if "https://" + host in ROBOTS_ORIGINS else parts.scheme
+    path = urllib.parse.quote(urllib.parse.unquote(parts.path), safe="/:@-._~")
+    path = re.sub(r"/{2,}", "/", path).rstrip("/") or "/"
+    query = "" if parts.query.startswith("anchor=") else parts.query
+    return urllib.parse.urlunsplit(
+        parts._replace(path=path, netloc=host, scheme=scheme, query=query)
+    )
+
+
+def content_blocks(root):
+    """Keep complete paragraph/list boundaries, including late-page conditions."""
+    result = []
+
+    def visit(node):
+        if node.tag in ("script", "style", "nav", "form", "footer"):
+            return
+        if node.tag in ("p", "li", "h1", "h2", "h3", "h4", "td"):
+            text = node.text()
+            if text:
+                result.append(text)
+            return
+        for child in node.children:
+            if isinstance(child, Node):
+                visit(child)
+
+    visit(root)
+    return result or ([root.text()] if root.text() else [])
+
+
+def material_links(root, url):
+    return sorted(
+        {
+            absolute_link(url, node.attrs["href"])
+            for node in nodes(root, "a")
+            if node.attrs.get("href", "").strip()
+            and urllib.parse.urlsplit(
+                absolute_link(url, node.attrs["href"])
+            ).scheme
+            in ("http", "https")
+        }
+    )
+
+
+def read_html(url):
+    _, headers, body = fetch_public(url)
+    if "html" not in headers.get("Content-Type", "").lower():
+        raise AdapterError("Expected public HTML: " + url, "parse")
+    return document_root(body.decode("utf-8", "strict"))
+
+
+LISTINGS = {
+    "finansowanie-projektow": "grants",
+    "wydarzenia-i-szkolenia": "training",
+    "konkursy": "competitions",
+}
+# These are identity aliases, never a store of programme facts.
+ALIASES = {
+    SOURCE_URL
+    + "finansowanie-projektow/zmiana-ktora-pomagasz-tworzyc": SOURCE_URL
+    + "finansowanie-projektow/zmiana-ktora-ty-tworzysz",
+}
+# Historical discrepancies are unresolved warnings, not replacement facts.
+_GOVERNING_CONFLICTS = {
+    "zagraniczne-wyjazdy-doskonalenia-kadry": "Course-duration limits differ from the previously reviewed programme guide.",
+    "erasmus-mundus-design-measures": "The overview grant amount differs from the previously reviewed programme guide.",
+    "dzialania-jean-monnet-debata-nt-polityk": "Network geography and consortium eligibility differ from the previously reviewed guide.",
+    "erasmus-mundus-joint-masters": "The overview omits governing mobility/residence-country eligibility conditions.",
+}
+_FACT_PATTERNS = {
+    "eligibility": r"dla kogo|wiek|pełnolet|wymag|uprawni|wyklucz|nie mog|nie może|skierowan|beneficjent|sympatyk|"
+    r"co najmniej|minimum|muszą|musi|uczestni|nauczyciel|student|uczni",
+    "funding": r"dofinans|stypend|nagrod|honorarium|\beuro\b|\bEUR\b|\bPLN\b|"
+    r"\bzł\b|koszt|bezpłat",
+    "application": r"prześlij|przesłać|zgłosz|zgłasz|wniosk|formularz|aplik|"
+    r"rejestr|zapis|termin|\bCV\b|list motyw",
+    "requirements": r"język|polsku|znaków|słowach|limitu|format|maksymaln|autorski|oryginaln|niepublikowan|nienagradz|jedną pracę|skan|zdjęcie|kategorii",
+    "duration": r"(?<![\w@])\d{1,3}(?:[–-]\d{1,3})?\s+(?:dni|dzień|godzin\w*|miesi\w*|tygodni\w*|lat|sekund\w*|minut\w*)\b",
+}
+_CALL_WORDS = re.compile(r"konkurs|nab[oó]r|discovereu", re.I)
+_MONTHS = {
+    "stycznia": 1,
+    "lutego": 2,
+    "marca": 3,
+    "kwietnia": 4,
+    "maja": 5,
+    "czerwca": 6,
+    "lipca": 7,
+    "sierpnia": 8,
+    "września": 9,
+    "października": 10,
+    "listopada": 11,
+    "grudnia": 12,
+}
+_DATE = re.compile(
+    r"(?<!\d)(?:(?P<day>\d{1,2})\s+(?P<month>"
+    + "|".join(_MONTHS)
+    + r")\s+(?P<year>20\d{2})|(?P<d>\d{1,2})[./](?P<m>\d{1,2})"
+    r"[./](?P<y>20\d{2}))(?!\d)",
+    re.I,
+)
+_CLOSING = re.compile(
+    r"(?:zgłosze\w*|wniosk\w*|aplikac\w*|zapis\w*|rejestrac\w*|"
+    r"nab[oó]r|nadsyłani\w*|przesyłani\w*)[^.!?;]{0,100}?"
+    r"(?:\bdo\b|upływa|kończy się|mija)|"
+    r"(?:prześlij|przesłać|nadsyłać)[^.!?;]{0,100}?\bdo\b|"
+    r"(?:prace będą przyjmowane|zdjęcie należy dodać)[^.!?;]{0,100}?\bdo\b|"
+    r"uczestnicy zgłaszają swój udział.{0,150}?\bw terminie od.{0,60}?\bdo\b|"
+    r"konkurs trwa(?:[^.!?;]|\br\.){0,80}?\bdo\b",
+    re.I,
+)
+
+
+def closing_dates(blocks):
+    """Use only explicit application closings with a complete source year."""
+    dates = []
+    for block in blocks:
+        if re.search(
+            r"czas trwania.*projekt|okres realizacji|okres trwałości",
+            block,
+            re.I,
+        ):
+            continue
+        if re.search(
+            r"planowan|przewidywan|orientacyjn|wstępny termin", block, re.I
+        ):
+            continue
+        for closing in _CLOSING.finditer(block):
+            tail = block[closing.end() :]
+            # A partial date cannot borrow a year from a later event or result.
+            match = re.match(r"\s*(?:dnia\s+)?", tail)
+            offset = match.end()
+            date = _DATE.match(tail, offset)
+            if date is None:
+                continue
+            try:
+                if date["day"]:
+                    value = datetime(
+                        int(date["year"]),
+                        _MONTHS[date["month"].lower()],
+                        int(date["day"]),
+                    )
+                else:
+                    value = datetime(
+                        int(date["y"]), int(date["m"]), int(date["d"])
+                    )
+            except ValueError:
+                continue
+            evidence = block[closing.start() : closing.end() + date.end()]
+            dates.append(
+                {"date": value.date().isoformat(), "evidence": evidence}
+            )
+    return [
+        dict(pair) for pair in dict.fromkeys(tuple(d.items()) for d in dates)
+    ]
+
+
+def page_numbers(root):
+    values = {1}
+    for node in root.walk():
+        for key in ("data-page", "data-pagescount"):
+            value = node.attrs.get(key)
+            if value is not None:
+                if not re.fullmatch(r"[1-9]\d*", value) or int(value) > 100:
+                    raise AdapterError(
+                        "Invalid or excessive directory pagination"
+                    )
+                values.update(range(1, int(value) + 1))
+    return values
+
+
+def listing_url(slug, page):
+    if page == 1:
+        return SOURCE_URL + slug
+    prefix = "s_" if slug == "wydarzenia-i-szkolenia" else ""
+    params = {prefix + "filter_for_who": "0"}
+    if prefix:
+        params[prefix + "filter_terms"] = "0"
+    params.update(
+        {
+            prefix + "filter_string": "",
+            prefix + "filter_send": "filtruj",
+            "active_page": str(page),
+        }
+    )
+    return SOURCE_URL + slug + "?" + urllib.parse.urlencode(params)
 
 
 def read_pages():
-    """Exhaust all eighty-eight required inputs in their reviewed order."""
-    return {key: read_input(key) for key in INPUTS}
+    """Exhaust advertised catalogue pages and discovered current call details."""
+    pages, candidates, catalogues, supporting = {}, {}, [], {}
+
+    def read(url):
+        url = public_url(url)
+        if url not in pages:
+            pages[url] = read_html(url)
+        return pages[url]
+
+    # Policy review remains separate from changing opportunity facts.
+    for key, info in ACCESS_POLICIES.items():
+        _, _, body = fetch_public(info["url"])
+        if html_fingerprint(body, key) != info["sha256"]:
+            raise AdapterError(
+                "Publisher access policy changed: " + key, "access"
+            )
+        pages[info["url"]] = document_root(body.decode("utf-8", "strict"))
+
+    for slug, category in LISTINGS.items():
+        pending, seen, signatures = {1}, set(), set()
+        while pending:
+            page = min(pending)
+            pending.remove(page)
+            url = listing_url(slug, page)
+            root = read(url)
+            pending.update(page_numbers(root) - seen - {page})
+            seen.add(page)
+            main = one(nodes(root, "main"), "directory main")
+            if slug == "konkursy":
+                cards = nodes(main, class_name="desc_holder")
+                if not cards:
+                    raise AdapterError("Missing contest catalogue cards")
+                signature = tuple(card.text() for card in cards)
+                for card in cards:
+                    title = one(nodes(card, "h2"), "contest title").text()
+                    links = material_links(card, url)
+                    catalogues.append((title, links, card))
+                    for link in links:
+                        if (
+                            urllib.parse.urlsplit(link).netloc
+                            in {
+                                "www.frse.org.pl",
+                                "erasmusplus.org.pl",
+                                "eks.org.pl",
+                                "etwinning.pl",
+                                "selfieplus.frse.org.pl",
+                                "eduinspiracje.org.pl",
+                            }
+                            and not link.lower().endswith(".pdf")
+                            and not re.search(
+                                r"laurea|/aktualnosci/",
+                                urllib.parse.urlsplit(link).path,
+                            )
+                        ):
+                            candidates.setdefault(public_url(link), category)
+            else:
+                links = {
+                    absolute_link(url, node.attrs["href"])
+                    for node in nodes(main, "a")
+                    if node.attrs.get("href", "").startswith("/" + slug + "/")
+                }
+                if not links:
+                    raise AdapterError("Empty catalogue page: " + url)
+                signature = tuple(sorted(links))
+                for link in sorted(links):
+                    candidates.setdefault(link, category)
+            if signature in signatures:
+                raise AdapterError("Repeated directory page: " + url)
+            signatures.add(signature)
+        print(
+            f"{slug}: exhausted {len(seen)} advertised pages", file=sys.stderr
+        )
+
+    candidates[SOURCE_URL + "praca-w-frse"] = "jobs"
+    # News recommendations expose current rounds omitted by evergreen catalogues.
+    homepage = read(SOURCE_URL)
+    for node in nodes(homepage, "a"):
+        href = node.attrs.get("href", "")
+        if href.startswith("/aktualnosci/") and _CALL_WORDS.search(
+            node.text()
+        ):
+            candidates.setdefault(
+                absolute_link(SOURCE_URL, href), "competitions"
+            )
+
+    pending = list(candidates)
+    visited = set()
+    while pending:
+        url = pending.pop(0)
+        if url in visited:
+            continue
+        if len(visited) >= 180:
+            raise AdapterError(
+                "Discovered detail inventory exceeds collection bound"
+            )
+        visited.add(url)
+        root = read(url)
+        main = one(nodes(root, "main"), "detail main")
+        for node in nodes(root, "a"):
+            href = node.attrs.get("href", "")
+            if not href:
+                continue
+            link = absolute_link(url, href)
+            parsed = urllib.parse.urlsplit(link)
+            if "https://" + parsed.netloc not in ROBOTS_ORIGINS:
+                continue
+            if parsed.path.lower().endswith(".pdf"):
+                continue
+            related = (
+                parsed.netloc == "www.frse.org.pl"
+                and parsed.path.startswith("/aktualnosci/")
+                and _CALL_WORDS.search(node.text())
+            )
+            rules = (
+                re.match(
+                    r"^(?:szczegółowe zasady|regulamin|zasady konkursu|"
+                    r"zobacz regulamin)",
+                    node.text(),
+                    re.I,
+                )
+                and node in nodes(main, "a")
+                or re.search(
+                    r"/konkurs-\d{4}$|/obwieszczenie-o-konkursie$", parsed.path
+                )
+                or parsed.fragment
+                and _CALL_WORDS.search(node.text())
+            )
+            if not (related or rules):
+                continue
+            clean = public_url(link)
+            if rules:
+                supporting.setdefault(url, set()).add(clean)
+            if clean not in candidates:
+                candidates[clean] = candidates[url]
+                pending.append(clean)
+    read("https://erasmusplus.org.pl/dokumenty")
+    return pages, candidates, catalogues, supporting
+
+
+def detail_content(root):
+    """Exclude navigation, related cards and decorative image captions."""
+    for name in ("financing_details", "events_details", "news_details"):
+        found = nodes(root, class_name=name)
+        if found:
+            return one(found, name)
+    main = one(nodes(root, "main"), "detail main")
+    result = Node("article")
+    for section in nodes(main, "section"):
+        if set(section.attrs.get("class", "").split()) & {
+            "section_box",
+            "text_page",
+            "white_content",
+            "details_more",
+            "standard_text_page",
+            "text_desc_box",
+            "about",
+            "download",
+        }:
+            result.children.append(section)
+    if not result.children:
+        raise AdapterError("Unrecognized substantive page layout")
+    return result
+
+
+def factual_extracts(blocks):
+    """Select short attributed factual clauses, not an article or rulebook."""
+    facts = {key: [] for key in _FACT_PATTERNS}
+    for block in blocks:
+        if re.match(r"Załącznik nr", block, re.I):
+            break
+        block = re.sub(r"^Dla kogo\?\s*", "Dla kogo: ", block, flags=re.I)
+        for clause in re.split(r";|(?<=[.!?])\s+(?=[A-ZĄĆĘŁŃÓŚŹŻ])", block):
+            for label, pattern in _FACT_PATTERNS.items():
+                if label == "duration" and not re.search(
+                    r"trwa|długo|okres|maks|minimum|dni|godzin|miesi|tygodni|sekund|minut",
+                    clause,
+                    re.I,
+                ):
+                    continue
+                covered = -1
+                for match in re.finditer(pattern, clause, re.I):
+                    if match.end() <= covered:
+                        continue
+                    start = max(0, match.start() - 70)
+                    end = min(len(clause), max(match.end(), start + 230))
+                    excerpt = clause[start:end]
+                    if start:
+                        excerpt = "[...] " + excerpt.split(" ", 1)[-1]
+                    if end < len(clause):
+                        excerpt = excerpt.rsplit(" ", 1)[0] + " [...]"
+                    covered = start + len(
+                        excerpt.removeprefix("[...] ").removesuffix(" [...]")
+                    )
+                    if excerpt and excerpt not in facts[label]:
+                        facts[label].append(excerpt)
+    return {key: values for key, values in facts.items() if values}
+
+
+def factual_material(content, url):
+    blocks = content_blocks(content)
+    links = material_links(content, url)
+    material = json.dumps(
+        {"text": content.text(), "links": links},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return {
+        "facts": factual_extracts(blocks),
+        "links": links,
+        "material_sha256": hashlib.sha256(material.encode()).hexdigest(),
+    }
+
+
+def record_from_content(url, title, content, category, reference=None):
+    fields = []
+    for group in nodes(content, class_name="details_list"):
+        labels = nodes(group, class_name="list_left")
+        values = nodes(group, class_name="list_right")
+        if len(labels) != len(values):
+            raise AdapterError("Unpaired programme fields: " + url)
+        fields.extend(
+            {"label": label.text(), "text": value.text()}
+            for label, value in zip(labels, values)
+        )
+    blocks = content_blocks(content)
+    links = material_links(content, url)
+    text = " ".join(blocks)
+    categories = [category]
+    kind = "opportunity"
+    if "/finansowanie-projektow/" in url:
+        kind = "institutional-grant"
+        if re.search(r"studiuj", title, re.I):
+            categories, kind = [
+                "scholarships",
+                "internships",
+            ], "programme-overview"
+        elif re.search(r"uczniowie.*praktyk", title, re.I):
+            categories, kind = ["internships"], "programme-overview"
+        elif re.search(r"wyjedź prowadzić|doskonalenia kadry", title, re.I):
+            categories, kind = ["training"], "programme-overview"
+        elif re.search(r"zostań wolontariuszem", title, re.I):
+            categories, kind = ["volunteering"], "programme-overview"
+    if re.search(r"worldskills|euroskills", title, re.I):
+        categories, kind = ["competitions"], "programme-overview"
+    overview = None
+    if category == "training":
+        overview = re.search(
+            r"[^.!?]*(?:coroczn\w*|co roku|katalog kursów|archiwum nagrań webinariów|"
+            r"wg harmonogramu|tegorocznej edycji|edycji Tool Fair w roku \d{4}|"
+            r"wszystkie lekcje)[^.!?]*",
+            text,
+            re.I,
+        )
+        if overview:
+            kind = "programme-overview"
+    record = make_record(
+        title,
+        url,
+        categories,
+        kind=kind,
+        method="publisher-html",
+        evidence=[ATTRIBUTION, url],
+    )
+    record["id"] = record_identity(url, reference)
+    if reference:
+        record["reference"] = reference
+    record["country"] = PUBLISHER_COUNTRY
+    if overview:
+        record["classification"]["evidence"].append(overview[0].strip())
+    record["details"] = factual_material(content, url)
+    record["details"]["fields"] = [
+        {
+            "label": item["label"],
+            "facts": factual_extracts([item["label"] + " " + item["text"]]),
+        }
+        for item in fields
+    ]
+    record["limitations"] = [
+        "HTML-reported conditions; linked programme rules can supersede overview text.",
+        "PDF-only eligibility, funding and deadlines are not verified by this adapter.",
+        "Residence and institutional affiliation are not nationality eligibility.",
+    ]
+    closings = closing_dates(
+        blocks + [item["label"] + " " + item["text"] for item in fields]
+    )
+    record["application_dates"] = closings
+    unique = sorted({entry["date"] for entry in closings})
+    if len(unique) == 1 and kind != "programme-overview":
+        record["deadline"] = unique[0]
+    term = " ".join(
+        n.text() for n in nodes(content, class_name="term_box_content")
+    )
+    closure = bool(
+        re.search(
+            r"(?:nab[oó]r|konkurs|przyjmowanie zgłoszeń)(?:\s+w konkursie)?"
+            r"(?:\s+\d{4})?\s+"
+            r"(?:(?:jest|został|zostało)\s+)?(?:już\s+)?"
+            r"(?:zakończon[yae]|zamknięt[yae]|zakończył się)\b",
+            term or text,
+            re.I,
+        )
+    )
+    record["application_closed"] = closure and kind != "programme-overview"
+    if record["application_closed"]:
+        record["status"] = "expired"
+    elif record["deadline"]:
+        today = datetime.now(timezone.utc).date().isoformat()
+        if record["deadline"] < today:
+            record["status"] = "expired"
+        elif (
+            record["deadline"] > today
+            and re.search(
+                r"zapraszamy|prześlij|należy przesłać|prosimy o przesłanie|"
+                r"przyjmujemy|trwa nabór|zgłoszenia do|na zgłoszenia czekamy",
+                text,
+                re.I,
+            )
+            and not re.search(r"nabór (?:rozpocznie|zacznie) się", text, re.I)
+        ):
+            record["status"] = "open"
+    locations = [
+        item["text"] for item in fields if item["label"].startswith("Gdzie")
+    ]
+    if len(locations) == 1 and locations[0].lower() not in (
+        "online",
+        "internet",
+    ):
+        record["location"] = locations[0]
+    conflict = _GOVERNING_CONFLICTS.get(
+        urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1]
+    )
+    if conflict:
+        record["source_conflicts"] = [
+            {
+                "status": "unresolved",
+                "issue": conflict,
+                "affected_fields": ["eligibility", "funding", "duration"],
+                "governing_documents": [],
+            }
+        ]
+        record["details"][
+            "verification"
+        ] = "conflicting-overview-not-governing-conditions"
+        record["limitations"].append(
+            conflict
+            + " Current PDF guide not parsed; do not rely on overview figures."
+        )
+    if re.search(r"worldskills|euroskills", title, re.I):
+        record["limitations"].append(
+            "FRSE programme overview only. Current WorldSkills-specific rules, "
+            "eligibility, costs and recruitment dates have not been verified; "
+            "the dedicated external origin is not accessed."
+        )
+    timing = (
+        "Termin zgłoszeń: " + record["deadline"] + ". "
+        if record["deadline"]
+        else "Brak jednoznacznego terminu zgłoszeń. "
+    )
+    record["summary"] = (
+        "FRSE; "
+        + categories[0]
+        + ". "
+        + timing
+        + (
+            "Warunki strony są sprzeczne lub niepełne względem przewodnika; wymagają weryfikacji."
+            if conflict
+            else "Warunki udziału i szczegóły: oficjalna strona organizatora."
+        )
+    )
+    return record
+
+
+def anchored_offers(content):
+    """Split named call headings across the CMS's nested modular wrappers."""
+    offers = []
+    active = None
+
+    def visit(node):
+        nonlocal active
+        if (
+            node.tag == "section"
+            and node.attrs.get("id")
+            and nodes(node, "h2")
+        ):
+            active = (
+                node.attrs["id"],
+                one(nodes(node, "h2"), "suboffer title").text(),
+                Node("article"),
+            )
+            offers.append(active)
+            active[2].children.append(node)
+            return
+        if node.tag in ("p", "li", "h1", "h2", "h3", "h4", "td", "a"):
+            if active is not None:
+                active[2].children.append(node)
+            return
+        for child in node.children:
+            if isinstance(child, Node):
+                visit(child)
+
+    visit(content)
+    return offers
 
 
 def parse_inventory(pages):
-    """Normalize only the complete guarded fifty-three-identity partition."""
-    if set(pages) != set(INPUTS) or any(
-        pages[key] != info["sha256"] for key, info in INPUTS.items()
-    ):
-        raise AdapterError("Incomplete reviewed FRSE frontier", "parse")
-    records = []
-    now = datetime.now(timezone.utc)
-    for profile in PROFILES:
-        record = make_record(
-            profile["title"],
-            profile["url"],
-            profile["categories"],
-            kind=profile["kind"],
-            host_countries=profile["hosts"],
-            evidence=[ATTRIBUTION, profile["proof"]]
-            + [INPUTS[key]["url"] for key in profile["inputs"]],
+    documents, candidates, catalogues, supporting = pages
+    records = {}
+    excluded = []
+    attachments = set().union(*supporting.values()) if supporting else set()
+    primary_rules = "https://eduinspiracje.org.pl/eduinspirator/regulamin"
+    support_roots = {
+        "https://selfieplus.frse.org.pl/",
+        "https://selfieplus.frse.org.pl/o-selfie",
+        "https://eduinspiracje.org.pl/eduinspirator/o-konkursie",
+        "https://etwinning.pl/konkursy/konkursy-polskie",
+        SOURCE_URL + "wydawnictwo",
+        SOURCE_URL + "wydawnictwo/regulamin",
+    }
+    for url in sorted(candidates, key=lambda value: (value in ALIASES, value)):
+        category = candidates[url]
+        root = documents[url]
+        if url in support_roots or (
+            url in attachments
+            and url != primary_rules
+            and (
+                "regulamin" in urllib.parse.urlsplit(url).path
+                or "lista-plikow" in url
+            )
+        ):
+            excluded.append(
+                (url, "supporting catalogue or rules, not another call")
+            )
+            continue
+        if category == "jobs":
+            boxes = nodes(root, class_name="module_faq_box")
+            references = set()
+            for box in boxes:
+                found = sorted(
+                    set(re.findall(r"\bFRSE/\d+/\d{4}\b", box.text()))
+                )
+                if not found:
+                    continue
+                reference = one(found, "job reference")
+                if reference in references:
+                    raise AdapterError("Repeated job reference")
+                references.add(reference)
+                title_nodes = nodes(box, class_name="title")
+                title = one(title_nodes, "job title").text()
+                record = record_from_content(
+                    url, title, box, category, reference
+                )
+                records[record["id"]] = record
+            if not references:
+                raise AdapterError("No current recruitment references")
+            continue
+        content = detail_content(root)
+        text = content.text()
+        if re.search(
+            r"nie ma możliwości samodzielnego zgłoszenia|"
+            r"nie wymaga samodzielnego zgłoszenia|"
+            r"nie muszą ubiegać się o nagrodę|"
+            r"do udziału w konkursie są zapraszane osoby wytypowane|"
+            r"pierwszym etapem jest przyznanie przez nas nominacji",
+            text,
+            re.I,
+        ):
+            excluded.append((url, "publisher explicitly requires nomination"))
+            continue
+        specialized = any(
+            nodes(root, class_name=name)
+            for name in ("financing_details", "events_details", "news_details")
         )
-        record["id"] = profile_identity(profile)
-        record["summary"] = profile["summary"]
-        record["country"] = PUBLISHER_COUNTRY
-        record["deadline"] = profile["deadline"]
-        record["location"] = profile["location"]
-        record["status"] = profile["status"]
-        deadline = profile["deadline"]
-        if deadline is not None:
-            if len(deadline) == 10:
-                if now.date().isoformat() > deadline:
-                    record["status"] = "expired"
-                elif now.date().isoformat() == deadline:
-                    record["status"] = "unknown"
-            elif now >= datetime.fromisoformat(deadline.replace("Z", "+00:00")):
-                record["status"] = "expired"
-        records.append(record)
-    validate_records(records)
-    if len(records) != 53:
-        raise AdapterError("Incomplete reviewed identity partition", "validate")
-    return records
+        titles = nodes(content, "h2") if specialized else nodes(root, "h1")
+        if url == primary_rules:
+            titles = nodes(content, "h2")
+        if not titles:
+            raise AdapterError("Missing opportunity title: " + url)
+        title = titles[0].text()
+        if not title:
+            raise AdapterError("Empty opportunity title: " + url)
+        if re.search(
+            r"bieg erasmusa|gala nagród|erasmus\s*days|"
+            r"dzień autorów|europejski tydzień młodzieży",
+            title,
+            re.I,
+        ):
+            excluded.append((url, "celebration, ceremony or charity activity"))
+            continue
+        offers = anchored_offers(content)
+        if offers:
+            for anchor, offer_title, offer in offers:
+                record = record_from_content(
+                    url + "#" + anchor, offer_title, offer, category
+                )
+                records[record["id"]] = record
+            continue
+        # A call announcement linking individually named sections is a parent,
+        # not an additional fifth competition.
+        links = material_links(content, url)
+        if any(
+            urllib.parse.urlsplit(link).fragment
+            and public_url(link) in documents
+            and anchored_offers(detail_content(documents[public_url(link)]))
+            for link in links
+            if "https://" + urllib.parse.urlsplit(link).netloc
+            in ROBOTS_ORIGINS
+        ):
+            excluded.append(
+                (url, "parent of separately collected anchored calls")
+            )
+            continue
+        canonical = ALIASES.get(url, url)
+        if url.endswith("/wydawnictwo/obwieszczenie-o-konkursie"):
+            category = "grants"
+            title = one(
+                [
+                    label
+                    for label, targets, _ in catalogues
+                    if any("/wydawnictwo" in target for target in targets)
+                ],
+                "publishing call catalogue title",
+            )
+        record = record_from_content(canonical, title, content, category)
+        if record["id"] in records:
+            prior = records[record["id"]]
+            prior["details"].setdefault("aliases", []).append(
+                {"url": url, "details": record["details"]}
+            )
+        else:
+            records[record["id"]] = record
+    for record in records.values():
+        url = record["url"].split("#", 1)[0]
+        linked = set(supporting.get(url, set())) - {url}
+        # These mappings attach evergreen context to the current discovered
+        # round while retaining the already published canonical identities.
+        if urllib.parse.urlsplit(url).netloc == "selfieplus.frse.org.pl":
+            linked.add("https://selfieplus.frse.org.pl/o-selfie")
+        elif url == primary_rules:
+            linked.add(
+                "https://eduinspiracje.org.pl/eduinspirator/o-konkursie"
+            )
+        elif "/wydawnictwo/obwieszczenie-o-konkursie" in url:
+            linked.add(SOURCE_URL + "wydawnictwo/regulamin")
+        elif "nasz-projekt-etwinning" in url:
+            linked.add("https://etwinning.pl/konkursy/konkursy-polskie")
+        record["details"]["supporting"] = [
+            {
+                "url": link,
+                **factual_material(detail_content(documents[link]), link),
+            }
+            for link in sorted(linked)
+            if link in documents
+        ]
+        if record.get("source_conflicts"):
+            index = "https://erasmusplus.org.pl/dokumenty"
+            guides = [
+                link
+                for link in material_links(documents[index], index)
+                if re.search(r"programme-guide-20\d{2}.*\.pdf$", link, re.I)
+            ]
+            if not guides:
+                raise AdapterError(
+                    "Current governing programme-guide links missing"
+                )
+            year = max(
+                re.search(r"programme-guide-(20\d{2})", link, re.I)[1]
+                for link in guides
+            )
+            current = [
+                link
+                for link in guides
+                if "programme-guide-" + year in link.lower()
+            ]
+            record["source_conflicts"][0]["governing_documents"] = [
+                index
+            ] + sorted(current)
+            record["classification"]["evidence"].extend(
+                [index] + sorted(current)
+            )
+    result = list(records.values())
+    validate_records(result)
+    print(
+        json.dumps(
+            {
+                "detail_pages": len(candidates),
+                "records": len(result),
+                "excluded": excluded,
+            },
+            ensure_ascii=False,
+        ),
+        file=sys.stderr,
+    )
+    return result
 
 
 def collect():
@@ -1898,7 +2608,10 @@ def validate_prior_metadata(previous, records):
             parsed = datetime.fromisoformat(
                 record["last_checked_at"].replace("Z", "+00:00")
             )
-            if parsed.tzinfo is None or parsed != timestamps["last_checked_at"]:
+            if (
+                parsed.tzinfo is None
+                or parsed != timestamps["last_checked_at"]
+            ):
                 raise ValueError()
     except (ValueError, TypeError, AttributeError):
         raise AdapterError(
@@ -2065,2484 +2778,48 @@ ROBOTS_ORIGINS = [
     "https://www.frse.org.pl",
 ]
 
-INPUTS = {
-    "funding-teach": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/w"
-            "yjedz-prowadzic-zajecia"
-        ),
-        "format": "html",
-        "sha256": (
-            "5891c581b1d4d4e0b4de8b7cb790c9687091c0431271c11f"
-            "1adf3adc3b390393"
-        ),
-    },
-    "funding-study": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/s"
-            "tudiuj-w-europie"
-        ),
-        "format": "html",
-        "sha256": (
-            "23a97021581aa6d798d7bafb8d29cb9a8f81639008bf6e5f"
-            "0aa2f71a04ec2ec3"
-        ),
-    },
-    "funding-03": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/w"
-            "yjedz-na-szkolenie-kadry-lub-z-uczniami-na-zajec"
-            "ia"
-        ),
-        "format": "html",
-        "sha256": (
-            "a80c115102d4824858e58c93e4e59f4e9105cbc4a6546cd7"
-            "9694f463565222bc"
-        ),
-    },
-    "funding-04": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/t"
-            "woja-szkola-w-partnerstwie-z-europa"
-        ),
-        "format": "html",
-        "sha256": (
-            "2b50a7a8cdcd995eada78be73e36faec72f5ce514cb0a7f2"
-            "63221777575c474b"
-        ),
-    },
-    "funding-05": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "mieniaj-edukacje"
-        ),
-        "format": "html",
-        "sha256": (
-            "3c5a931b384f36de133d33d1926a40bf6ca43354e60c67ae"
-            "db197b7581f63d69"
-        ),
-    },
-    "funding-06": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/u"
-            "czniowie-na-zagranicznych-praktykach"
-        ),
-        "format": "html",
-        "sha256": (
-            "baaf31dd85b051ab4f5345187c73c9366c779b1220ff55f1"
-            "94b5567d488982d8"
-        ),
-    },
-    "funding-07": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "agraniczne-wyjazdy-doskonalenia-kadry"
-        ),
-        "format": "html",
-        "sha256": (
-            "124c55fa24453599b4065cff76d990deb9b528e93cb001f1"
-            "ecd256375cc52fda"
-        ),
-    },
-    "funding-08": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/r"
-            "ozwoj-instytucji-ksztalcenia-zawodowego"
-        ),
-        "format": "html",
-        "sha256": (
-            "cf2d8eb67ae875709e96dc2468ff1e5fd14e12349738fd1e"
-            "6221e327f5ba7154"
-        ),
-    },
-    "funding-09": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/m"
-            "obilnosci-kadry-sportowej"
-        ),
-        "format": "html",
-        "sha256": (
-            "4fe1621fdfafc658fdfd1580dc139326ff7f1e68c2aa02af"
-            "7a5414cf2c32cbb2"
-        ),
-    },
-    "funding-10": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/m"
-            "iedzynarodowe-partnerstwa-w-dziedzinie-sportu"
-        ),
-        "format": "html",
-        "sha256": (
-            "8566d5f516e38d64d8190b578ff3d99831a4858d2170a204"
-            "6034c2ef70c64878"
-        ),
-    },
-    "funding-11": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/s"
-            "ojusze-na-rzecz-edukacji-i-przedsiebiorstw"
-        ),
-        "format": "html",
-        "sha256": (
-            "8492435671bee1a57a7adb98dd5144679069f40d6408e667"
-            "4746a253f7cea2d7"
-        ),
-    },
-    "funding-12": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/s"
-            "ojusze-na-rzecz-wspolpracy-sektorowej"
-        ),
-        "format": "html",
-        "sha256": (
-            "4688abf8565b8cb345cdb847084638a75adb717c261a4bd8"
-            "65a9ee6017489a11"
-        ),
-    },
-    "funding-13": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/d"
-            "zialania-jean-monnet-nauczanie-i-badania"
-        ),
-        "format": "html",
-        "sha256": (
-            "8c65d574a21c532c2eef2bfe9ce7071dd833ffd74eda4a01"
-            "c977ea99e3027012"
-        ),
-    },
-    "funding-14": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/d"
-            "zialania-jean-monnet-debata-nt-polityk"
-        ),
-        "format": "html",
-        "sha256": (
-            "0014f2ea3bfeb8834ab874bba9f670f408b3f1bb58e0d75a"
-            "03b6f2ce16d33d3c"
-        ),
-    },
-    "funding-15": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/b"
-            "udowanie-potencjalu-w-szkolnictwie-wyzszym"
-        ),
-        "format": "html",
-        "sha256": (
-            "709d72d1b48f71b42ee9484b2d587b66f58e5617941fd98b"
-            "f03e94c152648180"
-        ),
-    },
-    "funding-16": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/e"
-            "rasmus-mundus-joint-masters"
-        ),
-        "format": "html",
-        "sha256": (
-            "2739cdfb7e47101f7d5f5460b65c874d1d374376d0ba1ea6"
-            "bad67a6c01b53703"
-        ),
-    },
-    "funding-17": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/e"
-            "rasmus-mundus-design-measures"
-        ),
-        "format": "html",
-        "sha256": (
-            "2703b17ac57028f10b5024a73c52fb4da9e993fa12bccdb8"
-            "033ad803b50d37d4"
-        ),
-    },
-    "funding-18": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/e"
-            "dukacja-przez-cale-zycie"
-        ),
-        "format": "html",
-        "sha256": (
-            "0e2db0b4ae267761bda08fa5b07a6daa85ef6f3e93c31d70"
-            "29ed3c54f53dd80c"
-        ),
-    },
-    "funding-19": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/r"
-            "ozwin-metody-pracy-z-doroslymi"
-        ),
-        "format": "html",
-        "sha256": (
-            "d71cbe6ad4526bd5806147e8ae89bde6b01ef6e5b860a5be"
-            "8c1c82b0921a089e"
-        ),
-    },
-    "funding-20": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/w"
-            "ymiany-mlodziezowe-wspolpraca-poprzez-organizacj"
-            "e-spotkan"
-        ),
-        "format": "html",
-        "sha256": (
-            "f2fda955790113f86b76eb21a9f1bd666202ba5f78f492a5"
-            "ee75ed9e056479da"
-        ),
-    },
-    "funding-21": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/m"
-            "lodziezowe-spotkania-debaty-kampanie-w-kraju-i-z"
-            "a-granica"
-        ),
-        "format": "html",
-        "sha256": (
-            "43d7f9a30812d04561d1d1ad001cb007c6d3f4df2dba196f"
-            "432d050f7754f965"
-        ),
-    },
-    "funding-22": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/w"
-            "spolpracuj-z-innymi-na-rzecz-mlodziezy"
-        ),
-        "format": "html",
-        "sha256": (
-            "02ad825966d6e58477e649ea2a9426662d5471a46bf180e9"
-            "969138cf2c445b25"
-        ),
-    },
-    "funding-23": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/s"
-            "tworz-branzowe-centrum-umiejetnosci"
-        ),
-        "format": "html",
-        "sha256": (
-            "7c9d757bc5203aeca9c2d6577b4a700714f5aa335dca8e21"
-            "2f1ad0f21e06b3b6"
-        ),
-    },
-    "funding-24": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/k"
-            "oordynuj-regionalne-dzialania-lll"
-        ),
-        "format": "html",
-        "sha256": (
-            "1835f40084ad6136e3d44e060c78d0f9ce3c8e318cc23340"
-            "c5f6827b150b0927"
-        ),
-    },
-    "funding-25": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "miana-ktora-ty-tworzysz"
-        ),
-        "format": "html",
-        "sha256": (
-            "2735835bc1bda122d13afe9cbc60c04335fbe18023202bb1"
-            "b562fca58ee30a70"
-        ),
-    },
-    "funding-26": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "miana-ktora-pomagasz-tworzyc"
-        ),
-        "format": "html",
-        "sha256": (
-            "e28ebbb4fb30214e94d7fdf8cedd022b8164444d5058a82b"
-            "801988aeb4725913"
-        ),
-    },
-    "funding-27": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "ostan-wolontariuszem-badz-solidarny"
-        ),
-        "format": "html",
-        "sha256": (
-            "92884a1a52ef7ac192ea5f29e17bffba95e91b60d78f8881"
-            "f2b779ee75bd19e5"
-        ),
-    },
-    "funding-28": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "organizuj-wolontariat-wzmocnij-swoja-organizacje"
-        ),
-        "format": "html",
-        "sha256": (
-            "dfab56caf73f4915bf8990496e085e1c1cb6ecbe93ef2b4f"
-            "5831c66ffe4f595a"
-        ),
-    },
-    "funding-29": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/o"
-            "rganizuj-wyjazdy-z-mlodzieza-z-litwy"
-        ),
-        "format": "html",
-        "sha256": (
-            "2987414d839c19219d164a6b066a4f3f98c7a1937aba7d06"
-            "21a545c29c6ad2d9"
-        ),
-    },
-    "funding-30": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/o"
-            "rganizuj-miedzynarodowe-wydarzenia"
-        ),
-        "format": "html",
-        "sha256": (
-            "be46ad5a498ea5f3b374dee0002a594b9490e36feac92b1a"
-            "9550e365f9ed18c1"
-        ),
-    },
-    "training-02": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinarium-powrot-szwajcarii-do-programu-erasmus"
-        ),
-        "format": "html",
-        "sha256": (
-            "cb09dac83dba4a88a6ac1365d21fdf4b734e86e6bd5d1c4f"
-            "7828aa257fcb739a"
-        ),
-    },
-    "training-03": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinarium-powrot-wielkiej-brytanii-do-erasmusa-s"
-            "ektor-mlodziez"
-        ),
-        "format": "html",
-        "sha256": (
-            "4029595595535167f54ed68f2b06d05e267daf2f67cdc027"
-            "70f5712de3cccf43"
-        ),
-    },
-    "training-04": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/r"
-            "pi-slupsk-konferencja-erasmus-zmienia-perspektyw"
-            "e"
-        ),
-        "format": "html",
-        "sha256": (
-            "3fa80df691cb09972f93940808579a5e5dcfcb1d0114e0d4"
-            "00330c99fb7a1de9"
-        ),
-    },
-    "training-05": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/e"
-            "urolekcje-eurodesk"
-        ),
-        "format": "html",
-        "sha256": (
-            "e7f93538bfc86ee5c4d1faa0280a825a69ee2499b4a5405f"
-            "b8bbca68ec7128a4"
-        ),
-    },
-    "training-06": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/k"
-            "ursy-internetowe-etwinning"
-        ),
-        "format": "html",
-        "sha256": (
-            "466983204e0e69b59f1dbf7a78093bdaf31a52ce077fe7ce"
-            "1b246333abc4cf6d"
-        ),
-    },
-    "training-07": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinaria-etwinning"
-        ),
-        "format": "html",
-        "sha256": (
-            "e7d5cdf6c89a1d1d10a73e77c261ce41f877326fb9f6b9c1"
-            "aed09a40830a9d7d"
-        ),
-    },
-    "training-11": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/f"
-            "orum-edukacji-doroslych"
-        ),
-        "format": "html",
-        "sha256": (
-            "58b84cb6830b85c06a13b4d4e9d929134bcc04e91878f6a5"
-            "4e1a59d9c409e9d9"
-        ),
-    },
-    "training-13": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/k" "ongres-edukacji"
-        ),
-        "format": "html",
-        "sha256": (
-            "64802afaa9a74a3d67a944d331171b1684fc6604fc915fc0"
-            "516f37cf6f020a93"
-        ),
-    },
-    "training-14": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/m"
-            "obilne-centrum-edukacyjne-frse"
-        ),
-        "format": "html",
-        "sha256": (
-            "fb908f17daed0b23042fadf7ecd43bae6b5b33170ef976ca"
-            "b73086339586e5a0"
-        ),
-    },
-    "training-15": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/o"
-            "golnopolski-dzien-informacyjny-frse"
-        ),
-        "format": "html",
-        "sha256": (
-            "ed0781fd201f3f380ebf9d4ed6cf93f56c4079dd98953bff"
-            "281a18e87916591a"
-        ),
-    },
-    "training-17": {
-        "url": "https://www.frse.org.pl/wydarzenia-i-szkolenia/tool-fair",
-        "format": "html",
-        "sha256": (
-            "d038fda656fadf5470746b424d3bc772ab0f79d78c812eb9"
-            "cba89a14ad399753"
-        ),
-    },
-    "training-20": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/t"
-            "edxwarsaw-youth-2026"
-        ),
-        "format": "html",
-        "sha256": (
-            "2411b461914b576095747a9733cfe7be19ab8151fe964f08"
-            "ec9526247e091320"
-        ),
-    },
-    "training-21": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinarium-erasmus-dzialania-jean-monnet"
-        ),
-        "format": "html",
-        "sha256": (
-            "59ff0b167a571115f280a4d6f52ccce73389efd5ea46c3c1"
-            "371ac542ddf0c1e7"
-        ),
-    },
-    "training-22": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinarium-dzialania-erasmus-mundus"
-        ),
-        "format": "html",
-        "sha256": (
-            "eef787ae3728439c86e44dab2032b765dd8a073d3c1352cf"
-            "4e608dad373c19e1"
-        ),
-    },
-    "funding": {
-        "url": "https://www.frse.org.pl/finansowanie-projektow",
-        "format": "html",
-        "sha256": (
-            "d79ec32f467b726b41773411105cf4e792b51091ba043975"
-            "65886cbd27351ed8"
-        ),
-    },
-    "funding-history-page2": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow?f"
-            "ilter_for_who=0&filter_string=&filter_send=filtr"
-            "uj&active_page=2"
-        ),
-        "format": "html",
-        "sha256": (
-            "841abf351ab1428912bbd024e00ae07c298ca11e5a70f110"
-            "0c92b1a0cdf7f2d2"
-        ),
-    },
-    "funding-history-page3": {
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow?f"
-            "ilter_for_who=0&filter_string=&filter_send=filtr"
-            "uj&active_page=3"
-        ),
-        "format": "html",
-        "sha256": (
-            "fd8258135e49bd9218d0b0aa9f9b9d59a866f7226804ccd5"
-            "5f000d1030720a00"
-        ),
-    },
-    "contests": {
-        "url": "https://www.frse.org.pl/konkursy",
-        "format": "html",
-        "sha256": (
-            "cd9b7b004b120a1e6341f50e1966bd9ff23441d9068e7d90"
-            "505cd116ea1351b3"
-        ),
-    },
-    "contests-history-page2": {
-        "url": (
-            "https://www.frse.org.pl/konkursy?filter_for_who="
-            "0&filter_string=&filter_send=filtruj&active_page"
-            "=2"
-        ),
-        "format": "html",
-        "sha256": (
-            "7519b232c333e18dea38c813738e7f9aaa9ae52708558b91"
-            "07110a595cdfe7fa"
-        ),
-    },
-    "events": {
-        "url": "https://www.frse.org.pl/wydarzenia-i-szkolenia",
-        "format": "html",
-        "sha256": (
-            "40d14282f1c8b2c9ae4bfae1f77cc96a2ff3c7db9a5269b5"
-            "a1aa95ceaabf17b4"
-        ),
-    },
-    "events-history-page2": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia?s"
-            "_filter_for_who=0&s_filter_terms=0&s_filter_stri"
-            "ng=&s_filter_send=filtruj&active_page=2"
-        ),
-        "format": "html",
-        "sha256": (
-            "2ee6dc6b0080eb17099923a5763e2cde2ad7eb2a45b920bf"
-            "6150b37cf6dfed12"
-        ),
-    },
-    "events-history-page3": {
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia?s"
-            "_filter_for_who=0&s_filter_terms=0&s_filter_stri"
-            "ng=&s_filter_send=filtruj&active_page=3"
-        ),
-        "format": "html",
-        "sha256": (
-            "092f3d0d2f65763a9f1a5e88872562f9195e1c197e18a8c9"
-            "ee358abcff944418"
-        ),
-    },
-    "jobs": {
-        "url": "https://www.frse.org.pl/praca-w-frse",
-        "format": "html",
-        "sha256": (
-            "37b9f410fa23aa71ea912209e0d96a2d5b97ae9baea2dba8"
-            "6202fe761bfbd287"
-        ),
-    },
-    "discover": {
-        "url": (
-            "https://www.frse.org.pl/aktualnosci/konkurs-disc"
-            "overeu-ruszyla-runda-jesienna"
-        ),
-        "format": "html",
-        "sha256": (
-            "57743467e2db85dc0407337a127b06ff761eb9398dfde3e1"
-            "ba22100bd565a640"
-        ),
-    },
-    "etwinning-call": {
-        "url": (
-            "https://www.frse.org.pl/aktualnosci/konkurs%C2%A"
-            "0nasz-projekt-etwinning-2027"
-        ),
-        "format": "html",
-        "sha256": (
-            "b4122e1312e1f451fc752417545a00486bb5279da011c6f1"
-            "3345c46d96bd767a"
-        ),
-    },
-    "professional-school": {
-        "url": (
-            "https://www.frse.org.pl/aktualnosci/nabor-uzupel"
-            "niajacy-profesjonalna-szkola-roku"
-        ),
-        "format": "html",
-        "sha256": (
-            "97dce4fc0d0022f9e6b324448a6f7621df7ca31509761007"
-            "85517afc7a3c9359"
-        ),
-    },
-    "professional-school-hub": {
-        "url": "https://www.frse.org.pl/profesjonalna-szkola-roku",
-        "format": "html",
-        "sha256": (
-            "f5dc42de7151eb1d786f6bf9682bf8ec8103b32226dcd938"
-            "ee5b2ae301f676f8"
-        ),
-    },
-    "professional-school-regulations": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "026/08/27/zj6fq8/psr-regulamin-konkurs-uzupelnia"
-            "jacy.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "61ee04fde91614566053070b655363ec37e24d6d0c391b51"
-            "7ec47607a30bcfae"
-        ),
-    },
-    "etwinning-regulations": {
-        "url": (
-            "https://etwinning.pl/brepo/panel_repo_files/2026"
-            "/09/26/slsxob/regulamin-konkursu-nasz-projekt-et"
-            "winning.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "c577fa213cdadc05bbf43a0162d1c1425f0ba54b3565dcec"
-            "9e2ccb88e68eebfe"
-        ),
-    },
+ACCESS_POLICIES = {
     "etwinning-policy": {
         "url": "https://etwinning.pl/klauzula-rodo",
         "format": "html",
-        "sha256": (
-            "30e804cac14e720b68560c19b5c3c1d5cad9a464668bd4ac"
-            "d2de9a3c4e51eb18"
-        ),
-    },
-    "erasmus-call-pdf": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "025/11/13/ctajct/oj-c-202506080-pl-txt.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "f49ccf5c4761928d762bd7861327f94ea8f17a88bbebebef"
-            "44574a371e6210d0"
-        ),
-    },
-    "erasmus-documents": {
-        "url": "https://erasmusplus.org.pl/dokumenty",
-        "format": "html",
-        "sha256": (
-            "78df90a75713a81cd9f14d969a20fd2da33953d89bbe8167"
-            "5558282c13ae7e9d"
-        ),
-    },
-    "erasmus-guide2026": {
-        "url": (
-            "https://erasmusplus.org.pl/brepo/panel_repo_file"
-            "s/2025/11/13/n1naeo/programme-guide-2026-pl.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "f7eec2fe597cbb9afcda01019e58ec51ce256b9cd55105d5"
-            "7bb44acbc0dad7f4"
-        ),
-    },
-    "erasmus-guide2026-en": {
-        "url": (
-            "https://erasmusplus.org.pl/brepo/panel_repo_file"
-            "s/2025/11/13/xrqjug/programme-guide-2026-en.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "8f14f67fc83d5081e7e85744ff39ae855aef34af8c842d22"
-            "ba8c52e464c331a0"
-        ),
+        "sha256": "ad1d077225592a200ef0c4b027c2c0c8f6419a1676a41b32e6e98c82d39511c7",
     },
     "erasmus-policy": {
-        "url": (
-            "https://erasmusplus.org.pl/ochrona-danych-osobow"
-            "ych-w-programie-erasmus-2021-2027"
-        ),
+        "url": "https://erasmusplus.org.pl/ochrona-danych-osobowych-w-programie-erasmus-2021-2027",
         "format": "html",
-        "sha256": (
-            "cc11877f254b88ad93715592d853dcd45bbc7b3fb5b5ca6e"
-            "0f9ace4ff9cad40b"
-        ),
-    },
-    "eks-documents": {
-        "url": "https://eks.org.pl/dokumenty",
-        "format": "html",
-        "sha256": (
-            "98e4f064e3a4875e14d0ced0b9c33d20f2d46a073fab0fb3"
-            "ae87ff44e719e35a"
-        ),
-    },
-    "eks-guide2026": {
-        "url": (
-            "https://eks.org.pl/brepo/panel_repo_files/2025/1"
-            "1/18/wi9dq2/european-solidarity-corps-guide-2026"
-            "-pl.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "04162b445649ed5130e526900a60364a8817874d78691189"
-            "8e8d200ba83807d4"
-        ),
+        "sha256": "075762ac2bd97b3e05bab61400399fdbb68c7ebf2598adb79085c9103d28e826",
     },
     "eks-cookies": {
         "url": "https://eks.org.pl/pliki-cookies",
         "format": "html",
-        "sha256": (
-            "e68229644ee9f8251023c806fdb62a93ac5be64199f90de8"
-            "37de18067d9454dd"
-        ),
-    },
-    "bcu-call3": {
-        "url": "https://www.frse.org.pl/kpo-bcu-wnioskowanie-konkurs-iii",
-        "format": "html",
-        "sha256": (
-            "2a6ad33aef2397f04db24cf3ca2683eb47e1ca82bce3d41f"
-            "28ad2cff0b89016c"
-        ),
-    },
-    "bcu-reglatest": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "025/01/23/iyb7uu/regulamin-konkursu-utworzenie-i"
-            "-wsparcie-funkcjono.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "3bcd5c725d29a40c7693272c866daace2c0e65baf64fa0ed"
-            "5de1b57a0669b6cf"
-        ),
-    },
-    "bcu-amendments": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "025/01/23/embgsr/kpo-bcu-zestawienie-zmian-w-reg"
-            "ulaminie-konkursu-i.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "1585913255af7c29e57b9caf3012cf3b8aa5a8cbf4afdf0a"
-            "2d8ff15e695a7513"
-        ),
-    },
-    "selfie2025": {
-        "url": "https://selfieplus.frse.org.pl/konkurs-2025",
-        "format": "html",
-        "sha256": (
-            "505b70c45c8d8628be45ad0bc45e991e26048c44782ed20b"
-            "f0901265cc3ca675"
-        ),
-    },
-    "selfie-reg2025": {
-        "url": (
-            "https://selfieplus.frse.org.pl/brepo/panel_repo_"
-            "files/2025/05/14/svbrks/selfie-regulamin-2025.pd"
-            "f"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "147aaed0912e67f1e76ee266f3f585a42aa9a4084f769b9d"
-            "3c5382864af84484"
-        ),
+        "sha256": "1b254c885f5486b4ed19afb6403df320592e9da80acaffcf676b743e58083af9",
     },
     "selfie-cookies": {
         "url": "https://selfieplus.frse.org.pl/pliki-cookies",
         "format": "html",
-        "sha256": (
-            "837ad1e0a6f7a8a58d3004a159a99a5da3167273d494244c"
-            "0b356d45256d7292"
-        ),
-    },
-    "edu-inspirator-rules": {
-        "url": "https://eduinspiracje.org.pl/eduinspirator/regulamin",
-        "format": "html",
-        "sha256": (
-            "d34303bd4a8d2c456419466047c0c97a8c1b7a36870ac7ba"
-            "153fc0f8c3cffd18"
-        ),
-    },
-    "edu-inspirator-reg2025": {
-        "url": (
-            "https://eduinspiracje.org.pl/brepo/panel_repo_fi"
-            "les/2025/08/26/xcc1pd/regulamin-eduinspirator-20"
-            "25.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "b04940e40f4e44fbacf61346bcd0adf90cce8a3a0608d1b4"
-            "2cb1abebf7025d33"
-        ),
+        "sha256": "fbfbec993f5ada3723a9948c8b8e43a107bb384b3f8cfec1c041cad3f9a09f6f",
     },
     "edu-rodo": {
         "url": "https://eduinspiracje.org.pl/rodo",
         "format": "html",
-        "sha256": (
-            "5684c28baf6592ac679b14908fa1c421c91e321e38a3986a"
-            "815a4ca166f64ea3"
-        ),
+        "sha256": "65e51c255257535831d2cc2b157a0d7b4584eb2f5caca28290969c16081ab3da",
     },
     "edu-cookies": {
         "url": "https://eduinspiracje.org.pl/pliki-cookies",
         "format": "html",
-        "sha256": (
-            "eb0566c232e72787338410f1b0e3b7dcf649b6604fccd43e"
-            "2054751785b14ad8"
-        ),
-    },
-    "publishing-call": {
-        "url": "https://www.frse.org.pl/wydawnictwo/obwieszczenie-o-konkursie",
-        "format": "html",
-        "sha256": (
-            "cda7303f508024561ee5b02b7fd68c03ea2fe46d32ec284d"
-            "4b53f92dd67e58a1"
-        ),
-    },
-    "publishing-reg": {
-        "url": "https://www.frse.org.pl/wydawnictwo/regulamin",
-        "format": "html",
-        "sha256": (
-            "84e5350547bb1cf51e72000b667d2d547762fd50dab6a2d6"
-            "f86bc289017223db"
-        ),
-    },
-    "publishing-standards": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "026/02/20/e2zdqx/standardy-techniczne-2026.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "56ed2775bbb9f7d82b784911e282c3a5b354ca7f436d8b76"
-            "0a8ca0b45a2ef510"
-        ),
-    },
-    "publishing-ethics": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "026/02/20/igfxwm/zasady-etyki-publikacyjnej-2026"
-            ".pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "b366062caab547765d74296191f2c8a478eef1882807fa78"
-            "2b099aa5d5aec93a"
-        ),
-    },
-    "publishing-review": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "026/02/20/ry7rgc/procedura-recenzowania-2026.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "b7d529cad93dbd127e0ce4d3a49579b60733a4aad6dd2912"
-            "04ac39abe4055e50"
-        ),
-    },
-    "publishing-production": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "026/02/20/kxkni2/procedury-wydawnicze-monografii"
-            "-naukowych-2026.pdf"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "1eecb433c938a938db5649ef53a6415d971cb198fb9cefbf"
-            "a9ac740121ba8f3f"
-        ),
-    },
-    "slupsk-programme": {
-        "url": (
-            "https://www.frse.org.pl/brepo/panel_repo_files/2"
-            "026/10/06/0gzurw/program-rpi-slupsk-2026-10-15.p"
-            "df"
-        ),
-        "format": "pdf",
-        "sha256": (
-            "44f059391ca8d71566a106b6c6a1fd008b05205858c081bc"
-            "77363152088e221c"
-        ),
+        "sha256": "1e46a71bc622c675ff41d6c2e8bbb1aa092770dee96b2c0920ebfb3cd1b7865b",
     },
     "data-policy": {
         "url": "https://www.frse.org.pl/rodo",
         "format": "html",
-        "sha256": (
-            "2249b2221d1ef20fd69dc20473c515b091af1ee8eb521aa3"
-            "719da48e3f6bd0c6"
-        ),
+        "sha256": "801a0f900ef0a76a0be5ea8209ba0b3ba6582c567075a9f76ac79dd3bc7203e2",
     },
     "cookies": {
         "url": "https://www.frse.org.pl/pliki-cookies",
         "format": "html",
-        "sha256": (
-            "4e19a35e762f2c04975141ce8c5f78c165e8b2ed0d996671"
-            "62fbb27b124a518d"
-        ),
-    },
-    "uk-webinar": {
-        "url": (
-            "https://www.frse.org.pl/aktualnosci/webinarium-p"
-            "owrot-wielkiej-brytanii-do-erasmusa-sektor-mlodz"
-            "iez"
-        ),
-        "format": "html",
-        "sha256": (
-            "bd0844829db8c3bc5e84428399bcc1c101316e0b767dbe45"
-            "ffb03ebcece19050"
-        ),
+        "sha256": "1d9fecbed93387fac66917822db032ea4d54d5e0c3b206c3db7f2a7a4b21e225",
     },
 }
-
-PROFILES = [
-    {
-        "key": "funding-01",
-        "title": "Wyjedź prowadzić zajęcia!",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/w"
-            "yjedz-prowadzic-zajecia"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Mobilność kadry uczelni: zajęcia lub szkolenie za granicą. "
-        "Wniosek instytucjonalny składa uczelnia z ECHE, pracownik "
-        "zgłasza się w macierzystej uczelni. W UE i krajach "
-        "stowarzyszonych zwykle 2–60 dni; zaproszeni pracownicy "
-        "przedsiębiorstw od 1 dnia, mobilność z krajami "
-        "niestowarzyszonymi od 5 dni. Dofinansowanie podróży i "
-        "utrzymania zależy od kraju i długości wyjazdu. Nabór "
-        "instytucjonalny 2026 zakończony; nie jest to termin rekrutacji "
-        "pracowników.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "No literal participant application deadline; do not use "
-        "institutional or event dates.",
-        "inputs": [
-            "funding-teach",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-02",
-        "title": "Studiuj w Europie!",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/s"
-            "tudiuj-w-europie"
-        ),
-        "categories": ["scholarships", "internships"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Dla studentów uczelni uczestniczących w Erasmus+"
-        ": studia lub "
-        "praktyki za granicą, zwykle 2–12 miesięcy; krótka mobilność "
-        "mieszana 5–30 dni. Limit 12 miesięcy na cykl studiów, 24 na "
-        "studiach jednolitych, obejmuje wcześniejsze wyjazdy. "
-        "Absolwentów na praktyki wybiera uczelnia przed ukończeniem "
-        "studiów; praktyka do roku po dyplomie. Stypendium zależy od "
-        "kraju i czasu, możliwe wsparcie osób z mniejszymi szansami. "
-        "Nabór uczelni 2026 zamknięty, rekrutację osób ustala uczelnia.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "No literal participant application deadline; do not use "
-        "institutional or event dates.",
-        "inputs": [
-            "funding-study",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-03",
-        "title": "Wyjedź na szkolenie kadry lub z uczniami na zajęcia",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/w"
-            "yjedz-na-szkolenie-kadry-lub-z-uczniami-na-zajec"
-            "ia"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Mobilność uczniów i kadry edukacji szkolnej. Wni"
-        "oskować mogą "
-        "uprawnione polskie przedszkola, szkoły i inne instytucje "
-        "sektora, przez projekt krótkoterminowy, akredytację lub "
-        "konsorcjum. Wsparcie obejmuje podróż, utrzymanie i organizację "
-        "działań; koszty zależą od formatu i kraju. Projekty "
-        "krótkoterminowe trwają 6–18 miesięcy. Udział osób organizuje "
-        "placówka; zakończony nabór instytucjonalny 2026 nie wyznacza "
-        "ich indywidualnego terminu.",
-        "deadline": "2026-02-19T11:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-03",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-04",
-        "title": "Twoja szkoła w partnerstwie z Europą",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/t"
-            "woja-szkola-w-partnerstwie-z-europa"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Granty dla instytucji edukacji szkolnej i partnerów: "
-        "partnerstwa współpracy lub na małą skalę, bez wymogu "
-        "akredytacji Erasmus+. Standardowe partnerstwo wymaga co "
-        "najmniej 3 organizacji z 3 krajów UE/stowarzyszonych; małe co "
-        "najmniej 2 z 2 krajów. Ryczałty na cały projekt: 120, 250 lub "
-        "400 tys. EUR na 12–36 miesięcy albo 30 lub 60 tys. EUR na 6–24 "
-        "miesiące. Nie są to stypendia osobowe. Nabór 2026 zakończony; "
-        "szczegółowe warunki określa aktualny przewodnik.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure. Multiple national/central "
-        "variants differ in clock/routes: no universal precise deadline.",
-        "inputs": [
-            "funding-04",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-05",
-        "title": "Zmieniaj edukację!",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "mieniaj-edukacje"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Europejskie partnerstwa rozwoju szkół: koordynat"
-        "or to lokalny "
-        "lub regionalny organ edukacji albo organ koordynujący szkoły z "
-        "UE/kraju stowarzyszonego. Co najmniej 6 organizacji; w kraju "
-        "koordynatora i drugim kraju po organie oraz 2 szkoły. Projekt "
-        "musi objąć minimum 3 zadania, w tym po jednym z obu kategorii "
-        "działań. Grant ryczałtowy 400 tys. EUR na 36 miesięcy dla "
-        "projektu. Nabór 2026 zamknięty.",
-        "deadline": "2026-04-09T10:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-05",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-06",
-        "title": "Uczniowie na zagranicznych praktykach",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/u"
-            "czniowie-na-zagranicznych-praktykach"
-        ),
-        "categories": ["internships"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Zagraniczne praktyki dla osób uczących się w kształceniu "
-        "zawodowym i absolwentów do roku po ukończeniu nauki. "
-        "Rekrutację prowadzi uprawniona instytucja sektora VET, która "
-        "wnioskuje o grant. Praktyki 10–89 dni lub ErasmusPro 90–365 "
-        "dni; udział w konkursach umiejętności 1–10 dni. Dofinansowanie "
-        "podróży, utrzymania i organizacji, bez obowiązkowego wkładu "
-        "uczestnika. Nabór instytucji 2026 zakończony; terminy "
-        "uczestników zależą od projektu.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "No literal participant application deadline; do not use "
-        "institutional or event dates.",
-        "inputs": [
-            "funding-06",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-07",
-        "title": "Zagraniczne wyjazdy doskonalenia kadry",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "agraniczne-wyjazdy-doskonalenia-kadry"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Mobilność kadry instytucji kształcenia zawodoweg"
-        "o: obserwacja "
-        "pracy 2–60 dni, prowadzenie zajęć 2–365 dni lub kursy 2–10 "
-        "dni. Wniosek o finansowanie składa uprawniona instytucja VET; "
-        "pracowników rekrutuje ich organizacja. Wsparcie pokrywa według "
-        "zasad programu podróż, utrzymanie i organizację wyjazdu. Nabór "
-        "instytucjonalny 2026 zakończony; nie oznacza zakończenia "
-        "wszystkich rekrutacji kadry. Pełne warunki kosztów kursów "
-        "określa przewodnik 2026.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "No literal participant application deadline; do not use "
-        "institutional or event dates.",
-        "inputs": [
-            "funding-07",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-08",
-        "title": "Rozwój instytucji kształcenia zawodowego",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/r"
-            "ozwoj-instytucji-ksztalcenia-zawodowego"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Partnerstwa instytucji kształcenia zawodowego z "
-        "organizacjami "
-        "edukacyjnymi, branżowymi i innymi uprawnionymi partnerami. "
-        "Partnerstwo współpracy: minimum 3 organizacje z 3 krajów, "
-        "12–36 miesięcy i 120/250/400 tys. EUR. Mała skala: minimum 2 "
-        "organizacje z 2 krajów, 6–24 miesiące i 30/60 tys. EUR. Kwoty "
-        "to ryczałty projektowe, nie wypłaty dla uczestnika. "
-        "Koordynator z UE/kraju stowarzyszonego; szczegółowe zasady "
-        "krajów określa przewodnik. Nabór 2026 zakończony.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure. Multiple national/central "
-        "variants differ in clock/routes: no universal precise deadline.",
-        "inputs": [
-            "funding-08",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-09",
-        "title": "Mobilności kadry sportowej",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/m"
-            "obilnosci-kadry-sportowej"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Mobilność pracowników i wolontariuszy sportu, pr"
-        "zede wszystkim "
-        "organizacji sportu powszechnego. Polska organizacja wnioskuje "
-        "o projekt; uczestnik musi mieć udokumentowany związek "
-        "pracy/wolontariatu i mieszkać w kraju wysyłającym. Obserwacja "
-        "pracy 2–14 dni lub prowadzenie treningów 15–60 dni; "
-        "maksymalnie 10 osób. Budżet obejmuje podróż, utrzymanie, "
-        "organizację i wsparcie włączenia. Nabór 2026 zakończony; "
-        "zawody zawodników nie są tą mobilnością.",
-        "deadline": "2026-02-12T11:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-09",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-10",
-        "title": "Międzynarodowe partnerstwa w dziedzinie sportu",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/m"
-            "iedzynarodowe-partnerstwa-w-dziedzinie-sportu"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Międzynarodowa współpraca organizacji sportowych"
-        ": partnerstwa "
-        "współpracy, małej skali i niekomercyjne imprezy europejskie. "
-        "Wnioskodawcą jest uprawniona organizacja, nie pojedynczy "
-        "sportowiec. Liczba partnerów, czas i ryczałt zależą od "
-        "działania; wskazane 30–450 tys. EUR nie stanowi jednej "
-        "wspólnej stawki dla wszystkich akcji. Finansowanie projektu "
-        "wymaga warunków przewodnika 2026 i właściwego konkursu EACEA. "
-        "Nabór 2026 zakończony.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-10",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-11",
-        "title": "Sojusze na rzecz edukacji i przedsiębiorstw",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/s"
-            "ojusze-na-rzecz-edukacji-i-przedsiebiorstw"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Sojusze edukacji i przedsiębiorstw: minimum 8 be"
-        "neficjentów z "
-        "4 krajów UE/stowarzyszonych, w tym 3 podmioty rynku pracy i 3 "
-        "organizacje edukacji, przynajmniej jedna uczelnia oraz jeden "
-        "dostawca VET. Uczelnie UE/stowarzyszone wymagają ECHE. "
-        "Koordynator z UE/kraju stowarzyszonego; inni partnerzy tylko "
-        "według przewodnika. Grant pokrywa do 80% kosztów, maks. 1 mln "
-        "EUR na 2 lata lub 1,5 mln EUR na 3 lata. Nabór 2026 "
-        "zakończony.",
-        "deadline": "2026-03-10T16:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-11",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-12",
-        "title": "Sojusze na rzecz współpracy sektorowej",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/s"
-            "ojusze-na-rzecz-wspolpracy-sektorowej"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Sojusze współpracy sektorowej rozwijają umiejętności w "
-        "określonych ekosystemach przemysłowych. Wymagane minimum 12 "
-        "beneficjentów z 8 krajów UE/stowarzyszonych, co najmniej 5 "
-        "podmiotów rynku pracy i 5 dostawców edukacji, w tym uczelnia i "
-        "VET. Uczelnie UE/stowarzyszone muszą mieć ECHE. Dofinansowanie "
-        "do 80% kosztów projektu, maks. 4 mln EUR na 4 lata. Nabór 2026 "
-        "zakończony; skład i kwalifikowalność partnerów określa "
-        "przewodnik.",
-        "deadline": "2026-03-10T16:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-12",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-13",
-        "title": "Działania Jean Monnet – nauczanie i badania",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/d"
-            "zialania-jean-monnet-nauczanie-i-badania"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Jean Monnet finansuje nauczanie i badania o UE w"
-        " uprawnionych "
-        "uczelniach. Uczelnie UE/krajów stowarzyszonych wymagają ECHE; "
-        "pozostałe kraje podlegają ograniczeniom przewodnika. Moduły, "
-        "katedry i centra doskonałości mają odrębne wymagania godzinowe "
-        "i stawki, projekty zwykle trwają 3 lata. Grant "
-        "instytucjonalny, nie stypendium studenta. Nabór 2026 "
-        "zakończony. Ogólne limity na stronie FRSE należy sprawdzić w "
-        "aktualnym przewodniku, nie traktować jako jednej stawki.",
-        "deadline": "2026-02-03T16:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-13",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-14",
-        "title": "Działania Jean Monnet – debata nt. polityk",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/d"
-            "zialania-jean-monnet-debata-nt-polityk"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Sieci Jean Monnet 2026: wewnętrzna co najmniej 1"
-        "2 uczelni z 7 "
-        "krajów UE/stowarzyszonych; UE–Indie co najmniej 12 "
-        "beneficjentów, w tym 6 z Indii, koordynator z UE/kraju "
-        "stowarzyszonego. Uczelnie UE/stowarzyszone wymagają ECHE. "
-        "Projekty zwykle 36 miesięcy, do 80% kosztów, maks. 1 mln/1,2 "
-        "mln EUR. Nabór zamknięty. Opis FRSE zawiera sprzeczne stare "
-        "wymagania Kanada/USA; aktualny przewodnik 2026 w obu językach "
-        "wskazuje Indie.",
-        "deadline": "2026-02-03T16:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-14",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-15",
-        "title": "Budowanie potencjału w szkolnictwie wyższym",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/b"
-            "udowanie-potencjalu-w-szkolnictwie-wyzszym"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Budowanie potencjału szkolnictwa wyższego: granty dla "
-        "uprawnionych uczelni, organizacji uczelni i konsorcjów z "
-        "kwalifikujących się krajów, według części projektu i regionu. "
-        "Stawki projektowe: 200–400 tys. EUR na 24/36 miesięcy, 400–800 "
-        "tys. EUR na 24/36 miesięcy lub 800 tys.–1 mln EUR na 36/48 "
-        "miesięcy. Skład konsorcjum i udział władz krajowych różnią się "
-        "między częściami; pełne warunki w przewodniku 2026. Nabór 2026 "
-        "zakończony; wzmianka o 2023 r. nie jest nowym naborem.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure. Multiple strands/regional "
-        "routes; no falsely universal deadline.",
-        "inputs": [
-            "funding-15",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-16",
-        "title": "Erasmus Mundus Joint Masters",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/e"
-            "rasmus-mundus-joint-masters"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Erasmus Mundus Joint Masters: grant dla konsorcj"
-        "um minimum 3 "
-        "uczelni z 3 krajów, w tym 2 z UE/krajów stowarzyszonych; ECHE "
-        "dla tych uczelni. Finansuje wspólny program i stypendia "
-        "wybranych studentów pełnych studiów: 1400 EUR/miesiąc przez "
-        "12/18/24 miesiące, bez czesnego dla stypendysty. Wymagane dwa "
-        "semestry w dwóch krajach innych niż kraj zamieszkania przy "
-        "zapisie, w tym jednym UE/stowarzyszonym; wcześniejsze "
-        "stypendium EMJM wyklucza kolejne. Nabór konsorcjów 2026 "
-        "zakończony; kandydaci studiujący aplikują do konkretnych "
-        "programów w ich terminach.",
-        "deadline": "2026-02-12T16:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-16",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-17",
-        "title": "Erasmus Mundus Design Measures",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/e"
-            "rasmus-mundus-design-measures"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Erasmus Mundus Design Measures wspiera opracowan"
-        "ie wspólnych "
-        "międzynarodowych studiów magisterskich. Wnioskuje uprawniona "
-        "uczelnia; uczelnie UE/krajów stowarzyszonych muszą mieć ECHE. "
-        "Projekt ma przygotować wspólny program minimum 3 uczelni w 3 "
-        "krajach, w tym 2 UE/stowarzyszone. Grant 60 tys. EUR jako "
-        "ryczałt na projekt trwający 15 miesięcy; nie jest stypendium "
-        "osobowym ani finansowaniem już prowadzonych studiów. Nabór "
-        "2026 zakończony; szczegóły w przewodniku.",
-        "deadline": "2026-02-12T16:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-17",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-18",
-        "title": "Edukacja przez całe życie",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/e"
-            "dukacja-przez-cale-zycie"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Mobilność niezawodowej edukacji dorosłych dla uprawnionych "
-        "instytucji, np. bibliotek, NGO i uniwersytetów trzeciego "
-        "wieku. Wyjazdy obejmują kadrę i dorosłych uczących się; "
-        "priorytet mają osoby o mniejszych szansach. Grant na podróż, "
-        "utrzymanie, organizację, kursy i włączenie zależy od formatu. "
-        "Projekty krótkoterminowe 6–18 miesięcy; akredytowane 15 "
-        "miesięcy z możliwością wydłużenia. Nabór instytucji 2026 "
-        "zakończony, rekrutację osób prowadzą organizacje.",
-        "deadline": "2026-02-19T11:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-18",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-19",
-        "title": "Rozwiń metody pracy z dorosłymi",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/r"
-            "ozwin-metody-pracy-z-doroslymi"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Partnerstwa niezawodowej edukacji dorosłych dla "
-        "uprawnionych "
-        "organizacji. Współpraca wymaga minimum 3 organizacji z 3 "
-        "krajów UE/stowarzyszonych; mała skala minimum 2 z 2 krajów. "
-        "Ryczałty całego projektu: 120/250/400 tys. EUR na 12–36 "
-        "miesięcy albo 30/60 tys. EUR na 6–24 miesiące, według "
-        "przewodnika 2026. To wsparcie instytucji, nie wypłata dla "
-        "słuchacza. Nabór 2026 zakończony; projekty mają rozwijać "
-        "kompetencje i metody pracy z dorosłymi.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure. Multiple national/central "
-        "variants differ in clock/routes: no universal precise deadline.",
-        "inputs": [
-            "funding-19",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-20",
-        "title": "Wymiany młodzieżowe – współpraca poprzez organizację spotkań",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/w"
-            "ymiany-mlodziezowe-wspolpraca-poprzez-organizacj"
-            "e-spotkan"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Wymiany dla młodzieży 13–30 lat mieszkającej w krajach "
-        "organizacji wysyłających/przyjmujących; minimum 2 grupy z 2 "
-        "krajów, 5–21 dni. Wnioskować mogą uprawnione organizacje lub "
-        "nieformalne grupy z UE/krajów stowarzyszonych, mimo węższego "
-        "opisu FRSE. Projekty 3–24 miesiące obejmują budżet podróży, "
-        "utrzymania i włączenia; stawki zależą od kraju. Zwykle 16–60 "
-        "uczestników, minimum 10 przy wyłącznie mniejszych szansach. "
-        "Nabór grantów 2026 zakończony; nie jest to indywidualny termin "
-        "uczestnika.",
-        "deadline": "2026-10-01T10:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-20",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-21",
-        "title": (
-            "Młodzieżowe spotkania, debaty, kampanie – w kraj" "u i za granicą"
-        ),
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/m"
-            "lodziezowe-spotkania-debaty-kampanie-w-kraju-i-z"
-            "a-granica"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Działania uczestnictwa młodzieży 13–30 lat mieszkającej w "
-        "krajach uczestniczących organizacji: lokalne lub "
-        "międzynarodowe uczenie się demokracji. Wnioskują uprawnione "
-        "organizacje lub nieformalne grupy, nie pojedyncza osoba; opis "
-        "FRSE jest węższy od przewodnika. Projekt 3–24 miesiące, grant "
-        "do 60 tys. EUR na zarządzanie, wydarzenia, mobilność, coaching "
-        "i włączenie. Nie finansuje działań partyjnych ani "
-        "infrastruktury. Nabór grantów 2026 zakończony; pełne warunki w "
-        "przewodniku.",
-        "deadline": "2026-10-01T10:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-21",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-22",
-        "title": "Współpracuj z innymi na rzecz młodzieży!",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/w"
-            "spolpracuj-z-innymi-na-rzecz-mlodziezy"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Międzynarodowe partnerstwa na rzecz młodzieży dl"
-        "a uprawnionych "
-        "organizacji, z koordynatorem w UE/kraju stowarzyszonym. "
-        "Partnerstwa współpracy: minimum 3 organizacje z 3 krajów, "
-        "120/250/400 tys. EUR na 12–36 miesięcy. Mała skala: minimum 2 "
-        "z 2 krajów, 30/60 tys. EUR na 6–24 miesięcy. Kwoty to ryczałty "
-        "projektu, nie osobiste stypendia; wzmianka o osobach w opisie "
-        "FRSE nie zastępuje zasad wnioskodawcy. Nabór 2026 zakończony.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure. Multiple national/central "
-        "variants differ in clock/routes: no universal precise deadline.",
-        "inputs": [
-            "funding-22",
-            "erasmus-guide2026-en",
-            "erasmus-guide2026",
-            "erasmus-call-pdf",
-        ],
-    },
-    {
-        "key": "funding-23",
-        "title": "Stwórz branżowe centrum umiejętności",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/s"
-            "tworz-branzowe-centrum-umiejetnosci"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Grant na utworzenie branżowego centrum umiejętności: "
-        "uprawniony ogólnopolski podmiot branżowy, spółka Skarbu "
-        "Państwa lub organ szkoły zawodowej/CKZ, z wymaganym "
-        "partnerstwem branży i placówki. Nabór III zamknięty 31.01.2025 "
-        "o 16:00 (brak strefy). Limity dziedzinowe 9–16 mln PLN "
-        "wynikają z regulaminu. Finansowanie projektu, nie uczestnika; "
-        "bez obowiązkowego wkładu, z badaniem zdolności finansowej "
-        "podmiotów niepublicznych.",
-        "deadline": "2025-01-31",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": [
-            "funding-23",
-            "bcu-call3",
-            "bcu-reglatest",
-            "bcu-amendments",
-        ],
-    },
-    {
-        "key": "funding-24",
-        "title": "Koordynuj regionalne działania LLL",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/k"
-            "oordynuj-regionalne-dzialania-lll"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Koordynacja uczenia się przez całe życie w regionach: "
-        "niekonkurencyjne granty dla samorządów województw lub ich "
-        "upoważnionych jednostek. Jeden projekt na region, do 21,5 mln "
-        "PLN; łączna alokacja 344 mln PLN nie jest stawką osobową. "
-        "Uzupełniający nabór dla Wielkopolski zakończył się 31.10.2023; "
-        "realizacja do 30.06.2026 nie jest terminem aplikacji. Brak "
-        "potwierdzonego nowego naboru; nie jest to otwarte stypendium "
-        "dla mieszkańca.",
-        "deadline": "2023-10-31",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": ["funding-24"],
-    },
-    {
-        "key": "funding-25",
-        "title": "Zmiana, którą Ty tworzysz",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "miana-ktora-ty-tworzysz"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Projekty solidarności EKS: minimum 5 osób w wiek"
-        "u 18–30 lat na "
-        "początku projektu, legalnie mieszkających w tym samym kraju UE "
-        "lub stowarzyszonym z EKS, z rejestracją w portalu. Grupa albo "
-        "organizacja w jej imieniu realizuje lokalny, niekomercyjny "
-        "projekt 2–12 miesięcy. Wsparcie 630 EUR na projekt/miesiąc; "
-        "coaching i koszty włączenia wymagają uzasadnienia. Nabór 2026 "
-        "zakończony.",
-        "deadline": "2026-10-01T10:00:00Z",
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": ["funding-25", "funding-26", "eks-guide2026"],
-    },
-    {
-        "key": "funding-27",
-        "title": "Zostań wolontariuszem – bądź solidarny!",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "ostan-wolontariuszem-badz-solidarny"
-        ),
-        "categories": ["volunteering"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Wolontariat EKS dla osób 18–30 lat w chwili rozpoczęcia, "
-        "legalnie mieszkających w uprawnionych krajach; rejestracja od "
-        "17 lat nie obniża wieku udziału. Indywidualnie 14–366 dni lub "
-        "zespołowo 14–59 dni, bez wynagrodzenia i opłat udziału. "
-        "Wsparcie podróży, mieszkania, wyżywienia, języka, "
-        "ubezpieczenia i kieszonkowego. Obowiązuje łączny limit 12 "
-        "miesięcy wcześniejszego wolontariatu i ograniczenie kolejnego "
-        "długiego wyjazdu. Rekrutację ustala projekt; zamknięty nabór "
-        "instytucji nie zamyka wszystkich ofert.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "No literal participant application deadline; do not use "
-        "institutional or event dates.",
-        "inputs": ["funding-27", "eks-guide2026"],
-    },
-    {
-        "key": "funding-28",
-        "title": "Zorganizuj wolontariat – wzmocnij swoją organizację!",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/z"
-            "organizuj-wolontariat-wzmocnij-swoja-organizacje"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Grant EKS dla uprawnionej organizacji prowadzącej i "
-        "organizującej wolontariat; wymagany ważny Znak Jakości. "
-        "Projekt angażuje osoby 18–30 lat z uprawnioną legalną "
-        "rezydencją, obejmuje koszty organizacji i wsparcia "
-        "uczestników. Nie jest indywidualną ofertą pracy. Nabór grantów "
-        "2026 zakończony; przewodnik wskazuje 18 lutego i opcjonalnie 1 "
-        "października w południe czasu Brukseli, wbrew wzmiance FRSE o "
-        "maju/październiku. Czas i dopuszczalne działania określa "
-        "aktualny przewodnik EKS.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure. Mandatory February18, optional "
-        "October1 not proved Poland-specific; no guessed applicable "
-        "closing.",
-        "inputs": ["funding-28", "eks-guide2026"],
-    },
-    {
-        "key": "funding-29",
-        "title": "Organizuj wyjazdy z młodzieżą z Litwy",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/o"
-            "rganizuj-wyjazdy-z-mlodzieza-z-litwy"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Grant dla niekomercyjnych osób prawnych zarejestrowanych w "
-        "Polsce/Litwie, z doświadczeniem pracy z młodzieżą, na "
-        "partnerstwo obu krajów. Format 1: osoby 13–30 lat poza "
-        "liderami, 10–24 uczestników wraz z maks. 4 opiekunami. Format "
-        "2: 13–30 lat lub starsi pracownicy młodzieżowi, minimum 10 "
-        "osób poza opiekunami. Wyjazd 4–7 dni, jeden priorytet 2026. Do "
-        "100% kosztów projektu: 1500–15 000 EUR albo 1500–7500 EUR, bez "
-        "wkładu własnego. Nabór 2026 zakończony; kwiecień–październik "
-        "to realizacja, nie termin aplikacji.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure.",
-        "inputs": ["funding-29"],
-    },
-    {
-        "key": "funding-30",
-        "title": "Organizuj międzynarodowe wydarzenia!",
-        "url": (
-            "https://www.frse.org.pl/finansowanie-projektow/o"
-            "rganizuj-miedzynarodowe-wydarzenia"
-        ),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "status": "expired",
-        "summary": "Polsko-Ukraińska Rada Wymiany Młodzieży: projekty "
-        "niekomercyjnych podmiotów zarejestrowanych w Polsce/Ukrainie, "
-        "działających na rzecz młodzieży, działania 5–10 dni. Wariant A "
-        "obejmuje grupę przyjeżdżającą z Ukrainy i partnera "
-        "ukraińskiego; wariant B młodzież ukraińską mieszkającą w "
-        "Polsce, bez wymogu ukraińskiej organizacji. 100% kosztów "
-        "projektu, bez wymaganego wkładu własnego, podróży, pobytu, "
-        "działań i szczególnych potrzeb. Nabór 2026 zakończony; "
-        "maj–październik to okres realizacji, nie aplikowania.",
-        "deadline": None,
-        "hosts": ["PL"],
-        "location": None,
-        "proof": "Literal own institutional competition closed: Nabór 2026 "
-        "zakończony (or actual dedicated closed round). This is not "
-        "individual recruitment closure. Literal formatA arrival "
-        "inPoland/formatB Ukrainian youth alreadyinPoland; "
-        "institutionalestablishment not citizenship.",
-        "inputs": ["funding-30"],
-    },
-    {
-        "key": "training-02",
-        "title": "Webinarium: Powrót Szwajcarii do programu Erasmus+",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinarium-powrot-szwajcarii-do-programu-erasmus"
-        ),
-        "categories": ["training"],
-        "kind": "opportunity",
-        "status": "unknown",
-        "summary": "Webinarium po angielsku dla biur współpracy międ"
-        "zynarodowej, "
-        "koordynatorów Erasmus+ i zainteresowanych powrotem Szwajcarii "
-        "do programu. 12 października 2026, 11:00–12:15, MS Teams. "
-        "Obowiązuje rejestracja przez oficjalny formularz. To termin "
-        "wydarzenia, nie zamknięcia zapisów; strona nie podaje terminu "
-        "rekrutacji, strefy czasowej ani opłaty. Warunki udziału należy "
-        "potwierdzić przy rejestracji.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-02"],
-    },
-    {
-        "key": "training-03",
-        "title": "Webinarium: Powrót Wielkiej Brytanii do Erasmusa+, sektor "
-        "Młodzież",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinarium-powrot-wielkiej-brytanii-do-erasmusa-s"
-            "ektor-mlodziez"
-        ),
-        "categories": ["training"],
-        "kind": "opportunity",
-        "status": "unknown",
-        "summary": "Webinarium po angielsku dla organizacji młodzieżowych, "
-        "koordynatorów, osób pracujących z młodzieżą i "
-        "zainteresowanych. Dotyczy powrotu Wielkiej Brytanii do "
-        "Erasmus+ w sektorze młodzieży. 14 października 2026, "
-        "14:00–15:30, MS Teams; wymagane zapisy. Data wydarzenia nie "
-        "jest terminem zapisów, brak podanej strefy i opłaty. Powrót UK "
-        "od 2027 r. nie oznacza kwalifikowalności w konkursie "
-        "DiscoverEU 2026.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-03", "uk-webinar"],
-    },
-    {
-        "key": "training-04",
-        "title": "RPI Słupsk. Konferencja: Erasmus+ zmienia perspektywę",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/r"
-            "pi-slupsk-konferencja-erasmus-zmienia-perspektyw"
-            "e"
-        ),
-        "categories": ["training"],
-        "kind": "opportunity",
-        "status": "unknown",
-        "summary": "Konferencja edukacyjna w Słupsku: 15 października 2026, "
-        "15:00–18:10, PODN, ul. Poniatowskiego 4a. Program obejmuje "
-        "kompetencje przyszłości, doświadczenia uczestników Erasmus+, "
-        "eTwinning i potrzeby pracodawców. Rejestracja na miejscu w "
-        "programie 14:30–15:00 nie jest terminem zamknięcia "
-        "internetowych zapisów. Szczegóły uczestnictwa należy "
-        "potwierdzić u organizatora; brak podanej opłaty i strefy "
-        "czasowej.",
-        "deadline": None,
-        "hosts": ["PL"],
-        "location": "Słupsk, PODN, ul. Poniatowskiego 4a",
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-04", "slupsk-programme"],
-    },
-    {
-        "key": "training-05",
-        "title": "Eurolekcje EURODESK",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/e"
-            "urolekcje-eurodesk"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Bezpłatne Eurolekcje dla uczniów szkół ponadpodstawowych, "
-        "głównie 16–19 lat. Konsultanci Eurodesk prowadzą 45-minutowe "
-        "lekcje lub 90-minutowe warsztaty o mobilności, pracy, "
-        "projektach i aktywności w Europie, także online. Placówka "
-        "kontaktuje się z prowadzącymi w sprawie realizacji. To program "
-        "edukacyjny bez opublikowanego wspólnego terminu naboru.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-05"],
-    },
-    {
-        "key": "training-06",
-        "title": "Kursy internetowe eTwinning",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/k"
-            "ursy-internetowe-etwinning"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Bezpłatne kursy internetowe eTwinning dla nauczy"
-        "cieli różnych "
-        "przedmiotów i typów placówek. Nauka na platformie "
-        "Moodle/eTwinning rozwija pracę projektową i wykorzystanie "
-        "narzędzi cyfrowych; wymagane konto oraz zapis do konkretnego "
-        "kursu. To przegląd programu, nie aktualny nabór do wszystkich "
-        "kursów. Terminy, czas i warunki danej edycji trzeba sprawdzić "
-        "na stronie eTwinning; strona FRSE nie podaje wspólnego "
-        "terminu.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-06"],
-    },
-    {
-        "key": "training-07",
-        "title": "Webinaria eTwinning",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinaria-etwinning"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Bezpłatne webinaria eTwinning dla nauczycieli wszystkich "
-        "przedmiotów i typów szkół, dotyczące projektów, narzędzi oraz "
-        "współpracy. Wymagane konto programu i rejestracja do "
-        "konkretnego spotkania. Strona FRSE używa dawnej nazwy "
-        "eTwinning Live; nie potwierdza ona bieżącego adresu platformy. "
-        "Przegląd programu bez wspólnego terminu naboru; daty i "
-        "aktualną procedurę sprawdź w oficjalnych szkoleniach "
-        "eTwinning.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-07"],
-    },
-    {
-        "key": "training-11",
-        "title": "Forum Edukacji Dorosłych",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/f"
-            "orum-edukacji-doroslych"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Forum Edukacji Dorosłych to coroczna konferencja"
-        " edukacyjna "
-        "EPALE dla praktyków, badaczy, trenerów, osób rozwijających "
-        "kadry i innych zainteresowanych uczeniem się dorosłych. "
-        "Wspiera wymianę doświadczeń i rozwój kompetencji zawodowych. "
-        "Strona FRSE opisuje program, nie konkretną aktualną edycję; "
-        "nie podaje bieżącego terminu zapisów, daty, miejsca ani "
-        "opłaty. Warunki edycji należy potwierdzić u organizatora.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-11"],
-    },
-    {
-        "key": "training-13",
-        "title": "Kongres Edukacji",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/k" "ongres-edukacji"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Kongres Edukacji FRSE: bezpłatna konferencja dla"
-        " edukatorów, "
-        "instytucji, beneficjentów programów, władz i zainteresowanych "
-        "rozwojem edukacji. Program obejmuje eksperckie wystąpienia i "
-        "wymianę doświadczeń. To przegląd corocznego wydarzenia, bez "
-        "aktualnego terminu zapisów; zwyczajowego miejsca w Warszawie "
-        "ani poprzedniej edycji w Gdańsku nie należy uznawać za "
-        "potwierdzoną lokalizację nowej edycji.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-13"],
-    },
-    {
-        "key": "training-14",
-        "title": "Mobilne Centrum Edukacyjne FRSE",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/m"
-            "obilne-centrum-edukacyjne-frse"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Mobilne Centrum Edukacyjne FRSE oferuje grupom warsztaty o "
-        "europejskich programach edukacyjnych i nowych technologiach. "
-        "Pojedyncze zajęcia do 60 minut, grupa do 30 osób; działania "
-        "docierają do różnych regionów Polski. Przegląd programu, bez "
-        "podanego aktualnego harmonogramu lub wspólnego terminu naboru. "
-        "Dla zainteresowanej placówki udział i warunki uzgadnia się z "
-        "organizatorem.",
-        "deadline": None,
-        "hosts": ["PL"],
-        "location": "Różne regiony Polski według harmonogramu",
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-14"],
-    },
-    {
-        "key": "training-15",
-        "title": "Ogólnopolski Dzień Informacyjny FRSE",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/o"
-            "golnopolski-dzien-informacyjny-frse"
-        ),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Ogólnopolski Dzień Informacyjny FRSE łączy ekspe"
-        "rckie sesje, "
-        "konsultacje i prezentacje możliwości europejskich programów "
-        "dla organizacji, instytucji i firm. Wydarzenie edukacyjne "
-        "odbywa się stacjonarnie lub online zależnie od edycji. "
-        "Aktualna strona jest przeglądem programu i odsyła do "
-        "poprzedniej edycji; nie potwierdza daty nowej edycji, opłaty "
-        "ani terminu zapisów. Sprawdź aktualny komunikat organizatora.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-15"],
-    },
-    {
-        "key": "training-17",
-        "title": "Tool Fair",
-        "url": "https://www.frse.org.pl/wydarzenia-i-szkolenia/tool-fair",
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "status": "unknown",
-        "summary": "Tool Fair to program międzynarodowej wymiany nar"
-        "zędzi edukacji "
-        "pozaformalnej dla pracowników młodzieżowych, trenerów, "
-        "facylitatorów oraz osób z NGO i wolontariuszy. Służy uczeniu "
-        "się i wymianie praktyk. Strona FRSE wskazuje poprzednią edycję "
-        "2023; nie jest to potwierdzony nabór 2026. Brak bieżącego "
-        "terminu, miejsca i warunków finansowania; należy sprawdzić "
-        "aktualną edycję u organizatora.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-17"],
-    },
-    {
-        "key": "training-20",
-        "title": "TEDxWarsaw Youth 2026",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/t"
-            "edxwarsaw-youth-2026"
-        ),
-        "categories": ["training"],
-        "kind": "opportunity",
-        "status": "unknown",
-        "summary": "FRSE udostępnia bezpłatne bilety na TEDxWarsaw Y"
-        "outh 2026: 23 "
-        "października, 9:00–16:00, Teatr 6. piętro, PKiN w Warszawie. "
-        "Uczestnik zgłasza motywację; wybór następuje w trzech turach, "
-        "nie według kolejności zgłoszeń. Strona nie podaje wspólnego "
-        "terminu zamknięcia, dokładnego limitu wieku ani strefy "
-        "czasowej. Jest to selektywne wsparcie udziału w wydarzeniu "
-        "edukacyjnym; złożenie zgłoszenia nie gwarantuje biletu.",
-        "deadline": None,
-        "hosts": ["PL"],
-        "location": "Warszawa, Teatr 6. piętro, Pałac Kultury i Nauki",
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-20"],
-    },
-    {
-        "key": "training-21",
-        "title": "Webinarium Erasmus+: działania Jean Monnet",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinarium-erasmus-dzialania-jean-monnet"
-        ),
-        "categories": ["training"],
-        "kind": "opportunity",
-        "status": "unknown",
-        "summary": "Webinarium Erasmus+ Jean Monnet dla biur współpracy "
-        "międzynarodowej, koordynatorów i zainteresowanych studiami o "
-        "UE. 27 października 2026, 10:00–11:00, MS Teams; wymagane "
-        "zapisy przez oficjalny formularz. Wydarzenie przedstawia "
-        "działania Jean Monnet, nie stanowi osobnego grantu. Strona nie "
-        "określa zamknięcia zapisów, strefy czasowej ani opłaty; podana "
-        "data to termin spotkania.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-21"],
-    },
-    {
-        "key": "training-22",
-        "title": "Webinarium: działania Erasmus Mundus",
-        "url": (
-            "https://www.frse.org.pl/wydarzenia-i-szkolenia/w"
-            "ebinarium-dzialania-erasmus-mundus"
-        ),
-        "categories": ["training"],
-        "kind": "opportunity",
-        "status": "unknown",
-        "summary": "Webinarium o działaniach Erasmus Mundus dla biur"
-        " współpracy "
-        "międzynarodowej, koordynatorów i zainteresowanych. 28 "
-        "października 2026, 10:00–11:00, MS Teams, wymagane zapisy. "
-        "Spotkanie dotyczy programów wspólnych studiów i ich "
-        "opracowania, nie jest indywidualnym stypendium. Strona nie "
-        "podaje zamknięcia zapisów, strefy czasowej ani opłaty; data i "
-        "godziny określają wydarzenie.",
-        "deadline": None,
-        "hosts": [],
-        "location": None,
-        "proof": "Registration closing unknown. Event date/time, recurring old "
-        "edition, fixed capacity and programme modules do not establish "
-        "closing/open status.",
-        "inputs": ["training-22"],
-    },
-    {
-        "key": "job-FRSE-27-2026",
-        "title": "Specjalista/specjalistka/ starszy specjalista/starsza "
-        "specjalistka / główny specjalista/główna specjalistka w Zespole "
-        "ds. projektów finansowanych z Funduszy Norweskich i EOG",
-        "url": "https://www.frse.org.pl/praca-w-frse",
-        "categories": ["jobs"],
-        "kind": "opportunity",
-        "status": "open",
-        "summary": "Praca w Warszawie przy projektach z Funduszy Nor"
-        "weskich i EOG; "
-        "dwa wakaty. Wymagane wyższe wykształcenie, staż 2/4/5 lat "
-        "zależnie od stanowiska, angielski minimum B1, bardzo dobra "
-        "znajomość MS Office/Excel i gotowość do wyjazdów. Umowa o "
-        "pracę, opieka medyczna, szkolenia, lekcje angielskiego i "
-        "świadczenia dodatkowe. CV i list motywacyjny do 23 "
-        "października 2026 o 17:00; źródło nie podaje strefy ani "
-        "wynagrodzenia.",
-        "deadline": "2026-10-23",
-        "hosts": ["PL"],
-        "location": "Warszawa",
-        "proof": "Actual reference FRSE/27/2026 and explicit appli"
-        "cation closing; "
-        "clock17:00 has no literalzone, preserve dateonly. Same "
-        "canonicaljobsURL, stable identity includes actual reference.",
-        "inputs": ["jobs"],
-    },
-    {
-        "key": "job-FRSE-25-2026",
-        "title": "Młodszy specjalista/młodsza specjalistka / "
-        "specjalista/specjalistka / starszy specjalista/starsza "
-        "specjalistka / główny specjalista/główna specjalistka w Zespole "
-        "Projektu FERS edukacja szkolna",
-        "url": "https://www.frse.org.pl/praca-w-frse",
-        "categories": ["jobs"],
-        "kind": "opportunity",
-        "status": "expired",
-        "summary": "Oferta FRSE/25/2026: 1 etat w Warszawie, projekty FERS "
-        "edukacja szkolna. Wymagane wyższe wykształcenie I/II stopnia, "
-        "doświadczenie przy środkach europejskich, angielski, "
-        "zaawansowany Excel i gotowość do wyjazdów; B1 wskazano jako "
-        "dodatkowy atut. Umowa na czas projektu, nie dłużej niż do "
-        "listopada 2029, opieka medyczna i szkolenia. Termin CV i "
-        "listu: 25 września 2026 o 17:00, już upłynął. Brak podanej "
-        "strefy i stawki wynagrodzenia.",
-        "deadline": "2026-09-25",
-        "hosts": ["PL"],
-        "location": "Warszawa",
-        "proof": "Actual reference FRSE/25/2026 and explicit appli"
-        "cation closing; "
-        "clock17:00 has no literalzone, preserve dateonly. Same "
-        "canonicaljobsURL, stable identity includes actual reference.",
-        "inputs": ["jobs"],
-    },
-    {
-        "key": "job-FRSE-24-2026",
-        "title": "Młodsza specjalistka/młodszy specjalista / "
-        "specjalistka/specjalista / starsza specjalistka/starszy "
-        "specjalista / główna specjalistka/główny specjalista w Biurze "
-        "Programów Edukacji Szkolnej oraz Edukacji Dorosłych w Zespole "
-        "Erasmus+ SE-KA1",
-        "url": "https://www.frse.org.pl/praca-w-frse",
-        "categories": ["jobs"],
-        "kind": "opportunity",
-        "status": "expired",
-        "summary": "Oferta FRSE/24/2026: 1 wakat w Warszawie w Zespo"
-        "le Erasmus+ "
-        "SE-KA1. Wymagane wyższe wykształcenie I/II stopnia, angielski, "
-        "dobra znajomość MS Office, komunikacja, organizacja pracy i "
-        "zainteresowanie edukacją szkolną; doświadczenie "
-        "Erasmus+/projektowe to dodatkowy atut. Umowa o pracę, opieka "
-        "medyczna, szkolenia i lekcje angielskiego. CV i list "
-        "motywacyjny należało złożyć do 30 września 2026 o 17:00; "
-        "termin minął, brak strefy oraz wynagrodzenia.",
-        "deadline": "2026-09-30",
-        "hosts": ["PL"],
-        "location": "Warszawa",
-        "proof": "Actual reference FRSE/24/2026 and explicit appli"
-        "cation closing; "
-        "clock17:00 has no literalzone, preserve dateonly. Same "
-        "canonicaljobsURL, stable identity includes actual reference.",
-        "inputs": ["jobs"],
-    },
-    {
-        "key": "job-FRSE-23-2026",
-        "title": "Specjalistka/specjalista / starsza specjalistka/starszy "
-        "specjalista / główna specjalistka/główny specjalista w Zespole "
-        "Młodzież Erasmus+ i Discover EU – Akcja 1",
-        "url": "https://www.frse.org.pl/praca-w-frse",
-        "categories": ["jobs"],
-        "kind": "opportunity",
-        "status": "expired",
-        "summary": "Oferta FRSE/23/2026: 1 wakat w Warszawie, Erasmu"
-        "s+ Młodzież i "
-        "DiscoverEU KA1. Wymagane magisterium, minimum 2 lata "
-        "doświadczenia dla specjalisty lub 4 dla starszego specjalisty, "
-        "znajomość pracy z młodzieżą/edukacji pozaformalnej, angielski "
-        "minimum B2 i MS Office/Excel. Umowa o pracę, wdrożenie, opieka "
-        "medyczna i szkolenia. Dla głównego specjalisty źródło nie "
-        "podaje odrębnego minimalnego stażu. CV i list do 11 września "
-        "2026 o 17:00; termin upłynął, bez strefy.",
-        "deadline": "2026-09-11",
-        "hosts": ["PL"],
-        "location": "Warszawa",
-        "proof": "Actual reference FRSE/23/2026 and explicit appli"
-        "cation closing; "
-        "clock17:00 has no literalzone, preserve dateonly. Same "
-        "canonicaljobsURL, stable identity includes actual reference.",
-        "inputs": ["jobs"],
-    },
-    {
-        "key": "discover",
-        "title": "Konkurs DiscoverEU: ruszyła runda jesienna!",
-        "url": (
-            "https://www.frse.org.pl/aktualnosci/konkurs-disc"
-            "overeu-ruszyla-runda-jesienna"
-        ),
-        "categories": ["competitions"],
-        "kind": "opportunity",
-        "status": "open",
-        "summary": "DiscoverEU jesień 2026 dla osób urodzonych w 200"
-        "8 r. legalnie "
-        "mieszkających w UE lub krajach stowarzyszonych: Islandia, "
-        "Liechtenstein, Macedonia Północna, Norwegia, Serbia i Turcja. "
-        "Darmowy bilet na podróż po Europie, zwykle kolejową, do 7 dni "
-        "podróży w miesiącu, samodzielnie lub z maks. 4 kwalifikującymi "
-        "się znajomymi; wsparcie szczególnych potrzeb. Zgłoszenia do 15 "
-        "października 2026 w południe, bez podanej strefy. Podróż "
-        "1.03.2027–31.05.2028; opis katalogowy o obywatelstwie jest "
-        "węższy od aktualnego naboru.",
-        "deadline": "2026-10-15",
-        "hosts": [],
-        "location": None,
-        "proof": "Actual invitation/closed-call proof and date. Pr"
-        "eserve dateonly "
-        "ifclock has no sourcezone; futuredate alone is never enough "
-        "foropen.",
-        "inputs": ["discover"],
-    },
-    {
-        "key": "etwinning-call",
-        "title": "Konkurs: Nasz projekt eTwinning 2027",
-        "url": (
-            "https://www.frse.org.pl/aktualnosci/konkurs%C2%A"
-            "0nasz-projekt-etwinning-2027"
-        ),
-        "categories": ["competitions"],
-        "kind": "opportunity",
-        "status": "open",
-        "summary": "Dla nauczycieli i uprawnionej kadry polskich placówek "
-        "realizujących międzynarodowy projekt eTwinning w 2025/26 lub "
-        "2026/27, z Krajową Odznaką Jakości. Nie obejmuje projektów "
-        "czysto krajowych, wcześniej nagrodzonych ani nauczycieli i "
-        "szkół zwycięskich w poprzedniej edycji; ambasadorzy tylko we "
-        "własnej kategorii. Nauczyciel może zgłosić do 4 projektów; "
-        "wymagany dostęp jury i zgody. Konkurs wyróżnia projekty, bez "
-        "potwierdzonej kwoty nagrody. Zgłoszenia do 15 stycznia 2027 o "
-        "23:59, źródło nie podaje strefy.",
-        "deadline": "2027-01-15",
-        "hosts": [],
-        "location": None,
-        "proof": "Actual invitation/closed-call proof and date. Pr"
-        "eserve dateonly "
-        "ifclock has no sourcezone; futuredate alone is never enough "
-        "foropen.",
-        "inputs": [
-            "etwinning-call",
-            "etwinning-regulations",
-            "etwinning-policy",
-        ],
-    },
-    {
-        "key": "professional-school",
-        "title": "Nabór uzupełniający: Profesjonalna Szkoła Roku",
-        "url": (
-            "https://www.frse.org.pl/aktualnosci/nabor-uzupel"
-            "niajacy-profesjonalna-szkola-roku"
-        ),
-        "categories": ["competitions"],
-        "kind": "opportunity",
-        "status": "open",
-        "summary": "Nabór uzupełniający 2025: polskie szkoły branżowe I (poza "
-        "wyłącznie młodocianymi pracownikami), technika, branżowe II i "
-        "policealne dzienne/stacjonarne. Obszary: "
-        "chemia/petrochemia/środowisko, IT/telekomunikacja, "
-        "motoryzacja/elektromobilność lub zdrowie/bezpieczeństwo/opieka "
-        "społeczna. Dyrektor/reprezentant zgłasza raz w jednym "
-        "obszarze, na podstawie działań 2022/23–2024/25. Nagroda: "
-        "tytuł, statuetka, dyplom i możliwe punkty w późniejszym "
-        "konkursie grantowym, bez dotacji pieniężnej. Udział bezpłatny; "
-        "do 15.10.2026 o 15:00, brak strefy.",
-        "deadline": "2026-10-15",
-        "hosts": [],
-        "location": None,
-        "proof": "Actual invitation/closed-call proof and date. Pr"
-        "eserve dateonly "
-        "ifclock has no sourcezone; futuredate alone is never enough "
-        "foropen.",
-        "inputs": [
-            "professional-school",
-            "professional-school-hub",
-            "professional-school-regulations",
-        ],
-    },
-    {
-        "key": "selfie2025",
-        "title": "Konkurs 2025",
-        "url": "https://selfieplus.frse.org.pl/konkurs-2025",
-        "categories": ["competitions"],
-        "kind": "opportunity",
-        "status": "expired",
-        "summary": "Konkurs fotograficzny dla instytucjonalnych beneficjentów "
-        "Erasmus+, EKS, PO WER, FERS oraz wymian polsko-litewskich i "
-        "polsko-ukraińskich. Jedno niekolażowe zdjęcie z projektu, "
-        "JPG/PNG ponad 1 MB i opis 500–1000 znaków; wymagane prawa "
-        "autorskie oraz zgody osób na zdjęciu. Nagrody rzeczowe dla "
-        "instytucji: aparaty cyfrowe lub natychmiastowe, zależnie od "
-        "kategorii. Nabór zakończony 31 października 2025. Zdjęcia "
-        "później dodane na platformę nie oznaczają przedłużenia "
-        "konkursu.",
-        "deadline": "2025-10-31",
-        "hosts": [],
-        "location": None,
-        "proof": "Actual invitation/closed-call proof and date. Pr"
-        "eserve dateonly "
-        "ifclock has no sourcezone; futuredate alone is never enough "
-        "foropen.",
-        "inputs": ["selfie2025", "selfie-reg2025"],
-    },
-    {
-        "key": "edu-inspirator-rules",
-        "title": "EDUinspirator 2025",
-        "url": "https://eduinspiracje.org.pl/eduinspirator/regulamin",
-        "categories": ["competitions"],
-        "kind": "opportunity",
-        "status": "expired",
-        "summary": "Konkurs dla osób, które uczestniczyły w projekta"
-        "ch programów "
-        "FRSE w latach 2015–2025 i rozwijają edukację w Polsce; dla "
-        "niepełnoletnich wymagana zgoda opiekuna. Oceniane działania "
-        "mają mieć międzynarodowy charakter i odpowiadać kryteriom "
-        "innowacji, technologii, języków lub przedsiębiorczości. "
-        "Nagrody rzeczowe lub vouchery, bez wymiany na gotówkę; "
-        "dodatkowe 11,11% wartości nagrody służy podatkowi, nie "
-        "stypendium. Zgłoszenia zakończone 31 października 2025.",
-        "deadline": "2025-10-31",
-        "hosts": [],
-        "location": None,
-        "proof": "Actual invitation/closed-call proof and date. Pr"
-        "eserve dateonly "
-        "ifclock has no sourcezone; futuredate alone is never enough "
-        "foropen.",
-        "inputs": ["edu-inspirator-rules", "edu-inspirator-reg2025"],
-    },
-    {
-        "key": "publishing-call",
-        "title": "EDUinspiracje Nauka - Monografie FRSE",
-        "url": "https://www.frse.org.pl/wydawnictwo/obwieszczenie-o-konkursie",
-        "categories": ["grants"],
-        "kind": "opportunity",
-        "status": "expired",
-        "summary": "Dla autorów oryginalnych, nieopublikowanych monografii o "
-        "edukacji, z nauk humanistycznych/społecznych, po polsku lub "
-        "angielsku; praca nie może być w innym procesie wydawniczym ani "
-        "wygenerowana przez AI, obowiązują wyłączenia konfliktu "
-        "interesów. Wymagane pozytywne oceny i recenzje oraz licencja. "
-        "FRSE finansuje wydanie, promocję i tłumaczenie; honorarium "
-        "5000 PLN brutto, rozdziały pracy zbiorowej do 1200 PLN brutto. "
-        "Termin 30 kwietnia 2026 minął; aktualne obwieszczenie "
-        "potwierdza zamknięcie.",
-        "deadline": "2026-04-30",
-        "hosts": [],
-        "location": None,
-        "proof": "Actual invitation/closed-call proof and date. Pr"
-        "eserve dateonly "
-        "ifclock has no sourcezone; futuredate alone is never enough "
-        "foropen.",
-        "inputs": [
-            "publishing-call",
-            "publishing-reg",
-            "publishing-standards",
-            "publishing-ethics",
-            "publishing-review",
-            "publishing-production",
-        ],
-    },
-]
 
 
 if __name__ == "__main__":

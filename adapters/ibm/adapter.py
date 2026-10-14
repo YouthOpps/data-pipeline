@@ -1,4 +1,4 @@
-"""Collect five advertised IBM early-career programme information pages."""
+"""Discover IBM early-career programmes and extract current official facts."""
 
 import argparse
 import base64
@@ -343,16 +343,12 @@ def verify_state_directory():
         or (info.st_dev, info.st_ino) != _STATE_DIR_ID
         or (current.st_dev, current.st_ino) != _STATE_DIR_ID
     ):
-        raise AdapterError(
-            "Publisher state directory identity changed", "access"
-        )
+        raise AdapterError("Publisher state directory identity changed", "access")
 
 
 def secure_file(name, flags):
     verify_state_directory()
-    descriptor = os.open(
-        name, flags | os.O_NOFOLLOW, 0o600, dir_fd=_STATE_DIR_FD
-    )
+    descriptor = os.open(name, flags | os.O_NOFOLLOW, 0o600, dir_fd=_STATE_DIR_FD)
     info = os.fstat(descriptor)
     if (
         info.st_uid != os.getuid()
@@ -425,9 +421,7 @@ def load_budget():
         descriptor = secure_file("state.json", os.O_RDONLY)
     except FileNotFoundError:
         if not _STATE_INITIALIZING:
-            raise AdapterError(
-                "Mature publisher state is missing", "access"
-            ) from None
+            raise AdapterError("Mature publisher state is missing", "access") from None
         return empty_budget(time.time())
     with os.fdopen(descriptor, "rb") as file:
         raw = file.read(16385)
@@ -817,14 +811,10 @@ def fetch_public(url):
                 state["observed_at"] = now
                 save_budget(state)
             continue
-        key = next(
-            (key for key, info in INPUTS.items() if info["url"] == url),
-            "unmapped-public-input",
-        )
         parsed = urllib.parse.urlsplit(reviewed)
         provenance = parsed.scheme + "://" + parsed.netloc + parsed.path
         raise AdapterError(
-            f"Required publisher input {key} returned HTTP {status}: " + provenance,
+            f"Required publisher input returned HTTP {status}: " + provenance,
             "fetch",
             status,
         )
@@ -1483,6 +1473,26 @@ def validate_records(records):
                 and not isinstance(record[field], str)
             ):
                 raise AdapterError("Invalid record field: " + field, "validate")
+        if "source_documents" in record:
+            documents = record["source_documents"]
+            if not isinstance(documents, list) or not documents:
+                raise AdapterError("Missing IBM source documents", "validate")
+            for document in documents:
+                public_url(document["url"])
+                if not re.fullmatch(r"[0-9a-f]{64}", document.get("sha256", "")):
+                    raise AdapterError("Invalid IBM content digest", "validate")
+            for field in (
+                "eligibility",
+                "funding",
+                "programme_features",
+                "programme_details",
+                "tracks",
+                "deadline_text",
+            ):
+                if not isinstance(record.get(field), list) or any(
+                    not isinstance(value, str) for value in record[field]
+                ):
+                    raise AdapterError("Invalid IBM facts: " + field, "validate")
         if "summary_language" in record and (
             not isinstance(record["summary_language"], str)
             or not re.fullmatch(
@@ -1514,10 +1524,9 @@ def profile_identity(profile):
 
 def validate_owned_records(records):
     """Reject foreign identities and impossible owned record chronologies."""
-    profiles = {profile_identity(profile): profile for profile in PROFILES}
     for record in records:
-        profile = profiles.get(record["id"])
-        if profile is None or record["url"] != profile["url"]:
+        public_url(record["url"])
+        if record["id"] != profile_identity(record):
             raise AdapterError("Unowned IBM record identity or URL", "validate")
         values = {
             field: datetime.fromisoformat(record[field].replace("Z", "+00:00"))
@@ -1536,7 +1545,9 @@ def validate_owned_records(records):
             <= values["last_checked_at"]
         ):
             raise AdapterError("Invalid owned IBM chronology", "validate")
-        if record["status"] != "unknown" or record["deadline"] is not None:
+        if record["kind"] == "programme-overview" and (
+            record["status"] != "unknown" or record["deadline"] is not None
+        ):
             raise AdapterError("Unsupported IBM programme availability", "validate")
 
 
@@ -1659,101 +1670,519 @@ def publish_files(snapshot, files):
 
 
 def public_url(value):
+    """Restrict dynamic discovery to public IBM careers HTML and legal pages."""
     parsed = urllib.parse.urlsplit(value)
-    clean = urllib.parse.urlunsplit(parsed._replace(fragment=""))
-    allowed = {info["url"] for info in INPUTS.values()} | {
-        origin + "/robots.txt" for origin in ROBOTS_ORIGINS
-    }
+    path = parsed.path.rstrip("/")
     if (
-        clean not in allowed
-        or parsed.scheme != "https"
+        parsed.scheme != "https"
+        or parsed.netloc != "www.ibm.com"
         or parsed.username
         or parsed.password
         or parsed.port
+        or not (
+            path == "/robots.txt"
+            or path in {"/legal", "/legal/terms"}
+            or path == "/careers"
+            or path.startswith("/careers/")
+        )
+        or path == "/careers/search"
+        or any(part in {"..", "."} for part in parsed.path.split("/"))
+        or "%" in parsed.path
     ):
         raise AdapterError("Unreviewed public source route", "access")
-    return clean
+    return urllib.parse.urlunsplit(parsed._replace(fragment=""))
 
 
-def html_fingerprint(body, key=None):
-    """Bind all visible facts, literal links and public form/frontier controls."""
-    root = document_root(body.decode("utf-8", "strict"))
-    links = sorted(
-        {
-            (node.tag, node.attrs.get("rel", ""), node.attrs["href"])
-            for node in root.walk()
-            if node.tag in ("a", "link") and node.attrs.get("href")
-        }
-    )
-    controls = [
-        (
-            node.tag,
-            sorted(
-                (name, value)
-                for name, value in node.attrs.items()
-                if name
-                in {
-                    "action",
-                    "method",
-                    "name",
-                    "value",
-                    "selected",
-                    "data-pagescount",
-                    "data-activepage",
-                    "data-active-page",
-                }
-            ),
-        )
-        for node in root.walk()
-    ]
-    controls = [item for item in controls if item[1]]
-    if any(node.duplicate_attrs for node in root.walk()):
-        raise AdapterError("Duplicate publisher HTML attributes: " + str(key), "parse")
-    facts = json.dumps(
-        {"text": root.text(), "links": links, "controls": controls},
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(facts.encode()).hexdigest()
+def linked_url(base, href):
+    """Normalize only literal public links; do not invent API routes."""
+    url = urllib.parse.urljoin(base, href)
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.hostname != "www.ibm.com" or parsed.path == "/careers/search":
+        return None
+    if not (parsed.path == "/careers" or parsed.path.startswith("/careers/")):
+        return None
+    return public_url(url)
 
 
-def read_input(key):
-    info = INPUTS[key]
-    try:
-        status, headers, body = fetch_public(info["url"])
-    except AdapterError as error:
-        raise AdapterError(
-            "Required publisher input " + key + ": " + safe_error(error),
-            error.stage,
-            error.status,
-        ) from None
-    if info["format"] == "html":
-        digest = html_fingerprint(body, key)
-    else:
-        if info["format"] == "pdf" and not body.startswith(b"%PDF-"):
-            raise AdapterError("Invalid material document: " + key, "parse")
-        digest = hashlib.sha256(body).hexdigest()
-    if digest != info["sha256"]:
-        raise AdapterError("Reviewed source facts/frontier changed: " + key, "parse")
-    return digest
+def article_body(root):
+    return one(nodes(root, class_name="body-article-8"), "IBM article body")
+
+
+def programme_cards(root):
+    """Keep the programme section separate from advice, events and job alerts."""
+    active = False
+    cards = []
+    for node in root.walk():
+        if node.tag == "h2":
+            label = node.text().lower()
+            if label.startswith(("our programs", "our programmes")):
+                active = True
+            elif label:
+                active = False
+        if active and node.tag == "c4d-cta-block-item":
+            cards.append(node)
+    if not cards:
+        raise AdapterError("IBM programme section missing or empty", "parse")
+    return cards
+
+
+def pagination(root, url):
+    links = set()
+    for node in root.walk():
+        rel = (node.attrs.get("rel") or "").split()
+        if "next" in rel or (
+            node.tag == "a" and re.fullmatch(r"next(?: page)?", node.text(), re.I)
+        ):
+            target = linked_url(url, node.attrs.get("href", ""))
+            if not target or target == url:
+                raise AdapterError("Unresolved IBM listing pagination", "parse")
+            links.add(target)
+        for key in ("data-pagescount", "data-page-count"):
+            count = node.attrs.get(key)
+            if count and (not count.isdigit() or int(count) > 1) and not links:
+                # Check again after inspecting all literal navigation links.
+                links.add(None)
+    if None in links:
+        links.remove(None)
+        if not links:
+            raise AdapterError("IBM pagination has no public next link", "parse")
+    return sorted(links)
 
 
 def read_pages():
-    """Exhaust all ten required inputs in their reviewed order."""
-    return {key: read_input(key) for key in INPUTS}
+    """Exhaust the current programme cards, child programmes and pagination."""
+    pages = {}
+
+    def read(url):
+        if url not in pages:
+            _, headers, body = fetch_public(url)
+            if "html" not in headers.get("Content-Type", "").lower():
+                raise AdapterError("Expected official IBM HTML", "parse")
+            pages[url] = document_root(body.decode("utf-8", "strict"))
+        return pages[url]
+
+    programmes = discover_programmes(read)
+    return {"documents": pages, "programmes": programmes}
+
+
+def discover_programmes(read):
+    """Walk the programme frontier using one memoized official document reader."""
+    programmes = {}
+    home = read(SOURCE_URL)
+    terms = read("https://www.ibm.com/legal/terms")
+    if not re.search(
+        r"only use a crawler to crawl.*?as permitted by.*?robots.txt",
+        terms.text(),
+        re.I,
+    ):
+        raise AdapterError("IBM crawler permission requires review", "access")
+    hubs = {
+        linked_url(SOURCE_URL, node.attrs["href"])
+        for node in nodes(home, "a")
+        if node.attrs.get("href") and re.search(r"entry[- ]level", node.text(), re.I)
+    }
+    hubs.discard(None)
+    if not hubs:
+        raise AdapterError("IBM early-career hub not discovered", "parse")
+    visited = set()
+    while hubs:
+        url = min(hubs)
+        hubs.remove(url)
+        if url in visited:
+            continue
+        visited.add(url)
+        root = read(url)
+        for card in programme_cards(root):
+            targets = {
+                linked_url(url, node.attrs["href"])
+                for node in nodes(card, "a")
+                if node.attrs.get("href")
+            }
+            targets.discard(None)
+            target = one(list(targets), "public programme card destination")
+            programmes.setdefault(target, {target})
+        hubs.update(set(pagination(root, url)) - visited)
+
+    pending = set(programmes)
+    scanned = set()
+    while pending:
+        url = min(pending)
+        pending.remove(url)
+        if url in scanned:
+            continue
+        scanned.add(url)
+        root = read(url)
+        body = article_body(root) if "/blog/" in url else root
+        for node in nodes(body, "a"):
+            href = node.attrs.get("href")
+            if not href:
+                continue
+            target = linked_url(url, href)
+            if not target or target == url or "/blog/" not in target:
+                continue
+            if not re.search(r"program(?:me)?s?\b", node.text() + " " + target, re.I):
+                continue
+            # This explanatory article belongs to the already published
+            # internship identity, rather than a second internship offer.
+            if target == INTERNSHIP_EXPLANATION:
+                programmes.setdefault(INTERNSHIP_URL, {INTERNSHIP_URL}).add(target)
+            else:
+                programmes.setdefault(target, {target})
+            if target not in scanned:
+                pending.add(target)
+        if url == INTERNSHIP_URL:
+            # Programme links on the hub use "Read now"; the slug carries
+            # the programme context without admitting application-tip articles.
+            for node in nodes(root, "a"):
+                target = linked_url(url, node.attrs.get("href", ""))
+                if target == INTERNSHIP_EXPLANATION:
+                    programmes[url].add(target)
+                    pending.add(target)
+    return programmes
+
+
+INTERNSHIP_URL = "https://www.ibm.com/careers/internships"
+INTERNSHIP_EXPLANATION = (
+    "https://www.ibm.com/careers/blog/"
+    "5-things-that-make-the-ibm-internship-programs-unique"
+)
+
+
+def content_blocks(root):
+    """Retain complete article sections, excluding shared navigation."""
+    body = article_body(root)
+    return [
+        node.text()
+        for node in body.walk()
+        if node.tag in {"h2", "h3", "p", "li"}
+        and node.text()
+        and not (node.tag == "li" and nodes(node, "p"))
+    ]
+
+
+def normalize_fact(text):
+    return text.translate(str.maketrans({"‑": "-", "–": "-", "’": "'"}))
+
+
+def hub_blocks(root):
+    """Read substantive hub text while pruning navigation and testimonials."""
+    blocks = []
+    navigation_tail = False
+
+    def visit(node):
+        nonlocal navigation_tail
+        if node.tag in {"h2", "h3"} and node.text().lower().startswith(
+            ("keep exploring", "let's find your next steps")
+        ):
+            navigation_tail = True
+        classes = node.attrs.get("class", "").lower()
+        if (
+            navigation_tail
+            or node.tag in {"nav", "header", "footer", "script", "style"}
+            or any(word in node.tag for word in ("masthead", "footer", "breadcrumb"))
+            or any(word in classes for word in ("breadcrumb", "testimonial", "quote"))
+            or node.attrs.get("data-component-name") == "next-steps"
+        ):
+            return
+        if node.tag in {"h2", "h3", "p", "li"}:
+            text = node.text()
+            if text and not text.startswith(("“", '"', "-")):
+                blocks.append(text)
+            return
+        for child in node.children:
+            if isinstance(child, Node):
+                visit(child)
+
+    visit(root)
+    return blocks
+
+
+def closing_dates(blocks):
+    """Resolve closing clauses only when every advertised timing is known."""
+    statements = []
+    dates = set()
+    unresolved = False
+    trigger = re.compile(
+        r"\b(?:applications? (?:deadline|close|closing)|"
+        r"apply (?:by|before)|deadline for applications)\b",
+        re.I,
+    )
+    date_pattern = re.compile(
+        r"\b\d{4}-\d{2}-\d{2}\b|"
+        r"\b\d{1,2}\s+[A-Za-z]+\s+\d{4}\b|"
+        r"\b[A-Za-z]+\s+\d{1,2},?\s+\d{4}\b"
+    )
+    for block in blocks:
+        for sentence in re.split(r"(?<=[.!?])\s+", block):
+            closings = list(trigger.finditer(sentence))
+            if not closings:
+                continue
+            statements.append(sentence)
+            for index, closing in enumerate(closings):
+                end = (
+                    closings[index + 1].start()
+                    if index + 1 < len(closings)
+                    else len(sentence)
+                )
+                clause = sentence[closing.end() : end]
+                # Dates belonging to a project, event or programme start are
+                # outside the application-closing clause, even in one sentence.
+                clause = re.split(
+                    r"\b(?:for\s+)?(?:projects?|events?|courses?|programmes?)\s+"
+                    r"(?:start(?:ing|s)?|begin(?:ning|s)?|on)|"
+                    r"\b(?:starting|beginning)\b",
+                    clause,
+                    maxsplit=1,
+                    flags=re.I,
+                )[0]
+                matches = list(date_pattern.finditer(clause))
+                if len(matches) != 1 or re.search(r"\d", clause[: matches[0].start()]):
+                    unresolved = True
+                    continue
+                value = matches[0].group()
+                for fmt in ("%Y-%m-%d", "%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y"):
+                    try:
+                        dates.add(
+                            datetime.strptime(value.replace(",", ""), fmt)
+                            .date()
+                            .isoformat()
+                        )
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    unresolved = True
+    return (
+        next(iter(dates)) if len(dates) == 1 and not unresolved else None
+    ), statements
+
+
+def current_facts(blocks):
+    """Extract eligibility and funding statements without inferred nationality."""
+    sentences = list(
+        dict.fromkeys(
+            sentence.strip()
+            for block in blocks
+            for sentence in re.split(r"(?<=[.!?])\s+", normalize_fact(block))
+            if sentence.strip()
+        )
+    )
+    eligibility = [
+        text
+        for text in sentences
+        if re.search(
+            r"\b(?:eligible|eligibility|applicants? must|enrolled|"
+            r"pursuing a degree|designed for|requires? less than|"
+            r"recent (?:university|college|graduate)|fresh graduates|"
+            r"career switcher|individuals who|citizen|nationality)\b",
+            text,
+            re.I,
+        )
+    ]
+    funding = [
+        text
+        for text in sentences
+        if re.search(
+            r"\b(?:salary|salaries|stipend|paid|unpaid|earn-and-learn|"
+            r"funding|scholarship|tuition|remuneration)\b",
+            text,
+            re.I,
+        )
+    ]
+    features = []
+    for pattern, label in (
+        (r"\bmentor(?:ing|ship|s)?\b", "Mentoring"),
+        (r"\bstructured onboarding\b", "Structured onboarding"),
+        (r"\bcertifications?\b", "Certifications"),
+        (r"\bdigital credentials\b", "Digital credentials"),
+        (r"\bhands-on\b", "Hands-on work"),
+        (
+            r"\b(?:program(?:me)?|experience)\b[^.]*\bfull-time\b|"
+            r"\bfull-time\b[^.]*\b(?:program(?:me)?|experience)\b",
+            "Full-time",
+        ),
+        (r"\bon-site\b", "On-site"),
+        (
+            r"\blearning (?:and career development )?resources\b|"
+            r"\blearning.*?platform",
+            "Learning resources",
+        ),
+    ):
+        if any(re.search(pattern, text, re.I) for text in sentences):
+            features.append(label)
+    return eligibility, funding, features
 
 
 def parse_inventory(pages):
-    """Normalize only the complete ten-input, five-programme partition."""
-    if set(pages) != set(INPUTS) or any(
-        pages[key] != info["sha256"] for key, info in INPUTS.items()
-    ):
-        raise AdapterError("Incomplete reviewed IBM programme frontier", "parse")
+    documents, programmes = pages["documents"], pages["programmes"]
+    if not programmes:
+        raise AdapterError("Empty IBM programme frontier", "parse")
     records = []
     now = utc_now()
-    for profile in PROFILES:
-        record = json.loads(json.dumps(profile["fields"]))
-        record["id"] = profile_identity(profile)
+    for url, sources in sorted(programmes.items()):
+        root = documents[url]
+        title = one(
+            [node.text() for node in nodes(root, "h1") if node.text()],
+            "programme title",
+        )
+        blocks = []
+        provenance = []
+        for source in sorted(sources):
+            page = documents[source]
+            if "/blog/" in source:
+                blocks.extend(content_blocks(page))
+                body = article_body(page)
+            else:
+                blocks.extend(hub_blocks(page))
+                body = page
+            provenance.append(
+                {
+                    "url": source,
+                    "sha256": hashlib.sha256(
+                        json.dumps(
+                            {
+                                "text": body.text(),
+                                "links": sorted(
+                                    {
+                                        node.attrs["href"]
+                                        for node in body.walk()
+                                        if node.attrs.get("href")
+                                    }
+                                ),
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ).encode()
+                    ).hexdigest(),
+                }
+            )
+        if url == INTERNSHIP_URL:
+            # The co-op comparison explicitly covers both programmes. Keep
+            # its scope in the statement rather than generalizing its duration.
+            for other_url, other_root in documents.items():
+                if "/blog/" not in other_url or other_url in sources:
+                    continue
+                comparisons = [
+                    block
+                    for block in content_blocks(other_root)
+                    if re.search(r"Both co.ops and internships", block)
+                ]
+                if comparisons:
+                    blocks.extend(comparisons)
+                    provenance.append(
+                        {
+                            "url": other_url,
+                            "sha256": hashlib.sha256(
+                                " ".join(comparisons).encode()
+                            ).hexdigest(),
+                        }
+                    )
+        if not blocks:
+            raise AdapterError(
+                "Programme has no substantive article facts: " + url, "parse"
+            )
+        eligibility, funding, features = current_facts(blocks)
+        details = list(
+            dict.fromkeys(
+                sentence
+                for block in blocks
+                for sentence in re.split(r"(?<=[.!?])\s+", normalize_fact(block))
+                if re.search(
+                    r"\b(?:\d+|one|two|three|four|six|twelve|sixteen)[- ]"
+                    r"(?:weeks?|months?|years?|hours?)\b",
+                    sentence,
+                    re.I,
+                )
+            )
+        )
+        deadline, deadline_text = closing_dates(blocks)
+        title_key = normalize_fact(title).lower()
+        if "apprentic" in title_key:
+            categories = ["training", "jobs"]
+        elif "intern" in title_key or "co-op" in title_key:
+            categories = ["internships"]
+        elif re.search(r"entry.level|sales.*program", title_key):
+            categories = ["jobs", "training"]
+        elif re.search(r"program|training|academy", title_key):
+            categories = ["training"]
+        else:
+            raise AdapterError(
+                "Unclassified advertised IBM programme: " + title, "parse"
+            )
+        summary_parts = []
+        for statement in eligibility + funding + details:
+            if not statement.endswith((".", "!", "?")):
+                statement += "."
+            if (
+                statement not in summary_parts
+                and len(" ".join(summary_parts + [statement])) <= 400
+            ):
+                summary_parts.append(statement)
+        if features:
+            summary_parts.append("Programme features: " + ", ".join(features) + ".")
+        suffix = "Programme overview; current vacancies are not established."
+        if deadline_text:
+            suffix = "Application timing is stated on the official programme page."
+        summary_parts.append(suffix)
+        summary = " ".join(summary_parts)
+        # Never clip a qualification or funding condition to fit the summary.
+        # Complete extracted statements remain in their dedicated fields.
+        while len(summary.encode("utf-16-le")) // 2 > 600 and len(summary_parts) > 1:
+            summary_parts.pop(-2)
+            summary = " ".join(summary_parts)
+        tracks = []
+        in_tracks = False
+        for block in blocks:
+            if re.search(r"(?:specialized|specialised) tracks:", block, re.I):
+                in_tracks = True
+                continue
+            if in_tracks:
+                if " – " in block or " –" in block or " - " in block:
+                    tracks.append(block)
+                else:
+                    in_tracks = False
+        host_countries = []
+        for track in tracks:
+            if re.search(r"assignment in", track, re.I):
+                for name, code in (("Spain", "ES"), ("Ireland", "IE")):
+                    if re.search(r"\b" + name + r"\b", track):
+                        host_countries.append(code)
+        record = {
+            "title": title,
+            "url": url,
+            "source": SOURCE_ID,
+            "source_url": SOURCE_URL,
+            "published_at": None,
+            "summary": summary,
+            "tags": [],
+            "location": None,
+            "deadline": deadline,
+            "deadline_text": deadline_text,
+            "language": LANGUAGE,
+            "summary_language": LANGUAGE,
+            "category": categories[0],
+            "categories": categories,
+            "kind": "opportunity" if deadline_text else "programme-overview",
+            "host_countries": sorted(set(host_countries)),
+            "eligible_countries": [],
+            "publisher_country": PUBLISHER_COUNTRY,
+            "status": "expired" if deadline and deadline < now[:10] else "unknown",
+            "eligibility": eligibility,
+            "funding": funding,
+            "programme_features": features,
+            "programme_details": details,
+            "tracks": tracks,
+            "source_documents": provenance,
+            "classification": {
+                "method": "official-html-programme",
+                "status": "classified",
+                "evidence": [
+                    "Official early-career programme discovery; not a vacancy inventory",
+                    *sorted(sources),
+                ],
+            },
+        }
+        record["id"] = profile_identity(record)
         record.update(
             {
                 key: now
@@ -1768,10 +2197,6 @@ def parse_inventory(pages):
         )
         records.append(record)
     validate_records(records)
-    if len(records) != 5:
-        raise AdapterError(
-            "Incomplete reviewed programme identity partition", "validate"
-        )
     return records
 
 
@@ -2031,275 +2456,6 @@ def main():
     except PhaseExpired:
         return 1
 
-
-INPUTS = {
-    "entry": {
-        "url": "https://www.ibm.com/careers",
-        "format": "html",
-        "sha256": "440e60193d74f78f87260c59e1a9e438961cd9dbf0df495d616949629810df41",
-        "raw_research_sha256": "6b68bb5b01a7b3614d81a0ede406f6617e07ad6c802ac368aa165ffc75e6b637",
-    },
-    "terms": {
-        "url": "https://www.ibm.com/legal?lnk=flg-tous-usen",
-        "format": "html",
-        "sha256": "422d80560d6a1450d490f45a606827f4e8cda1afd5092e4e37df9ce51d617be4",
-        "raw_research_sha256": "795443f00761e13d00e7ec237e7ff1f4737d5739f5f2c6fce14baf0c68089f1d",
-    },
-    "terms-full": {
-        "url": "https://www.ibm.com/legal/terms",
-        "format": "html",
-        "sha256": "04e5a4c678259cd471a212f2a4f341c50f15068c6f8e6580bce3cb09d0a99cfb",
-        "raw_research_sha256": "b927e638542e5489721e824d7db3608c35def7989a40787ab111395edad665e5",
-    },
-    "internships": {
-        "url": "https://www.ibm.com/careers/internships",
-        "format": "html",
-        "sha256": "0b02a14e20fa9d3cfab986e05a580fcb1abee6536f6d74a3f911a5ec5828fe4d",
-        "raw_research_sha256": "3d9ad6a4b45a727eb608ac1387f937c728a2f9816b0df095f6c7af6d3b88b8e8",
-    },
-    "entry-level": {
-        "url": "https://www.ibm.com/careers/career-opportunities",
-        "format": "html",
-        "sha256": "d48cb78738d66127415a97dbda5d24a379350f9938d40deeb4f5a3464135bc7d",
-        "raw_research_sha256": "f4530b9b05481753a7e018769274c963e06a4c90224274986a99c6f423a7b854",
-    },
-    "apprenticeship": {
-        "url": "https://www.ibm.com/careers/blog/the-ibm-apprenticeship-program-no-degree-no-problem",
-        "format": "html",
-        "sha256": "4cd9f9a0a8d4424d9655f8959a9af0a45cb0a267ebd1daf48a10c2f5064bc118",
-        "raw_research_sha256": "1e8eab200e4600ec0f5ebbad9541d16e54cb6fd6bc0f323877ba1037ed519c4d",
-    },
-    "coop": {
-        "url": "https://www.ibm.com/careers/blog/your-future-starts-here-inside-ibm-co-op-program",
-        "format": "html",
-        "sha256": "58ab112c8f6fadff359011d6967158192b20660300a17e140eb47fa5a9be949f",
-        "raw_research_sha256": "f26219345ece43de57d86aff24a4599ad14a4415c16977d1a93d991e4c868100",
-    },
-    "internship-programme": {
-        "url": "https://www.ibm.com/careers/blog/5-things-that-make-the-ibm-internship-programs-unique",
-        "format": "html",
-        "sha256": "4c86bed719a1843058d636dbceb334a15afa267192d17e829a31f01c7e55c77e",
-        "raw_research_sha256": "4b6ee1ad9e27e9b971b317c0b275acc6cfaed225afacbe2655ae4d0cfaf06af0",
-    },
-    "entry-guide": {
-        "url": "https://www.ibm.com/careers/blog/discover-your-potential-entry-level-careers-that-make-a-difference",
-        "format": "html",
-        "sha256": "2d7edd4418bba4d65585a6e908a07ec2e735a1d3af84ef7edd4011070c99ac0f",
-        "raw_research_sha256": "5f47caf8ac4ae387da4285d8e596e823b2e9689cd1090c6a48bf55cbbff2de19",
-    },
-    "sales-accelerator": {
-        "url": "https://www.ibm.com/careers/blog/what-is-the-ibm-sales-accelerator-program",
-        "format": "html",
-        "sha256": "0c4bb9c3bd8d03014c2ad320fa3be2d6e7408167a8e36cdecf4f5682e14b4cc8",
-        "raw_research_sha256": "f6990ceff0706fa8bd0440f2fa0f119ae8c26c7b19484cc5f093422ebba78349",
-    },
-}
-PROFILES = [
-    {
-        "key": "internships",
-        "url": "https://www.ibm.com/careers/internships",
-        "inputs": ["internships", "internship-programme", "coop"],
-        "fields": {
-            "title": "Internships",
-            "url": "https://www.ibm.com/careers/internships",
-            "source": "ibm",
-            "source_url": "https://www.ibm.com/careers",
-            "published_at": None,
-            "summary": "IBM internships offer degree-pursuing students real project "
-            "work, mentoring, professional networks and access to learning "
-            "resources. This global programme overview does not establish "
-            "current vacancies, role-specific eligibility, pay, locations "
-            "or closing dates. The separate co-op comparison describes "
-            "12-week summer internships; that duration is not stated for "
-            "every global internship.",
-            "tags": [],
-            "location": None,
-            "deadline": None,
-            "language": "en",
-            "summary_language": "en",
-            "category": "internships",
-            "categories": ["internships"],
-            "kind": "programme-overview",
-            "host_countries": [],
-            "eligible_countries": [],
-            "publisher_country": "US",
-            "status": "unknown",
-            "classification": {
-                "method": "editorial-review",
-                "status": "classified",
-                "evidence": [
-                    "IBM official programme information; " "original factual summary",
-                    "Programme overview; individual current " "vacancies not collected",
-                    "https://www.ibm.com/careers/internships",
-                ],
-            },
-        },
-    },
-    {
-        "key": "the-ibm-apprenticeship-program-no-degree-no-problem",
-        "url": "https://www.ibm.com/careers/blog/the-ibm-apprenticeship-program-no-degree-no-problem",
-        "inputs": ["apprenticeship"],
-        "fields": {
-            "title": "The IBM Apprenticeship program: No Degree? No Problem!",
-            "url": "https://www.ibm.com/careers/blog/the-ibm-apprenticeship-program-no-degree-no-problem",
-            "source": "ibm",
-            "source_url": "https://www.ibm.com/careers",
-            "published_at": None,
-            "summary": "A full-time earn-and-learn programme for people without a "
-            "four-year bachelor’s degree in their chosen field who already "
-            "have domain knowledge. Participants work with IBM teams, "
-            "receive expert mentoring, earn digital credentials and "
-            "develop technical and professional skills. Current vacancies, "
-            "location-specific admission rules, pay amounts and closing "
-            "dates are not specified.",
-            "tags": [],
-            "location": None,
-            "deadline": None,
-            "language": "en",
-            "summary_language": "en",
-            "category": "training",
-            "categories": ["training", "jobs"],
-            "kind": "programme-overview",
-            "host_countries": [],
-            "eligible_countries": [],
-            "publisher_country": "US",
-            "status": "unknown",
-            "classification": {
-                "method": "editorial-review",
-                "status": "classified",
-                "evidence": [
-                    "IBM official programme information; " "original factual summary",
-                    "Programme overview; individual current " "vacancies not collected",
-                    "https://www.ibm.com/careers/blog/the-ibm-apprenticeship-program-no-degree-no-problem",
-                ],
-            },
-        },
-    },
-    {
-        "key": "your-future-starts-here-inside-ibm-co-op-program",
-        "url": "https://www.ibm.com/careers/blog/your-future-starts-here-inside-ibm-co-op-program",
-        "inputs": ["coop"],
-        "fields": {
-            "title": "Your Future Starts Here: Inside IBM’s Co-op Program",
-            "url": "https://www.ibm.com/careers/blog/your-future-starts-here-inside-ibm-co-op-program",
-            "source": "ibm",
-            "source_url": "https://www.ibm.com/careers",
-            "published_at": None,
-            "summary": "A 16-week, full-time experience on-site at an IBM office for "
-            "actively enrolled college and university students, in "
-            "software or sales. Students work on real projects with teams "
-            "and mentors, developing technical and professional skills. A "
-            "later full-time job depends on performance and an offer. "
-            "Current openings, pay, exact office locations and closing "
-            "dates are not established.",
-            "tags": [],
-            "location": None,
-            "deadline": None,
-            "language": "en",
-            "summary_language": "en",
-            "category": "internships",
-            "categories": ["internships"],
-            "kind": "programme-overview",
-            "host_countries": [],
-            "eligible_countries": [],
-            "publisher_country": "US",
-            "status": "unknown",
-            "classification": {
-                "method": "editorial-review",
-                "status": "classified",
-                "evidence": [
-                    "IBM official programme information; " "original factual summary",
-                    "Programme overview; individual current " "vacancies not collected",
-                    "https://www.ibm.com/careers/blog/your-future-starts-here-inside-ibm-co-op-program",
-                ],
-            },
-        },
-    },
-    {
-        "key": "discover-your-potential-entry-level-careers-that-make-a-difference",
-        "url": "https://www.ibm.com/careers/blog/discover-your-potential-entry-level-careers-that-make-a-difference",
-        "inputs": ["entry-guide"],
-        "fields": {
-            "title": "Discover Your Potential: Entry-Level Careers That Make a "
-            "Difference",
-            "url": "https://www.ibm.com/careers/blog/discover-your-potential-entry-level-careers-that-make-a-difference",
-            "source": "ibm",
-            "source_url": "https://www.ibm.com/careers",
-            "published_at": None,
-            "summary": "IBM’s global Entry-Level Program offers structured "
-            "onboarding, role-specific training, certifications, hands-on "
-            "work and mentoring. It welcomes recent graduates, career "
-            "switchers and nontraditional backgrounds entering roles that "
-            "typically require less than one year of relevant experience. "
-            "Exact role eligibility, pay, locations and closing dates "
-            "depend on individual vacancies, which this programme overview "
-            "does not establish.",
-            "tags": [],
-            "location": None,
-            "deadline": None,
-            "language": "en",
-            "summary_language": "en",
-            "category": "jobs",
-            "categories": ["jobs", "training"],
-            "kind": "programme-overview",
-            "host_countries": [],
-            "eligible_countries": [],
-            "publisher_country": "US",
-            "status": "unknown",
-            "classification": {
-                "method": "editorial-review",
-                "status": "classified",
-                "evidence": [
-                    "IBM official programme information; " "original factual summary",
-                    "Programme overview; individual current " "vacancies not collected",
-                    "https://www.ibm.com/careers/blog/discover-your-potential-entry-level-careers-that-make-a-difference",
-                ],
-            },
-        },
-    },
-    {
-        "key": "what-is-the-ibm-sales-accelerator-program",
-        "url": "https://www.ibm.com/careers/blog/what-is-the-ibm-sales-accelerator-program",
-        "inputs": ["sales-accelerator", "entry-guide"],
-        "fields": {
-            "title": "What is the IBM Sales Accelerator Program?",
-            "url": "https://www.ibm.com/careers/blog/what-is-the-ibm-sales-accelerator-program",
-            "source": "ibm",
-            "source_url": "https://www.ibm.com/careers",
-            "published_at": None,
-            "summary": "For fresh graduates interested in technology sales, this "
-            "Europe-focused programme has Client Engineering and Sales "
-            "tracks, a two-year growth plan, mentoring and real customer "
-            "work. The first six weeks include Global Sales School. The "
-            "Sales track includes an international assignment in Valencia, "
-            "Spain, or Dublin, Ireland; other office locations are "
-            "unspecified. Current vacancies, pay and application closing "
-            "dates are not established.",
-            "tags": [],
-            "location": None,
-            "deadline": None,
-            "language": "en",
-            "summary_language": "en",
-            "category": "jobs",
-            "categories": ["jobs", "training"],
-            "kind": "programme-overview",
-            "host_countries": ["ES", "IE"],
-            "eligible_countries": [],
-            "publisher_country": "US",
-            "status": "unknown",
-            "classification": {
-                "method": "editorial-review",
-                "status": "classified",
-                "evidence": [
-                    "IBM official programme information; " "original factual summary",
-                    "Programme overview; individual current " "vacancies not collected",
-                    "https://www.ibm.com/careers/blog/what-is-the-ibm-sales-accelerator-program",
-                ],
-            },
-        },
-    },
-]
-ROBOTS_ORIGINS = {"https://www.ibm.com"}
 
 if __name__ == "__main__":
     raise SystemExit(main())

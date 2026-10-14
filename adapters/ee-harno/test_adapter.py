@@ -1,6 +1,7 @@
 """One live non-publishing Harno funding collection test."""
 
 import json
+import os
 import sys
 import unittest
 
@@ -9,6 +10,10 @@ import adapter
 
 class LiveAdapterTest(unittest.TestCase):
     def test_live_collection(self):
+        if os.environ.get("DATA_SOURCE_TOKEN"):
+            raise RuntimeError(
+                "Publication credentials are not allowed in live tests"
+            )
         records = adapter.collect()
         adapter.validate_records(records)
         self.assertTrue(records)
