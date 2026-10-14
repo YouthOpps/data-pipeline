@@ -61,10 +61,14 @@ def collect():
         raise ValueError("Reviewed programme canonical URL changed or is ambiguous")
     if page.heading is not None or page.headings != [EXPECTED_TITLE]:
         raise ValueError("Expected one exact reviewed programme heading")
-    # A calendar date or closed application message does not establish publication or a deadline.
-    return [make_record(EXPECTED_TITLE, SOURCE_URL, ["scholarships"],
-                        kind="programme-overview", tags=["programme-overview"],
-                        method="editorial-review", evidence=[SOURCE_URL])]
+    # The verified heading explicitly identifies this application's closing day.
+    record = make_record(
+        EXPECTED_TITLE, SOURCE_URL, ["scholarships"],
+        kind="programme-overview", tags=["programme-overview"],
+        method="editorial-review", evidence=[SOURCE_URL],
+    )
+    record["deadline"] = "2026-12-01"
+    return [record]
 
 # All transport, output and publication code below belongs to this adapter.
 # Python standard library only; no imports from another adapter or project module.
@@ -268,7 +272,14 @@ def validate_records(records, *, allow_empty=False):
                 raise AdapterError('Missing record field: ' + field, 'validate')
             if value is not None:
                 try:
-                    if datetime.fromisoformat(value.replace('Z', '+00:00')).tzinfo is None:
+                    if (field == "deadline" and isinstance(value, str)
+                            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)):
+                        datetime.strptime(value, "%Y-%m-%d")
+                        continue
+                    parsed = datetime.fromisoformat(
+                        value.replace('Z', '+00:00')
+                    )
+                    if parsed.tzinfo is None:
                         raise ValueError()
                 except (ValueError, TypeError, AttributeError):
                     raise AdapterError('Invalid record timestamp: ' + field, 'validate')
