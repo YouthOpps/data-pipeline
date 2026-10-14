@@ -822,14 +822,14 @@ def vacancy(row, root):
     title = one(nodes(main, "h1"), "vacancy heading").text()
     body = one(nodes(main, "div", "vacancy_details_area"), "vacancy body")
     text = body.text()
-    if (
-        title != listing_title
-        or not re.search(r"\bPhD\b", title, re.I)
-        or not re.search(
-            r"salary|stipend|scholarship|appointment and payment", text, re.I
-        )
+    if title != listing_title:
+        raise AdapterError("Detail title differs from listing title", "parse")
+    if not re.search(r"\bPhD\b", title, re.I):
+        raise AdapterError("Detail title lacks PhD identity", "parse")
+    if not re.search(
+        r"salary|stipend|scholarship|appointment and payment", text, re.I
     ):
-        raise AdapterError("Unverified funded doctoral vacancy", "parse")
+        raise AdapterError("Detail lacks verified funding evidence", "parse")
     deadline, status, dates = application_deadline(body, date)
     evidence = [
         "Official current PhD listing: " + VACANCIES_URL,
@@ -937,10 +937,8 @@ def vacancy(row, root):
     return record
 
 
-def collect():
-    """Collect actual university programmes plus every current PhD advert."""
-    _ROBOTS.clear()
-    records = scholarships(page(SOURCE_URL))
+def vacancy_catalog():
+    """Read every authoritative listing page before comparing inventories."""
     pending, seen, rows, urls = [VACANCIES_URL], set(), [], set()
     while pending:
         url = pending.pop(0)
@@ -970,20 +968,63 @@ def collect():
                 pending.append(target)
         if len(seen) > 30:
             raise AdapterError("Excessive vacancy pagination", "parse")
-    for index, row in enumerate(rows, 1):
-        records.append(vacancy(row, page(row[0])))
-        print(
-            f"UCPH: inspected doctoral advert {index}/{len(rows)}",
-            file=sys.stderr,
-        )
-    validate_records(records)
-    print(
-        f"UCPH: {len(records) - len(rows)} award programmes, "
-        f"{len(rows)} doctoral adverts, "
-        f"{len(seen)} listing pages",
-        file=sys.stderr,
-    )
-    return records
+    return rows, len(seen)
+
+
+def collect():
+    """Collect completely; restart once only after verified catalog turnover."""
+    _ROBOTS.clear()
+    rows = None
+    for attempt in range(2):
+        records = scholarships(page(SOURCE_URL))
+        if rows is None:
+            rows, listing_pages = vacancy_catalog()
+        for index, row in enumerate(rows, 1):
+            # Fetch failures/refusals cannot trigger catalog recovery.
+            detail = page(row[0])
+            try:
+                record = vacancy(row, detail)
+            except AdapterError as error:
+                identifier = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(row[0]).query
+                )["show"][0]
+                diagnostic = (
+                    f"Doctoral advert show={identifier} ({row[0]}): "
+                    + str(error)
+                )
+                if error.stage != "parse" or attempt:
+                    raise AdapterError(diagnostic, error.stage) from error
+                print("UCPH: " + safe_error(diagnostic), file=sys.stderr)
+                refreshed, refreshed_pages = vacancy_catalog()
+                identity = {(item[0], item[1]) for item in rows}
+                current = {(item[0], item[1]) for item in refreshed}
+                if current == identity:
+                    raise AdapterError(
+                        diagnostic + "; authoritative catalog unchanged",
+                        "parse",
+                    ) from error
+                print(
+                    "UCPH: catalog changed; "
+                    "restarting complete collection once",
+                    file=sys.stderr,
+                )
+                rows, listing_pages = refreshed, refreshed_pages
+                break
+            records.append(record)
+            print(
+                f"UCPH: inspected doctoral advert {index}/{len(rows)}",
+                file=sys.stderr,
+            )
+        else:
+            validate_records(records)
+            print(
+                f"UCPH: {len(records) - len(rows)} award programmes, "
+                f"{len(rows)} doctoral adverts, "
+                f"{listing_pages} listing pages",
+                file=sys.stderr,
+            )
+            return records
+    raise AdapterError("Complete catalog restart exhausted", "parse")
 
 
 CATEGORIES = (
@@ -1086,7 +1127,7 @@ def pace(url, interval=6):
             if raw
             else {"starts": [], "interval": 6, "until": 0}
         )
-        budget["interval"] = max(budget["interval"], interval, 6)
+        budget["interval"] = max(budget["interval"], interval, 6.1)
         while True:
             now = time.time()
             budget["starts"] = [
@@ -1157,7 +1198,14 @@ def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
                 raise AdapterError("Response exceeds 5 MB", "fetch")
             return response.status, response.headers, body
     finally:
-        state.close()
+        try:
+            # Hold the family lock through completion and the next-start gate.
+            budget["until"] = max(
+                budget["until"], time.time() + budget["interval"]
+            )
+            save_budget(state, budget)
+        finally:
+            state.close()
 
 
 def fetch_source(url, min_interval=6):
@@ -1361,9 +1409,11 @@ def validate_records(records, *, allow_empty=False):
                 or not record[field].strip()
             ):
                 raise AdapterError("Missing record field: " + field, "validate")
-        if record["id"] in ids:
+        if not re.fullmatch(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", record["id"]):
+            raise AdapterError("Invalid opportunity identifier", "validate")
+        if record["id"].casefold() in ids:
             raise AdapterError("Duplicate opportunity identifier", "validate")
-        ids.add(record["id"])
+        ids.add(record["id"].casefold())
         url = urllib.parse.urlsplit(record["url"])
         if (
             url.scheme not in ("http", "https")

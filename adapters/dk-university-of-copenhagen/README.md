@@ -131,6 +131,28 @@ URL. Multiple places or regular/integrated degree routes within one
 advertisement remain one opportunity. Listing department and detail conditions
 are retained; host Denmark is not applicant nationality.
 
+A detail parse/verification failure reports its native `show` ID, university
+URL and failed guard. Title equality, PhD identity and funding evidence remain
+mandatory. On the first such failure, the adapter rechecks the complete paced
+authoritative listing. Only a changed set of native URLs and titles permits one
+complete restart: scholarship conditions are fetched again and every detail in
+the refreshed catalogue is validated. No records from the abandoned attempt
+survive. An unchanged catalogue, any second detail failure, malformed listing,
+or fetch/access refusal fails closed and preserves the last-good snapshot.
+Catalogue replacement is not inferred expiry; deadline cleanup is unchanged.
+
+Investigation of the 14 October failure found the previously first advert
+`170070` had an explicit 21:59 UTC deadline; the failed collection began seconds
+later. It subsequently disappeared from the complete listing and its detail
+returned generic portal content. The original failing response was not retained,
+so its exact failed condition remains unconfirmed; this recovery is bounded by
+observed catalogue changes rather than an assumed cause or retirement notice.
+
+Final identifiers are stable 24-character hexadecimal hashes of source-qualified
+native identities. Validation enforces the website-compatible ASCII alphanumeric
+and single-hyphen grammar and rejects case-insensitive duplicates after all
+source-specific overrides.
+
 Programme descriptions with no dated current application call retain null
 deadlines and unknown status. Academic-merit, citizenship, study residence,
 faculty enrolment and fee-paying conditions come from the publisher. The
@@ -213,3 +235,11 @@ and success metadata are committed atomically only
 under this source's paths. An empty/invalid raw response or fetch, parse,
 validation or publication failure preserves last-good data and its success
 timestamp; safe failure metadata may be updated. Tests never publish.
+
+The shared KU-family native pacing budget uses a minimum 6.1-second reserved
+gap and keeps the family lock until response/error completion has durably
+advanced the next-start watermark by that interval. The conservative completion
+gate guarantees spacing even when request construction or scheduling varies.
+Existing stronger intervals and Retry-After deadlines are kept;
+all origins, robots requests, redirects and retries share the same lock and
+rolling request history.
