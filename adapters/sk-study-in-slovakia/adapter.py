@@ -7,7 +7,7 @@ SAIA's noncommercial terms require attribution and completed retrieval times.
 
 import argparse
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -29,7 +29,6 @@ import zipfile
 import contextlib
 import http.cookiejar
 import signal
-from datetime import timedelta
 
 SOURCE_ID = "sk-study-in-slovakia"
 SOURCE_URL = "https://www.studyinslovakia.saia.sk/en/main/scholarships"
@@ -489,9 +488,9 @@ def make_record(
         },
     }
 
-def validate_records(records):
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -976,7 +975,8 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
             "Collection failed; last-good data preserved"
             if error
             else (
-                f"Collected {len(records)} validated Study in Slovakia "
+                f"Validated refresh retains {len(records)} validated "
+                "Study in Slovakia "
                 "funding programmes and placements"
             )
         ),
@@ -1557,6 +1557,38 @@ def phase_error(name):
 def serialize(value):
     return json.dumps(value, ensure_ascii=False, indent=2) + "\n"
 
+def remove_expired_records(records, checked_at):
+    """Filter verified deadlines after validating the complete fresh inventory.
+
+    Unzoned closing dates use UTC-12 as a conservative world-wide boundary;
+    no publisher timezone is inferred. Explicit offsets retain their instant.
+    """
+    validate_records(records)
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.tzinfo is None:
+        raise AdapterError(
+            "Cleanup requires an aware check timestamp", "validate"
+        )
+    retained = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if deadline and re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+            closing = datetime.fromisoformat(deadline).date()
+            latest_date = checked.astimezone(
+                timezone(timedelta(hours=-12))
+            ).date()
+            expired = latest_date > closing
+        elif deadline:
+            closing = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            if closing.tzinfo is not None:
+                expired = checked > closing
+        if not expired:
+            retained.append(record)
+    validate_records(retained, allow_empty=True)
+    return retained
+
+
 def fresh_records(records, old, attempt, checked):
     prior = {record["id"]: record for record in old}
     temporal = {
@@ -1604,6 +1636,7 @@ def run_body(publishing):
             records = collect()
             checked = utc_now()
             fresh_records(records, old, attempt, checked)
+            records = remove_expired_records(records, checked)
             outcome = metadata(attempt, previous, records, checked_at=checked)
             desired = {
                 "data.json": serialize(records),
@@ -1634,7 +1667,10 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif (
+                        snapshot["files"]["data.json"] is not None
+                        and latest["files"] == snapshot["files"]
+                    ):
                         publish_files(
                             latest,
                             {
@@ -1706,7 +1742,7 @@ def prior_timestamp(value):
 
 def validate_prior_pair(records, previous):
     """Only an entirely validated owned pair can be retained after a failure."""
-    validate_records(records)
+    validate_records(records, allow_empty=True)
     identities = {"source": SOURCE_ID, "source_url": SOURCE_URL,
                   "website_url": WEBSITE_URL, "language": LANGUAGE,
                   "publisher_country": PUBLISHER_COUNTRY,
@@ -2690,7 +2726,7 @@ EXPECTED_INVENTORIES = {'en': [('489',
         ('190', 'NEMECKO - medzinárodné stáže v parlamente'),
         ('191',
          'NEMECKO - Program výmeny osôb pracujúcich na spoločných projektoch medzi SR '
-         'a SRN'),
+         'a SRN (DAAD, MŠVVaM SR, SAV)'),
         ('756',
          'NEMECKO - stáže v Európskej centrálnej banke vo Frankfurte nad Mohanom'),
         ('752',
@@ -3588,9 +3624,12 @@ REVIEWED_FACTS = {'296': {'title': 'National Scholarship Programme of the Slovak
          'source_language': 'sk',
          'facts_sha256': '0031c99ba2fbc0437e27c7dee41ede6b09e2ca5ba29044543521b2dae2cbfb5c'},
  '191': {'title': 'NEMECKO - Program výmeny osôb pracujúcich na spoločných projektoch '
-                  'medzi SR a SRN',
+                  'medzi SR a SRN (DAAD, MŠVVaM SR, SAV)',
          'source_language': 'sk',
-         'facts_sha256': '42ec55e2ae216eaed46ee1506eac0c68ae00d08b4753175ffc53cf0361126162'},
+         'facts_sha256': (
+             '712edaf8cb5440a3287d2310d63d0c98e7'
+             '983a5c23d90a7e0db27d0f69892793'
+         )},
  '192': {'title': 'NEMECKO - štipendiá Európskeho prekladateľského centra v Straelene '
                   'pre prekladateľov umeleckej literatúry',
          'source_language': 'sk',

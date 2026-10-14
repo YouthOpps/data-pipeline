@@ -1,5 +1,10 @@
 name: fetch-at-oead-ernst-mach
 on:
+  push:
+    branches: [main]
+    paths:
+      - adapters/at-oead-ernst-mach/**
+      - .github/workflows/fetch-at-oead-ernst-mach.yml
   workflow_dispatch:
   schedule:
     - cron: '3 0/6 * * *'
