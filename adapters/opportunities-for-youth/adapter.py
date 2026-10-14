@@ -347,7 +347,8 @@ def make_record(
     }
 
 
-def validate_records(records, *, allow_empty=False):
+def validate_records(records, *, allow_empty=False, allow_legacy_ids=False):
+    """Validate fresh IDs; legacy native IDs are allowed only for old reads."""
     if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError("Empty or invalid opportunity collection",
                            "validate")
@@ -369,9 +370,16 @@ def validate_records(records, *, allow_empty=False):
             if (not isinstance(record.get(field), str) or
                     not record[field].strip()):
                 raise AdapterError("Missing record field: " + field, "validate")
-        if record["id"] in ids:
+        pattern = re.escape(SOURCE_ID) + r"-[1-9][0-9]*"
+        if allow_legacy_ids:
+            pattern = re.escape(SOURCE_ID) + r"[-:][1-9][0-9]*"
+        if not re.fullmatch(pattern, record["id"]):
+            raise AdapterError("Invalid native opportunity identifier",
+                               "validate")
+        identity = record["id"].replace(SOURCE_ID + ":", SOURCE_ID + "-", 1)
+        if identity in ids:
             raise AdapterError("Duplicate opportunity identifier", "validate")
-        ids.add(record["id"])
+        ids.add(identity)
         url = urllib.parse.urlsplit(record["url"])
         if (url.scheme not in ("http", "https") or not url.hostname or
                 url.username or url.password):
@@ -880,7 +888,7 @@ def collect_inventory():
             )
             if deadline_label:
                 record["summary"] = "Publisher-stated " + deadline_label[0]
-            record["id"] = SOURCE_ID + ":" + str(post_id)
+            record["id"] = SOURCE_ID + "-" + str(post_id)
             record["classification"]["status"] = "classified"
             records.append(record)
         print(f"Archive page {page}/{pages}: {len(seen)}/{total} posts",
@@ -1122,7 +1130,7 @@ def main():
     previous = (json.loads(snapshot["files"]["metadata.json"]) if snapshot and
                 snapshot["files"]["metadata.json"] is not None else {})
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old, allow_empty=True)
+        validate_records(old, allow_empty=True, allow_legacy_ids=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish")
@@ -1131,7 +1139,10 @@ def main():
         records = collect()
         validate_records(records)
         records = remove_expired_records(records, utc_now())
-        prior = {record["id"]: record for record in old}
+        prior = {
+            record["id"].replace(SOURCE_ID + ":", SOURCE_ID + "-", 1): record
+            for record in old
+        }
         temporal = {
             "created_at",
             "updated_at",
