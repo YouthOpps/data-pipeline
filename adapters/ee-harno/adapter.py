@@ -153,14 +153,20 @@ PAGES = {
 CONDITIONS = {
     "entry": "f2429f93c8a4266e60dd405a28d9d809ea278a27a408bed258760cafe180701f",
     "estophilus": "dd5fdea38a5dfd88733dc9f37d04d231441e82cf081e32778e91c60fba38f2b2",
-    "language": "fa8495a8984e3351cbb728c63c036586e5537b13df9c20ff06f61e0f2a17640a",
+    "language": (
+        "533d811ca7794b36f1ab1af3b5c1657f"
+        "a2ef335dc9bef0ea84a27b4ba127819a"
+    ),
     "expatriate": "5c469f86a822a623829d0f765c1a1b7db1e37ecc468b6130a4f8d5782cb0f3c9",
     "agur": "58aa86fdc5cd40e841a7d1553fbb5173e7eb8cde5e76f7a88e7614e93c67ec36",
     "special": "d966407a5b466fd8af5adf817a0201f89206cb59866894938b1bf3b1be0049d9",
     "kristjan": "a965be80f18be2e97a876ca968b0e5616d1d2db62754ca8908b9ca3a2cf232d9",
-    "ekkav": "79c95afdd9a20cef45e3e730655530795e850a02aec9529800a042ead72c3591",
+    "ekkav": "c728320a58c57cfa3c6583ea568d5283297a9992f162123efdd04dc854ef65f6",
     "kristjan-et": "d4575724aaa7e74fcfd02200965e8e985a7a396056f4c6d18fb15a723f52e9cc",
-    "ekkav-et": "c8ede59d2f85d40d9c4f4c609d55c1d508a98bee34c20e9c19a0f8324e5016d2",
+    "ekkav-et": (
+        "6db3384f234c970e51f9b554a9e24d0d"
+        "aac43c117075dc1123f6df65a3705dce"
+    ),
 }
 
 ELIGIBLE = (
@@ -366,18 +372,22 @@ def parse_inventory(pages):
     )
     add(
         "language",
-        "ekkav-language-spring-2026",
-        "EKKAV Estonian language summer/winter course scholarship 2026",
+        "ekkav-language-autumn-2026",
+        "EKKAV Estonian language summer/winter course scholarship 2026-27",
         "International BA/MA/PhD students enrolled abroad who study or have "
         "studied Estonian; course registration and lecturer recommendation "
         "or language certificate required. Covers participation fee, "
         "accommodation and cultural excursions; travel self-funded. Apply "
-        "February15–March15,2026. The page labels the round autumn2025/26 "
-        "despite these spring dates; course places are not separate awards.",
-        deadline="2026-03-15",
-        opening="2026-02-15",
+        "October15–November15,2026 for the autumn2026/27 academic semester; "
+        "course places are not separate awards.",
+        deadline="2026-11-15",
+        opening="2026-10-15",
         hosts=("EE",),
-        facts=("foreign university", "travelling expenses", "March 15th 2026"),
+        facts=(
+            "foreign university",
+            "travelling expenses",
+            "November 15th 2026",
+        ),
     )
     add(
         "agur",
@@ -469,45 +479,45 @@ def parse_inventory(pages):
         )
     add(
         "ekkav-et",
-        "ekkav-guest-lectures-spring-2026",
-        "EKKAV short guest lecture funding – spring 2026",
+        "ekkav-guest-lectures-autumn-2026",
+        "EKKAV short guest lecture funding – autumn 2026-27",
         "Foreign higher-education institutions offering curricular Estonian "
         "language/culture studies may request short guest-lecture funding. "
         "Normally the local Estonian lecturer prepares the application and "
         "hosts the guest. Guideline-rate lecture fee plus evidenced travel "
         "reimbursement by unit prices; amounts not stated on this page. "
-        "Apply February15–March15,2026; lectures must follow "
+        "Apply October15–November15,2026; lectures must follow "
         "confirmed results.",
         anchor="kulalisloeng",
-        deadline="2026-03-15",
-        opening="2026-02-15",
+        deadline="2026-11-15",
+        opening="2026-10-15",
         kind="institutional-grant",
         category="grants",
         facts=(
             "Külalisloengute rahastust",
             "õppekaval põhinev",
             "sõidukulud",
-            "15. märtsini 2026",
+            "15. novembrini 2026",
         ),
     )
     add(
         "ekkav-et",
-        "ekkav-estonia-lectures-spring-2026",
-        "EKKAV Estonia-themed lecture funding – spring 2026",
+        "ekkav-estonia-lectures-autumn-2026",
+        "EKKAV Estonia-themed lecture funding – autumn 2026-27",
         "Higher-educated Estonian citizens OR foreign nationals with suitable "
         "education/experience may lecture at a foreign HEI without curricular "
         "Estonian language/culture teaching. Foreign applicants require "
         "Estonian B1; Estonian application documents. Guideline-rate lecture "
         "fee, no travel reimbursement; exact amount unstated. Apply "
-        "February15–March15,2026; lectures must follow confirmed results.",
+        "October15–November15,2026; lectures must follow confirmed results.",
         anchor="eesti-teemaline",
-        deadline="2026-03-15",
-        opening="2026-02-15",
+        deadline="2026-11-15",
+        opening="2026-10-15",
         facts=(
             "Eesti kodanik või välismaalane",
             "B1 tasemel",
             "sõidukulusid ei kompenseerita",
-            "15. märtsini 2026",
+            "15. novembrini 2026",
         ),
     )
     validate_records(records)
@@ -897,9 +907,34 @@ def make_record(
     }
 
 
-def validate_records(records):
+def remove_expired_records(records, now=None):
+    """Filter a validated refresh; never mutate the prior published snapshot."""
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(timezone(timedelta(hours=-12))).date()
+    retained = []
+    for record in records:
+        value = record.get("deadline")
+        expired = False
+        if isinstance(value, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    expired = datetime.fromisoformat(value).date() < today
+                else:
+                    closing = datetime.fromisoformat(
+                        value.replace("Z", "+00:00")
+                    )
+                    expired = closing.tzinfo is not None and closing < now
+            except ValueError:
+                # Ambiguous deadlines never establish expiry.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
     """Validate every collected or persisted record against the contract."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -1191,7 +1226,9 @@ def metadata(attempt, previous, records, error=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else (f"Collected {len(records)} validated Harno funding records")
+            else (
+                f"Validated refresh retains {len(records)} Harno funding records"
+            )
         ),
         "error": safe_error(error) if error else None,
     }
@@ -1225,7 +1262,7 @@ def main():
         else {}
     )
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish"
@@ -1236,6 +1273,7 @@ def main():
             wait_publisher_cooldown(previous)
         records = collect()
         validate_records(records)
+        records = remove_expired_records(records)
         prior = {record["id"]: record for record in old}
         temporal = {
             "created_at",
@@ -1268,11 +1306,11 @@ def main():
         records.sort(
             key=lambda record: record["published_at"] or "", reverse=True
         )
-        validate_records(records)
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(attempt, previous, records, failure)
-    if args.publish and (not failure or old):
+    if args.publish and (not failure or previous):
         files = {
             "metadata.json": json.dumps(outcome, ensure_ascii=False, indent=2)
             + "\n"
@@ -1295,7 +1333,7 @@ def main():
             )
             try:
                 latest = read_snapshot()
-                if not old or latest["files"] != snapshot["files"]:
+                if not previous or latest["files"] != snapshot["files"]:
                     raise AdapterError(
                         "No safe previous snapshot for failure reporting",
                         "publish",

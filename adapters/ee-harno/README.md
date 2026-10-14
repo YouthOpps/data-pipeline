@@ -47,15 +47,15 @@ strictly longer than one month, up to ten months.
 | International researcher/academic grant 2026 | 1 May 2026, 23:59 Estonian time | One award with short/long duration rates |
 | International degree/exchange scholarship 2026/27 | 31 October 2026, 23:59 Estonian time | One award, BA/MA/PhD benefit variants |
 | Estophilus spring scholarship | 15 March 2026 | One research mobility award |
-| EKKAV summer/winter language scholarship | 15 March 2026 | One scholarship, not a separate course listing |
-| Ustus Agur doctoral scholarship | 16 November 2025 | Actual expired call remains published |
+| EKKAV summer/winter language scholarship | 15 November 2026 | One scholarship, not a separate course listing |
+| Ustus Agur doctoral scholarship | 16 November 2025 | Actual expired call validated, removed before publication |
 | Special-needs student scholarship 2026/27 | Rolling, except July/August | One programme; disability/credit rates are tiers |
 | Kristjan Jaak degree studies abroad 2026 | 30 March 2026, 23:59, zone unstated | One degree-study call |
 | Kristjan Jaak short study visit, first round | 2 March 2026, 23:59, zone unstated | Actual February–March round |
 | Kristjan Jaak short study visit, second round | 31 May 2026, 23:59, zone unstated | Actual May round |
 | Kristjan Jaak short study visit, third round | 31 October 2026, 23:59, zone unstated | Actual October round |
-| EKKAV short guest lectures | 15 March 2026 | Institutional funding, curricular Estonian teaching |
-| EKKAV Estonia-themed lectures | 15 March 2026 | Individual funding, institutions without that curriculum |
+| EKKAV short guest lectures | 15 November 2026 | Institutional funding, curricular Estonian teaching |
+| EKKAV Estonia-themed lectures | 15 November 2026 | Individual funding, institutions without that curriculum |
 
 Main entry URLs retain real `summerandwinter`, `researchersandacademic` and
 `degreeandexchange` anchors. Kristjan Jaak retains `valisopingute_stipendium`
@@ -118,14 +118,15 @@ Explicit “Estonian time” uses Europe/Tallinn's actual 2026 DST calendar:
 1 May 23:59 is `2026-05-01T20:59:00Z`; 31 October 23:59 is
 `2026-10-31T21:59:00Z`. Dates without a zone use `YYYY-MM-DD`, preserving
 any stated 23:59 clock in prose without inventing an offset. Opening dates
-control future-call status; expired calls remain present while published.
+control future-call status; expired calls remain in validated raw publisher coverage and are removed
+from the refreshed published subset.
 Special-needs rolling status is open outside July/August, unknown during that
 pause. No page-update, decision, payment or event date becomes a deadline.
 
 Publisher inconsistencies are disclosed rather than silently corrected:
 current degree call 2026/27 retains 2025/26 enrollment-document instructions;
-summer-school online eligibility refers to 2025 only; Estophilus/EKKAV language
-pages retain autumn/open wording despite explicit March 2026 dates. The
+summer-school online eligibility refers to 2025 only; the Estophilus page
+retains autumn/open wording despite its explicit March 2026 dates. The
 explicit dated application window governs expiration, not stale “open” text.
 
 ## Run and publication
@@ -153,8 +154,8 @@ Publication writes exclusively `datas/ee-harno/{data,metadata}.json` in one
 conflict-safe commit. First failure creates no source folder; later failure
 preserves last-good data and success timestamp and updates only failure
 metadata when safe. Sibling-source changes can rebase; newer own-source data
-cannot be overwritten. Only successfully published validated nonempty records
-advance durable success. Harno metadata also records `publisher_next_request_at`: at least 120 seconds
+cannot be overwritten. Only successful atomic publication after validated nonempty retrieval
+advances durable success. Harno metadata also records `publisher_next_request_at`: at least 120 seconds
 after the last Harno response, or a longer explicit Retry-After. A later
 publication run reads and honors that timestamp before its first Harno request;
 GitHub API reads use their independent budget. Legacy metadata without this
@@ -167,3 +168,35 @@ Both fresh and prior Harno records use the strict
 600-unit validator; Charles University's source-specific historical-summary
 exception is not used here. Live collection/static mocked publication evidence
 does not itself claim production execution; maintainers verify after merge.
+
+## Expired-record cleanup
+
+A refresh first retrieves and validates the complete nonempty publisher inventory.
+Only then are records with a verified past `deadline` removed from the next
+source snapshot, including expired identities from the previous publication.
+The existing full replacement does not merge old records back into the result.
+Date-only deadlines remain eligible through their closing date. With no
+documented publisher timezone, cleanup uses the conservative UTC-12 calendar: the
+closing date must have ended globally before removal.
+Explicit timezone-aware timestamps expire strictly after the stated instant;
+missing deadlines remain eligible; unresolved publisher dates stay null.
+Invalid normalized deadlines fail validation and preserve last-good data. Status, record age and
+absence from a response are not expiry evidence. Publisher inventory coverage
+continues to be checked before filtering.
+
+The refreshed subset and success metadata are published atomically within this
+source. If every validated record has expired, success publishes an empty array;
+an empty raw retrieval still fails validation. Previously published empty arrays
+are valid snapshots. Retrieval, parsing, validation and publication failures
+preserve last-good data and its success timestamp; safe failure metadata may
+be updated. The sole live test remains non-publishing and verifies the complete
+raw inventory. Cleanup and failure boundaries are checked separately without
+production execution.
+
+The official language-course page, reviewed 14 October 2026, now publishes
+the autumn 2026/27 call with an October 15–November 15, 2026 application
+window. The English EKKAV hub and Estonian guest/Estonia-themed lecture
+calls independently publish the same autumn window. All three changed
+substantive fingerprints and the three affected call recipes were updated
+together; the earlier spring edition is replaced by this actual current call.
+No hour or publisher timezone is stated for this cutoff.

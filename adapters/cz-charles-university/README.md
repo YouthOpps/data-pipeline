@@ -164,7 +164,7 @@ or its own workflow. Repository/main guards and global publication concurrency
 prevent branch publication and overlapping data-source commits. The App token
 permits contents-write only for `YouthOpps/data-source`.
 
-Validated nonempty results and source metadata are committed atomically only to
+After validated nonempty retrieval, filtered results and source metadata are committed atomically only to
 `datas/cz-charles-university/{data,metadata}.json`. First failure creates nothing;
 after successful publication, failure preserves last-good data and its success
 timestamp, recording failure metadata when possible. Successful publication
@@ -186,3 +186,27 @@ metadata together with strict fresh validation. Collection failure keeps the
 prior data bytes unchanged and can update only failure metadata, preserving the
 previous success timestamp. Publication failure uses the existing safe
 source-snapshot comparison before attempting metadata-only failure reporting.
+
+## Expired-record cleanup
+
+A refresh first retrieves and validates the complete nonempty publisher inventory.
+Only then are records with a verified past `deadline` removed from the next
+source snapshot, including expired identities from the previous publication.
+The existing full replacement does not merge old records back into the result.
+Date-only deadlines remain eligible through their closing date. With no
+documented publisher timezone, cleanup uses the conservative UTC-12 calendar: the
+closing date must have ended globally before removal.
+Explicit timezone-aware timestamps expire strictly after the stated instant;
+missing deadlines remain eligible; unresolved publisher dates stay null.
+Invalid normalized deadlines fail validation and preserve last-good data. Status, record age and
+absence from a response are not expiry evidence. Publisher inventory coverage
+continues to be checked before filtering.
+
+The refreshed subset and success metadata are published atomically within this
+source. If every validated record has expired, success publishes an empty array;
+an empty raw retrieval still fails validation. Previously published empty arrays
+are valid snapshots. Retrieval, parsing, validation and publication failures
+preserve last-good data and its success timestamp; safe failure metadata may
+be updated. The sole live test remains non-publishing and verifies the complete
+raw inventory. Cleanup and failure boundaries are checked separately without
+production execution.

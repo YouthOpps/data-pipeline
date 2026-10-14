@@ -52,4 +52,28 @@ The single live test collects actual nonempty records, validates them, and emits
 
 The matching `fetch-de-rausvonzuhaus.yml` runs after changes to its own adapter/workflow are merged to `main`, supports manual dispatch and runs every six hours at minute 41. A repository/main guard, minimal permissions, data-source-only GitHub App token and global publication concurrency constrain the Action. Its sole application command uses `adapter.py --publish`; tests and formatting never run in production.
 
-Production starts after maintainer merge. It atomically publishes only `datas/de-rausvonzuhaus/data.json` and `metadata.json` using a conflict-safe Git commit. First-run failure creates no source folder. After a successful publication, later failure preserves last-good data and the last successful timestamp and records sanitized failure metadata when possible. The success timestamp advances only after a validated, nonempty result is successfully published. Failed metadata publication is reported rather than claimed to have been saved. This adapter does not alter any other source or create a catalog.
+Production starts after maintainer merge. It atomically publishes only `datas/de-rausvonzuhaus/data.json` and `metadata.json` using a conflict-safe Git commit. First-run failure creates no source folder. After a successful publication, later failure preserves last-good data and the last successful timestamp and records sanitized failure metadata when possible. The success timestamp advances only after a validated nonempty retrieval and its filtered result are successfully published. Failed metadata publication is reported rather than claimed to have been saved. This adapter does not alter any other source or create a catalog.
+
+## Expired-record cleanup
+
+A refresh first retrieves and validates the complete nonempty publisher inventory.
+Only then are records with a verified past `deadline` removed from the next
+source snapshot, including expired identities from the previous publication.
+The existing full replacement does not merge old records back into the result.
+Date-only deadlines remain eligible through their closing date. With no
+documented publisher timezone, cleanup uses the conservative UTC-12 calendar: the
+closing date must have ended globally before removal.
+Explicit timezone-aware timestamps expire strictly after the stated instant;
+missing deadlines remain eligible; unresolved publisher dates stay null.
+Invalid normalized deadlines fail validation and preserve last-good data. Status, record age and
+absence from a response are not expiry evidence. Publisher inventory coverage
+continues to be checked before filtering.
+
+The refreshed subset and success metadata are published atomically within this
+source. If every validated record has expired, success publishes an empty array;
+an empty raw retrieval still fails validation. Previously published empty arrays
+are valid snapshots. Retrieval, parsing, validation and publication failures
+preserve last-good data and its success timestamp; safe failure metadata may
+be updated. The sole live test remains non-publishing and verifies the complete
+raw inventory. Cleanup and failure boundaries are checked separately without
+production execution.
