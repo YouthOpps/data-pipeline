@@ -1,8 +1,7 @@
-"""Collect reviewed Fulbright Bulgaria awards and actual training editions."""
+"""Discover and extract official Fulbright Bulgaria awards and training."""
 
 import argparse
 import base64
-import copy
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
@@ -105,7 +104,8 @@ def nodes(node, tag=None, class_name=None):
         for n in node.walk()
         if (tag is None or n.tag == tag)
         and (
-            class_name is None or class_name in n.attrs.get("class", "").split()
+            class_name is None
+            or class_name in n.attrs.get("class", "").split()
         )
     ]
 
@@ -127,7 +127,8 @@ def page(url):
     root = PublisherHTML(document).root
     title = " ".join(n.text() for n in nodes(root, "title")).lower()
     if re.match(
-        r"just a moment|access denied|attention required|checking your browser",
+        r"just a moment|access denied|attention required|checking your"
+        r" browser",
         title,
     ):
         raise AdapterError("Publisher access challenge", "access")
@@ -158,294 +159,10 @@ def reviewed_url(value):
     )
 
 
-def substantive_text(key, root):
-    """Keep programme facts while excluding reviewed personal presentation."""
-    content = article(root)
-    parts = []
-    selected = []
-    for node in nodes(content, "div"):
-        classes = node.attrs.get("class", "").split()
-        if "et_pb_module" not in classes:
-            continue
-        if any(
-            c in classes
-            for c in (
-                "et_pb_team_member",
-                "et_pb_testimonial",
-                "et_pb_gallery",
-                "et_pb_image",
-                "et_pb_video",
-                "et_pb_code",
-            )
-        ):
-            continue
-        if any(c in classes for c in EXCLUDED_MODULES.get(key, [])):
-            continue
-        if key == "court" and any(
-            c in classes for c in ("et_pb_accordion", "et_pb_accordion_item")
-        ):
-            # These ten accordions are personal internship testimonials.
-            continue
-        if key == "eta" and "et_pb_slider" in classes:
-            continue
-        if any(node in list(parent.walk())[1:] for parent in selected):
-            continue
-        text = node.text()
-        if text:
-            parts.append(text)
-            selected.append(node)
-
-    def outside_modules(node):
-        if node.tag in ("script", "style", "noscript") or (
-            "et_pb_module" in node.attrs.get("class", "").split()
-        ):
-            return []
-        result = []
-        for child in node.children:
-            if isinstance(child, Node):
-                result.extend(outside_modules(child))
-            elif child.strip():
-                result.append(child)
-        return result
-
-    parts.extend(outside_modules(content))
-    if key in ("news", "conferences", "conference2"):
-        # Discovery card headings identify the finite frontier; author names
-        # and excerpts are impact-story presentation, not funding conditions.
-        parts = [
-            n.text() for n in nodes(content) if n.tag in ("h1", "h2", "h3")
-        ]
-    if not parts:
-        raise AdapterError("Missing substantive source modules", "parse")
-    return " ".join(parts).replace("\xad", "").replace("\u200b", "")
-
-
-def normalized_home_contact_question(root):
-    """Normalize only the reviewed public contact form's rotating question."""
-    question = one(
-        nodes(root, "span", "et_pb_contact_captcha_question"),
-        "home contact arithmetic question",
-    )
-    if (
-        question.attrs != {"class": "et_pb_contact_captcha_question"}
-        or len(question.children) != 1
-        or not isinstance(question.children[0], str)
-    ):
-        raise AdapterError("Changed home contact question shape", "parse")
-    match = re.fullmatch(
-        r"(0|[1-9][0-9]?) \+ (0|[1-9][0-9]?)", question.children[0]
-    )
-    if match is None:
-        raise AdapterError("Changed home contact arithmetic format", "parse")
-    field = one(
-        nodes(root, "input", "et_pb_contact_captcha"),
-        "home contact arithmetic field",
-    )
-    expected = {
-        "type": "text",
-        "size": "2",
-        "class": "input et_pb_contact_captcha",
-        "data-first_digit": match.group(1),
-        "data-second_digit": match.group(2),
-        "value": "",
-        "name": "et_pb_contact_captcha_0",
-        "data-required_mark": "required",
-        "autocomplete": "off",
-    }
-    if field.attrs != expected or field.children:
-        raise AdapterError("Changed home contact arithmetic field", "parse")
-    pair = one(
-        [
-            n
-            for n in nodes(root, "p")
-            if question in n.children and field in n.children
-        ],
-        "paired home contact question and field",
-    )
-    meaningful = [
-        child if isinstance(child, Node) else child.strip()
-        for child in pair.children
-        if isinstance(child, Node) or child.strip()
-    ]
-    if pair.attrs != {"class": "clearfix"} or meaningful != [
-        question,
-        "=",
-        field,
-    ]:
-        raise AdapterError("Changed home contact arithmetic pair", "parse")
-    wrapper = one(
-        [n for n in nodes(root, "div") if pair in n.children],
-        "home contact arithmetic wrapper",
-    )
-    if wrapper.attrs != {"class": "et_pb_contact_right"} or [
-        c for c in wrapper.children if isinstance(c, Node) or c.strip()
-    ] != [pair]:
-        raise AdapterError("Changed home contact arithmetic wrapper", "parse")
-    form = one(
-        [n for n in nodes(root, "form") if question in list(n.walk())],
-        "home public contact form",
-    )
-    if form.attrs != {
-        "class": "et_pb_contact_form clearfix",
-        "method": "post",
-        "action": PAGES["home"],
-    }:
-        raise AdapterError("Changed home contact form boundary", "parse")
-    # Work on a copy: the raw parsed document remains intact. No answer is
-    # computed, no input is populated and no form is submitted.
-    normalized = copy.deepcopy(root)
-    one(
-        nodes(normalized, "span", "et_pb_contact_captcha_question"),
-        "copied home contact arithmetic question",
-    ).children = ["REVIEWED_CONTACT_QUESTION"]
-    return normalized
-
-
-def source_facts(key, root):
-    if key == "home":
-        root = normalized_home_contact_question(root)
-    observed = [
-        n.attrs.get("href", "")
-        for n in nodes(root, "link")
-        if n.attrs.get("rel") == "canonical"
-    ]
-    if observed != CANONICALS[key]:
-        raise AdapterError("Publisher canonical changed: " + key, "parse")
-    routes, policies = set(), set()
-    personal_anchors = set()
-    for node in nodes(article(root), "div"):
-        classes = node.attrs.get("class", "").split()
-        if (
-            any(
-                c in classes
-                for c in (
-                    "et_pb_team_member",
-                    "et_pb_testimonial",
-                    "et_pb_gallery",
-                    "et_pb_image",
-                    "et_pb_video",
-                )
-            )
-            or any(c in classes for c in EXCLUDED_MODULES.get(key, []))
-            or (
-                key == "court"
-                and any(
-                    c in classes
-                    for c in ("et_pb_accordion", "et_pb_accordion_item")
-                )
-            )
-        ):
-            personal_anchors.update(nodes(node, "a"))
-    for anchor in nodes(root, "a"):
-        if anchor in personal_anchors:
-            continue
-        href = anchor.attrs.get("href", "")
-        if not href or href.startswith(("mailto:", "tel:")):
-            continue
-        absolute = urllib.parse.urljoin(PAGES[key], href)
-        parsed = urllib.parse.urlsplit(absolute)
-        label = anchor.text().lower()
-        if re.search(
-            r"privacy|terms|copyright|licen[cs]e|политика|условия", label
-        ):
-            policies.add(absolute)
-        if (parsed.hostname or "").lower() in (
-            "fulbright.bg",
-            "www.fulbright.bg",
-        ):
-            if parsed.path.startswith(("/wp-content/", "/wp-includes/")):
-                # Media is not requested; robots remains independently checked.
-                continue
-            routes.add(reviewed_url(absolute))
-    # Footer privacy anchors sometimes have no visible label.
-    for route in routes:
-        if "privacy" in route or "terms" in route:
-            policies.add(route)
-    footer = one(
-        [
-            n
-            for n in nodes(root, "div")
-            if FOOTER_MODULES[key] in n.attrs.get("class", "").split()
-        ],
-        "reviewed publisher legal footer",
-    ).text()
-    # Only the copyright end year is presentation; new legal wording is not.
-    footer = re.sub(r"©\s*1993[-–]\d{4}", "© 1993-CURRENT_YEAR", footer)
-    notices = []
-    for section in nodes(root, "div"):
-        if not any(
-            "_tb_footer" in c and "section" in c
-            for c in section.attrs.get("class", "").split()
-        ):
-            continue
-        for paragraph in nodes(section, "p"):
-            if re.search(
-                r"re.?publi|permission|copyright|rights reserved|licen[cs]e"
-                r"|reuse|reproduction|разрешение|авторск",
-                paragraph.text(),
-                re.IGNORECASE,
-            ):
-                notices.append(paragraph.text())
-    return json.dumps(
-        {
-            "legal_footer": footer,
-            "legal_notices": sorted(set(notices)),
-            "text": substantive_text(key, root),
-            "routes": sorted(routes),
-            "policies": sorted(policies),
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-
-
-FOOTER_MODULES = {
-    "agile": "et_pb_text_9_tb_footer",
-    "alumni": "et_pb_text_9_tb_footer",
-    "conference2": "et_pb_text_9_tb_footer",
-    "conferences": "et_pb_text_9_tb_footer",
-    "court": "et_pb_text_9_tb_footer",
-    "digital2020": "et_pb_text_9_tb_footer",
-    "doctoral": "et_pb_text_9_tb_footer",
-    "entry": "et_pb_text_9_tb_footer",
-    "eta-host": "et_pb_text_9_tb_footer",
-    "eta": "et_pb_text_9_tb_footer",
-    "fis2019": "et_pb_text_9_tb_footer",
-    "fis2021": "et_pb_text_9_tb_footer",
-    "fis2022-review": "et_pb_text_9_tb_footer",
-    "fis2022": "et_pb_text_9_tb_footer",
-    "ftea": "et_pb_text_9_tb_footer",
-    "graduate-bg": "et_pb_text_9_tb_footer",
-    "graduate-us": "et_pb_text_9_tb_footer",
-    "home": "et_pb_text_9_tb_footer",
-    "humphrey": "et_pb_text_9_tb_footer",
-    "incoming": "et_pb_text_9_tb_footer",
-    "info-sessions": "et_pb_text_9_tb_footer",
-    "journalists": "et_pb_text_9_tb_footer",
-    "law": "et_pb_text_9_tb_footer",
-    "leaders": "et_pb_text_9_tb_footer",
-    "math": "et_pb_text_9_tb_footer",
-    "mba-alias": "et_pb_text_9_tb_footer",
-    "media2023": "et_pb_text_9_tb_footer",
-    "news": "et_pb_text_9_tb_footer",
-    "ngo": "et_pb_text_9_tb_footer",
-    "open2023": "et_pb_text_9_tb_footer",
-    "open2024": "et_pb_text_9_tb_footer",
-    "other": "et_pb_text_9_tb_footer",
-    "outgoing": "et_pb_text_9_tb_footer",
-    "pmp": "et_pb_text_9_tb_footer",
-    "privacy": "et_pb_text_9_tb_footer",
-    "scholar-us": "et_pb_text_9_tb_footer",
-    "scholar": "et_pb_text_9_tb_footer",
-    "schuman": "et_pb_text_9_tb_footer",
-    "specialist": "et_pb_text_9_tb_footer",
-    "thanks": "et_pb_text_9_tb_footer",
-}
-
 PAGES = {
     "agile": (
-        "https://www.fulbright.bg/en/agile-certified-practitioner-pmi-a"
-        "cp-training/"
+        "https://www.fulbright.bg/en/"
+        "agile-certified-practitioner-pmi-acp-training/"
     ),
     "alumni": "https://www.fulbright.bg/en/alumni-grants/",
     "conference2": (
@@ -454,23 +171,21 @@ PAGES = {
     "conferences": "https://www.fulbright.bg/en/conferences-events/",
     "court": "https://www.fulbright.bg/sofijski-rajonen-sad/",
     "digital2020": (
-        "https://www.fulbright.bg/en/digital-presence-online-conference" "/"
+        "https://www.fulbright.bg/en/digital-presence-online-conference/"
     ),
-    "doctoral": (
-        "https://www.fulbright.bg/en/non-degree-research-programs-bg/"
-    ),
-    "entry": ("https://www.fulbright.bg/en/research-grants-for-bulgarians/"),
-    "eta-host": ("https://www.fulbright.bg/programa-za-uchiteli-po-anglijski/"),
-    "eta": ("https://www.fulbright.bg/en/english-teaching-assistantship/"),
+    "doctoral": "https://www.fulbright.bg/en/non-degree-research-programs-bg/",
+    "entry": "https://www.fulbright.bg/en/research-grants-for-bulgarians/",
+    "eta-host": "https://www.fulbright.bg/programa-za-uchiteli-po-anglijski/",
+    "eta": "https://www.fulbright.bg/en/english-teaching-assistantship/",
     "fis2019": (
-        "https://www.fulbright.bg/en/fulbright-international-seminar-20" "19/"
+        "https://www.fulbright.bg/en/fulbright-international-seminar-2019/"
     ),
     "fis2021": (
-        "https://www.fulbright.bg/en/fulbright-international-seminar-20" "21/"
+        "https://www.fulbright.bg/en/fulbright-international-seminar-2021/"
     ),
     "fis2022-review": "https://www.fulbright.bg/en/fis-2022-round-up/",
     "fis2022": (
-        "https://www.fulbright.bg/en/fulbright-international-seminar-20" "22/"
+        "https://www.fulbright.bg/en/fulbright-international-seminar-2022/"
     ),
     "ftea": "https://www.fulbright.bg/en/grants-for-teachers/",
     "graduate-bg": "https://www.fulbright.bg/en/graduate-students-bg/",
@@ -494,55 +209,53 @@ PAGES = {
     "other": "https://www.fulbright.bg/en/other/",
     "outgoing": "https://www.fulbright.bg/en/grants-for-bulgarian-citizens/",
     "pmp": (
-        "https://www.fulbright.bg/en/project-management-professional-pm"
-        "p-capm/"
+        "https://www.fulbright.bg/en/project-management-professional-pmp-capm/"
     ),
     "privacy": "https://www.fulbright.bg/en/privacy-policy/",
     "scholar-us": (
-        "https://www.fulbright.bg/en/grants-for-us-scholars-and-profess"
-        "ionals/"
+        "https://www.fulbright.bg/en/grants-for-us-scholars-and-professionals/"
     ),
-    "scholar": (
-        "https://www.fulbright.bg/en/visiting-scholar-grants-research/"
-    ),
+    "scholar": "https://www.fulbright.bg/en/visiting-scholar-grants-research/",
     "schuman": "https://www.fulbright.bg/en/fulbright-schuman/",
     "specialist": "https://www.fulbright.bg/en/fulbright-specialist-program/",
     "thanks": "https://www.fulbright.bg/en/thanks-to-scandinavia/",
+    "opportunity-funds": (
+        "https://www.fulbright.bg/en/opportunity-fund-bulgaria/"
+    ),
+    "group-advising": (
+        "https://www.fulbright.bg/en/"
+        "educationusa-virtual-group-advising-program/"
+    ),
+    "privacy-bg": "https://www.fulbright.bg/privacy-policy/",
 }
 
 CANONICALS = {
     "agile": [
-        (
-            "https://www.fulbright.bg/en/agile-certified-practitioner-p"
-            "mi-acp-training/"
-        ),
+        "https://www.fulbright.bg/en/"
+        "agile-certified-practitioner-pmi-acp-training/"
     ],
     "alumni": ["https://www.fulbright.bg/en/alumni-grants/"],
     "conference2": ["https://www.fulbright.bg/en/conferences-events/"],
     "conferences": ["https://www.fulbright.bg/en/conferences-events/"],
     "court": ["https://www.fulbright.bg/sofijski-rajonen-sad/"],
     "digital2020": [
-        ("https://www.fulbright.bg/en/digital-presence-online-confer" "ence/"),
+        "https://www.fulbright.bg/en/digital-presence-online-conference/"
     ],
     "doctoral": [
         "https://www.fulbright.bg/en/non-degree-research-programs-bg/"
     ],
     "entry": ["https://www.fulbright.bg/en/research-grants-for-bulgarians/"],
-    "eta-host": ["https://www.fulbright.bg/programa-za-uchiteli-po-anglijski/"],
+    "eta-host": [
+        "https://www.fulbright.bg/programa-za-uchiteli-po-anglijski/"
+    ],
     "eta": ["https://www.fulbright.bg/en/english-teaching-assistantship/"],
     "fis2019": [],
     "fis2021": [
-        (
-            "https://www.fulbright.bg/en/fulbright-international-semina"
-            "r-2021/"
-        ),
+        "https://www.fulbright.bg/en/fulbright-international-seminar-2021/"
     ],
     "fis2022-review": ["https://www.fulbright.bg/en/fis-2022-round-up/"],
     "fis2022": [
-        (
-            "https://www.fulbright.bg/en/fulbright-international-semina"
-            "r-2022/"
-        ),
+        "https://www.fulbright.bg/en/fulbright-international-seminar-2022/"
     ],
     "ftea": ["https://www.fulbright.bg/en/grants-for-teachers/"],
     "graduate-bg": ["https://www.fulbright.bg/en/graduate-students-bg/"],
@@ -566,298 +279,57 @@ CANONICALS = {
     "other": ["https://www.fulbright.bg/en/other/"],
     "outgoing": ["https://www.fulbright.bg/en/grants-for-bulgarian-citizens/"],
     "pmp": [
-        (
-            "https://www.fulbright.bg/en/project-management-professiona"
-            "l-pmp-capm/"
-        ),
+        "https://www.fulbright.bg/en/project-management-professional-pmp-capm/"
     ],
     "privacy": ["https://www.fulbright.bg/en/privacy-policy/"],
     "scholar-us": [
-        (
-            "https://www.fulbright.bg/en/grants-for-us-scholars-and-pro"
-            "fessionals/"
-        ),
+        "https://www.fulbright.bg/en/grants-for-us-scholars-and-professionals/"
     ],
     "scholar": [
         "https://www.fulbright.bg/en/visiting-scholar-grants-research/"
     ],
     "schuman": ["https://www.fulbright.bg/en/fulbright-schuman/"],
-    "specialist": ["https://www.fulbright.bg/en/fulbright-specialist-program/"],
+    "specialist": [
+        "https://www.fulbright.bg/en/fulbright-specialist-program/"
+    ],
     "thanks": ["https://www.fulbright.bg/en/thanks-to-scandinavia/"],
+    "opportunity-funds": [
+        "https://www.fulbright.bg/en/opportunity-fund-bulgaria/"
+    ],
+    "group-advising": [
+        "https://www.fulbright.bg/en/"
+        "educationusa-virtual-group-advising-program/"
+    ],
+    "privacy-bg": ["https://www.fulbright.bg/privacy-policy/"],
 }
 
-EXCLUDED_MODULES = {
-    "agile": [
-        "et_pb_blurb_15",
-        "et_pb_blurb_17",
-        "et_pb_toggle_4",
-        "et_pb_toggle_6",
-    ],
-    "alumni": ["et_pb_text_6"],
-    "court": [
-        "et_pb_text_1",
-        "et_pb_text_3",
-        "et_pb_text_4",
-        "et_pb_text_5",
-        "et_pb_text_7",
-        "et_pb_text_9",
-    ],
-    "doctoral": ["et_pb_text_7"],
-    "entry": ["et_pb_text_5"],
-    "eta": ["et_pb_text_11", "et_pb_text_12"],
-    "eta-host": ["et_pb_text_8", "et_pb_text_9"],
-    "ftea": ["et_pb_text_5"],
-    "graduate-bg": ["et_pb_text_6"],
-    "graduate-us": ["et_pb_text_7"],
-    "humphrey": ["et_pb_text_6"],
-    "leaders": ["et_pb_text_6"],
-    "math": ["et_pb_text_5"],
-    "pmp": [
-        "et_pb_blurb_10",
-        "et_pb_blurb_8",
-        "et_pb_blurb_9",
-        "et_pb_text_6",
-        "et_pb_toggle_0",
-        "et_pb_toggle_1",
-        "et_pb_toggle_2",
-    ],
-    "scholar": ["et_pb_text_7"],
-    "scholar-us": ["et_pb_text_7"],
-    "specialist": ["et_pb_text_8"],
-    "thanks": ["et_pb_text_5"],
-}
-
-CONDITIONS = {
-    "agile": (
-        "a3d9e45ec79a4d1d057c057a14a75e7ee49efe58ef2eb1ad0970c1dab24826" "26"
-    ),
-    "alumni": (
-        "2a2be4ee194e1f249a8d1edc739c09b55e3161522805a907390b54e9b3f11f" "57"
-    ),
-    "conference2": (
-        "90cd3e98586c00b170caa6a865584cbb222a5641d416680be973fd4a78948a" "a9"
-    ),
-    "conferences": (
-        "7ab73199e91bee17ca5ad366d637a7326f9224558a61e53e9dff28790b166e" "37"
-    ),
-    "court": (
-        "8ee27543bf86de6ae1f097eddd11b893aeedd0f367849936a1aca06c11683b" "41"
-    ),
-    "digital2020": (
-        "8559b283f3183364b41e753185da0077805550a5030417ca6bb5e1daee79f9" "e8"
-    ),
-    "doctoral": (
-        "10aa462c2da2be8f15ac7f1a36d15c6279cb6a7b0c91581a9eff9b5a583424" "6a"
-    ),
-    "entry": (
-        "ab876db59b7a3763e9a36b05516e8ea0591a9702e54e9191d7bd1eefd6a762" "25"
-    ),
-    "eta-host": (
-        "e63dfb219d0ba05580d2704bd74bef3da79a86cf937be6acf9aaf28fefb42c" "83"
-    ),
-    "eta": (
-        "3e2d1a8b1336b7dcefb58f28beeccab3098397d9453a8bd10d5e15058f1e5e" "21"
-    ),
-    "fis2019": (
-        "f54f3eabdfd35481af6204cc69946582584ef1a9866e92ba90f3879586bab5" "1f"
-    ),
-    "fis2021": (
-        "64b07a4200d2fe19eb9fe3df4a358f33e5f953f4dc9e7cca73081a42cbdd3f" "cf"
-    ),
-    "fis2022-review": (
-        "c9c6f7f805fa16407648ab24c9bb5120ea6087505bb6585ddd16b720e889da" "6a"
-    ),
-    "fis2022": (
-        "22252c73457a8cc6013164e9e55064e8d8186ddaf4349625c2922caea26851" "1d"
-    ),
-    "ftea": (
-        "393f6b28b4945021d720118a55d9787ddf63f5519760ae4fc6e9a7a76ecc3e" "8c"
-    ),
-    "graduate-bg": (
-        "e6050ec0d8e481f712be995b4b6519c93e4c328e43e94d78edfcad18f1ed69" "6c"
-    ),
-    "graduate-us": (
-        "29aaf0f940f561dde4e83a83c4e8ecdf7d1b3484071dd92581b699de84e3a5" "f9"
-    ),
-    "home": (
-        "071f436829565f6e8797ceecb293882e69f4322e5476a0aa08751c50c21f654f"
-    ),
-    "humphrey": (
-        "6ded6af39d2c8c040bd5ffae1170e91d5d088ac5e86714543b1de6146953d1" "0e"
-    ),
-    "incoming": (
-        "11fc053e5853842f429fccbaf019ec808d9e45a99b42cc02c606bea535be17" "77"
-    ),
-    "info-sessions": (
-        "2fa37863b01261319d448a2469700f96968b58a0fcb8469b3a85956700922d" "74"
-    ),
-    "journalists": (
-        "cd805aefc16ee5f6cc922cf45a2d424b7567c95b1fedb457d8cbe9b005e822" "c4"
-    ),
-    "law": (
-        "0ba26cd2a2e2d1dec9e17f7d1241b621586cc5f26c7ddb49f0a85674dc370d" "e2"
-    ),
-    "leaders": (
-        "6cfb5f41015aa6cd7a357ab282dd3ec7bb9e975283bcbf3e524b404ec22fed" "a2"
-    ),
-    "math": (
-        "2c8e33c04b1b8f51106d8220d16590c86335336ec616d26d8fb62dd8bbb8c6" "32"
-    ),
-    "mba-alias": (
-        "70225186dcf24faf7d79cf70aa236a701d2f3a0c29fbafbc42a281eddaacf5" "40"
-    ),
-    "media2023": (
-        "6ae2d944e8a20cb1d7b3f9f53274926fb8c96753f02ab04e02ef4f7e04b57a" "ff"
-    ),
-    "news": (
-        "20e67f21e5d35abb79f92b7c888330836b2d20e7a13f8f0f19da980558f1a0" "a1"
-    ),
-    "ngo": (
-        "d081d1f8682bd660e4f7b27a036d8792d9026e353694d7197df416804f4667" "d9"
-    ),
-    "open2023": (
-        "24d595b3b70cc72d31b910635ad4d4f95ca49a211c32346cd31b56068ec800" "3d"
-    ),
-    "open2024": (
-        "dbffbad66bee75051d3c56fcaa04a5ae50e58396d4de0cf2a4264549b7ea80" "bc"
-    ),
-    "other": (
-        "9e28081a9e0b825b50db87f04069680f1c19bc8b0b41c61d66b17a551c20ee" "ce"
-    ),
-    "outgoing": (
-        "0c038652802aab7dba87eefb5a1ecbc7a4bad5d1182792caa61e2ad037f861" "20"
-    ),
-    "pmp": (
-        "8f6db522cfeadff933244bf1ab92f05ad18e3f276cfe539eced417013926e0" "26"
-    ),
-    "privacy": (
-        "a4308ff46138cb4ea930beebb438030be636eee231b14014f47e2ad0c1eb6e" "75"
-    ),
-    "scholar-us": (
-        "0413a5a1843fbafb25df1e2452bae05318b66764e87437b12d102b15712093" "04"
-    ),
-    "scholar": (
-        "5d6d9904dee742469cacc151d2eeac1706f4c70eab0056faff0b4598cdf8a3" "64"
-    ),
-    "schuman": (
-        "06e9455f13d412e813087cb1bee118ae5b2f41bb00d5b6ac94a10f32dde07a" "53"
-    ),
-    "specialist": (
-        "f136ff869d544eac5d0d2f39e51e71f71996a88eea73a3981a69c228c90777" "cd"
-    ),
-    "thanks": (
-        "8c7bb66e777ec1b0eea1602e587790529fe4449a554b7197f408542a907f08" "40"
-    ),
-}
-
-PROFILES = [
+TRACKS = [
     {
         "track": "graduate-study",
         "key": "graduate-bg",
         "title": "Fulbright graduate study grants for Bulgarians",
         "categories": ["scholarships"],
         "hosts": ["US"],
-        "eligible": ["BG"],
-        "deadline": None,
-        "closed": True,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Closed degree-study competition for Bulgarian citizens: "
-            "one academic year in the US, up to USD66,000 total toward "
-            "fees and living costs, plus travel and health coverage. A "
-            "bachelor’s degree and relevant language/test evidence are "
-            "required; US dual citizens, green-card holders and "
-            "certain US residents/students are excluded. The published "
-            "May deadline has no year."
-        ),
-        "evidence": (
-            "graduate-bg; US; explicit BG citizenship, exclude BG/US "
-            "dual and green-card holders, current US students and >=5 "
-            "consecutive US years during preceding 6. AY 2027–28 "
-            "closed, deadline unspecified (May yearless). Accredited "
-            "US university degree fields except clinical "
-            "medicine/dentistry; BA diploma by Sept 1,2026 proof date. "
-            "Up to USD 66,000 total for one 10-month academic year, "
-            "round-trip/J 1/health up to 100 k; capacity 4 vs FAQ 5 "
-            "and obsolete table 7 documented, not cloned. IIE "
-            "placement, no prior US admission needed. TOEFL expected "
-            "with possible English-taught-degree waiver and "
-            "postnomination vouchers; GRE most fields except law/MBA, "
-            "GMAT business subject school alternative; desirable 81 "
-            "science/101 other and 600 school score are not common "
-            "hard minima. J 1 two-year home return."
-        ),
     },
     {
         "track": "doctoral-research",
         "key": "doctoral",
-        "title": "Fulbright doctoral research grants 2027–28",
+        "title": "Fulbright doctoral research grants",
         "categories": ["grants", "fellowships"],
         "hosts": ["US"],
-        "eligible": ["BG"],
-        "deadline": "2026-12-04",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Four to six months of nondegree US research for Bulgarian "
-            "doctoral students, with destination-based monthly "
-            "maintenance, flights and health coverage. A bachelor’s "
-            "degree, PhD enrollment and US host invitation are "
-            "required. TOEFL may follow nomination; above81 is "
-            "advisable. Visiting researchers cannot enroll in courses. "
-            "Apply by December4,2026; no closing time is published."
-        ),
-        "evidence": (
-            "doctoral; US; explicit BG and dual US/green-card "
-            "exclusion; BA and full/part-time advanced Ph D enrolment, "
-            "current US-study and>=5 consecutive/6 residence "
-            "exclusion. AY 2027–28 actual December 4,2026 deadline. "
-            "Four–six months, three–four grants capacity; monthly "
-            "maintenance amount unspecified, round-trip/health. "
-            "Official US host invitation/access/supervisor required. "
-            "TOEFL can be after nomination free voucher; above 81 "
-            "ADVISABLE, not mandatory score. No clinical "
-            "medicine/dentistry. Visiting researcher CANNOT enrol "
-            "courses despite generic tuition promotional line; "
-            "preserve contradiction without claiming tuition "
-            "entitlement."
-        ),
     },
     {
         "track": "visiting-scholar",
         "key": "scholar",
-        "title": "Fulbright visiting scholar grants 2027–28",
+        "title": "Fulbright visiting scholar grants",
         "categories": ["grants", "fellowships"],
         "hosts": ["US"],
-        "eligible": ["BG"],
-        "deadline": "2026-12-04",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Three to five months of US research or lecturing for "
-            "Bulgarian PhD holders. Monthly maintenance is "
-            "USD3,200–4,800, with travel, settling support and health "
-            "coverage. A US host invitation, project-appropriate "
-            "English and good health are required; no English test is "
-            "required. Clinical medicine/dentistry and US dual "
-            "citizens or green-card holders are excluded. Apply by "
-            "December4,2026."
-        ),
-        "evidence": (
-            "scholar; US; BG citizenship, exclude dual US/green-card; "
-            "Ph D, project English via interview (NO language-test "
-            "requirement), good health and medical report after "
-            "selection, official US host invitation. AY 2027–28 "
-            "December 4,2026 actual date. Three–five months; USD "
-            "3,200–4,800 per month plus flight/settling/health; "
-            "capacity 5–7 main versus obsolete related 5 not "
-            "entitlement. Nonclinical research/lecturing all other "
-            "fields, prior US opportunity preference not absolute "
-            "exclusion."
-        ),
     },
     {
         "track": "bulgarian-leaders",
@@ -865,110 +337,26 @@ PROFILES = [
         "title": "Fulbright Bulgarian Leaders awards",
         "categories": ["scholarships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": None,
-        "closed": True,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Closed self-placement programme for Bulgarian "
-            "master’s/doctoral students accepted into a top15 US "
-            "graduate programme in their field. Funding may total up "
-            "to USD100,000 across several years, with a three-year "
-            "return-to-Bulgaria agreement. Applicants arrange "
-            "university admission and pay application/test costs. "
-            "Clinical medicine/dentistry are excluded; no complete "
-            "current closing date is published."
-        ),
-        "evidence": (
-            "leaders; US; Bulgarian students label, no country "
-            "whitelist pending no direct passport proof. Selfplacement "
-            "into top 15 field-ranked US programme, no IIE assistance, "
-            "pay own applications/tests; accepted MA/Ph D, nonclinical "
-            "fields. Closed AY 2026–27; unspecified deadline (February "
-            "2025 lacks day and external university January deadlines "
-            "not programme deadline). Up to USD 100,000 total across "
-            "possibly several years; <=7 capacity, three-year "
-            "Bulgarian return agreement. Cannot parallel independently "
-            "if already core IIE finalist; conditional top 15 "
-            "admission funding review not automatic entitlement. Core "
-            "FAQ 60 k/comparison 66 k not Leaders cap."
-        ),
     },
     {
         "track": "humphrey-fellowship",
         "key": "humphrey",
-        "title": "Hubert H. Humphrey fellowships 2027–28",
+        "title": "Hubert H. Humphrey fellowships",
         "categories": ["fellowships", "training"],
         "hosts": ["US"],
-        "eligible": ["BG"],
-        "deadline": None,
-        "closed": True,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Closed ten-month nondegree US leadership fellowship for "
-            "Bulgarian mid-career professionals. A "
-            "four-year-equivalent bachelor’s degree, five years of "
-            "postdegree full-time experience and managerial/policy "
-            "responsibilities are required. Minimum English scores are "
-            "TOEFL72, Duolingo100 or IELTS6.0. Includes a professional "
-            "affiliation of at least six weeks; prior US experience "
-            "has specific restrictions."
-        ),
-        "evidence": (
-            "humphrey; US; explicit BG citizenship; "
-            "bachelor’s-equivalent 4 years, >=5 full-time years "
-            "AFTERdegree prior August 2026 (published anchor despite "
-            "AY 2027–28), managerial/policy role, public "
-            "service/leadership, valid BGpassport. Mandatory TOEFL 72 "
-            "ORDuolingo 100 ORIELTS 6. Closed AY 2027–28, unspecified "
-            "deadline. Ten-month nondegree, no conversion to degree, "
-            ">=6 weeks professional affiliation; campus placement no "
-            "choice, no numeric benefit invented. Prior US experience "
-            "allowed only total<=3 years and return BGwork>=4 years; "
-            "first-time/limited experience preference distinct. "
-            "Exclude BG/USdual, US permanent residents, "
-            "recentgraduates/nonmanagerial researchers or teachers, "
-            "mission/selection-affiliate staff/family. Misleading own "
-            "SEO-home canonical flagged."
-        ),
     },
     {
         "track": "thanks-to-scandinavia",
         "key": "thanks",
-        "title": "Thanks to Scandinavia graduate awards 2027–28",
+        "title": "Thanks to Scandinavia graduate awards",
         "categories": ["scholarships"],
         "hosts": ["US"],
-        "eligible": ["BG"],
-        "deadline": "2026-05-08",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical May8,2026 closing date for a US master’s-year "
-            "award for Bulgarian graduates. Candidates first need core "
-            "Fulbright nomination and then separate Foundation "
-            "selection. Additional funding is not quantified; the "
-            "generic graduate FAQ cap is not the top-up amount. "
-            "Preferred fields include human rights, history and "
-            "intercultural communication. The page’s open banner "
-            "conflicts with the past deadline."
-        ),
-        "evidence": (
-            "thanks; US; explicit BG citizen/BAproof Sept 1,2026, dual "
-            "US/greencard/current USstudy/5 consecutive-in 6 "
-            "exclusion. AY 2027–28 actual May 8,2026 EXPIRED despite "
-            "stale open banner. Oneacademic year MA, two grants "
-            "capacity; core Fulbright nomination then separate "
-            "Foundation approval, actual additional funding UNKNOWN, "
-            "do not borrow core 60 k FAQ or current 66 k. "
-            "Human-rights/history/sociology/Jewish/intercultural "
-            "fields preferred not exclusive; interest sameapplication "
-            "and anti-intolerance essay for principal nominees; "
-            "postnomination testvouchers/possiblewaiver, J 1 return 2 "
-            "years."
-        ),
     },
     {
         "track": "fordham-law",
@@ -976,62 +364,17 @@ PROFILES = [
         "title": "Fulbright–Fordham law tuition scholarship",
         "categories": ["scholarships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "bg",
-        "summary": (
-            "One Bulgarian student can receive 40% of tuition for a "
-            "full-time, one-academic-year LLM at Fordham Law in New "
-            "York. A bachelor’s degree is required. Apply directly to "
-            "Fordham Law and mention learning about the opportunity "
-            "through Fulbright Bulgaria. The seven specializations are "
-            "choices within one scholarship; no programme-specific "
-            "application deadline is published."
-        ),
-        "evidence": (
-            "law; US; one Bulgarian student label, BA, direct faculty "
-            "LLM application mention Fulbright origin. 40% tuition one "
-            "FULLTIMEacademic year at Fordham NY; seven law "
-            "specializations not seven identities. deadline and "
-            "opening unknown; sidebar May 20,2022 belongs "
-            "othergraduate grant, never transferred. Eligible[] "
-            "pending adjective versus passport scope; actual Bulgarian "
-            "article."
-        ),
     },
     {
         "track": "mathematics-research",
         "key": "math",
-        "title": "Fulbright mathematics research scholarship 2026–27",
+        "title": "Fulbright mathematics research scholarship",
         "categories": ["grants", "fellowships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": None,
-        "closed": True,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Closed five-month research placement at the University of "
-            "Miami/IMSA for early-career Bulgarian mathematicians from "
-            "Bulgarian educational institutions. The PhD must have "
-            "been awarded no more than ten years before the "
-            "application deadline. Maintenance is USD4,800 monthly, "
-            "plus flights, settling support and health coverage. "
-            "Geometry, combinatorics and applied mathematics are "
-            "preferred fields."
-        ),
-        "evidence": (
-            "math; US; early-career Bulgarian mathematicians, Ph D "
-            "<=10 years before deadline and all BGeducational "
-            "institutions; no country whitelist nationality "
-            "adjective/affiliation. Closed AY 2026–27, unspecified "
-            "deadline. Five months University Miami/IMSA; USD 4,800 "
-            "per month , flight/settling/health. "
-            "Geometry/combinatorics/applied preference not exclusion. "
-            "No capacity/year clones."
-        ),
     },
     {
         "track": "court-internship",
@@ -1039,245 +382,56 @@ PROFILES = [
         "title": "Fulbright Sofia Regional Court overseas internship",
         "categories": ["internships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "bg",
-        "summary": (
-            "Two selected Sofia Regional Court internship participants "
-            "receive a funded two-month placement at the federal "
-            "district court in New Orleans, Louisiana. Excellent "
-            "English is required. Fulbright covers travel, two-month "
-            "maintenance and visa costs. The ongoing programme page "
-            "publishes no complete application deadline; historical "
-            "grantee names are not application calls."
-        ),
-        "evidence": (
-            "court; US; two selected Sofia Regional Court internship "
-            "participants, excellent English, annual two-month New "
-            "Orleans Louisiana federaldistrictcourt placement funded "
-            "flight/maintenance/visa. No direct passport/degree "
-            "requirement from alumni biographies; no country "
-            "whitelist. deadline and opening unknown; current grantee "
-            "2025–26 names and 2010–24 stories not calls. Actual BG "
-            "canonical, no copied names/stories. Initial institutional "
-            "internship BG is route, funded overseas host US. The "
-            "reviewed2022 seminar round-up describes the court "
-            "participants as young Bulgarian law students; citizenship "
-            "remains unproven."
-        ),
     },
     {
         "track": "teacher-excellence-achievement",
         "key": "ftea",
-        "title": "Fulbright Teaching Excellence and Achievement 2027",
+        "title": "Fulbright Teaching Excellence and Achievement",
         "categories": ["training", "fellowships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": "2026-03-25",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical March25,2026 closing date for six-week US "
-            "teacher development in2027. Full-time secondary teachers "
-            "must live/work in Bulgaria, hold a bachelor’s degree, "
-            "have three teaching years and meet TOEFL45. Training "
-            "includes teaching methods, a40-hour practicum and "
-            "cultural exchange, with flights, housing/meals, academic "
-            "costs and health coverage. Prior TEA participants and "
-            "several noneligible teaching roles are excluded."
-        ),
-        "evidence": (
-            "ftea; US; fulltime BGsecondary teachers age 12–18 "
-            "students, eligible subjects English/math/science/socialstu"
-            "dies/journalism, BA, >=3 teachingyears, live/work BG "
-            "throughapplication+programme; no country whitelist "
-            "affiliation not passport. Mandatory TOEFL 45; "
-            "interviewtest or valid May 2025+results, returnteaching "
-            "commitment. Exclude prior TEA, administrators, "
-            "parttime/university/private tutors/expatriate schools. "
-            "Actual March 25,2026 EXPIRED, 2027 Jan–Mar/Sep–Oct "
-            "cohorts are eventperiods. Six weeks, 40 hour practicum; "
-            "international/USairfare, visa, fees, "
-            "lodging/meals/incidentals, ASPE, "
-            "conditionaltransport/baggage/workshops/alumni "
-            "minigrants;180 international capacity not 180 BGrecords."
-        ),
     },
     {
         "track": "schuman-pre-doctoral",
         "key": "schuman",
-        "title": ("Fulbright-Schuman predoctoral awards — historical2022 call"),
+        "title": "Fulbright-Schuman predoctoral awards — historical2022 call",
         "categories": ["grants", "fellowships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": "2022-12-01",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical December1,2022 closing date for four to nine "
-            "months of US predoctoral study/research. Projects concern "
-            "EU–US relations, EU policy or institutions and must "
-            "relate to at least two member states. A US host "
-            "affiliation letter is required. Topic countries are not "
-            "separate placements; funding amount and an explicit "
-            "passport test are not stated."
-        ),
-        "evidence": (
-            "`schuman-pre-doctoral`, `schuman-postdoctoral`, "
-            "`schuman-innovation`, schuman; actual December 1,2022 "
-            "EXPIRED for all four (historical source edition, no "
-            "invented newer round). Source candidates from 27 EUstates "
-            "is country-origin wording, no country whitelist pending "
-            "explicit citizenship proof; don't import external URL "
-            "claim. US affiliation letter required: predoctoral 4–9 "
-            "months accredited US institution, postdoc 3–9 months "
-            "USuniversity/nonprofit; both EU-US/policy/institutions "
-            "topic relevant >=2 EUmemberstates (topic countries not "
-            "host clones). Innovation policy/technology nexus, same "
-            "USaffiliation but source also says research tenable "
-            "one/two EUmemberstates; propose known US host and "
-            "explicitly incomplete/contradictory venue scope, no EU 27 "
-            "projection/duration guess. Educator 3–9 months "
-            "professional at EUuniversity and "
-            "USHEIglobal/international highered research. No own "
-            "quantified funding, parent<=9 months not silently min 4/3 "
-            "innovation. Distinct criteria, not one all-type clone."
-        ),
     },
     {
         "track": "schuman-postdoctoral",
         "key": "schuman",
-        "title": (
-            "Fulbright-Schuman postdoctoral awards — historical2022 " "call"
-        ),
+        "title": "Fulbright-Schuman postdoctoral awards — historical2022 call",
         "categories": ["grants", "fellowships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": "2022-12-01",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical December1,2022 closing date for three to nine "
-            "months of US postdoctoral research or lecturing. Projects "
-            "concern EU–US relations, EU policy or institutions and "
-            "must relate to at least two member states. A US host "
-            "affiliation letter is required. Topic countries are not "
-            "separate placements; funding amount and an explicit "
-            "passport test are not stated."
-        ),
-        "evidence": (
-            "`schuman-pre-doctoral`, `schuman-postdoctoral`, "
-            "`schuman-innovation`, schuman; actual December 1,2022 "
-            "EXPIRED for all four (historical source edition, no "
-            "invented newer round). Source candidates from 27 EUstates "
-            "is country-origin wording, no country whitelist pending "
-            "explicit citizenship proof; don't import external URL "
-            "claim. US affiliation letter required: predoctoral 4–9 "
-            "months accredited US institution, postdoc 3–9 months "
-            "USuniversity/nonprofit; both EU-US/policy/institutions "
-            "topic relevant >=2 EUmemberstates (topic countries not "
-            "host clones). Innovation policy/technology nexus, same "
-            "USaffiliation but source also says research tenable "
-            "one/two EUmemberstates; propose known US host and "
-            "explicitly incomplete/contradictory venue scope, no EU 27 "
-            "projection/duration guess. Educator 3–9 months "
-            "professional at EUuniversity and "
-            "USHEIglobal/international highered research. No own "
-            "quantified funding, parent<=9 months not silently min 4/3 "
-            "innovation. Distinct criteria, not one all-type clone."
-        ),
     },
     {
         "track": "schuman-innovation",
         "key": "schuman",
-        "title": ("Fulbright-Schuman Innovation awards — historical2022 call"),
+        "title": "Fulbright-Schuman Innovation awards — historical2022 call",
         "categories": ["grants", "fellowships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": "2022-12-01",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical December1,2022 closing date for "
-            "policy/technology research at the EU–US nexus. A US "
-            "university or nonprofit affiliation must be arranged. The "
-            "publisher also describes research tenable in one or two "
-            "EU member states; the complete venue scope is unresolved. "
-            "Funding amount and track-specific minimum duration are "
-            "not stated. No current competition is inferred."
-        ),
-        "evidence": (
-            "`schuman-pre-doctoral`, `schuman-postdoctoral`, "
-            "`schuman-innovation`, schuman; actual December 1,2022 "
-            "EXPIRED for all four (historical source edition, no "
-            "invented newer round). Source candidates from 27 EUstates "
-            "is country-origin wording, no country whitelist pending "
-            "explicit citizenship proof; don't import external URL "
-            "claim. US affiliation letter required: predoctoral 4–9 "
-            "months accredited US institution, postdoc 3–9 months "
-            "USuniversity/nonprofit; both EU-US/policy/institutions "
-            "topic relevant >=2 EUmemberstates (topic countries not "
-            "host clones). Innovation policy/technology nexus, same "
-            "USaffiliation but source also says research tenable "
-            "one/two EUmemberstates; propose known US host and "
-            "explicitly incomplete/contradictory venue scope, no EU 27 "
-            "projection/duration guess. Educator 3–9 months "
-            "professional at EUuniversity and "
-            "USHEIglobal/international highered research. No own "
-            "quantified funding, parent<=9 months not silently min 4/3 "
-            "innovation. Distinct criteria, not one all-type clone."
-        ),
     },
     {
         "track": "schuman-international-educator",
         "key": "schuman",
         "title": (
-            "Fulbright-Schuman international educator awards — "
-            "historical2022 call"
+            "Fulbright-Schuman international educator awards — historical2022"
+            " call"
         ),
         "categories": ["grants", "fellowships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": "2022-12-01",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical December1,2022 closing date for "
-            "three-to-nine-month international higher-education "
-            "research at US institutions. Applicants are professionals "
-            "at European universities; projects compare EU–US/global "
-            "practice and require a US affiliation letter. The own "
-            "page does not publish a funding amount or an explicit "
-            "passport test."
-        ),
-        "evidence": (
-            "`schuman-pre-doctoral`, `schuman-postdoctoral`, "
-            "`schuman-innovation`, schuman; actual December 1,2022 "
-            "EXPIRED for all four (historical source edition, no "
-            "invented newer round). Source candidates from 27 EUstates "
-            "is country-origin wording, no country whitelist pending "
-            "explicit citizenship proof; don't import external URL "
-            "claim. US affiliation letter required: predoctoral 4–9 "
-            "months accredited US institution, postdoc 3–9 months "
-            "USuniversity/nonprofit; both EU-US/policy/institutions "
-            "topic relevant >=2 EUmemberstates (topic countries not "
-            "host clones). Innovation policy/technology nexus, same "
-            "USaffiliation but source also says research tenable "
-            "one/two EUmemberstates; propose known US host and "
-            "explicitly incomplete/contradictory venue scope, no EU 27 "
-            "projection/duration guess. Educator 3–9 months "
-            "professional at EUuniversity and "
-            "USHEIglobal/international highered research. No own "
-            "quantified funding, parent<=9 months not silently min 4/3 "
-            "innovation. Distinct criteria, not one all-type clone."
-        ),
     },
     {
         "track": "english-teaching-assistant",
@@ -1285,266 +439,59 @@ PROFILES = [
         "title": "Fulbright/ABF English Teaching Assistantship",
         "categories": ["fellowships", "training"],
         "hosts": ["BG"],
-        "eligible": ["US"],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "One academic year of English teaching in Bulgarian "
-            "schools or universities, with USD1,000 monthly, USD2,000 "
-            "travel, USD1,000 relocation, USD500 language support, "
-            "health coverage and free housing. Applicants need a "
-            "bachelor’s degree by start, native English and no PhD at "
-            "application. The citizenship banner’s dual-citizen "
-            "wording is ambiguous; US citizenship is expressly named. "
-            "No application deadline is published."
-        ),
-        "evidence": (
-            "eta; BG; ownbanner exact “U.S. or dual (Bulgarian, "
-            "European) citizens at the time of application”; known "
-            "positive US only and ambiguous dual scope retained, no "
-            "independent BG/EU passport-only claim; native English, BA "
-            "bystart, NOPh D atapplication, health. Academic year, "
-            "Septorientation/event dates yearless not deadline. USD "
-            "1,000 per month ; travel 2,000+relocation 1,000 (combined "
-            "3,000 not additional), language 500 one-time, ASPE and "
-            "mental-health, freehousing utilities grantee, no "
-            "dependentincrease. English leaf 14–18 teaching hours vs "
-            "BGhost 14–20 conflict preserved; "
-            "mentor/co-teaching/extracurricular/community duties, "
-            "Fridayfree and 4 leave days; limitedsecond-year "
-            "competitive extension not fresh record. deadline and "
-            "opening unknown. Prior teaching/region experience "
-            "advantageous not required."
-        ),
     },
     {
         "track": "eta-host-institution",
         "key": "eta-host",
-        "title": ("Fulbright/ABF English assistant host-institution programme"),
+        "title": "Fulbright/ABF English assistant host-institution programme",
         "categories": ["grants", "training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": None,
-        "closed": False,
         "kind": "institutional-grant",
         "language": "bg",
-        "summary": (
-            "Bulgarian schools and universities can request an "
-            "American English assistant for an academic year. Hosts "
-            "provide a14–20-hour weekly teaching plan, materials, free "
-            "furnished housing and mentoring, and support adjustment "
-            "and extracurricular activity. The institution is the "
-            "applicant; the assistant’s citizenship is not an "
-            "institutional eligibility rule. Annual selection timing "
-            "is yearless."
-        ),
-        "evidence": (
-            "eta-host; BG; separate actual BGschool/university "
-            "institutional request, not applicant-USnationality; no "
-            "country whitelist. Oneacademic-year placement for "
-            "suitablelanguage/profile/general/vocational "
-            "schools/state/municipal/universities; corporate sponsor "
-            "funding route no new campusclone. Host 14–20 h/weekly "
-            "plan, materials, free safe furnishedhousing, "
-            "mentoring/adjustment/extracurricularsupport, "
-            "nondiscrimination/innovative supportive vision. Selection "
-            "endfirstschoolterm yearless, deadline and opening "
-            "unknown. Actual programmebeneficiary USassistant not "
-            "institutional citizenship; don't duplicate merely "
-            "translated individualgrant."
-        ),
     },
     {
         "track": "us-graduate-study",
         "key": "graduate-us",
-        "title": ("Fulbright US graduate study/research — archived overview"),
+        "title": "Fulbright US graduate study/research — archived overview",
         "categories": ["scholarships", "grants"],
         "hosts": ["BG"],
-        "eligible": ["US"],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Archived ten-month study/research award in Bulgaria for "
-            "US citizens with a bachelor’s-equivalent degree before "
-            "start. Maintenance is USD1,200 monthly plus travel, "
-            "relocation, research/books, incidentals, health coverage "
-            "and USD500 language support. University course tuition is "
-            "conditional on Board approval. Current enrollment is not "
-            "required; a host invitation is encouraged. No current "
-            "opening or deadline is inferred."
-        ),
-        "evidence": (
-            "`us-graduate-study`, `us-graduate-bg-romania`, "
-            "`us-graduate-bg-greece`, graduate-us ARCHIVED ownpage; US "
-            "citizen, PRinsufficient, bachelor’s-equivalentbystart, "
-            "MA/Ph Dpreferredwhere stated not compulsory, "
-            "independentunstructuredprojectskills/project-specific "
-            "Bulgarian, no patient-contact/licensure. deadline and "
-            "opening unknown, explicitly archival titles, no "
-            "current-open claim. Core 10 months BG up to 3 capacity; "
-            "BG-RO 10 months 5 each, BG-GR 9 months 5 BG+4 GR, "
-            "archaeology/history BHFupto 10 months BG with "
-            "relateddiscipline/background, fieldschool/excavation/conse"
-            "rvation/study visits and publishable paper/presentation. "
-            "Region experience notdisadvantage, "
-            "currentstudentenrolment notrequired; previous Fulbright "
-            "preferencefirsttimers, former ETA>=2 yearsgap. "
-            "Invitationencouraged not compulsory. ALL USD 1,200 per "
-            "month plus flight/relocation/researchbooks/incidentals/hea"
-            "lth grantee only, nodependentincrease; language 500 "
-            "core+arch versus 250 joint. Corecoursetuition conditional "
-            "Boardapproval; archaeology optionalone appropriateuni "
-            "course, no borrowed courseconditions toall. Distinct "
-            "joint durations/hosts/entitlements not countryclones."
-        ),
     },
     {
         "track": "us-graduate-bg-romania",
         "key": "graduate-us",
         "title": (
-            "Fulbright Bulgaria–Romania graduate award — archived " "overview"
+            "Fulbright Bulgaria–Romania graduate award — archived overview"
         ),
         "categories": ["scholarships", "grants"],
         "hosts": ["BG", "RO"],
-        "eligible": ["US"],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Archived joint research award: ten months, five each in "
-            "Bulgaria and Romania, with country order arranged by the "
-            "grantee. US citizenship and a bachelor’s-equivalent "
-            "degree are required; master’s/doctoral candidates are "
-            "preferred. Maintenance is USD1,200 monthly plus programme "
-            "travel/research/health support and USD250 language "
-            "support. No dependent increase or current deadline is "
-            "published."
-        ),
-        "evidence": (
-            "`us-graduate-study`, `us-graduate-bg-romania`, "
-            "`us-graduate-bg-greece`, graduate-us ARCHIVED ownpage; US "
-            "citizen, PRinsufficient, bachelor’s-equivalentbystart, "
-            "MA/Ph Dpreferredwhere stated not compulsory, "
-            "independentunstructuredprojectskills/project-specific "
-            "Bulgarian, no patient-contact/licensure. deadline and "
-            "opening unknown, explicitly archival titles, no "
-            "current-open claim. Core 10 months BG up to 3 capacity; "
-            "BG-RO 10 months 5 each, BG-GR 9 months 5 BG+4 GR, "
-            "archaeology/history BHFupto 10 months BG with "
-            "relateddiscipline/background, fieldschool/excavation/conse"
-            "rvation/study visits and publishable paper/presentation. "
-            "Region experience notdisadvantage, "
-            "currentstudentenrolment notrequired; previous Fulbright "
-            "preferencefirsttimers, former ETA>=2 yearsgap. "
-            "Invitationencouraged not compulsory. ALL USD 1,200 per "
-            "month plus flight/relocation/researchbooks/incidentals/hea"
-            "lth grantee only, nodependentincrease; language 500 "
-            "core+arch versus 250 joint. Corecoursetuition conditional "
-            "Boardapproval; archaeology optionalone appropriateuni "
-            "course, no borrowed courseconditions toall. Distinct "
-            "joint durations/hosts/entitlements not countryclones."
-        ),
     },
     {
         "track": "us-graduate-bg-greece",
         "key": "graduate-us",
         "title": (
-            "Fulbright Bulgaria–Greece graduate award — archived " "overview"
+            "Fulbright Bulgaria–Greece graduate award — archived overview"
         ),
         "categories": ["scholarships", "grants"],
         "hosts": ["BG", "GR"],
-        "eligible": ["US"],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Archived joint research award: nine months, five in "
-            "Bulgaria and four in Greece. US citizenship and a "
-            "bachelor’s-equivalent degree are required; "
-            "master’s/doctoral candidates are preferred. Maintenance "
-            "is USD1,200 monthly plus programme travel/research/health "
-            "support and USD250 language support. Topic examples do "
-            "not create extra awards. No dependent increase or current "
-            "deadline is published."
-        ),
-        "evidence": (
-            "`us-graduate-study`, `us-graduate-bg-romania`, "
-            "`us-graduate-bg-greece`, graduate-us ARCHIVED ownpage; US "
-            "citizen, PRinsufficient, bachelor’s-equivalentbystart, "
-            "MA/Ph Dpreferredwhere stated not compulsory, "
-            "independentunstructuredprojectskills/project-specific "
-            "Bulgarian, no patient-contact/licensure. deadline and "
-            "opening unknown, explicitly archival titles, no "
-            "current-open claim. Core 10 months BG up to 3 capacity; "
-            "BG-RO 10 months 5 each, BG-GR 9 months 5 BG+4 GR, "
-            "archaeology/history BHFupto 10 months BG with "
-            "relateddiscipline/background, fieldschool/excavation/conse"
-            "rvation/study visits and publishable paper/presentation. "
-            "Region experience notdisadvantage, "
-            "currentstudentenrolment notrequired; previous Fulbright "
-            "preferencefirsttimers, former ETA>=2 yearsgap. "
-            "Invitationencouraged not compulsory. ALL USD 1,200 per "
-            "month plus flight/relocation/researchbooks/incidentals/hea"
-            "lth grantee only, nodependentincrease; language 500 "
-            "core+arch versus 250 joint. Corecoursetuition conditional "
-            "Boardapproval; archaeology optionalone appropriateuni "
-            "course, no borrowed courseconditions toall. Distinct "
-            "joint durations/hosts/entitlements not countryclones."
-        ),
     },
     {
         "track": "us-graduate-archaeology",
         "key": "graduate-us",
         "title": (
-            "Fulbright/Balkan Heritage archaeology award — archived " "overview"
+            "Fulbright/Balkan Heritage archaeology award — archived overview"
         ),
         "categories": ["scholarships", "grants", "training"],
         "hosts": ["BG"],
-        "eligible": ["US"],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Archived Bulgaria archaeology/history placement of up to "
-            "ten months with the Balkan Heritage Foundation. US "
-            "citizens need a bachelor’s-equivalent degree and relevant "
-            "disciplinary interest/background. Field schools, "
-            "excavation/conservation and study visits support a paper "
-            "or conference presentation. Maintenance is USD1,200 "
-            "monthly with programme support and USD500 language "
-            "support; one suitable university course may be taken."
-        ),
-        "evidence": (
-            "`us-graduate-study`, `us-graduate-bg-romania`, "
-            "`us-graduate-bg-greece`, graduate-us ARCHIVED ownpage; US "
-            "citizen, PRinsufficient, bachelor’s-equivalentbystart, "
-            "MA/Ph Dpreferredwhere stated not compulsory, "
-            "independentunstructuredprojectskills/project-specific "
-            "Bulgarian, no patient-contact/licensure. deadline and "
-            "opening unknown, explicitly archival titles, no "
-            "current-open claim. Core 10 months BG up to 3 capacity; "
-            "BG-RO 10 months 5 each, BG-GR 9 months 5 BG+4 GR, "
-            "archaeology/history BHFupto 10 months BG with "
-            "relateddiscipline/background, fieldschool/excavation/conse"
-            "rvation/study visits and publishable paper/presentation. "
-            "Region experience notdisadvantage, "
-            "currentstudentenrolment notrequired; previous Fulbright "
-            "preferencefirsttimers, former ETA>=2 yearsgap. "
-            "Invitationencouraged not compulsory. ALL USD 1,200 per "
-            "month plus flight/relocation/researchbooks/incidentals/hea"
-            "lth grantee only, nodependentincrease; language 500 "
-            "core+arch versus 250 joint. Corecoursetuition conditional "
-            "Boardapproval; archaeology optionalone appropriateuni "
-            "course, no borrowed courseconditions toall. Distinct "
-            "joint durations/hosts/entitlements not countryclones."
-        ),
     },
     {
         "track": "us-scholar-core",
@@ -1552,32 +499,8 @@ PROFILES = [
         "title": "Fulbright US scholar and professional grants",
         "categories": ["grants", "fellowships"],
         "hosts": ["BG"],
-        "eligible": ["US"],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Three to five months in Bulgaria for US scholars, "
-            "professionals or artists with the appropriate PhD, "
-            "terminal qualification or professional standing. "
-            "Maintenance is USD3,800 monthly, with USD1,700 travel and "
-            "USD1,300 relocation. Dependent supplements require at "
-            "least80% presence. A host invitation is optional, with "
-            "science-placement considerations. Clinical "
-            "medicine/dentistry are excluded; no complete deadline is "
-            "published."
-        ),
-        "evidence": (
-            "scholar-us; BG; US citizen, PRinsufficient; Ph D or "
-            "appropriate fieldterminaldegree/recognizedprofessionals/ar"
-            "tists; no clinicalmedicine/dentistry. Three–five months, "
-            "up to 5 capacity, USD 3,800 per month ; flight 1,700 "
-            "andrelocation 1,300, dependents travel 1,500 one/3,000 "
-            "two+ and monthly 100 one/200 two+ ONLY>=80%presence. "
-            "Invite optional, preferredpuresciences; prior Fulbright "
-            "not blanketban. deadline and opening unknown."
-        ),
     },
     {
         "track": "us-scholar-flex",
@@ -1585,29 +508,8 @@ PROFILES = [
         "title": "Fulbright US scholar Flex grants",
         "categories": ["grants", "fellowships"],
         "hosts": ["BG"],
-        "eligible": ["US"],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Two short Bulgaria visits over up to two years, totaling "
-            "two to four months, for eligible US "
-            "scholars/professionals. Choose the actual Flex option and "
-            "provide a timeline. Maintenance is USD3,800 monthly; "
-            "USD4,000 travel covers all segments together. No "
-            "dependent benefits are provided. Core award "
-            "travel/relocation and dependent allowances do not carry "
-            "over; no complete deadline is published."
-        ),
-        "evidence": (
-            "scholar-us; same actual USeligibility, BG; two "
-            "SHORTsegmentswithin<=2 years,total 2–4 months and actual "
-            "Flexcheckbox/timeline. USD 3,800 per month , USD 4,000 "
-            "total travel ALLsegments, NO dependentbenefits. No "
-            "borrowing core 1,700/1,300 or dependentbenefit. deadline "
-            "and opening unknown."
-        ),
     },
     {
         "track": "specialist-host-project",
@@ -1615,70 +517,17 @@ PROFILES = [
         "title": "Fulbright Specialist institutional host projects",
         "categories": ["grants", "training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": None,
-        "closed": False,
         "kind": "institutional-grant",
         "language": "en",
-        "summary": (
-            "Bulgarian institutions can propose education/training "
-            "projects with US specialists lasting14–42days. Hosts "
-            "cover lodging, meals and local transport; federal support "
-            "covers international flights, limited health insurance "
-            "and a daily honorarium. Personal/clinical research is "
-            "excluded. Conditional MultiVisit projects share the "
-            "same42-day ceiling. January10, June10 and October10 "
-            "deadlines have no year."
-        ),
-        "evidence": (
-            "specialist; BG; no country whitelist institutional "
-            "applicants HEI/government/courts/cultural/NGO/thinktank/me"
-            "dical-publichealth/teachinghospital. Actual 14–42 days "
-            "alltraveldays included, lectures/workshops/curriculum/need"
-            "sassessment institutionaloutputs; NO personalresearch "
-            "includingclinicalpatientcontact. "
-            "Onegrant/institution/year, oneexpert, onecountry; "
-            "conditional Multi Visit<=3 trips/12 months each>=14 days "
-            "total<=42. Jan 10/Jun 10/Oct 10 YEARLESS deadline and "
-            "opening unknown; planningnamed 3 months/open 4 months. "
-            "Hostlodging/meals/localtransportcostshare; "
-            "federalinternationalflight/limitedhealth/DAILYhonorarium "
-            "amountunknown. Namedexpertexistsapproval or World "
-            "Learningroster match, no guaranteedslot."
-        ),
     },
     {
         "track": "specialist-us-professional",
         "key": "specialist",
-        "title": ("Fulbright Specialist US professional assignment overview"),
+        "title": "Fulbright Specialist US professional assignment overview",
         "categories": ["fellowships", "training"],
         "hosts": ["BG"],
-        "eligible": ["US"],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Experienced US citizens may apply for the Fulbright "
-            "Specialist roster and, if matched and approved, deliver "
-            "institutional training assignments lasting14–42days. "
-            "Roster acceptance does not guarantee a funded placement. "
-            "Bulgaria is a documented host, while the roster has "
-            "broader international scope. Assignments support "
-            "institutional education rather than personal research; no "
-            "individual closing date is published."
-        ),
-        "evidence": (
-            "specialist (scope decision): actual own US "
-            "citizenexperienced academic/professional/artistic "
-            "specialist individual rosterroute and funded 14–42 "
-            "dayinstitutional assignments. BGplacement known, "
-            "globalroster not BGexclusive; deadline and opening "
-            "unknown; rosteracceptance not guaranteedassignment, no "
-            "source-fixed honorarium invented. Distinct applicant role "
-            "substantive owntext; do not manufacture separate record "
-            "if gate deems only host-project description sufficient."
-        ),
     },
     {
         "track": "alumni-travel",
@@ -1686,40 +535,8 @@ PROFILES = [
         "title": "Fulbright Bulgaria alumni travel awards",
         "categories": ["grants"],
         "hosts": [],
-        "eligible": ["BG", "US"],
-        "deadline": "2026-02-28",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical February28,2026 closing date for Fulbright "
-            "Bulgaria alumni travel proposals, with a maximum EUR1,500 "
-            "per project. Bulgarian or US citizen alumni may apply for "
-            "one award type per year; joint proposals share the same "
-            "total ceiling. Projects/reports must finish within a "
-            "year, and recipients cannot reapply for two years. The "
-            "published rolling-open banner conflicts with the dated "
-            "round; no2027 deadline is inferred."
-        ),
-        "evidence": (
-            "`alumni-travel`, `alumni-publication`, alumni; explicit "
-            "BG/US CITIZENS Fulbright Bulgaria alumni, "
-            "projectsbased/carriedout BG. Each EUR 1,500 total maximum "
-            ", not shared doublepayment; travel 1/year "
-            "conference/training/follow-upresearch, publication 1/year "
-            "monograph/high-indexinternationaljournal, open 1–2/year "
-            "actualnontravel/nonpublication "
-            "community/art/research/education impact. Actual February "
-            "28,2026 EXPIRED despite stale rolling-open/upcominglabel; "
-            "preserveconflict without Feb 2027 inference. One "
-            "TYPE/alum/year, joint total maximum 1,500, "
-            "reports/projectcomplete<=1 year, no reapply 2 years, "
-            "laterfirsttimerpreference notabsolute lifetimeban. Not "
-            "official Fulbright grants; owntravel/visa. "
-            "Travelactualdestination UNKNOWN host[] despiteprojectbase "
-            "BG; publication/openproject BGknown "
-            "notpublisherinference. Capacities 2–4 overall not records."
-        ),
     },
     {
         "track": "alumni-publication",
@@ -1727,40 +544,8 @@ PROFILES = [
         "title": "Fulbright Bulgaria alumni publication awards",
         "categories": ["grants"],
         "hosts": ["BG"],
-        "eligible": ["BG", "US"],
-        "deadline": "2026-02-28",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical February28,2026 closing date for Fulbright "
-            "Bulgaria alumni publication proposals, with a maximum "
-            "EUR1,500 per project. Bulgarian or US citizen alumni may "
-            "apply for one award type per year; joint proposals share "
-            "the same total ceiling. Projects/reports must finish "
-            "within a year, and recipients cannot reapply for two "
-            "years. The published rolling-open banner conflicts with "
-            "the dated round; no2027 deadline is inferred."
-        ),
-        "evidence": (
-            "`alumni-travel`, `alumni-publication`, alumni; explicit "
-            "BG/US CITIZENS Fulbright Bulgaria alumni, "
-            "projectsbased/carriedout BG. Each EUR 1,500 total maximum "
-            ", not shared doublepayment; travel 1/year "
-            "conference/training/follow-upresearch, publication 1/year "
-            "monograph/high-indexinternationaljournal, open 1–2/year "
-            "actualnontravel/nonpublication "
-            "community/art/research/education impact. Actual February "
-            "28,2026 EXPIRED despite stale rolling-open/upcominglabel; "
-            "preserveconflict without Feb 2027 inference. One "
-            "TYPE/alum/year, joint total maximum 1,500, "
-            "reports/projectcomplete<=1 year, no reapply 2 years, "
-            "laterfirsttimerpreference notabsolute lifetimeban. Not "
-            "official Fulbright grants; owntravel/visa. "
-            "Travelactualdestination UNKNOWN host[] despiteprojectbase "
-            "BG; publication/openproject BGknown "
-            "notpublisherinference. Capacities 2–4 overall not records."
-        ),
     },
     {
         "track": "alumni-open-project",
@@ -1768,40 +553,8 @@ PROFILES = [
         "title": "Fulbright Bulgaria alumni open project awards",
         "categories": ["grants"],
         "hosts": ["BG"],
-        "eligible": ["BG", "US"],
-        "deadline": "2026-02-28",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical February28,2026 closing date for Fulbright "
-            "Bulgaria alumni open project proposals, with a maximum "
-            "EUR1,500 per project. Bulgarian or US citizen alumni may "
-            "apply for one award type per year; joint proposals share "
-            "the same total ceiling. Projects/reports must finish "
-            "within a year, and recipients cannot reapply for two "
-            "years. The published rolling-open banner conflicts with "
-            "the dated round; no2027 deadline is inferred."
-        ),
-        "evidence": (
-            "`alumni-travel`, `alumni-publication`, alumni; explicit "
-            "BG/US CITIZENS Fulbright Bulgaria alumni, "
-            "projectsbased/carriedout BG. Each EUR 1,500 total maximum "
-            ", not shared doublepayment; travel 1/year "
-            "conference/training/follow-upresearch, publication 1/year "
-            "monograph/high-indexinternationaljournal, open 1–2/year "
-            "actualnontravel/nonpublication "
-            "community/art/research/education impact. Actual February "
-            "28,2026 EXPIRED despite stale rolling-open/upcominglabel; "
-            "preserveconflict without Feb 2027 inference. One "
-            "TYPE/alum/year, joint total maximum 1,500, "
-            "reports/projectcomplete<=1 year, no reapply 2 years, "
-            "laterfirsttimerpreference notabsolute lifetimeban. Not "
-            "official Fulbright grants; owntravel/visa. "
-            "Travelactualdestination UNKNOWN host[] despiteprojectbase "
-            "BG; publication/openproject BGknown "
-            "notpublisherinference. Capacities 2–4 overall not records."
-        ),
     },
     {
         "track": "pmp-course-2026-september",
@@ -1809,43 +562,8 @@ PROFILES = [
         "title": "PMP/CAPM course — September/October2026 edition",
         "categories": ["training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Historical paid English PMP/CAPM preparation in Sofia on "
-            "September25–27 and October3–4,2026: five "
-            "days,35hours/PDUs; this edition’s fee is not specified. "
-            "Curriculum covers teams, governance, performance and "
-            "business value. The past edition still has an ongoing "
-            "banner, so application status is unresolved. "
-            "Certification-exam experience/degree requirements are not "
-            "proven course-admission rules."
-        ),
-        "evidence": (
-            "`pmp-course-2026-september`, pmp; paid English five-day "
-            "35 hours/PDUs course Sofia BG, October/November edition "
-            "price EUR960 including VAT; September edition price "
-            "unspecified. Actual editions Sep 25–27/Oct 3–4,2026 (past "
-            "despite ONGOINGbanner) and Oct 30–31/Nov 1/Nov 7–8,2026 "
-            "upcoming. unspecifiedapplicationdeadlines, "
-            "statusunknownwhere enrollment conflicts/no actualclose. "
-            "Training curriculum teams/governance/performance/value, "
-            "materials/prep not issuedcredential, nofundedgrantclaim. "
-            "Examdegree/36 or 60 month PMexperience/35 education "
-            "prerequisites are EXAM not mandatory courseadmission; "
-            "exam/membershipfees not award benefits. July 2026 "
-            "updatedexam header versus January 2021 footer retained as "
-            "sourceconflict, no guaranteedcurrentcertification. No "
-            "PMPvs CAPM/course-module clones or evergreenduplicate. "
-            "Cancellation source 15/7 day boundaries preserved not "
-            "guessed. The €960 VAT-included fee occurs only inside the "
-            "October/November edition card. The separate "
-            "September/October edition has no published fee; no common "
-            "price is inferred."
-        ),
     },
     {
         "track": "pmp-course-2026-october",
@@ -1853,38 +571,8 @@ PROFILES = [
         "title": "PMP/CAPM course — October/November2026 edition",
         "categories": ["training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Paid English PMP/CAPM preparation in Sofia on "
-            "October30–31 and November1/7/8,2026: five "
-            "days,35hours/PDUs, EUR960 including VAT. Curriculum "
-            "covers teams, governance, performance and business value, "
-            "with preparation materials. No application deadline is "
-            "published. This is course preparation, not a funded "
-            "scholarship or automatic professional certification."
-        ),
-        "evidence": (
-            "`pmp-course-2026-september`, pmp; paid English five-day "
-            "35 hours/PDUs course Sofia BG, EUR 960 VAT INCLUDED. "
-            "Actual editions Sep 25–27/Oct 3–4,2026 (past despite "
-            "ONGOINGbanner) and Oct 30–31/Nov 1/Nov 7–8,2026 upcoming. "
-            "unspecifiedapplicationdeadlines, statusunknownwhere "
-            "enrollment conflicts/no actualclose. Training curriculum "
-            "teams/governance/performance/value, materials/prep not "
-            "issuedcredential, nofundedgrantclaim. Examdegree/36 or 60 "
-            "month PMexperience/35 education prerequisites are EXAM "
-            "not mandatory courseadmission; exam/membershipfees not "
-            "award benefits. July 2026 updatedexam header versus "
-            "January 2021 footer retained as sourceconflict, no "
-            "guaranteedcurrentcertification. No PMPvs "
-            "CAPM/course-module clones or evergreenduplicate. "
-            "Cancellation source 15/7 day boundaries preserved not "
-            "guessed."
-        ),
     },
     {
         "track": "agile-course-2023-october",
@@ -1892,146 +580,37 @@ PROFILES = [
         "title": "PMI-ACP preparation — October2023 completed edition",
         "categories": ["training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": None,
-        "closed": True,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Completed historical English agile-certification "
-            "preparation in Sofia, October20–22,2023. Three days "
-            "provide21contact hours/PDUs; the published course fee is "
-            "EUR500 excluding VAT. Topics include agile mindset, "
-            "value, stakeholders, teams, planning, risk and "
-            "improvement. Exam eligibility is separate from course "
-            "enrollment; the remaining registration form does not "
-            "establish a current opening."
-        ),
-        "evidence": (
-            "`agile-course-2023-october`, agile; paid English Sofia BG "
-            "three-day 21 hours/PDUs course EUR 500 VAT EXCLUDED. "
-            "Actual Oct 20–22,2023 completed and Feb 9–11,2024 "
-            "fullybooked; unspecifiedclosingdates, expired "
-            "explicitcompleted/fullybooked rather than applicationdate "
-            "derivedfrom event. Curriculum agilemindset/value/stakehold"
-            "ers/teams/planning/risk/improvement, "
-            "materials/preparation and consultationsuponrequest. "
-            "Certificationexperience/degree/21 educationhours not "
-            "courseadmission; examfees notstipend. Form stillpresent "
-            "despite oldeditions, no futurecourse/openstatus invented, "
-            "no evergreenclone. Supplemental PDFredirectpolicy denied; "
-            "no bypass."
-        ),
     },
     {
         "track": "agile-course-2024-february",
         "key": "agile",
-        "title": ("PMI-ACP preparation — February2024 fully booked edition"),
+        "title": "PMI-ACP preparation — February2024 fully booked edition",
         "categories": ["training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": None,
-        "closed": True,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Fully booked historical English agile-certification "
-            "preparation in Sofia, February9–11,2024. Three days "
-            "provide21contact hours/PDUs; the published course fee is "
-            "EUR500 excluding VAT. Topics include agile mindset, "
-            "value, stakeholders, teams, planning, risk and "
-            "improvement. Exam eligibility is separate from course "
-            "enrollment; no future course or closing date is inferred."
-        ),
-        "evidence": (
-            "`agile-course-2023-october`, agile; paid English Sofia BG "
-            "three-day 21 hours/PDUs course EUR 500 VAT EXCLUDED. "
-            "Actual Oct 20–22,2023 completed and Feb 9–11,2024 "
-            "fullybooked; unspecifiedclosingdates, expired "
-            "explicitcompleted/fullybooked rather than applicationdate "
-            "derivedfrom event. Curriculum agilemindset/value/stakehold"
-            "ers/teams/planning/risk/improvement, "
-            "materials/preparation and consultationsuponrequest. "
-            "Certificationexperience/degree/21 educationhours not "
-            "courseadmission; examfees notstipend. Form stillpresent "
-            "despite oldeditions, no futurecourse/openstatus invented, "
-            "no evergreenclone. Supplemental PDFredirectpolicy denied; "
-            "no bypass."
-        ),
     },
     {
         "track": "civil-society-research",
         "key": "ngo",
-        "title": "Fulbright civil-society research grants 2026–27",
+        "title": "Fulbright civil-society research grants",
         "categories": ["grants", "fellowships"],
         "hosts": ["US"],
-        "eligible": ["BG"],
-        "deadline": None,
-        "closed": True,
         "kind": "opportunity",
         "language": "bg",
-        "summary": (
-            "Closed three-to-five-month US research competition for "
-            "Bulgarian NGO leaders/representatives developing civil "
-            "society. A bachelor’s degree, excellent English, good "
-            "health and an official US NGO/university invitation are "
-            "required. Maintenance is USD3,200–4,800 monthly plus "
-            "flights and health coverage. US dual citizens and "
-            "work-visa/green-card holders are excluded. The "
-            "early-December deadline has no year."
-        ),
-        "evidence": (
-            "ngo actual /npo-research/ BGarticle; US; explicit "
-            "BGcitizenship, BA, excellent English via interview "
-            "NOtest; exclude BG/USdual andworkvisa/greencard, "
-            "goodhealth. Bulgarian NGOleaders/representatives "
-            "developingcivil society BG, official USNGO/uni invitation "
-            "(all recognized NGOs/accrediteduniv/researchinst). Closed "
-            "AY 2026–27; early December yearless unspecified. "
-            "Three–five months, USD 3,200–4,800 per month "
-            "flight/health,2–3 capacity, ownhostletterdates/workspace/a"
-            "ccess/contact required, August-to Julyprogrammebounds "
-            "notdeadline. No Ph Drequirement borrowedfromscholar."
-        ),
     },
     {
         "track": "oklahoma-mba",
         "key": "mba-alias",
         "title": (
-            "Fulbright/University of Oklahoma MBA — historical2025–26 " "call"
+            "Fulbright/University of Oklahoma MBA — historical2025–26 call"
         ),
         "categories": ["scholarships"],
         "hosts": ["US"],
-        "eligible": ["BG"],
-        "deadline": "2024-05-10",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical May10,2024 closing date for the Oklahoma Price "
-            "College MBA scholarship, covering the programme’s "
-            "duration. Bulgarian citizens need a four-year bachelor’s "
-            "degree and the stated TOEFL/GMAT evidence; no prior "
-            "business training is required. The page’s generic "
-            "graduate FAQ says up to USD60,000, but its exact "
-            "MBA-specific scope is unclear. The old open banner does "
-            "not establish a current call."
-        ),
-        "evidence": (
-            "mba-alias actual distinctnamed University Oklahoma Price "
-            "College Norman MBA; US; explicit BGcitizenship, BA 4 "
-            "yearproof Sept 1,2024; dual US/workvisa/greencard/current "
-            "USstudy/5 consecutive-in 6 excluded. AY 2025–26 actual "
-            "May 10,2024 EXPIRED despite staleopenbanner. Funding "
-            "entireprogramme, own FAQup to USD 60,000 total belongs "
-            "generic graduate wording—flag scope uncertainty/no "
-            "assertguaranteed entire MBAcost; travel/health own FAQ. "
-            "TOEFL>81 and GMAT>=650 owneligibility bullet (score "
-            "submission advantage not required by deadline, nominees "
-            "vouchers); latergeneric FAQ 101 desirable and 600 "
-            "schoolscore conflictnot silently replace 650. No "
-            "priorbusinesstraining required, J 1 home 2 years."
-        ),
     },
     {
         "track": "journalist-training",
@@ -2039,139 +618,1465 @@ PROFILES = [
         "title": "Fulbright explanatory-journalism training overview",
         "categories": ["training", "fellowships"],
         "hosts": ["US"],
-        "eligible": [],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "bg",
-        "summary": (
-            "Funded two-week US explanatory-journalism training for "
-            "practicing journalists with at least one year of "
-            "experience and B2 English. Flights, US travel, visa, "
-            "insurance, accommodation and meals are covered; "
-            "personal/home-country costs remain participants’ "
-            "responsibility. The Bulgarian-citizen banner conflicts "
-            "with broader country-origin eligibility text. The "
-            "programme is not annual; no complete current deadline is "
-            "published."
-        ),
-        "evidence": (
-            "journalists; US; fundedtwo-week English "
-            "explanatory/evidence-basedjournalism, >=1 "
-            "yrpractisingjournalist anymedia, B 2, workexamples, "
-            "vaccinationsbeforedeparture perhistoricalpandemicrequireme"
-            "nts source maychange. Bannerexplicit BGcitizens "
-            "versusbodyjournalistsfrom BG,AL,XK,MD,PL,MK,RO,SK,RS,ME,CZ"
-            ",HU; no country whitelist to retain the unresolved "
-            "explicit BGcitizenship banner AND broader 12 "
-            "country-origin eligibility without projecting a "
-            "contradictory partial or exclusive passport list. Dual "
-            "BG/US/workvisa/greencard excluded; firsttimer/limited "
-            "USexperience preference. Nonannual, deadline and opening "
-            "unknown; interviewsfirsthalf June/nominations July "
-            "yearless NOTdeadline. Free airfare/USlocaltravel/insurance"
-            "/visa/lodging/meals; participantowncountrytransport/hotel/"
-            "personalexpenses. Washington/NY/Poynter/Herald "
-            "workshops/complex-topicethics/disinformation, no "
-            "guaranteedall namedvisits/no providerclone."
-        ),
     },
     {
         "track": "international-seminar-2021",
         "key": "fis2021",
-        "title": ("Fulbright International Seminar2021 — historical edition"),
+        "title": "Fulbright International Seminar2021 — historical edition",
         "categories": ["training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": "2021-09-15",
-        "closed": False,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Historical participant deadline September15,2021 for the "
-            "September24–26 democracy/representation seminar in Sofia "
-            "and online. Bachelor’s juniors/seniors, graduate "
-            "students, academics, NGO representatives and young "
-            "professionals worldwide could apply. Full participants "
-            "attend workshops and complete projects for certification. "
-            "Participation was free; partial travel/accommodation aid "
-            "was conditional and capacity was25."
-        ),
-        "evidence": (
-            "fis 2021; BG +online; explicitglobalparticipants, no "
-            "citizenshippositive whitelist no country whitelist. "
-            "BAjunior/senior, MA/Ph D, academics, "
-            "NGO/youngprofessionals; actual Sep 15,2021 "
-            "APPLICATIONdeadline EXPIRED. Sep 24–26,2021 events Sofia "
-            "Launchee/Zoom, freefullprogrammeworkshops/projectwork/cert"
-            "ification,<=25 capacity andconditionalpartialtravel/accomm"
-            "odationcasebycase. Democracyrepresentation/inclusion/digit"
-            "alchange, no genericevergreenclone."
-        ),
     },
     {
         "track": "international-seminar-2022",
         "key": "fis2022",
-        "title": ("Fulbright International Seminar2022 — historical edition"),
+        "title": "Fulbright International Seminar2022 — historical edition",
         "categories": ["training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": None,
-        "closed": False,
         "kind": "programme-overview",
         "language": "en",
-        "summary": (
-            "Historical four-day hybrid rule-of-law seminar in Sofia, "
-            "October20–23,2022, with workshops on governance, justice "
-            "and international legal order. The own invitation "
-            "addresses third/fourth-year bachelor’s students, graduate "
-            "students, civic activists and professionals. In-person "
-            "places were limited, with separate online registration. "
-            "No application closing date or guaranteed travel "
-            "allowance is published."
-        ),
-        "evidence": (
-            "fis 2022+review; genuine ownparticipantinvitation BAyear "
-            "3/4,MA/Ph D,civicactivists/professionals, "
-            "hybridin-personlimited/Zoomregistration, "
-            "legal/democraticinstitutions/EU-USBGexpert workshops. "
-            "unspecifiedclosingdate/unknown (past event not "
-            "applicationdeadline); actual eventdates/location "
-            "corroboration by ownroundup appended below, no PDF. "
-            "Noawardamount/guaranteedtravel inferredfrom 2021. "
-            "Dates/location corroboration: https://www.fulbright.bg/en/"
-            "fis-2022-round-up/."
-        ),
     },
     {
         "track": "international-seminar-2019",
         "key": "fis2019",
-        "title": ("Fulbright International Seminar2019 — historical edition"),
+        "title": "Fulbright International Seminar2019 — historical edition",
         "categories": ["training"],
         "hosts": ["BG"],
-        "eligible": [],
-        "deadline": None,
-        "closed": True,
         "kind": "opportunity",
         "language": "en",
-        "summary": (
-            "Completed historical seven-day democracy seminar in Sofia "
-            "and Plovdiv, September24–30,2019. Structured lectures, "
-            "practical workshops, policy projects and graduation "
-            "addressed judicial reform, information security, social "
-            "cohesion and inclusion. The source describes "
-            "international academic/civic participants; their "
-            "attendance countries do not prove a passport whitelist. "
-            "No application deadline is published."
-        ),
-        "evidence": (
-            "Historical 2019 ECA-sponsored participant seminar: Sept "
-            "24–30,2019 Sofia/Plovdiv, structured workshops, policy "
-            "projects and graduation; no application deadline, no "
-            "citizenship whitelist inferred from participant origins."
-        ),
+    },
+    {
+        "track": "opportunity-funds",
+        "key": "opportunity-funds",
+        "title": "Opportunity Funds Bulgaria application-preparation awards",
+        "categories": ["grants", "scholarships"],
+        "hosts": ["US"],
+        "kind": "opportunity",
+        "language": "en",
+    },
+    {
+        "track": "educationusa-group-advising",
+        "key": "group-advising",
+        "title": "EducationUSA virtual group advising programme",
+        "categories": ["training"],
+        "hosts": [],
+        "kind": "programme-overview",
+        "language": "en",
     },
 ]
+
+POLICY_DIGESTS = {
+    "privacy": (
+        "0a5ac0b9d39f53470fb124a858a42d727d9f5f81787c75b2fe82232fc37ac52b"
+    ),
+    "privacy-bg": (
+        "f41c43225d36e9326377b5550f3c78e355e08f4b056f09ea5a97dbe86bb407c7"
+    ),
+}
+
+# Implementation fragment inserted into this source's standalone adapter.
+
+LEGAL_FOOTERS = {
+    "en": (
+        "Bulgarian-American Commission for Educational Exchange Fulbright ©"
+        " 1993-CURRENT_YEAR"
+    ),
+    "bg": (
+        "Българо-американска комисия за образователен обмен Фулбрайт ©"
+        " 1993-CURRENT_YEAR"
+    ),
+}
+POLICY_URLS = {
+    "https://www.fulbright.bg/en/privacy-policy/",
+    "https://www.fulbright.bg/privacy-policy/",
+}
+
+
+def script_links(root):
+    """Read inert Divi navigation JSON without executing JavaScript."""
+    result = {}
+    for script in nodes(root, "script"):
+        text = "".join(c for c in script.children if isinstance(c, str))
+        matches = re.findall(
+            r"var et_link_options_data\s*=\s*(\[.*?\]);", text
+        )
+        for match in matches:
+            try:
+                options = json.loads(match)
+            except ValueError as error:
+                raise AdapterError(
+                    "Invalid publisher card navigation", "parse"
+                ) from error
+            for option in options:
+                if (
+                    not isinstance(option, dict)
+                    or set(option) != {"class", "url", "target"}
+                    or not all(isinstance(v, str) for v in option.values())
+                    or option["class"] in result
+                ):
+                    raise AdapterError(
+                        "Ambiguous publisher card navigation", "parse"
+                    )
+                result[option["class"]] = option["url"]
+    return result
+
+
+def legal_facts(key, root):
+    """Guard rights evidence independently of mutable opportunity content."""
+    footer = one(
+        [
+            n
+            for n in nodes(root, "div")
+            if "et_pb_text_9_tb_footer" in n.attrs.get("class", "").split()
+        ],
+        "publisher copyright footer",
+    )
+    text = re.sub(r"©\s*1993[-–]\d{4}", "© 1993-CURRENT_YEAR", footer.text())
+    language = (
+        "bg"
+        if key in ("court", "eta-host", "journalists", "ngo", "privacy-bg")
+        else "en"
+    )
+    if text != LEGAL_FOOTERS[language]:
+        raise AdapterError("Publisher rights footer changed: " + key, "access")
+    policy = set()
+    for anchor in nodes(root, "a"):
+        href = anchor.attrs.get("href", "")
+        if href.startswith(("mailto:", "tel:")):
+            continue
+        label = anchor.text()
+        if re.search(
+            r"privacy|terms|policy|reuse|usage|copyright|licen[cs]e|"
+            r"политика|условия|авторск",
+            href + " " + label,
+            re.I,
+        ):
+            policy.add(urllib.parse.urljoin(PAGES[key], href))
+    for class_name, href in script_links(root).items():
+        if re.search(
+            r"privacy|terms|policy|reuse|usage|copyright|licen[cs]e|"
+            r"политика|условия",
+            href,
+            re.I,
+        ):
+            policy.add(urllib.parse.urljoin(PAGES[key], href))
+    if not policy.issubset(POLICY_URLS):
+        raise AdapterError(
+            "Unreviewed publisher policy route: " + key, "access"
+        )
+    for section in nodes(root, "div"):
+        if not any(
+            "_tb_footer" in c and "section" in c
+            for c in section.attrs.get("class", "").split()
+        ):
+            continue
+        for paragraph in nodes(section, "p"):
+            if re.search(
+                r"re.?publi|permission|copyright|rights"
+                r" reserved|licen[cs]e|reuse|reproduction|разрешение|авторск",
+                paragraph.text(),
+                re.I,
+            ):
+                raise AdapterError(
+                    "Publisher rights notice changed: " + key, "access"
+                )
+    if key in POLICY_DIGESTS:
+        material = (
+            article(root).text().replace("\xad", "").replace("\u200b", "")
+        )
+        if (
+            hashlib.sha256(material.encode()).hexdigest()
+            != POLICY_DIGESTS[key]
+        ):
+            raise AdapterError(
+                "Publisher privacy policy changed: " + key, "access"
+            )
+    observed = [
+        n.attrs.get("href", "")
+        for n in nodes(root, "link")
+        if n.attrs.get("rel") == "canonical"
+    ]
+    if observed != CANONICALS[key]:
+        raise AdapterError("Publisher canonical changed: " + key, "parse")
+
+
+def modules(root):
+    """Yield distinct content blocks, retaining their source order."""
+    return [
+        n
+        for n in nodes(article(root), "div")
+        if "et_pb_module" in n.attrs.get("class", "").split()
+        and not any(
+            c in n.attrs.get("class", "").split()
+            for c in (
+                "et_pb_accordion",
+                "et_pb_slider",
+                "et_pb_team_member",
+                "et_pb_testimonial",
+                "et_pb_gallery",
+                "et_pb_image",
+                "et_pb_video",
+                "et_pb_code",
+                "et_pb_blog",
+            )
+        )
+    ]
+
+
+def block(root, heading, optional=False):
+    """Select one labelled fact block and its associated disclosure toggle."""
+    items = modules(root)
+    selected = []
+    for i, item in enumerate(items):
+        headings = [
+            n.text()
+            for n in item.walk()
+            if n.tag in ("h1", "h2", "h3", "h4", "h5")
+        ]
+        if any(re.fullmatch(heading, value, re.I) for value in headings):
+            text = item.text()
+            if (
+                i + 1 < len(items)
+                and "et_pb_toggle"
+                in items[i + 1].attrs.get("class", "").split()
+                and "et_pb_accordion_item"
+                not in items[i + 1].attrs.get("class", "").split()
+            ):
+                text += " " + items[i + 1].text()
+            if not re.fullmatch(heading, text, re.I):
+                selected.append(text)
+    if not selected and optional:
+        return ""
+    return one(selected, "programme block: " + heading)
+
+
+def matched(pattern, text, description, optional=False):
+    values = list(re.finditer(pattern, text, re.I))
+    if not values and optional:
+        return None
+    if len(values) != 1:
+        raise AdapterError("Unsupported or ambiguous " + description, "parse")
+    return values[0]
+
+
+def primary(root):
+    """Exclude related-programme sidebars from this programme's own facts."""
+    text = article(root).text()
+    return re.split(
+        r"Other [Gg]rants|Other [Ss]cholarships|Други стипендии",
+        text,
+        maxsplit=1,
+    )[0]
+
+
+def amount(value):
+    return f'{int(re.sub(r"[^0-9]", "", value)):,}'
+
+
+_MONTHS = {
+    name.lower(): number
+    for number, name in enumerate(
+        (
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ),
+        1,
+    )
+}
+
+
+def closing_date(value):
+    """Parse a date from an explicitly selected application closing block."""
+    value = " ".join(value.replace(",", " ").split())
+    match = re.fullmatch(
+        r"(\d{1,2})(?:st|nd|rd|th)? ([A-Za-z]+) (\d{4})", value, re.I
+    )
+    if match:
+        day, month, year = match.groups()
+    else:
+        match = re.fullmatch(
+            r"([A-Za-z]+) (\d{1,2})(?:st|nd|rd|th)? (\d{4})", value, re.I
+        )
+        if not match:
+            raise AdapterError(
+                "Unsupported complete application deadline", "parse"
+            )
+        month, day, year = match.groups()
+    month_number = _MONTHS.get(month.lower())
+    if month_number is None:
+        raise AdapterError("Unsupported application deadline month", "parse")
+    try:
+        return datetime(int(year), month_number, int(day)).date().isoformat()
+    except ValueError as error:
+        raise AdapterError(
+            "Invalid complete application deadline", "parse"
+        ) from error
+
+
+def deadline_for(key, root):
+    """Use only the actual programme application slot, never dates in a hub."""
+    own = primary(root)
+    date = (
+        r"((?:\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s*,?\s*\d{4})|"
+        r"(?:[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?\s*,?\s*\d{4}))"
+    )
+    patterns = {
+        "doctoral": r"Application deadline:\s*" + date,
+        "scholar": r"Application deadline:\s*" + date,
+        "thanks": r"DEADLINE:\s*" + date,
+        "mba-alias": r"Application deadline:\s*" + date,
+        "schuman": r"Application deadline:\s*" + date,
+        "alumni": r"The next submission deadline is\s*" + date,
+        "opportunity-funds": (
+            r"Applications sent after the\s*" + date + r"\s*,?\s*deadline"
+        ),
+        "fis2021": r"Deadline for participant applications is\s*" + date,
+    }
+    if key == "ftea":
+        values = [
+            n.text()
+            for n in nodes(article(root))
+            if n.tag == "div"
+            and "dsm-timeline-content" in n.attrs.get("class", "").split()
+            and "Application deadline" in n.text()
+        ]
+        text = one(values, "teacher application deadline")
+        value = matched(
+            date + r"\s+Application deadline", text, "teacher closing date"
+        )[1]
+        return closing_date(value)
+    if key not in patterns:
+        # These supported programmes have absent or yearless application dates.
+        # New dated closing slots are not silently accepted as a missing date.
+        if re.search(
+            r"(?:Application deadline|submission deadline|DEADLINE)\s*:\s*"
+            + date,
+            own,
+            re.I,
+        ):
+            raise AdapterError("New unsupported closing slot: " + key, "parse")
+        return None
+    matches = list(re.finditer(patterns[key], own, re.I))
+    if key in ("doctoral", "scholar"):
+        matches.extend(
+            re.finditer(
+                r"Deadline for submitting applications for the academic"
+                r" 20\d{2}[-–]\d{2} is\s*" + date,
+                own,
+                re.I,
+            )
+        )
+    if key == "opportunity-funds":
+        matches.extend(
+            re.finditer(
+                date + r"\s+Deadline for submitting full application",
+                own,
+                re.I,
+            )
+        )
+    if key in (
+        "schuman",
+        "mba-alias",
+        "doctoral",
+        "scholar",
+        "opportunity-funds",
+    ):
+        values = {closing_date(m[1]) for m in matches}
+        return one(list(values), key + " consistent application closing")
+    return closing_date(one(matches, key + " application closing")[1])
+
+
+def programme_status(root, deadline):
+    if deadline:
+        checked = datetime.fromisoformat(utc_now().replace("Z", "+00:00"))
+        closing = datetime.strptime(deadline, "%Y-%m-%d").date()
+        latest = checked.astimezone(timezone(timedelta(hours=-12))).date()
+        earliest = checked.astimezone(timezone(timedelta(hours=14))).date()
+        return (
+            "expired"
+            if latest > closing
+            else "open" if earliest < closing else "unknown"
+        )
+    banner = " ".join(n.text() for n in modules(root)[:5])
+    if re.search(
+        r"competition is (?:now )?closed|currently"
+        r" closed|конкурсът.*(?:приключ|затворен)|fully booked|completed",
+        banner,
+        re.I,
+    ):
+        return "expired"
+    # Archive labels, event age and enrollment forms cannot establish opening.
+    return "unknown"
+
+
+def applicant_countries(key, root, track):
+    """Project explicit passport conditions and preserve source conflicts."""
+    text = primary(root)
+    if key in ("graduate-bg", "doctoral", "scholar", "thanks", "mba-alias"):
+        if re.search(
+            r"(?:Applicants must have|Eligibility Requirements.*?) Bulgarian"
+            r" citizenship",
+            text,
+            re.I,
+        ):
+            return ["BG"]
+    if key == "humphrey" and re.search(r"Be Bulgarian citizens", text, re.I):
+        return ["BG"]
+    if key == "ngo" and re.search(r"българско гражданство", text, re.I):
+        return ["BG"]
+    if key == "graduate-us" and re.search(
+        r"Applicants must be U\.S\. citizens at the time of application",
+        text,
+        re.I,
+    ):
+        return ["US"]
+    if key == "scholar-us" and re.search(r"U\.S\. citizen", text, re.I):
+        return ["US"]
+    if key == "eta" and re.search(
+        r"U\.S\. or dual \(Bulgarian, European\) citizens", text, re.I
+    ):
+        return ["US"]
+    if key == "specialist" and track == "specialist-us-professional":
+        if re.search(
+            r"Be a U\.S\. citizen",
+            block(
+                root,
+                "Individuals Interested in Serving as a Fulbright Specialists",
+            ),
+            re.I,
+        ):
+            return ["US"]
+    if key == "alumni" and re.search(
+        r"Bulgarian or US citizens who are alumni", text, re.I
+    ):
+        return ["BG", "US"]
+    return []
+
+
+def programme_year(root):
+    values = re.findall(
+        r"(?:AY|Academic year|academic)\s+(20\d{2})[-–](\d{2})",
+        primary(root),
+        re.I,
+    )
+    if not values:
+        return None
+    return values[0][0] + "–" + values[0][1]
+
+
+DISCLOSURE_HEADINGS = {
+    "agile": {
+        "Materials and certificate",
+        "Consultations",
+        "Library",
+        "About PMI-ACP®",
+    },
+    "graduate-us": {
+        "Fulbright study / research award",
+        "Fulbright Bulgaria-Romania Joint Research Award",
+        "Fulbright Bulgaria-Greece Joint Research Award",
+        "Eligibility",
+        "Candidate profile",
+        "Assignment and affiliation",
+        "Application",
+        "Grant benefits",
+    },
+    "scholar-us": {
+        "Flex Award",
+        "Eligibility",
+        "Candidate profile",
+        "Assignment and affiliation",
+        "Grant benefits",
+        "Application",
+    },
+    "specialist": {"Country description"},
+}
+
+
+def own_navigation(key, root):
+    """Discover real programme cards including Divi's inert navigation."""
+    result = []
+    configured = script_links(root)
+    for item in modules(root):
+        classes = item.attrs.get("class", "").split()
+        for class_name in classes:
+            if class_name in configured and "et_clickable" in classes:
+                if configured[class_name].startswith("#"):
+                    labels = {
+                        n.text() for n in item.walk() if n.tag in ("h3", "h4")
+                    }
+                    if not labels or not labels.issubset(
+                        DISCLOSURE_HEADINGS.get(key, set())
+                    ):
+                        raise AdapterError(
+                            "Unhandled programme card fragment", "parse"
+                        )
+                    continue
+                result.append(
+                    ("Programme card: " + item.text(), configured[class_name])
+                )
+        for anchor in nodes(item, "a"):
+            href = anchor.attrs.get("href", "")
+            if href and not href.startswith(("#", "mailto:", "tel:")):
+                result.append(
+                    (
+                        (
+                            item.text()
+                            if re.fullmatch(
+                                r"learn more|read more|more info|\$|",
+                                anchor.text(),
+                                re.I,
+                            )
+                            else anchor.text()
+                        ),
+                        href,
+                    )
+                )
+    for anchor in nodes(root, "a"):
+        if any(
+            anchor in list(menu.walk())
+            for menu in nodes(root, "ul")
+            if "menu" in menu.attrs.get("class", "")
+        ):
+            result.append((anchor.text(), anchor.attrs.get("href", "")))
+    return [
+        (label, reviewed_url(urllib.parse.urljoin(PAGES[key], href)))
+        for label, href in result
+        if urllib.parse.urlsplit(
+            urllib.parse.urljoin(PAGES[key], href)
+        ).hostname
+        in ("www.fulbright.bg", "fulbright.bg")
+    ]
+
+
+ROUTE_ALIASES = {
+    "/en/visiting-scholar-grants-bg/": "scholar",
+    "/en/graduate-students-usa/": "graduate-us",
+    "/en/sofijski-rajonen-sad/": "court",
+    "/en/media-literacy-for-teachers/": "ftea",
+    "/en/opportunity-fund-bulgaria/": "opportunity-funds",
+    "/en/konkurs-opportunity-funds-bulgaria/": "opportunity-funds",
+    "/alumni-grants/": "alumni",
+}
+DISCOVERY_ROOTS = tuple(
+    key
+    for key in PAGES
+    if key
+    not in (
+        "conferences",
+        "conference2",
+        "news",
+        "privacy",
+        "privacy-bg",
+    )
+)
+
+
+def check_frontier(pages):
+    known = {
+        urllib.parse.urlsplit(url).path.rstrip("/") + "/": key
+        for key, url in PAGES.items()
+    }
+    known.update(ROUTE_ALIASES)
+    found = set()
+    for key in DISCOVERY_ROOTS:
+        for label, url in own_navigation(key, pages[key]):
+            path = urllib.parse.urlsplit(url).path.rstrip("/") + "/"
+            if path in known:
+                found.add(known[path])
+            elif re.search(
+                r"Programme"
+                r" card:|grant|scholarship|fellowship|internship|award|"
+                r"opportunity|competition|advising|training|course|"
+                r"стипенди|обучен|конкурс|стаж|семинар",
+                label,
+                re.I,
+            ):
+                # Contact, social, advising descriptions and impact stories are
+                # not silently treated as unreviewed scholarship applicants.
+                if path not in NON_OPPORTUNITY_ROUTES:
+                    raise AdapterError(
+                        "Unhandled programme route: " + path, "parse"
+                    )
+    required = {
+        track["key"]
+        for track in TRACKS
+        if track["key"]
+        not in (
+            "fis2019",
+            "fis2021",
+            "fis2022",
+            "journalists",
+            "ngo",
+            "mba-alias",
+            "law",
+        )
+    }
+    if not required.issubset(found):
+        raise AdapterError("Missing programme discovery coverage", "parse")
+
+
+NON_OPPORTUNITY_ROUTES = {
+    "/en/advisory-services/",
+    "/en/alumni-achievements/",
+    "/en/about-us/",
+    "/en/grantees/",
+    "/en/contacts/",
+    "/en/privacy-policy/",
+    "/en/resources-for-us-grantees/",
+    "/en/info-sessions-scholar-phd-grants/",
+    "/stipendianti/",
+}
+
+
+def news_inventory(root):
+    """Detect unhandled programme announcements in current news cards."""
+    cards = nodes(article(root), "article", "et_pb_post")
+    if not cards:
+        raise AdapterError("Missing current news discovery cards", "parse")
+    reviewed_reports = {"/en/fulbright-bulgarian-nominees-2026-27/"}
+    for card in cards:
+        heading = one(
+            [n for n in card.walk() if n.tag in ("h2", "h3")],
+            "news card heading",
+        )
+        link = one(nodes(heading, "a"), "news card link")
+        path = urllib.parse.urlsplit(reviewed_url(link.attrs["href"])).path
+        label = heading.text()
+        classes = card.attrs.get("class", "").split()
+        if path not in reviewed_reports and (
+            re.search(
+                r"\b(?:grants?|scholarships?|fellowships?|apply|"
+                r"applications?|opportunity|competition|training)\b",
+                label,
+                re.I,
+            )
+            or "category-grants" in classes
+        ):
+            raise AdapterError(
+                "Unhandled programme announcement: " + path, "parse"
+            )
+
+
+def check_track_sections(pages):
+    """Fail on unhandled extra awards within a supported programme leaf."""
+    expected = {
+        "graduate-us": {
+            "Fulbright study / research award",
+            "Fulbright Bulgaria-Romania Joint Research Award",
+            "Fulbright Bulgaria-Greece Joint Research Award",
+            "Fulbright Study / Research Grant in Archaeology / History",
+            "Grant benefits",
+        },
+        "schuman": {
+            "Grants for (Pre)-Doctoral Research (Students)",
+            "Grants for Post-Doctoral Research and/or Lecturing (Scholars)",
+            "Innovation Award – (Students and Scholars)",
+            "International Educator Award (Scholars)",
+            "Innovation award",
+            "Grant for Scholars in Mathematics",
+        },
+        "scholar-us": {"Annual awards", "Flex Award", "Grant benefits"},
+    }
+    alumni = primary(pages["alumni"])
+    if re.findall(r"(?<!\d)(\d+)\)\s+[A-Z]", alumni) != ["1", "2", "3"]:
+        raise AdapterError("Unhandled alumni award-type inventory", "parse")
+    specialist = {
+        n.text()
+        for item in modules(pages["specialist"])
+        for n in item.walk()
+        if n.tag == "h5" and n.text() != "More Info"
+    }
+    if specialist != {
+        "Cost share for host insitutions",
+        "Application process for host institutions",
+        "Individuals Interested in Serving as a Fulbright Specialists",
+    }:
+        raise AdapterError("Unhandled Specialist applicant section", "parse")
+    for key, supported in expected.items():
+        actual = set()
+        for item in modules(pages[key]):
+            if "et_pb_blurb" not in item.attrs.get("class", "").split():
+                continue
+            for heading in [
+                n for n in item.walk() if n.tag in ("h2", "h3", "h4")
+            ]:
+                if re.search(r"\b(?:awards?|grants?)\b", heading.text(), re.I):
+                    actual.add(heading.text())
+        if actual - supported:
+            raise AdapterError("Unhandled award section: " + key, "parse")
+
+
+def conference_inventory(pages):
+    """Check complete conference pagination and supported seminar slots."""
+    actual = set()
+    for key in ("conferences", "conference2"):
+        for item in nodes(article(pages[key]), "article", "et_pb_post"):
+            heading = one(
+                [n for n in item.walk() if n.tag in ("h2", "h3")],
+                "conference card heading",
+            )
+            link = one(nodes(heading, "a"), "conference card link")
+            actual.add(reviewed_url(link.attrs["href"]))
+    expected = {
+        PAGES[key]
+        for key in (
+            "open2024",
+            "open2023",
+            "media2023",
+            "fis2022-review",
+            "fis2022",
+            "fis2021",
+            "digital2020",
+            "fis2019",
+        )
+    }
+    excluded = {
+        "https://www.fulbright.bg/en/orientation-for-us-grantees/",
+        "https://www.fulbright.bg/en/wrap-up-seminar-for-us-grantees-2022/",
+    }
+    if actual - expected - excluded or not expected.issubset(actual):
+        raise AdapterError(
+            "Unhandled conference opportunity inventory", "parse"
+        )
+    for key in ("conferences", "conference2"):
+        next_links = [
+            reviewed_url(urllib.parse.urljoin(PAGES[key], n.attrs["href"]))
+            for n in nodes(article(pages[key]), "a")
+            if "Older Entries" in n.text()
+        ]
+        if next_links != (
+            [PAGES["conference2"]] if key == "conferences" else []
+        ):
+            raise AdapterError("Unhandled conference pagination", "parse")
+
+
+def consistent(pattern, text, description):
+    values = {m.groups() for m in re.finditer(pattern, text, re.I)}
+    return one(list(values), description)
+
+
+def require(pattern, text, description):
+    if not re.search(pattern, text, re.I):
+        raise AdapterError("Missing supported " + description, "parse")
+
+
+def summary_for(track, root):
+    """Translate current, specifically scoped fields into independent facts."""
+    key, identity = track["key"], track["track"]
+    text = primary(root)
+    if key == "graduate-bg":
+        benefit = block(
+            root, "What does the Fulbright graduate study grant cover\\?"
+        )
+        (cap,) = consistent(
+            r"up to USD\s*([\d,]+)\s+toward tuition",
+            benefit,
+            "graduate total cap",
+        )
+        (months,) = consistent(
+            r"one academic year \((\d+) months\)", text, "graduate duration"
+        )
+        return (
+            f"US degree study for {months} months; funding up to USD"
+            f" {amount(cap)} toward tuition and living costs. "
+            + (
+                "Round-trip travel and health coverage are included. "
+                if re.search(
+                    r"covers travel costs.*health insurance", benefit, re.I
+                )
+                else ""
+            )
+            + "Consult the current eligibility and standardized-test"
+            " requirements on the programme page."
+        )
+    if key == "doctoral":
+        duration = matched(
+            r"funding for (\d+)[-–](\d+) months of research",
+            text,
+            "doctoral duration",
+        )
+        support = block(
+            root, "What does the Fulbright Visiting Researcher grant cover\\?"
+        )
+        require(
+            r"monthly maintenance.*return flight.*health insurance",
+            support,
+            "doctoral benefits",
+        )
+        return (
+            "Nondegree US research for enrolled doctoral students, lasting"
+            f" {duration[1]}–{duration[2]} months. Destination-based monthly"
+            " maintenance, return travel and health coverage are provided. "
+            + (
+                "A US host invitation is required. "
+                if "invitation letter should be issued" in text
+                else ""
+            )
+            + (
+                "The source excludes course enrollment by visiting"
+                " researchers."
+                if "not eligible to enroll in courses" in text
+                else ""
+            )
+        )
+    if key == "scholar":
+        benefit = block(root, "What does the Fulbright scholar grant cover\\?")
+        low, high = consistent(
+            r"amount of \$([\d, ]+)\s*[-–]\s*\$([\d, ]+),",
+            benefit,
+            "scholar monthly maintenance",
+        )
+        duration = matched(
+            r"between (\d+) to (\d+) months", benefit, "scholar duration"
+        )
+        return (
+            "US research or lecturing for scholars for"
+            f" {duration[1]}–{duration[2]} months. Monthly maintenance is USD"
+            f" {amount(low)}–{amount(high)}. "
+            + (
+                "Return travel and health coverage are described in the"
+                " benefits section. "
+                if re.search(r"travel|flight", benefit, re.I)
+                else ""
+            )
+            + "Use the programme page for current degree, host-invitation and"
+            " language conditions."
+        )
+    if key == "leaders":
+        own = one(
+            [
+                n.text()
+                for n in modules(root)
+                if n.text().startswith("Thanks to a recent funding increase")
+            ],
+            "Leaders placement description",
+        )
+        (cap,) = consistent(
+            r"Grants offer up to \$([\d,]+)", own, "Leaders funding cap"
+        )
+        (ranking,) = consistent(
+            r"ranked in the top (\d+) graduate programs",
+            own,
+            "Leaders placement condition",
+        )
+        return (
+            f"Self-placement funding up to USD {amount(cap)} for MA/PhD"
+            f" students admitted to a US programme ranked in the top {ranking}"
+            " in its field. "
+            + (
+                "The award can span several academic years. "
+                if "spread across multiple academic years" in own
+                else ""
+            )
+            + (
+                "Recipients sign a three-year return-to-Bulgaria agreement."
+                if "return to Bulgaria for three years" in own
+                else ""
+            )
+        )
+    if key == "humphrey":
+        own = block(root, "Eligibility Requirements")
+        scores = matched(
+            r"TOEFL iBT:\s*(\d+) Duolingo English Test:\s*(\d+)"
+            r" IELTS:\s*([\d.]+)",
+            own,
+            "Humphrey English alternatives",
+        )
+        return (
+            "US nondegree leadership development for mid-career"
+            f" professionals. Minimum English scores are TOEFL {scores[1]},"
+            f" Duolingo {scores[2]} or IELTS {scores[3]}. "
+            + (
+                "The source requires postdegree full-time professional"
+                " experience and management or policy responsibilities. "
+                if "full-time professional experience" in own
+                and "management or policy responsibilities" in own
+                else ""
+            )
+            + "Academic study and a professional affiliation form part of the"
+            " programme."
+        )
+    if key == "thanks":
+        require(r"Thanks to Scandinavia", text, "Foundation award identity")
+        return (
+            "US graduate award associated with Thanks to Scandinavia."
+            " Selection follows the Fulbright and Foundation processes. The"
+            " programme-specific additional funding is not quantified; figures"
+            " in the generic graduate FAQ do not establish this award’s"
+            " amount."
+        )
+    if key == "law":
+        (rate,) = consistent(
+            r"(\d+)\s*%\s*от (?:таксата|учебната такса)",
+            text,
+            "Fordham tuition fraction",
+        )
+        return (
+            f"Fordham Law LLM tuition support in New York: {rate}% of tuition."
+            " The source describes direct application to the university and a"
+            " bachelor’s-degree requirement. The law specializations are"
+            " choices within this award."
+        )
+    if key == "math":
+        support = block(root, "The grant covers")
+        (cap,) = consistent(
+            r"monthly maintenance allowance of \$([\d,]+)",
+            support,
+            "mathematics monthly maintenance",
+        )
+        require(r"University of Miami", text, "mathematics host institution")
+        return (
+            "Mathematics research at the University of Miami/IMSA, with USD"
+            f" {amount(cap)} monthly maintenance. "
+            + (
+                "Travel, settling support and health coverage are included. "
+                if "round trip airfare" in support
+                and "health insurance" in support
+                else ""
+            )
+            + "The source specifies early-career PhD and institutional"
+            " conditions."
+        )
+    if key == "court":
+        require(
+            r"двумесечен стаж.*Федералния окръжен съд на Луизиана",
+            text,
+            "court internship placement",
+        )
+        return (
+            "Two-month placement at the federal district court in New Orleans"
+            " for selected participants in the Sofia Regional Court internship"
+            " programme. "
+            + (
+                "Fulbright supports travel, maintenance and visa costs."
+                if re.search(r"средства за пътуване.*издръжка.*виза", text)
+                else ""
+            )
+        )
+    if key == "ftea":
+        criteria = block(root, "Eligibility Criteria")
+        (score,) = consistent(
+            r"(?:at least|minimum iBT TOEFL score of)\s*(\d+)",
+            criteria,
+            "teacher English minimum",
+        )
+        require(
+            r"full-time secondary-level teachers",
+            criteria,
+            "teacher applicant role",
+        )
+        return (
+            "US professional development for full-time secondary teachers"
+            " with a bachelor’s-equivalent degree and teaching experience."
+            f" TOEFL minimum: {score}. "
+            + (
+                "Flights, academic costs, housing, meals and a daily allowance"
+                " are supported. "
+                if re.search(
+                    r"Round-trip airfare, housing, meals, daily allowance,"
+                    r" academic fees",
+                    text,
+                )
+                else ""
+            )
+            + "The application deadline is distinct from interview, nomination"
+            " and cohort dates."
+        )
+    if key == "schuman":
+        headings = {
+            "schuman-pre-doctoral": (
+                r"Grants for \(Pre\)-Doctoral Research \(Students\)"
+            ),
+            "schuman-postdoctoral": (
+                r"Grants for Post-Doctoral Research and/or Lecturing"
+                r" \(Scholars\)"
+            ),
+            "schuman-innovation": (
+                r"Innovation Award – \(Students and Scholars\)"
+            ),
+            "schuman-international-educator": (
+                r"International Educator Award \(Scholars\)"
+            ),
+        }
+        section = block(root, headings[identity])
+        result = {
+            "schuman-pre-doctoral": (
+                "Predoctoral US study/research on EU–US relations, policy or"
+                " institutions."
+            ),
+            "schuman-postdoctoral": (
+                "Postdoctoral US research or lecturing on EU–US relations,"
+                " policy or institutions."
+            ),
+            "schuman-innovation": (
+                "Research on the intersection of policy and technology in"
+                " EU–US relations."
+            ),
+            "schuman-international-educator": (
+                "US research for international-education professionals at"
+                " European universities."
+            ),
+        }[identity]
+        duration = re.search(r"between (\w+) to (\w+) months", section, re.I)
+        if duration:
+            result += f" Duration: {duration[1]} to {duration[2]} months."
+        if re.search(
+            r"letter of affiliation|arranging their own affiliation",
+            section,
+            re.I,
+        ):
+            result += " A US institutional affiliation is required."
+        if (
+            identity == "schuman-innovation"
+            and "tenable in any one or two EU Member States" in section
+        ):
+            result += (
+                " The source also mentions one or two EU member states; the"
+                " complete venue scope is ambiguous."
+            )
+        return result
+    if key == "eta":
+        benefits = block(root, "Grant benefits")
+        (stipend,) = consistent(
+            r"Monthly stipend\s*[-–]\s*\$([\d,]+) per month",
+            benefits,
+            "ETA stipend",
+        )
+        (travel,) = consistent(
+            r"Round-trip air travel allowance\s*[-–]\s*\$([\d,]+)",
+            benefits,
+            "ETA travel allowance",
+        )
+        (relocation,) = consistent(
+            r"Relocation and incidentals allowance\s*[-–]\s*\$([\d,]+)",
+            benefits,
+            "ETA relocation allowance",
+        )
+        (language,) = consistent(
+            r"Bulgarian language\s*[-–]\s*\$([\d,]+)",
+            benefits,
+            "ETA language allowance",
+        )
+        return (
+            "English teaching in Bulgarian schools/universities. USD"
+            f" {amount(stipend)} monthly, USD {amount(travel)} travel, USD"
+            f" {amount(relocation)} relocation and USD {amount(language)}"
+            " language support. "
+            + (
+                "Host-school housing is free; utilities are the grantee’s"
+                " responsibility. "
+                if re.search(
+                    r"Housing is provided.*free of charge.*utility bills",
+                    benefits,
+                )
+                else ""
+            )
+            + "The citizenship banner has ambiguous dual-citizen wording;"
+            " confirm eligibility with the publisher."
+        )
+    if key == "eta-host":
+        low, high = consistent(
+            r"между (\d+) и (\d+) часа преподаване седмично",
+            text,
+            "institutional teaching plan",
+        )
+        return (
+            "Bulgarian schools and universities may host an English teaching"
+            f" assistant, providing {low}–{high} teaching hours per week. "
+            + (
+                "Hosts supply materials, furnished free housing and"
+                " mentoring. "
+                if "обзаведено и безплатно жилище" in text
+                and "учител-ментор" in text
+                else ""
+            )
+            + "The institution applies; beneficiary citizenship is not an"
+            " institutional passport condition."
+        )
+    if key == "graduate-us":
+        headings = {
+            "us-graduate-study": r"Fulbright study / research award",
+            "us-graduate-bg-romania": (
+                r"Fulbright Bulgaria-Romania Joint Research Award"
+            ),
+            "us-graduate-bg-greece": (
+                r"Fulbright Bulgaria-Greece Joint Research Award"
+            ),
+            "us-graduate-archaeology": (
+                r"Fulbright Study / Research Grant in Archaeology / History"
+            ),
+        }
+        section = block(root, headings[identity])
+        benefits = block(root, "Grant benefits")
+        (stipend,) = consistent(
+            r"Monthly stipend\s*[-–]\s*\$\s*([\d ]+) per month",
+            benefits,
+            "US graduate stipend",
+        )
+        result = {
+            "us-graduate-study": "Study/research in Bulgaria.",
+            "us-graduate-bg-romania": (
+                "Joint comparative study/research in Bulgaria and Romania."
+            ),
+            "us-graduate-bg-greece": (
+                "Joint comparative study/research in Bulgaria and Greece."
+            ),
+            "us-graduate-archaeology": (
+                "Bulgaria archaeology/history placement with the Balkan"
+                " Heritage Foundation."
+            ),
+        }[identity]
+        duration = re.search(
+            r"(?:Awards are for|award is for|spend up to) (\d+) months",
+            section,
+            re.I,
+        )
+        if duration:
+            result += f" Duration: {duration[1]} months."
+        result += (
+            f" Monthly stipend: USD {amount(stipend)}. The source also"
+            " describes travel, research and health support."
+        )
+        if "This content has been archived" in text:
+            result += " The page is archived; no current opening is inferred."
+        return result
+    if key == "scholar-us":
+        benefits = block(root, "Grant benefits")
+        (stipend,) = consistent(
+            r"Award Allowances:\s*\$([\d,]+) per month",
+            benefits,
+            "US scholar stipend",
+        )
+        if identity == "us-scholar-flex":
+            (stipend,) = consistent(
+                r"For Flex grants:\s*\$([\d,]+) per month",
+                benefits,
+                "Flex monthly stipend",
+            )
+            section = block(root, "Flex Award")
+            require(r"two short segments", section, "Flex visit structure")
+            (travel,) = consistent(
+                r"For Flex grants: Travel allowance of \$([\d,]+) total for"
+                r" all segments",
+                benefits,
+                "Flex aggregate travel",
+            )
+            return (
+                "Two-segment Bulgaria teaching/research/professional award."
+                f" USD {amount(stipend)} monthly and USD {amount(travel)}"
+                " travel across all segments. "
+                + (
+                    "Flex provides no dependent benefits. "
+                    if re.search(
+                        r"For Flex grants, dependent benefits will not be"
+                        r" provided",
+                        benefits,
+                        re.I,
+                    )
+                    else ""
+                )
+                + "Applicants select Flex and provide their timeline."
+            )
+        travel, relocation = consistent(
+            r"Travel allowance of \$([\d,]+) and relocation allowance of"
+            r" \$([\d,]+) for grantee",
+            benefits,
+            "core scholar allowances",
+        )
+        return (
+            "Bulgaria teaching/research/professional award for appropriately"
+            f" qualified US applicants. USD {amount(stipend)} monthly, USD"
+            f" {amount(travel)} travel and USD {amount(relocation)}"
+            " relocation. Dependent support is conditional; consult the"
+            " benefits section."
+        )
+    if key == "specialist":
+        parameters = block(root, "Program Parameters")
+        low, high = consistent(
+            r"range from (\d+) to (\d+) days",
+            parameters,
+            "Specialist project duration",
+        )
+        if identity == "specialist-us-professional":
+            section = block(
+                root,
+                "Individuals Interested in Serving as a Fulbright Specialists",
+            )
+            require(r"Be a U\.S\. citizen", section, "Specialist citizenship")
+            return (
+                "Experienced US citizens can apply for Specialist roster"
+                " consideration and institutional education assignments"
+                f" lasting {low}–{high} days. Roster acceptance does not"
+                " guarantee a funded project; match and approval are"
+                " required."
+            )
+        costs = block(root, "Cost share for host insitutions")
+        require(
+            r"lodging, meals, and in-country transportation",
+            costs,
+            "Specialist host cost share",
+        )
+        return (
+            "Institutional education/training projects hosting a US"
+            f" specialist for {low}–{high} days. Hosts cover lodging, meals"
+            " and local transportation; federal support covers international"
+            " travel, limited health benefits and an honorarium. Yearless"
+            " submission dates are not assigned a year."
+        )
+    if key == "alumni":
+        label = {
+            "alumni-travel": "Travel Award",
+            "alumni-publication": "Publication Award",
+            "alumni-open-project": "Open Alumni Awards",
+        }[identity]
+        require(label, text, "alumni award type")
+        (cap,) = consistent(
+            r"Maximum award amount:\s*€([\d,]+) per project",
+            text,
+            "alumni per-project ceiling",
+        )
+        return (
+            f"Fulbright Bulgaria alumni {label.lower()} for Bulgarian or US"
+            f" citizen alumni. Maximum EUR {amount(cap)} per project,"
+            " including joint proposals. "
+            + (
+                "Only one award type per alumnus per year is permitted. "
+                if "only ONE type of alumni grant per year" in text
+                else ""
+            )
+            + "The rolling-open banner and dated round must be read together."
+        )
+    if key in ("pmp", "agile"):
+        return course_summary(track, root)
+    if key == "ngo":
+        low, high = consistent(
+            r"издръжка в размер на ([\d ]+)\s*[–-]\s*([\d ]+) щатски долара",
+            text,
+            "NGO monthly maintenance",
+        )
+        require(
+            r"предназначена за ръководители и представители на български"
+            r" неправителствени организации",
+            text,
+            "NGO applicant role",
+        )
+        return (
+            "US civil-society research for Bulgarian NGO"
+            f" leaders/representatives, with USD {amount(low)}–{amount(high)}"
+            " monthly maintenance. "
+            + (
+                "A US NGO/university invitation is required. "
+                if "официална покана от американска" in text
+                else ""
+            )
+            + "The source’s early-December application closing has no complete"
+            " year."
+        )
+    if key == "mba-alias":
+        require(
+            r"University of Oklahoma MBA Grant",
+            text,
+            "Oklahoma programme identity",
+        )
+        return (
+            "Oklahoma Price College MBA funding for the programme’s duration."
+            " The leaf’s dated competition is historical despite its open"
+            " banner. The generic graduate FAQ cap is not a verified"
+            " MBA-specific benefit."
+        )
+    if key == "journalists":
+        criteria = block(root, "Критерии за подбор")
+        (level,) = consistent(
+            r"ниво (B\d)", criteria, "journalist English level"
+        )
+        require(
+            r"минимум една година профессионален|минимум една година"
+            r" професионален",
+            criteria,
+            "journalist experience",
+        )
+        return (
+            "Two-week US training for practicing journalists with"
+            f" professional experience and {level} English. The publisher"
+            " funds the training visit. Bulgarian-citizen wording conflicts"
+            " with a broader country-origin list, so no passport whitelist is"
+            " inferred."
+        )
+    if key.startswith("fis"):
+        require(
+            "Fulbright International Seminar " + key[3:],
+            article(root).text(),
+            "historical seminar identity",
+        )
+        if key == "fis2021":
+            require(r"Participation is free of charge", text, "seminar fee")
+            return (
+                "Historical hybrid democracy/representation seminar in Sofia"
+                " and online. Full participants attend workshops and complete"
+                " projects for certification. Participation was free; partial"
+                " travel/accommodation support was conditional."
+            )
+        if key == "fis2022":
+            require(r"Rule of Law", text, "seminar subject")
+            return (
+                "Historical hybrid rule-of-law seminar in Sofia, with distinct"
+                " in-person and online participation. Students, civic"
+                " activists and professionals are described as participants."
+                " No complete application closing or guaranteed travel"
+                " allowance is published."
+            )
+        return (
+            "Historical democracy seminar in Sofia and Plovdiv, with"
+            " structured lectures, workshops and participant projects."
+            " Attendance-country lists do not establish a citizenship"
+            " whitelist; no current opening is inferred."
+        )
+    if key == "opportunity-funds":
+        eligibility = block(root, "Student Eligibility")
+        (cap,) = consistent(
+            r"A maximum of \$([\d,]+) in Opportunity Funds",
+            block(root, "Allowable Costs"),
+            "Funds per-student ceiling",
+        )
+        require(
+            r"10th or 11th grade students enrolled full-time in Bulgarian high"
+            r" schools",
+            eligibility,
+            "Funds school grades",
+        )
+        require(
+            r"citizen of, or officially recognized refugee in Bulgaria",
+            eligibility,
+            "Funds citizenship or refugee alternative",
+        )
+        require(
+            r"U\.S\. citizens and permanent residents.*not eligible",
+            eligibility,
+            "Funds exclusion",
+        )
+        require(
+            r"does not guarantee acceptance or financial aid",
+            block(root, "Program Objectives"),
+            "Funds conditional outcome",
+        )
+        return (
+            f"Up to USD {amount(cap)} per student for US university"
+            " application preparation/costs. Full-time grades 10/11 students"
+            " in Bulgarian schools must be Bulgarian citizens or recognized"
+            " refugees, with financial need, English and academic/leadership"
+            " potential. US citizens/permanent residents are excluded."
+            " Admission and university financial aid are not guaranteed."
+        )
+    if key == "group-advising":
+        joining = block(root, "Who can Join\\?")
+        require(
+            r"open to ALL students in grades 8-12",
+            joining,
+            "advising school grades",
+        )
+        require(r"once per week", joining, "advising commitment")
+        require(
+            r"no guarantees.*accepted", text, "advising conditional outcome"
+        )
+        return (
+            "Structured virtual college-application preparation for grades"
+            " 8–12, with weekly advising and reading, writing, testing and"
+            " community-service activities. Participation requires commitment;"
+            " grade-12 entry timing is yearless. US admission is not"
+            " guaranteed. This is training/advising, rather than a"
+            " scholarship."
+        )
+    raise AdapterError("Unsupported opportunity track", "parse")
+
+
+def course_card(track, root):
+    """Select the complete card for one actual dated course edition."""
+    key, identity = track["key"], track["track"]
+    cards = [
+        n
+        for n in modules(root)
+        if "et_pb_blurb" in n.attrs.get("class", "").split()
+        and re.search(
+            r"Training \(in-person\)|PMP.*(?:Training|Course)", n.text(), re.I
+        )
+        and re.search(r"20\d{2}", n.text())
+    ]
+    if len(cards) != 2:
+        raise AdapterError("Unhandled course edition inventory", "parse")
+    month, year = {
+        "pmp-course-2026-september": ("September", "2026"),
+        "pmp-course-2026-october": ("October", "2026"),
+        "agile-course-2023-october": ("Oct(?:ober)?", "2023"),
+        "agile-course-2024-february": ("Feb(?:ruary)?", "2024"),
+    }[identity]
+    slot = (
+        r"\d+ days:\s*" + month + r"\b.*?\b" + year
+        if key == "pmp"
+        else r"\d+ days:\s*[^€]*?\b" + month + r"\b\s*,?\s*" + year
+    )
+    card = one(
+        [n for n in cards if re.search(slot, n.text(), re.I)],
+        "supported course month/year edition",
+    )
+    return card
+
+
+def course_status(track, root):
+    card = course_card(track, root)
+    items = modules(root)
+    index = items.index(card)
+    following = items[index + 1].text() if index + 1 < len(items) else ""
+    return (
+        "expired"
+        if following.lower() in ("fully booked", "completed")
+        else "unknown"
+    )
+
+
+def course_summary(track, root):
+    """Extract edition-scoped dates and fees without certification claims."""
+    prefix = "PMI-ACP" if track["key"] == "agile" else "PMP"
+    text = course_card(track, root).text()
+    fee = re.search(
+        r"€\s*([\d,]+)\s*(VAT (?:excl\.|incl\.)|incl\.? VAT|including VAT)",
+        text,
+        re.I,
+    )
+    schedule = matched(
+        r"\d+ days:\s*(.*?20\d{2})", text, "course edition dates"
+    )[1]
+    facts = (
+        f"Paid English {prefix} certification preparation in Sofia. Edition"
+        f" schedule: {schedule}. "
+    )
+    if re.search(r"[€$]|EUR", text) and fee is None:
+        raise AdapterError("Unsupported course fee", "parse")
+    if fee:
+        facts += f"Edition fee: EUR {amount(fee[1])}, {fee[2]}. "
+    else:
+        facts += (
+            "This edition has no published fee; another edition’s price is not"
+            " transferred. "
+        )
+    facts += (
+        "The edition dates are event dates, not application deadlines. Exam"
+        " eligibility is separate from course enrollment."
+    )
+    return facts
 
 
 def read_pages():
@@ -2182,37 +2087,60 @@ def parse_inventory(pages):
     if set(pages) != set(PAGES):
         raise AdapterError("Incomplete source evidence", "parse")
     for key, root in pages.items():
-        digest = hashlib.sha256(source_facts(key, root).encode()).hexdigest()
-        if digest != CONDITIONS[key]:
-            raise AdapterError(
-                "Source facts/inventory changed: " + key, "parse"
-            )
+        legal_facts(key, root)
+    check_frontier(pages)
+    conference_inventory(pages)
+    check_track_sections(pages)
+    news_inventory(pages["news"])
     records = []
-    for profile in PROFILES:
+    for track in TRACKS:
+        key, root = track["key"], pages[track["key"]]
+        summary = summary_for(track, root)
+        closing = deadline_for(key, root)
+        title = track["title"]
+        year = programme_year(root)
+        if key == "ftea":
+            year = matched(
+                r"in January or September (20\d{2}) for academic seminars",
+                primary(root),
+                "teacher programme cohort year",
+            )[1]
+        if key == "opportunity-funds":
+            year = matched(
+                r"announce the (20\d{2}) Opportunity Funds",
+                primary(root),
+                "Funds competition year",
+            )[1]
+        if year:
+            title += " " + year
         record = make_record(
-            profile["title"],
-            PAGES[profile["key"]],
-            profile["categories"],
-            kind=profile["kind"],
-            host_countries=profile["hosts"],
-            evidence=[ATTRIBUTION, profile["evidence"]],
+            title,
+            PAGES[key],
+            track["categories"],
+            kind=track["kind"],
+            host_countries=track["hosts"],
+            method="publisher-field-extraction",
+            evidence=[
+                ATTRIBUTION,
+                "Programme/track: " + track["track"],
+                "Current source fields: " + summary,
+            ],
         )
         record["id"] = hashlib.sha256(
-            (SOURCE_ID + "|" + profile["track"]).encode()
+            (SOURCE_ID + "|" + track["track"]).encode()
         ).hexdigest()[:24]
-        record["summary"] = profile["summary"]
-        record["eligible_countries"] = profile["eligible"]
-        record["language"] = profile["language"]
-        record["deadline"] = profile["deadline"]
-        if profile["deadline"]:
-            today = utc_now()[:10]
-            record["status"] = (
-                "open"
-                if today < profile["deadline"]
-                else "expired" if today > profile["deadline"] else "unknown"
-            )
-        elif profile["closed"]:
-            record["status"] = "expired"
+        record["summary"] = summary
+        record["summary_language"] = "en"
+        record["eligible_countries"] = applicant_countries(
+            key, root, track["track"]
+        )
+        record["language"] = track["language"]
+        record["deadline"] = closing
+        record["status"] = (
+            course_status(track, root)
+            if key in ("pmp", "agile")
+            else programme_status(root, closing)
+        )
         records.append(record)
     validate_records(records)
     return records
@@ -2277,7 +2205,8 @@ def safe_error(error):
     )
     text = re.sub(r"(?i)\b(?:bearer|basic)\s+\S+", "[redacted]", text)
     text = re.sub(
-        r"(?i)\b(token|password|secret|api[_-]?key|authorization)\s*[:=]\s*\S+",
+        r"(?i)\b(token|password|secret|api[_-]?key|"
+        r"authorization)\s*[:=]\s*\S+",
         r"\1=[redacted]",
         text,
     )
@@ -2292,7 +2221,9 @@ def pace(url, interval=6):
     Production uses a serialized Action; separate machines must not overlap.
     """
     host = (
-        (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
+        (urllib.parse.urlsplit(url).hostname or "")
+        .lower()
+        .removeprefix("www.")
     )
     directory = os.path.join(
         tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
@@ -2359,7 +2290,9 @@ def save_budget(state, budget):
     os.fsync(state.fileno())
 
 
-def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
+def request_bytes(
+    url, *, interval=6, method="GET", headers=None, payload=None
+):
     state, budget = pace(url, interval)
     request_headers = {"User-Agent": _USER_AGENT, **(headers or {})}
     try:
@@ -2434,7 +2367,9 @@ def fetch_source(url, min_interval=6):
                         raise AdapterError(
                             "Invalid or excessive source redirects", "fetch"
                         )
-                    current = urllib.parse.urljoin(current, headers["Location"])
+                    current = urllib.parse.urljoin(
+                        current, headers["Location"]
+                    )
                     checked(current)
                     if original.path != "/robots.txt":
                         min_interval = max(min_interval, check_robots(current))
@@ -2458,14 +2393,17 @@ def fetch_source(url, min_interval=6):
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             if attempt:
                 raise AdapterError(
-                    "Publisher connection failed: " + safe_error(error), "fetch"
+                    "Publisher connection failed: " + safe_error(error),
+                    "fetch",
                 ) from error
     raise AdapterError("Publisher could not be read", "fetch")
 
 
 def check_robots(url):
     parsed = urllib.parse.urlsplit(url)
-    origin = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    origin = urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, "", "", "")
+    )
     if origin not in _ROBOTS:
         try:
             _ROBOTS[origin] = fetch_source(origin + "/robots.txt")
@@ -2603,7 +2541,9 @@ def remove_expired_records(records, checked_at):
                     deadline = datetime.fromisoformat(
                         value.replace("Z", "+00:00")
                     )
-                    expired = deadline.tzinfo is not None and checked > deadline
+                    expired = (
+                        deadline.tzinfo is not None and checked > deadline
+                    )
             except (ValueError, TypeError):
                 # Missing or ambiguous deadlines never imply expiry.
                 pass
@@ -2640,7 +2580,9 @@ def validate_records(records, published=False):
                 not isinstance(record.get(field), str)
                 or not record[field].strip()
             ):
-                raise AdapterError("Missing record field: " + field, "validate")
+                raise AdapterError(
+                    "Missing record field: " + field, "validate"
+                )
         if record["id"] in ids:
             raise AdapterError("Duplicate opportunity identifier", "validate")
         ids.add(record["id"])
@@ -2663,7 +2605,9 @@ def validate_records(records, published=False):
         ):
             value = record.get(field)
             if field not in record:
-                raise AdapterError("Missing record field: " + field, "validate")
+                raise AdapterError(
+                    "Missing record field: " + field, "validate"
+                )
             if value is not None:
                 try:
                     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -2706,7 +2650,9 @@ def validate_records(records, published=False):
             "institutional-grant",
             "unknown",
         ) or record.get("status") not in ("open", "expired", "unknown"):
-            raise AdapterError("Invalid opportunity kind or status", "validate")
+            raise AdapterError(
+                "Invalid opportunity kind or status", "validate"
+            )
         summary = record.get("summary")
         if not isinstance(summary, str) or re.search("<[^>]+>", summary):
             raise AdapterError("Invalid plain summary", "validate")
@@ -2719,7 +2665,9 @@ def validate_records(records, published=False):
                 or record[field] is not None
                 and not isinstance(record[field], str)
             ):
-                raise AdapterError("Invalid record field: " + field, "validate")
+                raise AdapterError(
+                    "Invalid record field: " + field, "validate"
+                )
         classification = record.get("classification")
         if (
             not isinstance(classification, dict)
@@ -2975,8 +2923,9 @@ def main():
         not failure or snapshot["files"]["data.json"] is not None
     ):
         files = {
-            "metadata.json": json.dumps(outcome, ensure_ascii=False, indent=2)
-            + "\n"
+            "metadata.json": (
+                json.dumps(outcome, ensure_ascii=False, indent=2) + "\n"
+            )
         }
         if not failure:
             files["data.json"] = (
@@ -3007,10 +2956,10 @@ def main():
                 publish_files(
                     latest,
                     {
-                        "metadata.json": json.dumps(
-                            outcome, ensure_ascii=False, indent=2
+                        "metadata.json": (
+                            json.dumps(outcome, ensure_ascii=False, indent=2)
+                            + "\n"
                         )
-                        + "\n"
                     },
                 )
             except Exception:
@@ -3037,7 +2986,7 @@ if __name__ == "__main__":
                     "status": "fail",
                     "last_attempt_at": utc_now(),
                     "message": (
-                        "Run could not complete; " "durable status unavailable"
+                        "Run could not complete; durable status unavailable"
                     ),
                     "error": safe_error(error),
                     "failure_stage": getattr(error, "stage", "publish"),
