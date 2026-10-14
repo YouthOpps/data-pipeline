@@ -65,3 +65,31 @@ are unchanged. Its only application command is the adapter with `--publish`.
 Publication requires `DATA_SOURCE_TOKEN`, atomically updates only this source's
 data/metadata pair, preserves last-good data on failure and rejects a concurrent
 newer same-source snapshot. No production execution is part of local testing.
+
+## Expired-record cleanup
+
+Fulbright Austria preserves explicit CET/CEST/UTC/GMT closing clocks as aware
+instants; unzoned calendar closings remain date-only and unclear windows remain
+null. This cleanup uses those application fields without interpreting award
+periods as deadlines.
+
+The complete fresh inventory is fetched and validated before cleanup. The next
+source-scoped atomic data/metadata publication replaces the prior dataset rather
+than merging its rows, so expired previously published records cannot survive
+that successful replacement. Current records and records with missing or
+ambiguous deadlines remain eligible; status alone does not determine expiry.
+
+Offset-aware deadlines expire only after the stated instant. A date-only
+deadline with no documented publisher timezone remains eligible through that
+date in every civil timezone: cleanup uses the conservative UTC-12 calendar
+boundary, without guessing a publisher timezone or an unstated closing hour.
+The source recipes and their original deadline fields remain unchanged.
+
+A valid nonempty fresh inventory may produce an empty cleaned dataset; that
+empty result is published atomically with success metadata. An empty upstream
+collection still fails validation. Fetch, parsing, validation and publication
+failures preserve the last-good dataset (including a prior empty success) and
+success timestamp; cleanup never performs a separate deletion or writes another source.
+The sole live test validates the complete nonpublishing inventory, including
+closed records needed to verify source completeness; publication alone applies
+the deadline filter after that validation.

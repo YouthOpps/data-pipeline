@@ -269,3 +269,30 @@ Both pre phases/collection2100s; admission1980 leaves120s guard.219 starts have1
 Protected public-email guards decode bounded, valid Cloudflare email ciphertext while retaining both independent link and label identities, their positions, complete attributes and structure. Cipher-key rotation alone is stable; changed contacts, malformed encoding, duplicate attributes, removed or additional structure fail review. Ordinary links, visible prose and pagination remain guarded.
 
 The first production family run uses the concrete maintainer-reviewed `ARTSCOUNCILMALTA_PACING_BOOTSTRAP`, linked to the issue evidence for complete family history and preserved idle local pacing states. It supplies only a conservative earliest start bound when no stronger interval, embargo or refusal remains; existing family history always requires its newest trusted artifact.
+
+## Expired-record cleanup
+
+Arts Council Malta preserves explicit offset-aware CET closing instants and
+supported date-only application closings. Yearless clocks and unavailable
+historical closing facts remain null; CLOSED status alone does not expire them.
+
+The complete fresh inventory is fetched and validated before cleanup. The next
+source-scoped atomic data/metadata publication replaces the prior dataset rather
+than merging its rows, so expired previously published records cannot survive
+that successful replacement. Current records and records with missing or
+ambiguous deadlines remain eligible; status alone does not determine expiry.
+
+Offset-aware deadlines expire only after the stated instant. A date-only
+deadline with no documented publisher timezone remains eligible through that
+date in every civil timezone: cleanup uses the conservative UTC-12 calendar
+boundary, without guessing a publisher timezone or an unstated closing hour.
+The source recipes and their original deadline fields remain unchanged.
+
+A valid nonempty fresh inventory may produce an empty cleaned dataset; that
+empty result is published atomically with success metadata. An empty upstream
+collection still fails validation. Fetch, parsing, validation and publication
+failures preserve the last-good dataset (including a prior empty success) and
+success timestamp; cleanup never performs a separate deletion or writes another source.
+The sole live test validates the complete nonpublishing inventory, including
+closed records needed to verify source completeness; publication alone applies
+the deadline filter after that validation.

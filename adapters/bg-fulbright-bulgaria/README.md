@@ -25,3 +25,30 @@ Publisher robots disallows PDF requests. During fresh research, the supplemental
 The commission’s privacy policy was updated 16 March 2026 and concerns applicant data processing. It grants no open content licence. Records contain independently written English facts, attribution and original public URLs; no images, copied publisher prose, applicant data, grantee stories or contacts are republished.
 
 Publication uses `DATA_SOURCE_TOKEN` with write access to `YouthOpps/data-source`. The workflow obtains a scoped GitHub App token and runs `adapter.py --publish` on main, on relevant merges, manual dispatch and the configured schedule. Data and metadata are committed together under `datas/bg-fulbright-bulgaria/`. The actual publication code validates existing and new data, preserves last-good data on failure, updates failure metadata only for an existing source, retries a sibling-source ref race without force and never overwrites newer changes to this source. Local actual test success alone does not certify production Actions or site delivery; those need separate maintainer and independent verification.
+
+## Expired-record cleanup
+
+Fulbright Bulgaria recipes preserve explicit dated application closings as
+date-only values. Historical entries without a supported closing year retain
+null; their historical or expired status alone does not remove them.
+
+The complete fresh inventory is fetched and validated before cleanup. The next
+source-scoped atomic data/metadata publication replaces the prior dataset rather
+than merging its rows, so expired previously published records cannot survive
+that successful replacement. Current records and records with missing or
+ambiguous deadlines remain eligible; status alone does not determine expiry.
+
+Offset-aware deadlines expire only after the stated instant. A date-only
+deadline with no documented publisher timezone remains eligible through that
+date in every civil timezone: cleanup uses the conservative UTC-12 calendar
+boundary, without guessing a publisher timezone or an unstated closing hour.
+The source recipes and their original deadline fields remain unchanged.
+
+A valid nonempty fresh inventory may produce an empty cleaned dataset; that
+empty result is published atomically with success metadata. An empty upstream
+collection still fails validation. Fetch, parsing, validation and publication
+failures preserve the last-good dataset (including a prior empty success) and
+success timestamp; cleanup never performs a separate deletion or writes another source.
+The sole live test validates the complete nonpublishing inventory, including
+closed records needed to verify source completeness; publication alone applies
+the deadline filter after that validation.

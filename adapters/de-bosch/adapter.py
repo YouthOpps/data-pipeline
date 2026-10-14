@@ -8,7 +8,7 @@ Republish minimal original factual summaries and direct official links only.
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -1338,7 +1338,7 @@ def run_body(publishing):
                     candidate_metadata = json.loads(
                         candidate["files"]["metadata.json"]
                     )
-                    validate_records(candidate_records)
+                    validate_records(candidate_records, published=True)
                     validate_prior_metadata(
                         candidate_metadata, candidate_records
                     )
@@ -1347,6 +1347,8 @@ def run_body(publishing):
             records = collect()
             checked = utc_now()
             fresh_records(records, old, attempt, checked)
+            records = remove_expired_records(records, checked)
+            validate_records(records, published=True)
             outcome = metadata(attempt, previous, records, checked_at=checked)
             desired = {
                 "data.json": serialize(records),
@@ -1377,7 +1379,10 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif (
+                        snapshot["files"]["data.json"] is not None
+                        and latest["files"] == snapshot["files"]
+                    ):
                         publish_files(
                             latest,
                             {
@@ -1922,11 +1927,42 @@ def validate_owned_records(records):
             raise AdapterError("Invalid Bosch chronology", "validate")
 
 
-def validate_records(records):
+def remove_expired_records(records, checked_at):
+    """Filter a validated refresh before its atomic replacement publication."""
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.tzinfo is None:
+        raise AdapterError("Cleanup requires an aware check time", "validate")
+    retained = []
+    for record in records:
+        value = record.get("deadline")
+        expired = False
+        if isinstance(value, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    # An undocumented zone cannot justify an earlier cutoff.
+                    closing_date = datetime.strptime(value, "%Y-%m-%d").date()
+                    latest_zone = timezone(timedelta(hours=-12))
+                    expired = (
+                        checked.astimezone(latest_zone).date() > closing_date
+                    )
+                else:
+                    deadline = datetime.fromisoformat(
+                        value.replace("Z", "+00:00")
+                    )
+                    expired = deadline.tzinfo is not None and checked > deadline
+            except (ValueError, TypeError):
+                # Missing or ambiguous deadlines never imply expiry.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, published=False):
     if (
         not isinstance(records, list)
-        or not records
-        or len(records) != len(PROFILES)
+        or not records and not published
+        or not published and len(records) != len(PROFILES)
     ):
         raise AdapterError(
             "Incomplete reviewed Bosch identity inventory", "validate"
@@ -2057,7 +2093,10 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected {len(records)} reviewed Bosch programme overviews"
+            else (
+                f"Validated refresh retains {len(records)} "
+                "reviewed Bosch programme overviews"
+            )
         ),
         "error": safe_error(error) if error else None,
     }
