@@ -1,7 +1,8 @@
-"""Collect the reviewed finite Volkswagen AG youth individual job frontier.
+"""Discover current Volkswagen AG youth opportunities and their native facts.
 
 The advertised Volkswagen AG partition excludes other Group brands,
-non-youth roles and the robots-blocked HRD portal. English aliases are deduplicated.
+non-youth roles and the robots-blocked HRD portal.
+English aliases are deduplicated.
 Republish minimal original factual summaries and direct official links only.
 """
 
@@ -31,15 +32,20 @@ import urllib.request
 import zipfile
 
 SOURCE_ID = "volkswagen-group"
-# Explicit publisher withdrawal notices, verified against the current frontier.
-WITHDRAWN_POSITION_IDS = {"31130", "30024", "29834", "26566"}
 SOURCE_URL = WEBSITE_URL = "https://www.volkswagen-karriere.de/"
 LANGUAGE = "de"
 PUBLISHER_COUNTRY = "DE"
 PUBLISHER_TYPE = "company"
 SOURCE_NAME = "Volkswagen AG student and early-career opportunities"
-ATTRIBUTION = "Volkswagen AG — original factual summaries and direct official individual opportunity links."
-DESCRIPTION = "Volkswagen AG individual student and early-career listings; excludes non-youth roles, other Group brands and the robots-blocked HRD apprenticeship portal."
+ATTRIBUTION = (
+    "Volkswagen AG — original factual summaries and direct official "
+    "individual opportunity links."
+)
+DESCRIPTION = (
+    "Volkswagen AG individual student and early-career listings; "
+    "excludes non-youth roles, other Group brands and the "
+    "robots-blocked HRD apprenticeship portal."
+)
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
 _USER_AGENT = "YouthOpps/1.0 (+https://github.com/YouthOpps/data-pipeline; public opportunity metadata)"
@@ -1039,18 +1045,30 @@ def mark_pacing_artifact_ready(runner_parent, runner_root):
     relative = os.path.relpath(value, runner_root)
     parts = relative.split(os.sep)
     if not parts or any(name in {"", ".", ".."} for name in parts):
-        raise AdapterError("Step output outside runner temporary root", "access")
+        raise AdapterError(
+            "Step output outside runner temporary root", "access"
+        )
     descriptors = []
     parent = runner_parent
     try:
         for name in parts[:-1]:
-            descriptor = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=parent,
+            )
             descriptors.append(descriptor)
             info = os.fstat(descriptor)
-            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_mode & 0o022
+            ):
                 raise AdapterError("Unsafe step output parent", "access")
             parent = descriptor
-        descriptor = os.open(parts[-1], os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, dir_fd=parent)
+        descriptor = os.open(
+            parts[-1], os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, dir_fd=parent
+        )
         descriptors.append(descriptor)
         info = os.fstat(descriptor)
         current = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
@@ -1079,7 +1097,9 @@ def export_family_artifact():
         return
     configured = os.environ.get("RUNNER_TEMP", "")
     if not configured or not os.path.isabs(configured):
-        raise AdapterError("Explicit runner temporary directory required", "access")
+        raise AdapterError(
+            "Explicit runner temporary directory required", "access"
+        )
     root = os.path.realpath(configured)
     if os.path.dirname(os.path.abspath(path)) != root:
         raise AdapterError("Unsafe pacing artifact path", "access")
@@ -1093,7 +1113,9 @@ def export_family_artifact():
             or directory.st_mode & 0o022
             or directory.st_mode & 0o700 != 0o700
         ):
-            raise AdapterError("Unsafe pacing artifact directory owner", "access")
+            raise AdapterError(
+                "Unsafe pacing artifact directory owner", "access"
+            )
         existing = None
         try:
             existing = os.open(name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=parent)
@@ -1108,10 +1130,17 @@ def export_family_artifact():
                     or info.st_mode & 0o077
                     or info.st_nlink != 1
                 ):
-                    raise AdapterError("Unsafe existing pacing artifact owner", "access")
+                    raise AdapterError(
+                        "Unsafe existing pacing artifact owner", "access"
+                    )
                 current = os.stat(name, dir_fd=parent, follow_symlinks=False)
-                if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
-                    raise AdapterError("Pacing artifact identity changed", "access")
+                if (current.st_dev, current.st_ino) != (
+                    info.st_dev,
+                    info.st_ino,
+                ):
+                    raise AdapterError(
+                        "Pacing artifact identity changed", "access"
+                    )
                 # Invalidate before unlink: an unlink failure cannot leave a
                 # valid stale envelope on a writable, owned artifact inode.
                 os.ftruncate(existing, 0)
@@ -1121,7 +1150,9 @@ def export_family_artifact():
             finally:
                 os.close(existing)
         if _PUBLISHER_GATE_FAILED:
-            raise AdapterError("Publisher completion gate cannot be exported", "access")
+            raise AdapterError(
+                "Publisher completion gate cannot be exported", "access"
+            )
         run_id, attempt = current_run_identity()
         with locked_budget():
             state = load_budget()
@@ -1154,12 +1185,17 @@ def export_family_artifact():
                     or not stat.S_ISREG(info.st_mode)
                     or stat.S_IMODE(info.st_mode) != 0o600
                     or info.st_nlink != 1
-                    or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+                    or (info.st_dev, info.st_ino)
+                    != (current.st_dev, current.st_ino)
                 ):
-                    raise AdapterError("Unsafe finalized artifact identity", "access")
+                    raise AdapterError(
+                        "Unsafe finalized artifact identity", "access"
+                    )
                 raw = os.read(check, 16385)
                 if len(raw) > 16384 or json.loads(raw) != envelope:
-                    raise AdapterError("Finalized pacing artifact mismatch", "access")
+                    raise AdapterError(
+                        "Finalized pacing artifact mismatch", "access"
+                    )
             finally:
                 os.close(check)
             check_deadline()
@@ -1202,7 +1238,7 @@ class DER:
     def read(self, tag):
         if self.offset + 2 > len(self.data):
             raise ValueError("Incomplete DER")
-        actual, length = self.data[self.offset:self.offset + 2]
+        actual, length = self.data[self.offset : self.offset + 2]
         self.offset += 2
         if actual != tag:
             raise ValueError("Unexpected DER tag")
@@ -1210,7 +1246,7 @@ class DER:
             count = length & 127
             if not 1 <= count <= 4:
                 raise ValueError("Invalid DER length")
-            raw = self.data[self.offset:self.offset + count]
+            raw = self.data[self.offset : self.offset + count]
             if len(raw) != count or raw[0] == 0:
                 raise ValueError("Nonminimal DER length")
             self.offset += count
@@ -1220,7 +1256,7 @@ class DER:
         end = self.offset + length
         if end > len(self.data):
             raise ValueError("Incomplete DER value")
-        result = self.data[self.offset:end]
+        result = self.data[self.offset : end]
         self.offset = end
         return result
 
@@ -1244,7 +1280,8 @@ def rsa_key(pem):
             raise ValueError("Invalid PEM size")
         match = re.fullmatch(
             r"\s*-----BEGIN (RSA PRIVATE KEY|PRIVATE KEY)-----\r?\n"
-            r"([A-Za-z0-9+/=\r\n]+)-----END \1-----\s*", pem,
+            r"([A-Za-z0-9+/=\r\n]+)-----END \1-----\s*",
+            pem,
         )
         if not match:
             raise ValueError("Unsupported PEM")
@@ -1272,23 +1309,29 @@ def rsa_key(pem):
         sequence.finish()
         version, n, e, d, p, q, dp, dq, inverse = values
         if (
-            version != 0 or not 2048 <= n.bit_length() <= 8192
-            or e < 3 or e % 2 == 0 or e >= n
+            version != 0
+            or not 2048 <= n.bit_length() <= 8192
+            or e < 3
+            or e % 2 == 0
+            or e >= n
             or min(d, p, q, dp, dq, inverse) <= 0
-            or d >= n or inverse >= p
-            or p == q or p % 2 == 0 or q % 2 == 0 or p * q != n
+            or d >= n
+            or inverse >= p
+            or p == q
+            or p % 2 == 0
+            or q % 2 == 0
+            or p * q != n
             or e * d % math.lcm(p - 1, q - 1) != 1
-            or dp != d % (p - 1) or dq != d % (q - 1)
+            or dp != d % (p - 1)
+            or dq != d % (q - 1)
             or inverse * q % p != 1
         ):
             raise ValueError("Inconsistent RSA key")
         return n, e, d
     except Exception:
-        raise AdapterError((
-            "Invalid GitHub App signing key"
-        ), (
-            "publish"
-        )) from None
+        raise AdapterError(
+            ("Invalid GitHub App signing key"), ("publish")
+        ) from None
 
 
 def app_jwt(now):
@@ -1296,12 +1339,21 @@ def app_jwt(now):
     if not re.fullmatch(r"[1-9][0-9]{0,19}", app_id):
         raise AdapterError("Invalid GitHub App identifier", "publish")
     n, e, d = rsa_key(os.environ.get("WEBSITE_APP_PRIVATE_KEY", ""))
+
     def encode(value):
         return base64.urlsafe_b64encode(value).rstrip(b"=")
+
     header = encode(b'{"alg":"RS256","typ":"JWT"}')
-    payload = encode(json.dumps({
-        "iat": int(now) - 60, "exp": int(now) + 540, "iss": app_id,
-    }, separators=(",", ":")).encode())
+    payload = encode(
+        json.dumps(
+            {
+                "iat": int(now) - 60,
+                "exp": int(now) + 540,
+                "iss": app_id,
+            },
+            separators=(",", ":"),
+        ).encode()
+    )
     message = header + b"." + payload
     digest = bytes.fromhex("3031300d060960864801650304020105000420")
     digest += hashlib.sha256(message).digest()
@@ -1318,14 +1370,17 @@ def app_api(method, path, jwt, payload=None):
     """Use only the authenticated GitHub origin; never expose credentials."""
     try:
         status, _, body = request_bytes(
-            "https://api.github.com" + path, method=method,
+            "https://api.github.com" + path,
+            method=method,
             headers={
                 "Authorization": "Bearer " + jwt,
                 "Accept": "application/vnd.github+json",
                 "Content-Type": "application/json",
                 "X-GitHub-Api-Version": "2026-03-10",
-            }, payload=(json.dumps(payload).encode()
-                        if payload is not None else None),
+            },
+            payload=(
+                json.dumps(payload).encode() if payload is not None else None
+            ),
         )
         if status not in (200, 201):
             raise ValueError("App API failure")
@@ -1334,11 +1389,9 @@ def app_api(method, path, jwt, payload=None):
             raise ValueError("Invalid App response")
         return result
     except Exception:
-        raise AdapterError((
-            "GitHub App authentication failed"
-        ), (
-            "publish"
-        )) from None
+        raise AdapterError(
+            ("GitHub App authentication failed"), ("publish")
+        ) from None
 
 
 def publication_token():
@@ -1346,11 +1399,15 @@ def publication_token():
     global _APP_TOKEN, _APP_EXPIRY, _APP_CONFIGURATION
     if not os.environ.get("WEBSITE_APP_ID"):
         raise AdapterError("GitHub App configuration required", "publish")
-    configuration = hashlib.sha256((
-        os.environ.get("WEBSITE_APP_ID", "") + "\0"
-        + os.environ.get("WEBSITE_APP_INSTALLATION_ID", "") + "\0"
-        + os.environ.get("WEBSITE_APP_PRIVATE_KEY", "")
-    ).encode()).digest()
+    configuration = hashlib.sha256(
+        (
+            os.environ.get("WEBSITE_APP_ID", "")
+            + "\0"
+            + os.environ.get("WEBSITE_APP_INSTALLATION_ID", "")
+            + "\0"
+            + os.environ.get("WEBSITE_APP_PRIVATE_KEY", "")
+        ).encode()
+    ).digest()
     if _APP_CONFIGURATION != configuration:
         _APP_TOKEN, _APP_EXPIRY = None, 0
         _APP_CONFIGURATION = configuration
@@ -1359,13 +1416,16 @@ def publication_token():
         return _APP_TOKEN
     jwt = app_jwt(now)
     installation = app_api(
-        "GET", "/repos/YouthOpps/data-source/installation", jwt,
+        "GET",
+        "/repos/YouthOpps/data-source/installation",
+        jwt,
     )
     identity = installation.get("id")
     expected = os.environ.get("WEBSITE_APP_INSTALLATION_ID", "")
     account = installation.get("account", {})
     if (
-        type(identity) is not int or identity <= 0
+        type(identity) is not int
+        or identity <= 0
         or str(identity) != expected
         or not isinstance(account, dict)
         or installation.get("app_id") != int(os.environ["WEBSITE_APP_ID"])
@@ -1373,13 +1433,15 @@ def publication_token():
         or account.get("type") != "Organization"
     ):
         raise AdapterError("Unexpected GitHub App installation", "publish")
-    result = app_api((
-        "POST"
-    ), (
-        f"/app/installations/{identity}/access_tokens"
-    ), jwt, {
-        "repositories": ["data-source"], "permissions": {"contents": "write"},
-    })
+    result = app_api(
+        ("POST"),
+        (f"/app/installations/{identity}/access_tokens"),
+        jwt,
+        {
+            "repositories": ["data-source"],
+            "permissions": {"contents": "write"},
+        },
+    )
     repositories = result.get("repositories")
     permissions = result.get("permissions", {})
     try:
@@ -1390,24 +1452,26 @@ def publication_token():
             raise ValueError("Missing token timezone")
         expiry = expiry.timestamp()
     except Exception:
-        raise AdapterError((
-            "Invalid installation token expiry"
-        ), (
-            "publish"
-        )) from None
+        raise AdapterError(
+            ("Invalid installation token expiry"), ("publish")
+        ) from None
     now = time.time()
     if (
         not isinstance(result.get("token"), str)
         or not re.fullmatch(r"[!-~]{1,4096}", result["token"])
         or not now + 300 < expiry <= now + 3700
-        or not isinstance(repositories, list) or len(repositories) != 1
+        or not isinstance(repositories, list)
+        or len(repositories) != 1
         or not isinstance(repositories[0], dict)
         or repositories[0].get("full_name") != "YouthOpps/data-source"
         or not isinstance(permissions, dict)
         or permissions.get("contents") != "write"
-        or any(key not in ("contents", "metadata")
-               or key == "metadata" and value != "read"
-               for key, value in permissions.items())
+        or any(
+            key not in ("contents", "metadata")
+            or key == "metadata"
+            and value != "read"
+            for key, value in permissions.items()
+        )
     ):
         raise AdapterError("Unexpected installation token scope", "publish")
     _APP_TOKEN, _APP_EXPIRY = result["token"], expiry
@@ -1443,9 +1507,6 @@ def github(method, path, payload=None, missing_ok=False):
             f"GitHub publication API returned HTTP {status}", "publish", status
         )
     return json.loads(body)
-
-
-
 
 
 def read_snapshot():
@@ -1575,7 +1636,7 @@ def run_body(publishing):
                     old, previous = candidate_records, candidate_metadata
                 snapshot = candidate
             records = collect()
-            validate_records(records)
+            validate_records(records, require_complete=True)
             records = remove_expired_records(records)
             checked = utc_now()
             fresh_records(records, old, attempt, checked)
@@ -1744,7 +1805,9 @@ def secure_file(name, flags):
 
 def locked_budget():
     budget_file()
-    descriptor = secure_file("state.lock", os.O_RDWR | (os.O_CREAT if _STATE_INITIALIZING else 0))
+    descriptor = secure_file(
+        "state.lock", os.O_RDWR | (os.O_CREAT if _STATE_INITIALIZING else 0)
+    )
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -1758,7 +1821,9 @@ def load_budget():
         descriptor = secure_file("state.json", os.O_RDONLY)
     except FileNotFoundError:
         if not _STATE_INITIALIZING:
-            raise AdapterError("Mature publisher state is missing", "access") from None
+            raise AdapterError(
+                "Mature publisher state is missing", "access"
+            ) from None
         return empty_budget(time.time())
     with os.fdopen(descriptor, "rb") as file:
         raw = file.read(16385)
@@ -1921,7 +1986,10 @@ def prepare_collection():
     budget_file()
     if _COLLECTION_LOCK_FD is not None:
         raise AdapterError("Nested family collection refused", "access")
-    descriptor = secure_file("collection.lock", os.O_RDWR | (os.O_CREAT if _STATE_INITIALIZING else 0))
+    descriptor = secure_file(
+        "collection.lock",
+        os.O_RDWR | (os.O_CREAT if _STATE_INITIALIZING else 0),
+    )
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
@@ -1943,10 +2011,12 @@ def prepare_collection():
 
 
 def public_url(value):
+    """Permit guarded policy inputs and literal discovery routes only."""
     parsed = urllib.parse.urlsplit(value)
     clean = urllib.parse.urlunsplit(parsed._replace(fragment=""))
     if (
-        clean not in {info["url"] for info in INPUTS.values()}
+        clean
+        not in {info["url"] for info in INPUTS.values()} | _DISCOVERED_URLS
         or parsed.scheme != "https"
         or parsed.username
         or parsed.password
@@ -2000,7 +2070,9 @@ def check_robots(url):
             None,
         )
         if key is None:
-            raise AdapterError("Unreviewed Volkswagen AG robots origin", "access")
+            raise AdapterError(
+                "Unreviewed Volkswagen AG robots origin", "access"
+            )
         read_input(key)
     parser = _ROBOTS[origin]
     if not parser.can_fetch(_USER_AGENT, url):
@@ -2027,10 +2099,9 @@ def fetch_public(url):
             continue
         raise AdapterError(
             "Required publisher input returned HTTP " + str(status),
-            "fetch", status,
+            "fetch",
+            status,
         )
-
-
 
 
 def read_input(key):
@@ -2051,7 +2122,8 @@ def read_input(key):
         digest = html_fingerprint(body)
     if digest != info["sha256"]:
         raise AdapterError(
-            "Reviewed Volkswagen AG material or frontier changed: " + key, "parse"
+            "Reviewed Volkswagen AG material or frontier changed: " + key,
+            "parse",
         )
     if info["format"] == "robots":
         parsed = urllib.parse.urlsplit(info["url"])
@@ -2079,40 +2151,155 @@ def read_input(key):
 
 
 def read_pages():
-    """Exhaust all199 nominal inputs; fresh robots precede every document."""
-    order = [key for key, info in INPUTS.items() if info["format"] == "robots"]
-    order += [key for key, info in INPUTS.items() if info["format"] != "robots"]
-    return {key: read_input(key) for key in order}
+    """Retrieve the current bounded partition and its individual details."""
+    global _CURRENT_RECORD_IDS
+    _CURRENT_RECORD_IDS = None
+    _DISCOVERED_URLS.clear()
+    policies = [
+        key for key, info in INPUTS.items() if info["format"] == "robots"
+    ]
+    guarded = [key for key, info in INPUTS.items() if info["format"] == "html"]
+    for key in policies + guarded:
+        read_input(key)
+    german = discover_listing(INPUTS["german-listing"]["url"], "de")
+    english = discover_listing(INPUTS["english-listing"]["url"], "en")
+    if len(german) + len(english) > 220:
+        raise AdapterError(
+            "Current Volkswagen AG detail frontier exceeds review bound",
+            "parse",
+        )
+    profiles = {}
+    excluded = set()
+    withdrawn = set()
+    for url, listing in german.items():
+        profile = parse_detail(read_document(url), url, listing)
+        if profile is None:
+            withdrawn.add(url)
+            continue
+        identity = profile["identity"]
+        if identity in profiles or identity in excluded:
+            raise AdapterError("Duplicate current native JobID", "parse")
+        if profile["excluded"]:
+            excluded.add(identity)
+        else:
+            profiles[identity] = profile
+    for url, listing in english.items():
+        alias = parse_detail(read_document(url), url, listing)
+        if alias is None:
+            withdrawn.add(url)
+            continue
+        identity = alias["identity"]
+        if alias["excluded"]:
+            if identity not in excluded:
+                raise AdapterError(
+                    "English excluded alias lacks German identity", "parse"
+                )
+            continue
+        if identity not in profiles:
+            raise AdapterError(
+                "English alias lacks current German opportunity", "parse"
+            )
+        canonical = profiles[identity]
+        if (
+            alias["level"] != canonical["level"]
+            or alias["location"] != canonical["location"]
+        ):
+            raise AdapterError(
+                "English alias contradicts native career level/location",
+                "parse",
+            )
+        canonical.setdefault("aliases", []).append(url)
+    records = [make_record(profile) for profile in profiles.values()]
+    for record, profile in zip(records, profiles.values()):
+        record["classification"]["evidence"].extend(profile.get("aliases", []))
+    _CURRENT_RECORD_IDS = {record["id"] for record in records}
+    print(
+        f"Current Volkswagen AG census: {len(german)} German listings, "
+        f"{len(english)} English aliases; {len(records)} qualifying JobIDs, "
+        f"{len(excluded)} non-youth JobIDs, "
+        f"{len(withdrawn)} explicit withdrawals.",
+        file=sys.stderr,
+    )
+    validate_records(records, require_complete=True)
+    return records
 
 
 def profile_identity(profile):
-    return SOURCE_ID + "-" + hashlib.sha256(
-        (SOURCE_ID + "|" + profile["identity"]).encode()
-    ).hexdigest()[:24]
-
-
+    return (
+        SOURCE_ID
+        + "-"
+        + hashlib.sha256(
+            (SOURCE_ID + "|" + profile["identity"]).encode()
+        ).hexdigest()[:24]
+    )
 
 
 def make_record(profile, checked=None):
-    now = utc_now()
-    record = json.loads(json.dumps(profile["fields"]))
-    record["id"] = profile_identity(profile)
-    for field in ("created_at", "updated_at", "first_seen_at", "last_seen_at", "last_checked_at"):
-        record[field] = now
-    window = profile["application_window"]
-    today = (checked or now)[:10]
-    record["status"] = "unknown"
+    """Normalize only facts extracted from the current official detail page."""
+    now = checked or utc_now()
+    category, categories = _LEVEL_CATEGORIES[profile["level"]]
+    if profile["level"] == "Studierende" and re.search(
+        r"Abschlussarbeit|Masterarbeit",
+        profile["title"],
+    ):
+        category, categories = "training", ["training"]
+    summary, window, requirements = summarize_detail(profile)
+    status = "unknown"
     if window:
+        today = (
+            datetime.fromisoformat(now.replace("Z", "+00:00"))
+            .astimezone(timezone(timedelta(hours=-12)))
+            .date()
+            .isoformat()
+        )
         if today > window["closes"]:
-            record["status"] = "expired"
-        elif window["opens"] <= today <= window["closes"]:
-            record["status"] = "open"
+            status = "expired"
+        elif window["opens"] <= today:
+            status = "open"
+    record = {
+        "id": profile_identity(profile),
+        "title": profile["title"],
+        "url": profile["url"],
+        "source": SOURCE_ID,
+        "source_url": SOURCE_URL,
+        "published_at": None,
+        "summary": summary,
+        "summary_language": profile["language"],
+        "tags": [],
+        "location": profile["location"],
+        "deadline": window["closes"] if window else None,
+        "language": profile["language"],
+        "category": category,
+        "categories": categories,
+        "kind": "individual-opportunity",
+        "host_countries": ["DE"],
+        "eligible_countries": [],
+        "publisher_country": PUBLISHER_COUNTRY,
+        "classification": {
+            "method": "publisher-native-fields",
+            "status": "classified",
+            "evidence": [
+                profile["url"],
+                "Actual publisher Karrierelevel: " + profile["level"],
+                "Actual publisher JobID: " + profile["identity"],
+            ],
+        },
+        "status": status,
+    }
+    record["requirements"] = requirements
+    for key in (
+        "created_at",
+        "updated_at",
+        "first_seen_at",
+        "last_seen_at",
+        "last_checked_at",
+    ):
+        record[key] = now
     return record
 
 
-
-
 def validate_owned_records(records):
+    """Validate current and earlier published source-owned records."""
     temporal = {
         "created_at",
         "updated_at",
@@ -2120,16 +2307,67 @@ def validate_owned_records(records):
         "last_seen_at",
         "last_checked_at",
     }
-    profiles = {profile_identity(profile): profile for profile in PROFILES}
     for record in records:
-        profile = profiles.get(record.get("id"))
-        if profile is None:
-            raise AdapterError("Unowned Volkswagen AG identity", "validate")
-        expected = make_record(profile, record.get("last_checked_at"))
-        if {k: v for k, v in record.items() if k not in temporal} != {
-            k: v for k, v in expected.items() if k not in temporal
-        }:
-            raise AdapterError("Owned Volkswagen AG factual recipe changed", "validate")
+        url = urllib.parse.urlsplit(record["url"])
+        classification = record.get("classification")
+        if (
+            record.get("source") != SOURCE_ID
+            or record.get("source_url") != SOURCE_URL
+            or url.netloc != "jobs.volkswagen-group.com"
+            or not re.fullmatch(r"/Volkswagen/job/[^/]+/[1-9][0-9]*/", url.path)
+            or url.query
+            or url.fragment
+            or record.get("publisher_country") != "DE"
+            or record.get("host_countries") != ["DE"]
+            or record.get("eligible_countries") != []
+            or record.get("kind") != "individual-opportunity"
+            or record.get("language") not in {"de", "en"}
+            or record.get("summary_language") not in {"de", "en"}
+            or record.get("status") not in {"open", "expired", "unknown"}
+            or record.get("category") not in CATEGORIES
+            or not isinstance(record.get("categories"), list)
+            or record["category"] not in record["categories"]
+            or not set(record["categories"]) <= CATEGORIES
+            or not isinstance(classification, dict)
+            or set(classification) != {"method", "status", "evidence"}
+            or classification.get("method")
+            not in {"editorial-review", "publisher-native-fields"}
+            or classification.get("status") != "classified"
+            or not isinstance(classification.get("evidence"), list)
+            or record["url"] not in classification["evidence"]
+        ):
+            raise AdapterError(
+                "Invalid owned Volkswagen AG factual contract", "validate"
+            )
+        evidence = classification["evidence"]
+        job_ids = {
+            item.split(": ", 1)[1]
+            for item in evidence
+            if isinstance(item, str)
+            and item.startswith("Actual publisher JobID: ")
+        }
+        if classification["method"] == "publisher-native-fields":
+            if (
+                len(job_ids) != 1
+                or not re.fullmatch(r"[1-9][0-9]*", next(iter(job_ids)))
+                or profile_identity({"identity": next(iter(job_ids))})
+                != record["id"]
+            ):
+                raise AdapterError(
+                    "Native stable JobID does not match record", "validate"
+                )
+        deadline = record.get("deadline")
+        if deadline is not None:
+            if not isinstance(deadline, str) or not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}", deadline
+            ):
+                raise AdapterError("Unsupported native deadline", "validate")
+            try:
+                datetime.strptime(deadline, "%Y-%m-%d")
+            except ValueError:
+                raise AdapterError(
+                    "Invalid native deadline", "validate"
+                ) from None
         clocks = {
             field: datetime.fromisoformat(record[field].replace("Z", "+00:00"))
             for field in temporal
@@ -2174,27 +2412,56 @@ def validate_records(records, *, allow_empty=False, require_complete=False):
     if (
         not isinstance(records, list)
         or (not records and not allow_empty)
-        or (
-            require_complete
-            and {record.get("id") for record in records}
-            != {
-                profile_identity(profile)
-                for profile in PROFILES
-                if profile["identity"] not in WITHDRAWN_POSITION_IDS
-            }
+        or require_complete
+        and (
+            _CURRENT_RECORD_IDS is None
+            or {record.get("id") for record in records} != _CURRENT_RECORD_IDS
         )
     ):
         raise AdapterError(
-            "Incomplete reviewed Volkswagen AG identity inventory", "validate"
+            "Incomplete current Volkswagen AG identity inventory", "validate"
         )
-    expected_fields = set(make_record(PROFILES[0]))
+    expected_fields = {
+        "id",
+        "title",
+        "url",
+        "source",
+        "source_url",
+        "published_at",
+        "summary",
+        "summary_language",
+        "tags",
+        "location",
+        "deadline",
+        "language",
+        "category",
+        "categories",
+        "kind",
+        "host_countries",
+        "eligible_countries",
+        "publisher_country",
+        "classification",
+        "status",
+        "created_at",
+        "updated_at",
+        "first_seen_at",
+        "last_seen_at",
+        "last_checked_at",
+    }
     identities = set()
     for record in records:
-        if not isinstance(record, dict) or set(record) != expected_fields:
-            raise AdapterError("Invalid complete25-field contract", "validate")
+        if not isinstance(record, dict) or set(record) not in (
+            expected_fields,
+            expected_fields | {"requirements"},
+        ):
+            raise AdapterError(
+                "Invalid complete source record contract", "validate"
+            )
         if (
             not isinstance(record.get("id"), str)
-            or not re.fullmatch(SOURCE_ID + r"-[0-9a-f]{24}", record.get("id", ""))
+            or not re.fullmatch(
+                SOURCE_ID + r"-[0-9a-f]{24}", record.get("id", "")
+            )
             or record["id"] in identities
         ):
             raise AdapterError(
@@ -2230,7 +2497,7 @@ def validate_records(records, *, allow_empty=False, require_complete=False):
         if (
             not isinstance(summary, str)
             or not summary.strip()
-            or len(summary.encode("utf-16-le")) // 2 > 580
+            or len(summary.encode("utf-16-le")) // 2 > 600
             or re.search(r"<[^>]+>|[\x00-\x1f\x7f]", summary)
         ):
             raise AdapterError("Invalid original factual summary", "validate")
@@ -2262,21 +2529,28 @@ def validate_records(records, *, allow_empty=False, require_complete=False):
             invalid_url = True
         if invalid_url:
             raise AdapterError("Unsafe official URL", "validate")
+    for record in records:
+        requirements = record.get("requirements")
+        if require_complete and requirements is None:
+            raise AdapterError(
+                "Current raw record lacks native requirements", "validate"
+            )
+        if requirements is not None and (
+            not isinstance(requirements, list)
+            or not 1 <= len(requirements) <= 64
+            or any(
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value.encode("utf-16-le")) // 2 > 2000
+                or re.search(r"<[^>]+>|[\x00-\x1f\x7f]", value)
+                for value in requirements
+            )
+        ):
+            raise AdapterError("Invalid native requirements array", "validate")
     validate_owned_records(records)
 
 
-def parse_inventory(pages):
-    if set(pages) != set(INPUTS) or any(
-        pages[key] != info["sha256"] for key, info in INPUTS.items()
-    ):
-        raise AdapterError(
-            "Incomplete reviewed Volkswagen AG material frontier", "parse"
-        )
-    records = [
-        make_record(profile)
-        for profile in PROFILES
-        if profile["identity"] not in WITHDRAWN_POSITION_IDS
-    ]
+def parse_inventory(records):
     validate_records(records, require_complete=True)
     return records
 
@@ -2439,6520 +2713,1234 @@ def validate_prior_metadata(previous, records):
 _OPENER = urllib.request.build_opener(NoRedirect())
 
 
-INPUTS = {'input-001': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Doktorandin-Doktorand-Lebensdauerprognose-Leistungsmodule-%28wmd%29-34225/1446023933/',
-               'format': 'html',
-               'sha256': 'ece211d42ea2a2907973a190d15a0748235608af0893c76509bc452ee6fbc451',
-               'role': 'German individual all-level detail'},
- 'input-002': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-PhD-Student-Lifetime-Prediction-Power-Modules-%28fmd%29-34225/1446024033/',
-               'format': 'html',
-               'sha256': '220f4d9190200908a5299b8ba86510b3bf37a962c2e7b9f6c088115460cfc2e1',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-003': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Abschlussarbeit-GenAI-&-Machine-Learning-Leistungselektronik-%28wmd%29-34225/1445034833/',
-               'format': 'html',
-               'sha256': '88d75deed5dac9f0f18ca7d790519321ceb6d704c81476a270beff047c946d22',
-               'role': 'German individual all-level detail'},
- 'input-004': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Fachoberschule-kaufm%C3%A4nnisch-%28wmd%29-34225/1439332933/',
-               'format': 'html',
-               'sha256': '03a0e277e62f7920459e4222849637d0a7864af32d98a2ab32ddde29cd54927f',
-               'role': 'German individual all-level detail'},
- 'input-005': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Fachoberschule-technisch-%28wmd%29-34225/1439333633/',
-               'format': 'html',
-               'sha256': '4f8dc702064ab6e5132152d7f7aa0e4919060bd0a4d5a1775009f30d77e3288a',
-               'role': 'German individual all-level detail'},
- 'input-006': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Hardware-Test-Elektroantriebe-%28wmd%29-34225/1425947733/',
-               'format': 'html',
-               'sha256': 'a3c7dca5eb1eb909be5f00d6b3d05cf2b250290192c8f93ea94fa74fbc29d7da',
-               'role': 'German individual all-level detail'},
- 'input-007': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Werkstudentin-Werkstudent-Arbeitsordnung-%28wmd%29-34225/1432221533/',
-               'format': 'html',
-               'sha256': '391193f6cf787d1051a831dc58d17197ab0b6670618ff9c9d62fc6c86b9aaac1',
-               'role': 'German individual all-level detail'},
- 'input-008': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38037/1411109133/',
-               'format': 'html',
-               'sha256': '7cb7c66972bfc8abb36405bb9b510af984eb678008b703ff37d8789966656f80',
-               'role': 'German individual all-level detail'},
- 'input-009': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38037/1405555233/',
-               'format': 'html',
-               'sha256': 'c866bf4b80fc44df0986bceaa3688fc0f7ed4a47c377ae74638adbfe1675e40f',
-               'role': 'German individual all-level detail'},
- 'input-010': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Fachkraft-f%C3%BCr-Lagerlogistik-%28wmd%29-2027-38037/1411109833/',
-               'format': 'html',
-               'sha256': '9d83460c8f16c048c38c65a13343bc045b9c8b69c11124cc9f7f8e6b9a6abe68',
-               'role': 'German individual all-level detail'},
- 'input-011': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38037/1410102533/',
-               'format': 'html',
-               'sha256': '76e0c5c90b82ebc1f5e6b015a46eb591d69ade1c01fea9f73fe17b5cd0274a84',
-               'role': 'German individual all-level detail'},
- 'input-012': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38037/1410616833/',
-               'format': 'html',
-               'sha256': '24f000f02f3afa87cf4aa66135316d82dddd9f953a59017754875d72177b1f47',
-               'role': 'German individual all-level detail'},
- 'input-013': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Zerspanungsmechanikerin-Zerspanungsmechaniker-%28wmd%29-2027-38037/1405554733/',
-               'format': 'html',
-               'sha256': '5003583d347ed4c8f4c5b33e35e59526fae7662e626043810371f223bf9a7218',
-               'role': 'German individual all-level detail'},
- 'input-014': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38037/1411118833/',
-               'format': 'html',
-               'sha256': 'c5694ce6a4e4b0ca84f6154144fb1c111913c19f5e7c6b02e95c33145aa2e262',
-               'role': 'German individual all-level detail'},
- 'input-015': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-38037/1411121033/',
-               'format': 'html',
-               'sha256': '6ccf651f7412f775e42c08676859f472899a8a5ada457cf3e5d905a80850b300',
-               'role': 'German individual all-level detail'},
- 'input-016': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38037/1411122233/',
-               'format': 'html',
-               'sha256': 'e7cec515f410a6b30f17ffecd24c8e2f953e3ba1137726eb60c813f0cb1d42f3',
-               'role': 'German individual all-level detail'},
- 'input-017': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Mechatronik-%28wmd%29-2027-38037/1411119333/',
-               'format': 'html',
-               'sha256': 'b70985770c5b7ad963bfa754f8100be29629d23ac2cfdb7c725bcf68b8b982a2',
-               'role': 'German individual all-level detail'},
- 'input-018': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Abschlussarbeit-Operative-Automatisierungstechnik-%28wmd%29-26723/1442352133/',
-               'format': 'html',
-               'sha256': '995012d6602381e2b69ad078ec5d08dd3ffa657c38dfef9d04d1aa0550f96dfa',
-               'role': 'German individual all-level detail'},
- 'input-019': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-26703/1407824233/',
-               'format': 'html',
-               'sha256': '17b13b69d6c996ad16df79e3ea050879f5191a01a6df9acbdda245c0b2c196fb',
-               'role': 'German individual all-level detail'},
- 'input-020': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fachinformatikerin-Fachinformatiker-f%C3%BCr-Systemintegration-%28wmd%29-2027-26703/1407816633/',
-               'format': 'html',
-               'sha256': '8cb049e275fbc0d4b3e3486bfc35a7f1d56cbc13cb28c98ab84b069d79b3f12b',
-               'role': 'German individual all-level detail'},
- 'input-021': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fachkraft-f%C3%BCr-Metalltechnik-Fachrichtung-Montagetechnik-%28wmd%29-2027-26703/1411220333/',
-               'format': 'html',
-               'sha256': '143a6d30ecf9d59fea868f56a7831322e83fb5ba1e8cccdf411e6849585bba9f',
-               'role': 'German individual all-level detail'},
- 'input-022': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fahrzeuglackiererin-Fahrzeuglackierer-%28wmd%29-2027-26703/1405499833/',
-               'format': 'html',
-               'sha256': '8e9d548abfe708965f18c75f9d17cb96fe14ee843b8cd9190d584aef15b67392',
-               'role': 'German individual all-level detail'},
- 'input-023': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Industrieelektrikerin-Industrieelektriker-%28wmd%29-2027-26703/1407808033/',
-               'format': 'html',
-               'sha256': '29bb6c916395f2ed7f48c56f0438e8efaa2e72adf0c20db2c790d83a2fb782fa',
-               'role': 'German individual all-level detail'},
- 'input-024': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-26703/1413696133/',
-               'format': 'html',
-               'sha256': 'c064dcfb2d1e015ae2c9ffd69a18e1c00798c044326241c5755bf8c88d7a209c',
-               'role': 'German individual all-level detail'},
- 'input-025': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Kfz-Mechatronikerin-Kfz-Mechatroniker-f%C3%BCr-System-&-Hochvolttechnik-%28wmd%29-2027-26703/1405507733/',
-               'format': 'html',
-               'sha256': '41cd60ce8619bd075c8a414423c7625afcbf522dd9fbfc042340088c73f0e061',
-               'role': 'German individual all-level detail'},
- 'input-026': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-26703/1410689633/',
-               'format': 'html',
-               'sha256': 'c6bb59d6f35bcef81a6053805aca13116d666e986bd6268f9fdd60152be9d39c',
-               'role': 'German individual all-level detail'},
- 'input-027': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Technische-Produktdesignerin-Technischer-Produktdesigner-%28wmd%29-2027-26703/1413714833/',
-               'format': 'html',
-               'sha256': '5f88a493e988b82a23d4eabe0abc3c23e3c60db280cfd7f4918d8832343d321e',
-               'role': 'German individual all-level detail'},
- 'input-028': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-26703/1407832133/',
-               'format': 'html',
-               'sha256': 'c880fe87f1746ff0c1423e358737096e72cbd97b06613e3d48db5a2be8cc39b1',
-               'role': 'German individual all-level detail'},
- 'input-029': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Werkzeugmechanikerin-Werkzeugmechaniker-%28wmd%29-2027-26703/1413725433/',
-               'format': 'html',
-               'sha256': '53cfd01480c513d00c51081beb964870ca988a36503f4b28d36339ce51cbdc8c',
-               'role': 'German individual all-level detail'},
- 'input-030': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Duales-Studium-Elektrotechnik-%28wmd%29-2027-26703/1414143533/',
-               'format': 'html',
-               'sha256': '7d7db766eb68cd4cae61abc73b126b5456dd2994657c928ecb7c21b390b32d8b',
-               'role': 'German individual all-level detail'},
- 'input-031': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Praktikum-Operative-Automatisierungstechnik-%28wmd%29-26723/1442221833/',
-               'format': 'html',
-               'sha256': '2eddf95c89b9d360ce513b77866589dfde2c230297101afcea037593ff8ed299',
-               'role': 'German individual all-level detail'},
- 'input-032': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-30419/1411198733/',
-               'format': 'html',
-               'sha256': '57dfb9c799a24f29ac952dca5f8c465f1d94471e5b444463a2d447cc890a3517',
-               'role': 'German individual all-level detail'},
- 'input-033': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-30419/1415635033/',
-               'format': 'html',
-               'sha256': (
-                   '1be1fc6c2da85cde83e00f3d431323f2'
-                   '892e3ed722debccdbe6115ace764f76b'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-034': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-30419/1415645233/',
-               'format': 'html',
-               'sha256': (
-                   '6b5cb9bf9c5e124c77d89d3c165ceb10'
-                   'e0737175811464e5818f31da46de660b'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-035': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-30419/1413693433/',
-               'format': 'html',
-               'sha256': '2ad228ea3b6714e78390c71d5d617941bae72d48a699a47186c4d94d62ab835d',
-               'role': 'German individual all-level detail'},
- 'input-036': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Kraftfahrzeugmechatronikerin-Kraftfahrzeugmechatroniker-%28wmd%29-2027-30419/1413701733/',
-               'format': 'html',
-               'sha256': '9efca1287a6db4d1870de6b32ddb997d8faebf276085f67ba7c2492bff0b372b',
-               'role': 'German individual all-level detail'},
- 'input-037': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-30419/1413708433/',
-               'format': 'html',
-               'sha256': '09d160a5b9a9979ecd4b7f8ec98d5e0daea1b034498c7dfd1bcbff7202abb300',
-               'role': 'German individual all-level detail'},
- 'input-038': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-30419/1413717433/',
-               'format': 'html',
-               'sha256': '45f80f98e808dcc55bbe3f39c35cad11726758e238f4272f7c2279d3592e2a08',
-               'role': 'German individual all-level detail'},
- 'input-039': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-30419/1415741333/',
-               'format': 'html',
-               'sha256': (
-                   '1ca04e903ce249bb56513281680e7f23'
-                   '744e5f8d55bd5350cdfe3c749fa42b8e'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-040': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-30419/1415752133/',
-               'format': 'html',
-               'sha256': (
-                   '8d929555218bba42f8299fae810eb773'
-                   '36cba15012b762a27811055a9f35dce9'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-041': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Beschaffung-Interieur-%28wmd%29-30419/1441031833/',
-               'format': 'html',
-               'sha256': 'e70a0c0e5694a91db9a60ef4f440a8ef793e5997d1c68fa0b07aed8747afcaad',
-               'role': 'German individual all-level detail'},
- 'input-042': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Data-Analytics%2C-Business-Intelligence-&-K%C3%BCnstliche-Intelligenz-%28wmd%29-30419/1446004133/',
-               'format': 'html',
-               'sha256': (
-                   '966699ddb20642eb89a21346acd7f036'
-                   '82b9c3e42db1aad98d69c1795aef57e2'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-043': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Inboundlogistik-Just-in-Sequence-%28wmd%29-30419/1443606233/',
-               'format': 'html',
-               'sha256': 'ad606364edc639c1ba36ba5a18409f153f57fb5b5d2653f360f750da2402c60e',
-               'role': 'German individual all-level detail'},
- 'input-044': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Lackiererei-%28wmd%29-30419/1433367433/',
-               'format': 'html',
-               'sha256': '7c0177e855be11fada316fbb49716b9ce532314a304e823a2230a16063aa8982',
-               'role': 'German individual all-level detail'},
- 'input-045': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Produktmanagement-ID_-Buzz-%28wmd%29-30419/1441033733/',
-               'format': 'html',
-               'sha256': 'fdfcc9c0d151612c1f256897e3d089fb5e1dc4488a0e6d38cd6f47ff4776d415',
-               'role': 'German individual all-level detail'},
- 'input-046': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Produktstrategie-%28wmd%29-30419/1446026333/',
-               'format': 'html',
-               'sha256': 'b47823cab2a1861a1e15f8962a9212db4da9935302d9fbefa68230283075274f',
-               'role': 'German individual all-level detail'},
- 'input-047': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vertrieb-Europa-%28wmd%29-30419/1401231733/',
-               'format': 'html',
-               'sha256': '91017c185d5e36fede1b0aff57dbb12bb3b2d3dccd0c510074d14acbd500ee08',
-               'role': 'German individual all-level detail'},
- 'input-048': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vertriebscontrolling-%28wmd%29-30419/1443903833/',
-               'format': 'html',
-               'sha256': '279426bc4bebcfa4d40c11e5230df9b4f5590ffdc60143b696a0207c4cddac41',
-               'role': 'German individual all-level detail'},
- 'input-049': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vorserienlogistik-%28wmd%29-30419/1433366233/',
-               'format': 'html',
-               'sha256': '7e230350659d61098460a2e8389783dfa07da560310a58ece8cffcbfe7b3bf1d',
-               'role': 'German individual all-level detail'},
- 'input-050': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Camper-Experience-California-App-%28wmd%29-30419/1441022933/',
-               'format': 'html',
-               'sha256': '308db82aaec8bb600708e9a281b458914d24993e5080a64ebe0a37b9db959cab',
-               'role': 'German individual all-level detail'},
- 'input-051': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-E-Commerce-Management-%28mwd%29-30419/1441028633/',
-               'format': 'html',
-               'sha256': 'd88a611770474cc6554592a91608bcae97b173e108614b4843f48eec90f8414a',
-               'role': 'German individual all-level detail'},
- 'input-052': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Finanzsteuerung-%28wmd%29-30419/1441366633/',
-               'format': 'html',
-               'sha256': 'dc5965743838ed1ba48876befa589c68ab3986be1c12d6214d5d2afec01573d0',
-               'role': 'German individual all-level detail'},
- 'input-053': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Produktmarketing-California-Fahrzeuge-%28wmd%29-30419/1446062133/',
-               'format': 'html',
-               'sha256': 'ddab0c73b5cd6d3789ce12e485514067903f59dbdf46d44bab9608517820be6c',
-               'role': 'German individual all-level detail'},
- 'input-054': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Projektmanagement-Filmstudio-%28wmd%29-30419/1441374733/',
-               'format': 'html',
-               'sha256': '8623dd9ccf2d6d2f45e8200408146f120ef902431e60d408879f5576a1243432',
-               'role': 'German individual all-level detail'},
- 'input-055': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Verkaufsplanung-Deutschland-%28wmd%29-30419/1437959833/',
-               'format': 'html',
-               'sha256': '876bf36f390ef4a9708b93701bc55514994bfdd3cad869d40ec1351fcee422d3',
-               'role': 'German individual all-level detail'},
- 'input-056': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-34219/1405053833/',
-               'format': 'html',
-               'sha256': '0f0f65f7206310ff1d715e7baea83dfc1ea4e36a97329cb1109d627229704fe4',
-               'role': 'German individual all-level detail'},
- 'input-057': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Lagerlogistik-%28wmd%29-2027-34219/1404986633/',
-               'format': 'html',
-               'sha256': 'f288ea0f96885b827ae16e072b7a102c1f99787818c87c65091be97c8b53e62a',
-               'role': 'German individual all-level detail'},
- 'input-058': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Schutz-und-Sicherheit-%28wmd%29-2027-34219/1412368133/',
-               'format': 'html',
-               'sha256': 'a1ecfda38ee67383643517d3ac09756e876d9ba24ba1afde4d0c94fe33f68b87',
-               'role': 'German individual all-level detail'},
- 'input-059': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-34219/1405067033/',
-               'format': 'html',
-               'sha256': '0d240020b8b6c3b6a0445e8ff79d7534c654d468066918df67820f86dd2b5d52',
-               'role': 'German individual all-level detail'},
- 'input-060': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Gie%C3%9Fereimechanikerin-Gie%C3%9Fereimechaniker-f%C3%BCr-Druck-und-Kokillenguss-%28wmd%29-2027-34219/1405395933/',
-               'format': 'html',
-               'sha256': 'd92915f55ef08769a9e299ad609c51702545ed7d7740478398db95cdce4318b5',
-               'role': 'German individual all-level detail'},
- 'input-061': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-IT-Systemelektronikerin-IT-Systemelektroniker-%28wmd%29-2027-34219/1405034433/',
-               'format': 'html',
-               'sha256': '5e79da88bbff52e2722dfdf147af9ec4fef339df47494e1a07dcae9f412a3413',
-               'role': 'German individual all-level detail'},
- 'input-062': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-34219/1405439533/',
-               'format': 'html',
-               'sha256': '1ad24c37728187fe44e98ace36d892f732de442fa1163750a5ddd32c2e3dc30b',
-               'role': 'German individual all-level detail'},
- 'input-063': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-34219/1405072933/',
-               'format': 'html',
-               'sha256': '66a3460d33a24a452642bdd4d2014dd05d4539772e3f1218cc3ebf5ce5795ed3',
-               'role': 'German individual all-level detail'},
- 'input-064': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-34219/1405077633/',
-               'format': 'html',
-               'sha256': 'dfd8ac927ce165bb1011a0cb0f1ab2d3da7ace1f2c1cc58e4dc22ff7d2020780',
-               'role': 'German individual all-level detail'},
- 'input-065': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Werkstoffpr%C3%BCferin-Werkstoffpr%C3%BCfer-%28wmd%29-2027-34219/1405421433/',
-               'format': 'html',
-               'sha256': '7753a7cb351f2b4e10741a31bb063bd712e9a85359a4e60366e886ea0af2d571',
-               'role': 'German individual all-level detail'},
- 'input-066': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Elektrotechnik-%28wmd%29-2027-34219/1405084733/',
-               'format': 'html',
-               'sha256': 'a84d4f89723ce3fb5436ea5254b356e9f92849bf230d5630d0fb7a2614957680',
-               'role': 'German individual all-level detail'},
- 'input-067': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Maschinenbau-%28wmd%29-2027-34219/1405120333/',
-               'format': 'html',
-               'sha256': 'fd79fc76d1351a5f8f15860e6f1ec5175619228bc64d46bdfe3587f299ce2737',
-               'role': 'German individual all-level detail'},
- 'input-068': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Maschinenbau-Schwerpunkt-Gie%C3%9Fereitechnik-%28wmd%29-2027-34219/1405124733/',
-               'format': 'html',
-               'sha256': 'd1c05035a4235003aa20cebad95638d6eb2bb592d4ee55463b54aa30ed4509b9',
-               'role': 'German individual all-level detail'},
- 'input-069': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-34219/1415578133/',
-               'format': 'html',
-               'sha256': (
-                   'e76ff3958a156ef1d36de7b68531d60d'
-                   '0e5b33c1300408f2f708e077197399e7'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-070': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Elektrotechnik-%28wmd%29-2027-34219/1405129433/',
-               'format': 'html',
-               'sha256': 'f3814b86079ae694e2283462d2aaf24a82d28e1cd95e51b4188a8a1a5b93584e',
-               'role': 'German individual all-level detail'},
- 'input-071': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Maschinenbau-%28wmd%29-2027-34219/1405136533/',
-               'format': 'html',
-               'sha256': '87ec12263e94a10ff56e2e153667eaca7b830d185b74ba6253513fb4ec3f0698',
-               'role': 'German individual all-level detail'},
- 'input-072': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Praktikum-Erprobung-Antriebsmodule-%28wmd%29-34219/1435589233/',
-               'format': 'html',
-               'sha256': 'a56fccc1c0296255bed680ae0928b4e5ebb2b57f145d2b8e012561624fbf7375',
-               'role': 'German individual all-level detail'},
- 'input-073': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Werkstudentin-Werkstudent-After-Sales-Supply-Chain-%28wmd%29-34219/1445550633/',
-               'format': 'html',
-               'sha256': '7f2c6bd6577a87760161ab5df27b4e6f6b5deca0e16b49ce480b5b169edf61bd',
-               'role': 'German individual all-level detail'},
- 'input-074': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Werkstudentin-Werkstudent-Fertigungsprozessentwicklung-E-Antrieb-%28wmd%29-34219/1445572433/',
-               'format': 'html',
-               'sha256': '7bb6c40a0ebc1401cf8e58b82cb51c60b63344cbc3cc9310cf571d0b7a16abd6',
-               'role': 'German individual all-level detail'},
- 'input-075': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-CO2-Einsatz-als-Rohstoff-inkl_-Analytik-%28wmd%29/1426505833/',
-               'format': 'html',
-               'sha256': (
-                   '5adb91a4936eaf6176705c874455e12b'
-                   '40ff13335183a33e3ab2d62bd9bbad33'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-076': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-Kunststoffrecycling-%28wmd%29/1444149733/',
-               'format': 'html',
-               'sha256': 'e018d92fe268a618071bc282bd1d81234f972adabcc0eeea651584f1cb969f0a',
-               'role': 'German individual all-level detail'},
- 'input-077': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Chemielaborantin-Chemielaborant-%28wmd%29-2027-38231/1410618533/',
-               'format': 'html',
-               'sha256': '16b1b25953f6d95b3e52569f5d7918d74a45949c56db3224f7894869ac75f49c',
-               'role': 'German individual all-level detail'},
- 'input-078': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38231/1410619933/',
-               'format': 'html',
-               'sha256': '3174cc3f99d49b68816e124c34dabd806f65f264b6627e758f3b8a15b225209c',
-               'role': 'German individual all-level detail'},
- 'input-079': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38231/1410620633/',
-               'format': 'html',
-               'sha256': 'e8f777ad904e8835867c74cd74ebd543c01c5868571ccc9f04b1d2d2dbdcb514',
-               'role': 'German individual all-level detail'},
- 'input-080': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38231/1410622633/',
-               'format': 'html',
-               'sha256': '09473ea0151517c7537eafff5fe9c2cbce08c03d9ffff9e11ae235343c139a59',
-               'role': 'German individual all-level detail'},
- 'input-081': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38231/1410623433/',
-               'format': 'html',
-               'sha256': '1bde6872a703d91341a2390a133ba986f7829f4753ad60efbb1f014df05762f8',
-               'role': 'German individual all-level detail'},
- 'input-082': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Batterie-und-Wasserstofftechnologie-%28wmd%29-2027-38231/1410627233/',
-               'format': 'html',
-               'sha256': 'ee0f18a3f0b5f13636c87981552a357683efe439312db00ddc321570c5e3cde5',
-               'role': 'German individual all-level detail'},
- 'input-083': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Chemie-%28wmd%29-2027-38231/1410628733/',
-               'format': 'html',
-               'sha256': '03e2448aa210f0b0a91ab768ebec52aec5a8f508ee8acf1c0bc0a210ae1c4542',
-               'role': 'German individual all-level detail'},
- 'input-084': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Chemieingenieurwesen-%28wmd%29-2027-38231/1410629233/',
-               'format': 'html',
-               'sha256': '4dec8075c1923948b0b920b81b31e788f4021e4dbeffdfa488c55c14be4ec0f0',
-               'role': 'German individual all-level detail'},
- 'input-085': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38231/1410645533/',
-               'format': 'html',
-               'sha256': 'c0202b9fb509506316357d44e8c59293a3f8ef4d3210bb8e15ef980fa92011b4',
-               'role': 'German individual all-level detail'},
- 'input-086': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-38231/1410635133/',
-               'format': 'html',
-               'sha256': '1e3b4fa0166d898dd3a3cfb29e675dabf83c8fc06b62ae77264e5914dabc1669',
-               'role': 'German individual all-level detail'},
- 'input-087': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Internship-Battery-Cell-Technology-Development-%28fmd%29-38231/1438371433/',
-               'format': 'html',
-               'sha256': '8850b7a64a95f19341c63a5fe045847217541be837560c0b62c27f6ed40bf5f6',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-088': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Praktikum-Entwicklung-Batteriezelle-%28wmd%29-38231/1437461733/',
-               'format': 'html',
-               'sha256': '4f4381637e42d66d26bf945470054ba0f21f85014956b665f23c9ca6a2340f58',
-               'role': 'German individual all-level detail'},
- 'input-089': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-%28Senior%29-Consultant%2C-Project-Manager-Volkswagen-Group-Consulting-%28wmd%29-38436/1407460233/',
-               'format': 'html',
-               'sha256': 'f4452efcb0ba58b535aa0dc9d740d5d428101ea03c5396b3941e8e7495aee9f0',
-               'role': 'German individual all-level detail'},
- 'input-090': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Abschlussarbeit-%28Master%29-Klimatisierung-%28wmd%29-38436/1390265033/',
-               'format': 'html',
-               'sha256': '07ef2be92ccf060efb238e00393e2321b3141090f26a05b0267701a6a305a16f',
-               'role': 'German individual all-level detail'},
- 'input-091': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Abschlussarbeit-Aerodynamik-%28wmd%29-38436/1391398833/',
-               'format': 'html',
-               'sha256': 'e6275da45613299956f666fc8f2461f2bf24bf7802a936243d5b7fb5b91a0403',
-               'role': 'German individual all-level detail'},
- 'input-092': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Apprenticeship%2C-Internship-&-Academic-Programs-%28fmd%29-38436/1437940733/',
-               'format': 'html',
-               'sha256': 'baf68c993e158d706040ad6fac7109a63dd1a8828321c0b49f3649c79b330d99',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-093': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Apprenticeship%2C-Internship-&-Academic-Programs-%28fmd%29-38440/1435700133/',
-               'format': 'html',
-               'sha256': 'a2efa90ece0b27b4df8f7baeca587531efc151648765cc15ae1a471877f3f16f',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-094': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Associate-Principal-oder-Senior-Project-Manager-in-der-Volkswagen-Group-Consulting-%28wmd%29-38436/1024301901/',
-               'format': 'html',
-               'sha256': (
-                   '28fccb74fe8541210a8f227a66f81e14'
-                   '99d5c0dd6c11cd5a32e15e08168af98b'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-095': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38436/1411195433/',
-               'format': 'html',
-               'sha256': 'e310aa43d8c09bd7dac357c8518d1e8b40d5fd6a4229dc0983ca2fba04b0dc45',
-               'role': 'German individual all-level detail'},
- 'input-096': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38436/1411191933/',
-               'format': 'html',
-               'sha256': 'd53f99f660e0eb4f36370f73d580b504d9f2f6980955d03599e194862aa08152',
-               'role': 'German individual all-level detail'},
- 'input-097': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fachkraft-f%C3%BCr-Schutz-und-Sicherheit-%28wmd%29-2027-38436/1413683433/',
-               'format': 'html',
-               'sha256': '1c45f9c6f7fc03804ceb99f0ac48be0b1fe59b3748dce13ccc4ec8997e907042',
-               'role': 'German individual all-level detail'},
- 'input-098': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-38436/1413678933/',
-               'format': 'html',
-               'sha256': 'cb078245348b22caad583e0da89120959a762d385bcde49b93f81bc2891af24a',
-               'role': 'German individual all-level detail'},
- 'input-099': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-38436/1413686333/',
-               'format': 'html',
-               'sha256': 'e19b4a5f836024536c984b438366ab874f00f7f8530b36ce8efe45a75fe5de1c',
-               'role': 'German individual all-level detail'},
- 'input-100': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Gie%C3%9Fereimechanikerin-Gie%C3%9Fereimechaniker-f%C3%BCr-Druck-und-Kokillenguss-%28wmd%29-2027-38436/1413688333/',
-               'format': 'html',
-               'sha256': '49c282e7936d3f5143a88af3b0963b5f1b8ae5fc8a064e505af8999ee4f356e9',
-               'role': 'German individual all-level detail'},
- 'input-101': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Industriekauffrau-Industriekaufmann-%28wmd%29-2027-38436/1401796233/',
-               'format': 'html',
-               'sha256': '9b571bff10c6f274cee185b92499bf301574ee698a85187c0cb326fd04d02d62',
-               'role': 'German individual all-level detail'},
- 'input-102': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38436/1413691833/',
-               'format': 'html',
-               'sha256': '008ba65fffdecc206824b4dd3cf94dbe9f196bc9e47ae9ff1d489bf8a0c7a706',
-               'role': 'German individual all-level detail'},
- 'input-103': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-K%C3%B6chin-Koch-%28wmd%29-2027-38436/1413700133/',
-               'format': 'html',
-               'sha256': 'c05284e44abbb54b212aefb98b67aa26158bba19b74923b0d07f6f03af7cf57d',
-               'role': 'German individual all-level detail'},
- 'input-104': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kauffrau-Kaufmann-f%C3%BCr-B%C3%BCromanagement-%28wmd%29-2027-38436/1401809933/',
-               'format': 'html',
-               'sha256': 'c803e81164b8390eb732738ff9beed6d0befc34500b738a1db49c1144dd3202f',
-               'role': 'German individual all-level detail'},
- 'input-105': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kauffrau-Kaufmann-f%C3%BCr-Digitalisierungsmanagement-%28wmd%29-2027-38436/1401791333/',
-               'format': 'html',
-               'sha256': 'fae8f865d1431c604ae3704466ebe7f46c517b1023c2d6089515cc12ef6e1942',
-               'role': 'German individual all-level detail'},
- 'input-106': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kfz-Mechatronikerin-Kfz-Mechatroniker-f%C3%BCr-System-&-Hochvolttechnik-%28wmd%29-2027-38436/1413704833/',
-               'format': 'html',
-               'sha256': '26c66af1b94c4aa7a05dde44e253cc491745031eeccaaf4fa3926e2b34ce207f',
-               'role': 'German individual all-level detail'},
- 'input-107': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-38436/1413707733/',
-               'format': 'html',
-               'sha256': 'de3507dc27026d905a2e9ced6d9aee816dbeb30e9963a0500187c0cb109ecf8d',
-               'role': 'German individual all-level detail'},
- 'input-108': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Mediengestalterin-Mediengestalter-Digital-und-Print-%28wmd%29-2027-38436/1407959133/',
-               'format': 'html',
-               'sha256': '62ed41d8f7f46c58a7ea1314e54cfbd144e14ef46a0ac9644265a813e34639f6',
-               'role': 'German individual all-level detail'},
- 'input-109': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Medientechnologin-Medientechnologe-Druck-%28wmd%29-2027-38436/1413711833/',
-               'format': 'html',
-               'sha256': 'ccbee81619debe27ded650c3a308c52dff30a7d458093b4b370d4444b2ef1176',
-               'role': 'German individual all-level detail'},
- 'input-110': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38436/1413716033/',
-               'format': 'html',
-               'sha256': 'dbf5f5474e2ddb354feab53668d0131fe1d5e123834666e58b304d320ecfb693',
-               'role': 'German individual all-level detail'},
- 'input-111': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38436/1415714633/',
-               'format': 'html',
-               'sha256': (
-                   'd9d21714d388312c3bb4a3027f26d5a4'
-                   'b9276eadca5bb1f891ded21356bb4299'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-112': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Elektro-und-Informations%C2%ADtechnik-%28wmd%29-2027-38436/1415718033/',
-               'format': 'html',
-               'sha256': (
-                   '5f90df679860c74ed7cc362fd7d18ea8'
-                   '0732d2a63b7706b33c9117dc9eee2b6e'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-113': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-WING-Elektro-und-Informationstechnik-%28wmd%29-2027-38436/1415719733/',
-               'format': 'html',
-               'sha256': (
-                   '4e4e97b507e6c70778fa62072a15d892'
-                   '24cbf7efc50b1c82aa4fec3882ee543e'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-114': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Wirtschaftsingenieurwesen-Maschinenbau-%28wmd%29-2027-38436/1415722433/',
-               'format': 'html',
-               'sha256': (
-                   '138bfe9a90bc6fd66208cf61241f7998'
-                   'd58ee2e1c1173cdbca7fc687f99c78bd'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-115': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1407454333/',
-               'format': 'html',
-               'sha256': 'a5a18ec25fb2854d2d3c46d91adb6bad2ac34d27974c1a0103814fad8242ce96',
-               'role': 'German individual all-level detail'},
- 'input-116': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Director-Mergers-&-Acquisitions-%28wmd%29-38436/1257912701/',
-               'format': 'html',
-               'sha256': 'a97ca68621fc0d4ee1503896c7cd84db62e4894dc08826dc901e92a207020238',
-               'role': 'German individual all-level detail'},
- 'input-117': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Director-Mergers-&-Acquisitions-%28wmd%29-38436/1257913701/',
-               'format': 'html',
-               'sha256': '37441266cdef22fbdf246d6d08da0128c2af3c0c77e688b5972ebd5464b03330',
-               'role': 'German individual all-level detail'},
- 'input-118': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-Entwicklung-AI%E2%80%91Native-Entwicklungsmodelle-&-virtuelle-KI%E2%80%91Agenten-%28wmd%29-38436/1406590533/',
-               'format': 'html',
-               'sha256': '37ea1fabe9bc1ebc6864c08410ca8b6419db592ea95d1d2ef91223b842970952',
-               'role': 'German individual all-level detail'},
- 'input-119': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-KI-Systeme-Prozessplanung-Automobilproduktion-%28wmd%29-38436/1441334833/',
-               'format': 'html',
-               'sha256': 'fb70884a3938e7cf5fb6914e71cde1c59651c27b0bafe5b13298b132e7f56951',
-               'role': 'German individual all-level detail'},
- 'input-120': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-KI-gest%C3%BCtzte-globale-Kundenfeedback-und-Entscheidungsplattformen-%28wmd%29-38436/1434081033/',
-               'format': 'html',
-               'sha256': 'f5daf5d6dc167c66fcb5224a843f82cfd9dfe4e542e4fd3916564c6cbdfa8583',
-               'role': 'German individual all-level detail'},
- 'input-121': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-Leistungselektronik-%28wmd%29-38436/1440148933/',
-               'format': 'html',
-               'sha256': 'b1a8489e9670331aa4400480ece33feb9ba45d8baa19729b3de1ea6f3f527e19',
-               'role': 'German individual all-level detail'},
- 'input-122': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-AI-Engineering-%28wmd%29-2027-38436/1444719633/',
-               'format': 'html',
-               'sha256': (
-                   'de5bbbac655a4319b6c175c4bc568edd'
-                   '592578af01cce35c8b446dcef7be6c05'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-123': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Bauingenieurwesen-%28wmd%29-2027-38436/1415728933/',
-               'format': 'html',
-               'sha256': (
-                   'b1a8a7d79e0c2f65ca1c39daecff74f7'
-                   '270cd9da4f6d2fed0801932fbbeee3f8'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-124': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Betriebswirtschaft-%28wmd%29-2027-38436/1415731233/',
-               'format': 'html',
-               'sha256': (
-                   '877df07929bb61579fcfa3c4985ed804'
-                   '98550b800708f95a20c9a4f73c11cbef'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-125': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Chemie-%28wmd%29-2027-38436/1415727933/',
-               'format': 'html',
-               'sha256': (
-                   'ba675aa2b13f88483202154f8d181c8c'
-                   '9244c8f7003392c7a0704fbd570e96b0'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-126': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Energie-und-Geb%C3%A4udetechnik-%28wmd%29-2027-38436/1415742833/',
-               'format': 'html',
-               'sha256': (
-                   '7af5676cae4209a8e2a1c3a98fb8dd50'
-                   'd0d19ddab8e77f2e770f7fd75043d09b'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-127': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38436/1415744133/',
-               'format': 'html',
-               'sha256': (
-                   'f3d70ec1fd1b324b6b6949800c7c21ef'
-                   'd5901f50e8a500b70704dcdb0229cab0'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-128': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeugtechnik-%28wmd%29-2027-38436/1415746333/',
-               'format': 'html',
-               'sha256': (
-                   '75ddcd9a3c4a25f7a34bf5cd35a88b65'
-                   'fa111331b6d001f82e5ac9912f470f01'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-129': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Informatik-%28wmd%29-2027-38436/1415749433/',
-               'format': 'html',
-               'sha256': (
-                   '49c83a6a6dcd22ab810892dffb7b4d9b'
-                   'ce18ff4f8a711074e3e6cdb1fd221461'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-130': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-38436/1415753733/',
-               'format': 'html',
-               'sha256': (
-                   'd225db92d5c393fa824806c33a45d1f6'
-                   'd84c079ceda4d38a3946b4fe5ea80dcb'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-131': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Internationales-Management-%28wmd%29-2027-38436/1415756733/',
-               'format': 'html',
-               'sha256': (
-                   '9c26ab8b9ee2b8195915f9975a664c4a'
-                   '0bf9a1971aa5d167ed8c54d23c53980d'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-132': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Lehramt-Bildung-Beruf%2C-Fachrichtung-Wirtschaft-und-Verwaltung-%28wmd%29-2027-38436/1415762233/',
-               'format': 'html',
-               'sha256': (
-                   '9f30e8b5c98d469d1d970290e3da67aa'
-                   'f852e7f2acf0b026b595c8b7b4bb4680'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-133': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Logistik-und-Informationsmanagement-%28wmd%29-2027-38436/1415763933/',
-               'format': 'html',
-               'sha256': (
-                   'ed6d24c61788678679ee6529499cd6af'
-                   '15e2739b4cd5c8fb8f9c0c1542c8773d'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-134': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Materialwissenschaft-und-Werkzeugtechnik-%28wmd%29-2027-38436/1415767533/',
-               'format': 'html',
-               'sha256': (
-                   '902fa79931e1b2ae6834dab3803c0f28'
-                   '1a0a9bd9243ba12aa1227e675c9c02b0'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-135': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Smart-Vehicle-Systems-%28wmd%29-2027-38436/1415770133/',
-               'format': 'html',
-               'sha256': (
-                   '42482c85df1e3ed4198e056f7dc877ef'
-                   'f5e1de87dd3df2c6867dd39e829e08ce'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-136': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-38436/1415771433/',
-               'format': 'html',
-               'sha256': (
-                   '4d5a3c8c74bab721142a254345bdd26e'
-                   '3bc7af65d6f4a36b26f89f5794ff51c2'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-137': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsingenieur-Logistik-%28wmd%29-2027-38436/1415778433/',
-               'format': 'html',
-               'sha256': (
-                   '104ded6de6cf37e949cbfa6123da22c4'
-                   '3c902bfe2da026bc0139637dda698b5a'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-138': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Fach%C3%A4rztin-Facharzt-%28in-Weiterbildung%29-f%C3%BCr-Arbeitsmedizin-%28wmd%29-38436/1372918933/',
-               'format': 'html',
-               'sha256': '2dd402cf9d2776bae47cd7dfc91658e2ba9cb94eba51110b667ecb69de56f64c',
-               'role': 'German individual all-level detail'},
- 'input-139': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Masterabschlussarbeit-Cybersecurity-%28wmd%29-38436/1432396533/',
-               'format': 'html',
-               'sha256': 'dbe45ef38f8ea2bfec4ab002d6955d3ceabcf5729a2e4ddd7ab8d872f150d7c9',
-               'role': 'German individual all-level detail'},
- 'input-140': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Masterarbeit-Virtuelle-Absicherung-%28wmd%29-38436/1446057233/',
-               'format': 'html',
-               'sha256': 'fb149d3a46cdbd5e688f1cc0777147bbcadf8491264408d25a8ab39d959c04e5',
-               'role': 'German individual all-level detail'},
- 'input-141': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-PhD-Student-AI-driven-Global-Customer-Feedback-And-Decision-making-Platforms-%28fmd%29-38436/1434081133/',
-               'format': 'html',
-               'sha256': '4ed52839371199c20b9553975a18f971f7b3989769b2fb5db59b1b3cb9bd8eb8',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-142': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-PhD-Student-Agentic-AI-Process-Design-Automotive-Production-%28fmd%29-38436/1441334933/',
-               'format': 'html',
-               'sha256': 'ceb62ea3c0f7bb0129c46b81a1e0d3ddebd88057eb83826ef41f1cb88086dbfc',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-143': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-PhD-Student-Development-AI%E2%80%91Native-Development-Models-&-Virtual-AI-Agents-%28fmd%29-38436/1406590633/',
-               'format': 'html',
-               'sha256': '306ba4ae8b8b3031f9d772d149076ef4fbed57143e296482f4d5079fb9fd1009',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-144': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-PhD-Student-Power-Electronics-%28fmd%29-38436/1440149033/',
-               'format': 'html',
-               'sha256': '87f38bb27b3b4496dbe421f8776c0248ecf770f39af72c1ba35d7ee5a3617d49',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-145': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Customer-Data-Analytics-&-AI-%28wmd%29-38436/1427423533/',
-               'format': 'html',
-               'sha256': '97a340baecf6bb767cc6463a5dc907de07249d9a351b69e6963ed6b0b5c5d73b',
-               'role': 'German individual all-level detail'},
- 'input-146': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Design-Interieur-%28wmd%29-38436/1445518133/',
-               'format': 'html',
-               'sha256': 'e1583fcb923acece099fdd39c56361d435e83831a5b38e68b68100ff120ac979',
-               'role': 'German individual all-level detail'},
- 'input-147': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Gefahrstoffanalytik-%28wmd%29-38436/1432775533/',
-               'format': 'html',
-               'sha256': '370c71214c6fdc54ba0f4a704aeb410d69b76544839fa60a1dff5e9721563ad3',
-               'role': 'German individual all-level detail'},
- 'input-148': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-W%C3%A4rmeleitung-%28wmd%29-38436/1439987633/',
-               'format': 'html',
-               'sha256': (
-                   'e3f0846cc198176fdce4941b93a72013'
-                   '40d8ed187e7da201cdea872e24ad2a87'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-149': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Bedarfs-&-Anforderungsmanagement-%28wmd%29-38436/1432777033/',
-               'format': 'html',
-               'sha256': 'f01aca2ed49ab82eae24981f690e96cc0cac22d6a47d4b29d2bcdc0db0baf3e2',
-               'role': 'German individual all-level detail'},
- 'input-150': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Presswerk-%28wmd%29-38436/1433294733/',
-               'format': 'html',
-               'sha256': (
-                   'c9851a574fe62fd18f40d6cc16efc2be'
-                   '31c922305f8abeda3ba6f5abefc097d8'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-151': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Werklogistik-%28wmd%29-38436/1437940633/',
-               'format': 'html',
-               'sha256': '1dbb82bd758d6817494a1237b2aade096ba7cfc83a21847d575254900596b6cc',
-               'role': 'German individual all-level detail'},
- 'input-152': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Entwicklung-Karosseriefunktionen-%28wmd%29-38436/1435699833/',
-               'format': 'html',
-               'sha256': 'dae6f78dd52fe92f222033d2543b62bab7030be7d954796a99150c5621dd2a93',
-               'role': 'German individual all-level detail'},
- 'input-153': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Global-Assignments-Steuern-und-Sozialversicherung-%28wmd%29-38436/1382060033/',
-               'format': 'html',
-               'sha256': '399b1a056b24d4b26de4c21c074032a5c404a3a8c047de689e8372743ae22fa6',
-               'role': 'German individual all-level detail'},
- 'input-154': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Grundierung-Korrosionsschutz-Klebstoffe-%28wmd%29-38436/1433292633/',
-               'format': 'html',
-               'sha256': '68bfd36b087636d89618fe80dc7ea0adfd5c6084e6e9cd13e3bfd3da0e10b427',
-               'role': 'German individual all-level detail'},
- 'input-155': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Human-Factors-%28wmd%29-38436/1426504333/',
-               'format': 'html',
-               'sha256': (
-                   '009d3543958cf1e3a5ec81be994b4089'
-                   'b622da98ec32ee5379df71d2c2b4e6ab'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-156': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Marketing-Campaigns-&-Content-%28wmd%29-38436/1388391933/',
-               'format': 'html',
-               'sha256': 'b9f531868a61a5e59c245b21ed41fb317a26e2cb19eb50a1d94fdc5d4b502a4f',
-               'role': 'German individual all-level detail'},
- 'input-157': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Used-Car-Strategy-%28wmd%29-38436/1440469833/',
-               'format': 'html',
-               'sha256': '2dfb88fc0f92c9d1c819e00aedd6a864553c693870c130fb50b070e89757f10c',
-               'role': 'German individual all-level detail'},
- 'input-158': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Kommunikation-%28wmd%29-38440/1401771333/',
-               'format': 'html',
-               'sha256': '914018dfd655c296fc669c1403dd43bc31879a103f8ca0fe1b348aecd0906f94',
-               'role': 'German individual all-level detail'},
- 'input-159': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Konzernbeschaffung-Produktanl%C3%A4ufe-MEB-%28wmd%29-38436/1441415633/',
-               'format': 'html',
-               'sha256': '3b6cc50c8e71f94878b86adec4857bdd8be0b9c578cf40bd3347edaa59170825',
-               'role': 'German individual all-level detail'},
- 'input-160': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-1-&-4-%28wmd%29-38436/1437981133/',
-               'format': 'html',
-               'sha256': '9f43ff361aafa513f738d31ed2131351266459626a7cef0612cb4a780fa47abd',
-               'role': 'German individual all-level detail'},
- 'input-161': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-Golf-%28wmd%29-38436/1437042733/',
-               'format': 'html',
-               'sha256': (
-                   '5ddd8d0c164fa087f165bfdf4e7137fb'
-                   '648874fe271ac413bfd0462d8beaed0a'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-162': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Personal-Technische-Bereiche-%28wmd%29-38436/1443182433/',
-               'format': 'html',
-               'sha256': 'f01861e5a2d7bc6f47c8b86772d35e3a6a7afd22fd088a9daf0b487e4f841f84',
-               'role': 'German individual all-level detail'},
- 'input-163': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Pilothallenverbund-%28wmd%29-38436/1427420833/',
-               'format': 'html',
-               'sha256': 'bf5c6e044fa4ce2513c20a6188e193f69cb865839a73319401c6d7f4049ed59d',
-               'role': 'German individual all-level detail'},
- 'input-164': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Presswerk-Technikplanung-%28wmd%29-38436/1435725633/',
-               'format': 'html',
-               'sha256': '3d777cf74956aaebc590448479f4df19a42c21019ddf91f836a76f2e017b8328',
-               'role': 'German individual all-level detail'},
- 'input-165': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Produktivit%C3%A4tssteuerung-%28wmd%29-38440/1437929933/',
-               'format': 'html',
-               'sha256': '280826ff8605233f05f5011ec3574b5fb5220981cdfc803abd04ed8310bb9c03',
-               'role': 'German individual all-level detail'},
- 'input-166': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-%28wmd%29-38436/1440786033/',
-               'format': 'html',
-               'sha256': '99076ed15f5a61fb21721f46c40f373cbc85738b07b087bba2c6d2d32e3cf50c',
-               'role': 'German individual all-level detail'},
- 'input-167': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-Analysezentrum-Gesamtfahrzeug-Elektrik-%28wmd%29-38436/1403184933/',
-               'format': 'html',
-               'sha256': (
-                   '3ccc7c36b0c74340acbd93c2a6b76812'
-                   '2ecefcf8e18ecf4feecccb9164e0d74e'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-168': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-R%C3%A4der-Reifenentwicklung-%28wmd%29-38436/1443186533/',
-               'format': 'html',
-               'sha256': '3676f39a499af199ecd6bf792d6bab0bc37e44c88597ec2c647b7f130011981a',
-               'role': 'German individual all-level detail'},
- 'input-169': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Softwareentwicklung-Messdatenanalyse-%28wmd%29-38436/1429942733/',
-               'format': 'html',
-               'sha256': '6052aa6459b7444689dbab9cf39913d9e30c8f47b2ef7737916343f3cdf6a820',
-               'role': 'German individual all-level detail'},
- 'input-170': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-UI-Design-f%C3%BCr-nutzerzentrierte-Softwarel%C3%B6sungen-%28mwd%29-38436/1443242233/',
-               'format': 'html',
-               'sha256': 'cfcceaa9e93e7012534c3ebbf441ae74cdb6dc1ada60078093949bf00456afbb',
-               'role': 'German individual all-level detail'},
- 'input-171': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Vertriebscontrolling-%28wmd%29-38436/1430065033/',
-               'format': 'html',
-               'sha256': 'e00290aa4991a372af370da5a53e459fb9e2485c8463e1cc2debb9c4aba1b4e3',
-               'role': 'German individual all-level detail'},
- 'input-172': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Visuelle-Kommunikation-%28wmd%29-38436/1427432733/',
-               'format': 'html',
-               'sha256': '445d41f7b77038dbf5a5978b3a8f6e1729db3108e0f60acf39bd48eccecc06a6',
-               'role': 'German individual all-level detail'},
- 'input-173': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Volkswagen-Group-Academy%2C-Redaktion-&-interne-Kommunikation-%28wmd%29-38436/1444149233/',
-               'format': 'html',
-               'sha256': 'b07a874b69978d967b849e73ff26e83074b4e95bb37e8f9d61aac4b3c765b10f',
-               'role': 'German individual all-level detail'},
- 'input-174': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Werkleitung-und-Fahrzeugbau-Wolfsburg-%28wmd%29-38440/1435699933/',
-               'format': 'html',
-               'sha256': '71633f99fae0c6285083114e23b5bb6ad2c69a2088ed868136582f2a5d90400b',
-               'role': 'German individual all-level detail'},
- 'input-175': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Rechtsreferendariat-Integrit%C3%A4t-&-Recht-%28wmd%29-38436/1074619901/',
-               'format': 'html',
-               'sha256': (
-                   '807efd701e167aa8834cb49840150694'
-                   'fa77540437fbf396d746af75b106aa29'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-176': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Unsolicited-application-%28Senior%29-Consultant%2C-Project-Manager-Volkswagen-Group-Consulting-%28fmd%29-38436/1407460333/',
-               'format': 'html',
-               'sha256': '8db5b70d29d78a88a45cbc406d7f4d5dc85f13c6e655f2d24da809ef442f96d9',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-177': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Unsolicited-application-Consultant-Volkswagen-Group-Consulting-%28fmd%29-38436/1407454433/',
-               'format': 'html',
-               'sha256': 'b8f2d45c7cdbbe2029e12f7623a68793e9bb944d89817038aeeeb9340c40f632',
-               'role': 'English duplicate-JobID alias detail'},
- 'input-178': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Visiting-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1129477601/',
-               'format': 'html',
-               'sha256': (
-                   'dae0b41c6ab233e69d24029e66942a97'
-                   '2e6a5db7c59139f7ba92aab82711f3da'
-               ),
-               'role': 'German individual all-level detail'},
- 'input-179': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28Master%29-VW-Kraftwerk-GmbH-%28wmd%29-38436/1388142733/',
-               'format': 'html',
-               'sha256': '251ae9bd433c1f23c6a1d9256a8f56c3b97fe30043a6201fc0670f1a7787ded9',
-               'role': 'German individual all-level detail'},
- 'input-180': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28wmd%29-Werkstoffentwicklung-38436/1437580133/',
-               'format': 'html',
-               'sha256': 'c36ad0b71a5e57b5868de440fa9630487ef6ef3473813715ac7fc4c2d60651f7',
-               'role': 'German individual all-level detail'},
- 'input-181': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Betriebsstoffentwicklung-&-AGN-Systeme-%28wmd%29-38436/1431789533/',
-               'format': 'html',
-               'sha256': '71b216b0d52a5ba6e5ef8ae15685c2d66fd810b08b6fed0b86d6e189b4e04023',
-               'role': 'German individual all-level detail'},
- 'input-182': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Interne-Kommunikation-%28wmd%29-38436/1435639833/',
-               'format': 'html',
-               'sha256': '9663375e1b34f6e08bd6d8f5f7b696bf228bc9119c229b8a3ff56aeea19fe82f',
-               'role': 'German individual all-level detail'},
- 'input-183': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Kommunikation-%28wmd%29-38436/1436202133/',
-               'format': 'html',
-               'sha256': '90e0e45f65c5e8b88d7081174d0e84a2531507d539abe473024bddc8d63e63a4',
-               'role': 'German individual all-level detail'},
- 'input-184': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Videobearbeitung-%28wmd%29-38436/1433790133/',
-               'format': 'html',
-               'sha256': '81a1e6565c297102748dca3a978fe522302120390dc7be4578caa7794df1dce6',
-               'role': 'German individual all-level detail'},
- 'input-185': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=100&locale=de_DE',
-               'format': 'html',
-               'sha256': (
-                   'a282c06d73d0c4c33ef9f5e22317547c'
-                   'ef8aafe7ab6dc14c87cf9210c75ae223'
-               ),
-               'role': 'literal finite German pagination'},
- 'input-186': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=125&locale=de_DE',
-               'format': 'html',
-               'sha256': (
-                   'a3f8252c9f4248365383504dfaf057f9'
-                   '5c873bcfe1d0b0251e4a826d4d30c6f4'
-               ),
-               'role': 'literal finite German pagination'},
- 'input-187': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=150&locale=de_DE',
-               'format': 'html',
-               'sha256': (
-                   '90970fce6180ce47de6fdea8ed11d805'
-                   '5090b2f3ce34928277a665781fc0d74d'
-               ),
-               'role': 'literal finite German pagination'},
- 'input-188': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=25&locale=de_DE',
-               'format': 'html',
-               'sha256': (
-                   '3eceb3ee8b41d43b52ec5e1509de7bf0'
-                   '1dc16cde4fcfa17c88617331a2470737'
-               ),
-               'role': 'literal finite German pagination'},
- 'input-189': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=50&locale=de_DE',
-               'format': 'html',
-               'sha256': (
-                   '909890d1e6ddd8d51ccd2af35ee2eedc'
-                   '3aef2ed2044b7ed47d17b1dcbbb7d4df'
-               ),
-               'role': 'literal finite German pagination'},
- 'input-190': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?q=&sortColumn=referencedate&sortDirection=desc&searchby=location&d=15&optionsFacetsDD_facility=Volkswagen+AG&startrow=75&locale=de_DE',
-               'format': 'html',
-               'sha256': (
-                   'b2d47c0f17c5c4d4e11d1732ca3e2927'
-                   '355f1a2da98c2b370003b7974723d76d'
-               ),
-               'role': 'literal finite German pagination'},
- 'input-191': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?searchby=location&createNewAlert=false&q=&locationsearch=&geolocation=&optionsFacetsDD_city=&optionsFacetsDD_facility=Volkswagen+AG&optionsFacetsDD_department=&optionsFacetsDD_customfield2=&optionsFacetsDD_shifttype=&optionsFacetsDD_customfield3=&locale=de_DE',
-               'format': 'html',
-               'sha256': (
-                   '5653fda3ee4b50ad5d3ad8711ef3022e'
-                   '235ba78a98b4f0e6589cde7e226a0902'
-               ),
-               'role': 'literal finite German pagination'},
- 'input-192': {'url': 'https://jobs.volkswagen-group.com/Volkswagen/search/?searchby=location&createNewAlert=false&q=&locationsearch=&geolocation=&optionsFacetsDD_location=&optionsFacetsDD_facility=Volkswagen+AG&optionsFacetsDD_department=&optionsFacetsDD_customfield2=&optionsFacetsDD_shifttype=&optionsFacetsDD_customfield3=&locale=en_US',
-               'format': 'html',
-               'sha256': (
-                   '83d7d93cafb07a58ff34d248ffe7deee'
-                   '8915dd0205ceb6bdcde34495255c3f41'
-               ),
-               'role': 'English finite ten-alias listing'},
- 'input-193': {'url': 'https://jobs.volkswagen-group.com/content/Nutzungsbedingungen/?locale=de_DE',
-               'format': 'html',
-               'sha256': '257d17b39bbddfb809d03015552a054c22a979f585f593ef52b91a5c1e58eafa',
-               'role': 'legal terms'},
- 'input-194': {'url': 'https://jobs.volkswagen-group.com/robots.txt',
-               'format': 'robots',
-               'sha256': '91669efc2767d124199e1d848655af18d64ac71e61ae1227be7b6aa866f03caf',
-               'role': 'fresh origin robots/policy'},
- 'input-195': {'url': 'https://www.hrd-portal.com/robots.txt',
-               'format': 'robots',
-               'sha256': '58c109cc44da82a7ff610aaaa11a3801cb99eaa3cd98f3e05183607801af6608',
-               'role': 'fresh origin robots/policy'},
- 'input-196': {'url': 'https://www.volkswagen-karriere.de/de.html',
-               'format': 'html',
-               'sha256': (
-                   'f3e7a788aa530d33a4427a0ac1a0254a'
-                   '056ef9e8209139b76b386547e0b94e25'
-               ),
-               'role': 'official homepage'},
- 'input-197': {'url': 'https://www.volkswagen-karriere.de/de/nutzungsbedingungen.html',
-               'format': 'html',
-               'sha256': '2c333250fb0f843e9ee1b1c414a8fff4e5a7bc69f804ce30007cf90e6b950185',
-               'role': 'legal terms'},
- 'input-198': {'url': 'https://www.volkswagen-karriere.de/en.html',
-               'format': 'html',
-               'sha256': '1a6f26069f0dfad07cdb9caabd2afa781b5867e48193369bc7fec10b59752eb7',
-               'role': 'official homepage'},
- 'input-199': {'url': 'https://www.volkswagen-karriere.de/robots.txt',
-               'format': 'robots',
-               'sha256': 'dd84e3470dafcf77ca25f1d3d448c84dfd4255988f006a0318437961d06368fb',
-               'role': 'fresh origin robots/policy'}}
-PROFILES = [{'identity': '29435',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Kommunikation-%28wmd%29-38436/1436202133/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-10',
-  'fields': {'title': 'Werkstudentin / Werkstudent Kommunikation (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Kommunikation-%28wmd%29-38436/1436202133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥89 CP or Master in economics/communication or '
-                        'related studies; good–very good grades. Web '
-                        'design/maintenance and media editing skills, e.g. Adobe. DE '
-                        'C1. Docs: CV; enrolment proof; current transcript; work '
-                        'permit for non-EU applicants. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Kommunikation-%28wmd%29-38436/1436202133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '30199',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Werkleitung-und-Fahrzeugbau-Wolfsburg-%28wmd%29-38440/1435699933/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Praktikum Werkleitung und Fahrzeugbau Wolfsburg (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Werkleitung-und-Fahrzeugbau-Wolfsburg-%28wmd%29-38440/1435699933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Media/digital-management/business students or Gap Year; '
-                        'good–very good grades. Initial digital/change-communication '
-                        'knowledge and project/presentation experience. DE C1. Docs: '
-                        'CV; enrolment proof except Gap Year; current transcript; '
-                        'university certificate for mandatory internship. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38440',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Werkleitung-und-Fahrzeugbau-Wolfsburg-%28wmd%29-38440/1435699933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30114',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Praktikum-Erprobung-Antriebsmodule-%28wmd%29-34219/1435589233/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Praktikum Erprobung Antriebsmodule (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Praktikum-Erprobung-Antriebsmodule-%28wmd%29-34219/1435589233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Mechanical/vehicle/mechatronics/materials or related '
-                        'students; good–very good grades. Good Office skills; testing '
-                        'knowledge preferred. DE+EN B2. Docs: CV; enrolment proof; '
-                        'current transcript; university certificate for mandatory '
-                        'internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Praktikum-Erprobung-Antriebsmodule-%28wmd%29-34219/1435589233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30241',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Presswerk-Technikplanung-%28wmd%29-38436/1435725633/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Praktikum Presswerk Technikplanung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Presswerk-Technikplanung-%28wmd%29-38436/1435725633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Mechanical/CS/electrical or related students or Gap Year, '
-                        'basic study completed; good–very good grades. Basic '
-                        'coding/data-analysis and Office; Python ideal; '
-                        'measurement/automation knowledge advantageous. DE C1. Docs: '
-                        'CV; enrolment proof except Gap Year; current transcript; '
-                        'university certificate for mandatory internship. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Presswerk-Technikplanung-%28wmd%29-38436/1435725633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30313',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Interne-Kommunikation-%28wmd%29-38436/1435639833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Werkstudentin / Werkstudent Interne Kommunikation (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Interne-Kommunikation-%28wmd%29-38436/1435639833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Media/communication/journalism or related students; Bachelor '
-                        'basic studies completed AND ≥89 CP, OR Master; good–very good '
-                        'grades. Social-media affinity and Photoshop/InDesign/Premiere '
-                        'skills; communication/PR/journalism experience preferred. DE '
-                        'C2. Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work+residence permits and supplementary sheet if applicable '
-                        'for non-EU applicants. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Interne-Kommunikation-%28wmd%29-38436/1435639833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '28381',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Entwicklung-Karosseriefunktionen-%28wmd%29-38436/1435699833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Praktikum Entwicklung Karosseriefunktionen (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Entwicklung-Karosseriefunktionen-%28wmd%29-38436/1435699833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Mechanical/systems-engineering or related students or Gap '
-                        'Year; good–very good grades. Mechatronics interest; initial '
-                        'systems-engineering/CAD/requirements-tool experience '
-                        'preferred. DE+EN B2. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship; work permit for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Entwicklung-Karosseriefunktionen-%28wmd%29-38436/1435699833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '31008',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Doktorandin-Doktorand-Lebensdauerprognose-Leistungsmodule-%28wmd%29-34225/1446023933/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Doktorandin / Doktorand Lebensdauerprognose Leistungsmodule '
-                      '(w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Doktorandin-Doktorand-Lebensdauerprognose-Leistungsmodule-%28wmd%29-34225/1446023933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Good–very good doctoral-qualifying degree in mechanical/civil '
-                        'engineering/technical mathematics or related field. Materials '
-                        'modelling/testing, FEM/commercial FE and good–very good '
-                        'coding; Abaqus/Python preferred. DE C1 OR EN C1. Docs: CV; '
-                        'transcript or Master certificate. 35h; employment years1/2/3: '
-                        '€3030/3194/3497 gross/month +€167 allowance;49% '
-                        'variable-bonus participation. 30 leave days+Dec24/31 off; '
-                        'flex/mobile work, doctoral seminars/college; vehicle '
-                        'conditions.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Baunatal, DE, 34225',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs', 'training'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Doktorandin-Doktorand-Lebensdauerprognose-Leistungsmodule-%28wmd%29-34225/1446023933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Doktoranden']}}},
- {'identity': '30765',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Masterarbeit-Virtuelle-Absicherung-%28wmd%29-38436/1446057233/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Masterarbeit Virtuelle Absicherung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Masterarbeit-Virtuelle-Absicherung-%28wmd%29-38436/1446057233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Master students in '
-                        'vehicle/mechatronics/electrical/CS/mechanical/control '
-                        'engineering or related field; good–very good grades. '
-                        'Drive/hybrid/simulation interest; MATLAB/Simulink or Python '
-                        'experience advantageous. DE B2 OR EN B2. Docs: CV; enrolment '
-                        'proof; current transcript; university certificate for '
-                        'mandatory internship; work+residence permits and '
-                        'supplementary sheet if applicable for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Masterarbeit-Virtuelle-Absicherung-%28wmd%29-38436/1446057233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '31130',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Data-Analytics%2C-Business-Intelligence-&-K%C3%BCnstliche-Intelligenz-%28wmd%29-30419/1446004133/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Praktikum Data Analytics, Business Intelligence & Künstliche '
-                      'Intelligenz (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Data-Analytics%2C-Business-Intelligence-&-K%C3%BCnstliche-Intelligenz-%28wmd%29-30419/1446004133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'CS/business-IT/data-science/industrial-engineering or related '
-                        'students or Gap Year; good–very good grades. Data/AI '
-                        'interest; initial data-processing/coding/BI knowledge '
-                        'advantageous. DE B2. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship; work+residence permits for non-EU '
-                        'applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Data-Analytics%2C-Business-Intelligence-&-K%C3%BCnstliche-Intelligenz-%28wmd%29-30419/1446004133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30858',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Produktmarketing-California-Fahrzeuge-%28wmd%29-30419/1446062133/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Werkstudentin / Werkstudent Produktmarketing California '
-                      'Fahrzeuge (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Produktmarketing-California-Fahrzeuge-%28wmd%29-30419/1446062133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥89 CP or Master in '
-                        'business/industrial/mechanical/vehicle '
-                        'engineering/business-IT/innovation or related field; '
-                        'good–very good grades. Technical/strategic understanding and '
-                        'PowerPoint/Excel skills. DE C1. Docs: CV; enrolment proof; '
-                        'current transcript; work permit for non-EU applicants. €18.33 '
-                        'gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Produktmarketing-California-Fahrzeuge-%28wmd%29-30419/1446062133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '31142',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Produktstrategie-%28wmd%29-30419/1446026333/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-09',
-  'fields': {'title': 'Praktikum Produktstrategie (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Produktstrategie-%28wmd%29-30419/1446026333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Economics/industrial-engineering/business-IT or related '
-                        'students or Gap Year; good–very good grades. '
-                        'Strategic/business/automotive interest and Office; '
-                        'automotive/strategy experience advantageous. DE C1. Docs: CV; '
-                        'enrolment proof except Gap Year; current transcript; '
-                        'university certificate for mandatory internship; '
-                        'work+residence permits for non-EU applicants. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Produktstrategie-%28wmd%29-30419/1446026333/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '28190',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Duales-Studium-Elektrotechnik-%28wmd%29-2027-26703/1414143533/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-08',
-  'fields': {'title': 'Duales Studium Elektrotechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Duales-Studium-Elektrotechnik-%28wmd%29-2027-26703/1414143533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1401.50/month;35h/week;22 leave days; '
-                        'possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Duales-Studium-Elektrotechnik-%28wmd%29-2027-26703/1414143533/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '30692',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Werkstudentin-Werkstudent-Fertigungsprozessentwicklung-E-Antrieb-%28wmd%29-34219/1445572433/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-08',
-  'fields': {'title': 'Werkstudentin / Werkstudent Fertigungsprozessentwicklung '
-                      'E-Antrieb (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Werkstudentin-Werkstudent-Fertigungsprozessentwicklung-E-Antrieb-%28wmd%29-34219/1445572433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Master or advanced Bachelor ≥90 ECTS in electrical/mechanical '
-                        'or related engineering; good–very good grades. Advanced CAD, '
-                        'good Office and licence B required; design/project/e-machine '
-                        'experience preferred. DE+EN B2. Docs: CV; enrolment proof; '
-                        'current transcript. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Werkstudentin-Werkstudent-Fertigungsprozessentwicklung-E-Antrieb-%28wmd%29-34219/1445572433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '31180',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Werkstudentin-Werkstudent-After-Sales-Supply-Chain-%28wmd%29-34219/1445550633/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-08',
-  'fields': {'title': 'Werkstudentin / Werkstudent After Sales Supply Chain (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Werkstudentin-Werkstudent-After-Sales-Supply-Chain-%28wmd%29-34219/1445550633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business-IT/economics/project-management or related students '
-                        'or Gap Year; good–very good grades. Good–very good Office; '
-                        'communication, creativity and initiative. DE C1,EN B2. Docs: '
-                        'CV; enrolment proof; current transcript. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Werkstudentin-Werkstudent-After-Sales-Supply-Chain-%28wmd%29-34219/1445550633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '30717',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Design-Interieur-%28wmd%29-38436/1445518133/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-08',
-  'fields': {'title': 'Praktikum Abschlussarbeit Design Interieur (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Design-Interieur-%28wmd%29-38436/1445518133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Industrial/product/vehicle/transportation/automotive-design '
-                        'or related students; good–very good grades. Design software, '
-                        'sketching/Photoshop/3D skills; AI-tool basics preferred. '
-                        'DE+EN B2. Docs: CV; enrolment proof; current transcript; '
-                        'university certificate for mandatory internship; '
-                        'work+residence permits and supplementary sheet if applicable '
-                        'for non-EU applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Design-Interieur-%28wmd%29-38436/1445518133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '25062',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Abschlussarbeit-%28Master%29-Klimatisierung-%28wmd%29-38436/1390265033/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-07',
-  'fields': {'title': 'Abschlussarbeit (Master) Klimatisierung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Abschlussarbeit-%28Master%29-Klimatisierung-%28wmd%29-38436/1390265033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Master in '
-                        'physics/mechanical/vehicle/energy/process/fluid/thermal/climate '
-                        'engineering or related field; good–very good grades. '
-                        'Technical understanding; CFD/1D-calculation experience '
-                        'preferred. DE B2. Docs: CV; enrolment proof; current '
-                        'transcript; university certificate for mandatory internship. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Abschlussarbeit-%28Master%29-Klimatisierung-%28wmd%29-38436/1390265033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30973',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Abschlussarbeit-GenAI-&-Machine-Learning-Leistungselektronik-%28wmd%29-34225/1445034833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-07',
-  'fields': {'title': 'Praktikum / Abschlussarbeit GenAI & Machine Learning '
-                      'Leistungselektronik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Abschlussarbeit-GenAI-&-Machine-Learning-Leistungselektronik-%28wmd%29-34225/1445034833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor >89 CP or Master in '
-                        'electrical/system/CS/mechatronics/embedded systems or related '
-                        'field; good–very good grades. Good coding, preferably Python, '
-                        'and GenAI/LLM/AI-engineering experience; simulation tools '
-                        'advantageous. EN+DE B2. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Baunatal, DE, 34225',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Abschlussarbeit-GenAI-&-Machine-Learning-Leistungselektronik-%28wmd%29-34225/1445034833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '31119',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-AI-Engineering-%28wmd%29-2027-38436/1444719633/',
-  'application_window': {'opens': '2026-09-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-06',
-  'fields': {'title': 'Duales Studium AI Engineering (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-AI-Engineering-%28wmd%29-2027-38436/1444719633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Technical understanding and analytical thinking. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-AI-Engineering-%28wmd%29-2027-38436/1444719633/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27822',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Werkzeugmechanikerin-Werkzeugmechaniker-%28wmd%29-2027-26703/1413725433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Werkzeugmechanikerin / Werkzeugmechaniker (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Werkzeugmechanikerin-Werkzeugmechaniker-%28wmd%29-2027-26703/1413725433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Werkzeugmechanikerin-Werkzeugmechaniker-%28wmd%29-2027-26703/1413725433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27753',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Technische-Produktdesignerin-Technischer-Produktdesigner-%28wmd%29-2027-26703/1413714833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Technische Produktdesignerin / Technischer '
-                      'Produktdesigner (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Technische-Produktdesignerin-Technischer-Produktdesigner-%28wmd%29-2027-26703/1413714833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology, '
-                        'physics/maths. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Technische-Produktdesignerin-Technischer-Produktdesigner-%28wmd%29-2027-26703/1413714833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27751',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-26703/1413696133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Industriemechanikerin / Industriemechaniker (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-26703/1413696133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-26703/1413696133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27058',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fachkraft-f%C3%BCr-Schutz-und-Sicherheit-%28wmd%29-2027-38436/1413683433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Fachkraft für Schutz und Sicherheit (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fachkraft-f%C3%BCr-Schutz-und-Sicherheit-%28wmd%29-2027-38436/1413683433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; licence B required. Interest in '
-                        'sports, technology/German. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations; current criminal-record '
-                        'certificate. €1327/month;35h/week;30 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fachkraft-f%C3%BCr-Schutz-und-Sicherheit-%28wmd%29-2027-38436/1413683433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27053',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-38436/1413707733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Mechatronikerin / Mechatroniker (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-38436/1413707733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology/manual '
-                        'work. DE B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1327/month;35h/week;30 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-38436/1413707733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '26973',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38436/1413691833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Industriemechanikerin / Industriemechaniker (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38436/1413691833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38436/1413691833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27045',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38436/1413716033/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Werkfeuerwehrfrau / Werkfeuerwehrmann (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38436/1413716033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; age ≥16½ at start; driving '
-                        'licence within18 months after training starts. Interest in '
-                        'sports, technology/German. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations. >€1327/month;35h/week;30 '
-                        'leave days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38436/1413716033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27054',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-38436/1413678933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Fachkraft für Systemgastronomie (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-38436/1413678933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in German, '
-                        'maths/business. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-38436/1413678933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27729',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-38436/1413686333/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Fertigungsmechanikerin / Fertigungsmechaniker '
-                      '(w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-38436/1413686333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; Realschule recommended. Interest '
-                        'in business, maths/English. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '>€1327/month;35h/week;30 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-38436/1413686333/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27047',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Gie%C3%9Fereimechanikerin-Gie%C3%9Fereimechaniker-f%C3%BCr-Druck-und-Kokillenguss-%28wmd%29-2027-38436/1413688333/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Gießereimechanikerin / Gießereimechaniker für Druck- '
-                      'und Kokillenguss (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Gie%C3%9Fereimechanikerin-Gie%C3%9Fereimechaniker-f%C3%BCr-Druck-und-Kokillenguss-%28wmd%29-2027-38436/1413688333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Gie%C3%9Fereimechanikerin-Gie%C3%9Fereimechaniker-f%C3%BCr-Druck-und-Kokillenguss-%28wmd%29-2027-38436/1413688333/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27061',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-K%C3%B6chin-Koch-%28wmd%29-2027-38436/1413700133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Köchin / Koch (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-K%C3%B6chin-Koch-%28wmd%29-2027-38436/1413700133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in German, '
-                        'maths/business. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-K%C3%B6chin-Koch-%28wmd%29-2027-38436/1413700133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27069',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Medientechnologin-Medientechnologe-Druck-%28wmd%29-2027-38436/1413711833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Medientechnologin / Medientechnologe Druck (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Medientechnologin-Medientechnologe-Druck-%28wmd%29-2027-38436/1413711833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; Realschule recommended. Interest '
-                        'in business, maths/English. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '€1327/month;35h/week;30 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Medientechnologin-Medientechnologe-Druck-%28wmd%29-2027-38436/1413711833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27044',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kfz-Mechatronikerin-Kfz-Mechatroniker-f%C3%BCr-System-&-Hochvolttechnik-%28wmd%29-2027-38436/1413704833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Kfz-Mechatronikerin / Kfz-Mechatroniker für System- '
-                      '& Hochvolttechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kfz-Mechatronikerin-Kfz-Mechatroniker-f%C3%BCr-System-&-Hochvolttechnik-%28wmd%29-2027-38436/1413704833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology, '
-                        'physics/computing. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kfz-Mechatronikerin-Kfz-Mechatroniker-f%C3%BCr-System-&-Hochvolttechnik-%28wmd%29-2027-38436/1413704833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27085',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-30419/1413717433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Werkfeuerwehrfrau / Werkfeuerwehrmann (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-30419/1413717433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; age ≥16½ at start; licence B '
-                        'within18 months after training starts. Interest in sports, '
-                        'technology/German. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-30419/1413717433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '26975',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-30419/1413693433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Industriemechanikerin / Industriemechaniker (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-30419/1413693433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-30419/1413693433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '26985',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Kraftfahrzeugmechatronikerin-Kraftfahrzeugmechatroniker-%28wmd%29-2027-30419/1413701733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Kraftfahrzeugmechatronikerin / '
-                      'Kraftfahrzeugmechatroniker (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Kraftfahrzeugmechatronikerin-Kraftfahrzeugmechatroniker-%28wmd%29-2027-30419/1413701733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology, '
-                        'physics/computing. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Kraftfahrzeugmechatronikerin-Kraftfahrzeugmechatroniker-%28wmd%29-2027-30419/1413701733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27077',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-30419/1413708433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Ausbildung Mechatronikerin / Mechatroniker (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-30419/1413708433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology/manual '
-                        'work. DE B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1327/month;35h/week;30 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-30419/1413708433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '31020',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-Kunststoffrecycling-%28wmd%29/1444149733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Praktikum / Abschlussarbeit Kunststoffrecycling (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-Kunststoffrecycling-%28wmd%29/1444149733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Mechanical/materials/plastics/polymer-chemistry or related '
-                        'students. Office skills, initiative and teamwork. Docs: CV; '
-                        'enrolment proof; current transcript; university certificate '
-                        'for mandatory internship; work+residence permits for non-EU '
-                        'applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': None,
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-Kunststoffrecycling-%28wmd%29/1444149733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '31012',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Volkswagen-Group-Academy%2C-Redaktion-&-interne-Kommunikation-%28wmd%29-38436/1444149233/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-05',
-  'fields': {'title': 'Praktikum Volkswagen Group Academy, Redaktion & interne '
-                      'Kommunikation (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Volkswagen-Group-Academy%2C-Redaktion-&-interne-Kommunikation-%28wmd%29-38436/1444149233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Communication/media/journalism/design/digital-media or '
-                        'related students or Gap Year. Creative '
-                        'writing/design/storytelling; editorial/graphics experience '
-                        'and ideally CMS preferred. DE+EN C1. Docs: CV; enrolment '
-                        'proof except Gap Year; current transcript; university '
-                        'certificate for mandatory internship; work+residence permits '
-                        'for non-EU applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Volkswagen-Group-Academy%2C-Redaktion-&-interne-Kommunikation-%28wmd%29-38436/1444149233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '26164',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Kommunikation-%28wmd%29-38440/1401771333/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-03',
-  'fields': {'title': 'Praktikum Kommunikation (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Kommunikation-%28wmd%29-38440/1401771333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Communication/media/technology or related students or Gap '
-                        'Year. Technical interest, creative language/visualization, '
-                        'reliable work. DE AND EN C1. Docs: CV; enrolment proof; '
-                        'current transcript; university certificate for mandatory '
-                        'internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38440',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Kommunikation-%28wmd%29-38440/1401771333/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '26153',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-Entwicklung-AI%E2%80%91Native-Entwicklungsmodelle-&-virtuelle-KI%E2%80%91Agenten-%28wmd%29-38436/1406590533/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-03',
-  'fields': {'title': 'Doktorandin / Doktorand Entwicklung AI‑Native '
-                      'Entwicklungsmodelle & virtuelle KI‑Agenten (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-Entwicklung-AI%E2%80%91Native-Entwicklungsmodelle-&-virtuelle-KI%E2%80%91Agenten-%28wmd%29-38436/1406590533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Good–very good doctoral-qualifying degree in CS/AI-focused '
-                        'business or engineering/HCI or related field. Sound AI and '
-                        'software/development-process knowledge; '
-                        'digital-transformation/process experience ideal. DE C1,EN B2. '
-                        'Docs: CV; cover letter explaining doctorate '
-                        'motivation/research focus; transcript or Master/Diplom '
-                        'certificate. 35h; employment years1/2/3: €3030/3194/3497 '
-                        'gross/month +€167 allowance;49% variable-bonus participation. '
-                        '30 leave days+Dec24/31 off; flex/mobile work, doctoral '
-                        'seminars/college; vehicle conditions.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs', 'training'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-Entwicklung-AI%E2%80%91Native-Entwicklungsmodelle-&-virtuelle-KI%E2%80%91Agenten-%28wmd%29-38436/1406590533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Doktoranden']}}},
- {'identity': '29436',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Videobearbeitung-%28wmd%29-38436/1433790133/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-03',
-  'fields': {'title': 'Werkstudentin / Werkstudent Videobearbeitung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Videobearbeitung-%28wmd%29-38436/1433790133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Basic studies completed ≥89 credits or Master in '
-                        'media/design/film/journalism/communication or related field; '
-                        'good–very good grades. Video production/editing and '
-                        'camera/Premiere skills; other Creative Cloud advantageous. DE '
-                        'C1,EN B1. Docs: CV; enrolment proof; current transcript; '
-                        'work+residence permits and supplementary sheet if applicable '
-                        'for non-EU applicants. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Videobearbeitung-%28wmd%29-38436/1433790133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '27984',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-KI-gest%C3%BCtzte-globale-Kundenfeedback-und-Entscheidungsplattformen-%28wmd%29-38436/1434081033/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-03',
-  'fields': {'title': 'Doktorandin / Doktorand KI-gestützte globale Kundenfeedback- '
-                      'und Entscheidungsplattformen (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-KI-gest%C3%BCtzte-globale-Kundenfeedback-und-Entscheidungsplattformen-%28wmd%29-38436/1434081033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Good–very good doctoral-qualifying degree in '
-                        'CS/AI/data-science/business-IT/industrial-engineering or '
-                        'related field. ML/generative-AI/multi-agent knowledge plus '
-                        'data/statistics/software experience. DE+EN C1. Docs: CV; '
-                        'transcript or Master/Diplom certificate. 35h; employment '
-                        'years1/2/3: €3030/3194/3497 gross/month +€167 allowance;49% '
-                        'variable-bonus participation. 30 leave days+Dec24/31 off; '
-                        'flex/mobile work, doctoral seminars/college; vehicle '
-                        'conditions.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs', 'training'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-KI-gest%C3%BCtzte-globale-Kundenfeedback-und-Entscheidungsplattformen-%28wmd%29-38436/1434081033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Doktoranden']}}},
- {'identity': '30024',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Presswerk-%28wmd%29-38436/1433294733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-02',
-  'fields': {'title': 'Praktikum Digitalisierung Presswerk (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Presswerk-%28wmd%29-38436/1433294733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business/business-IT/industrial-engineering or related '
-                        'students or Gap Year; good–very good grades. Excel/PowerPoint '
-                        'and digital/process interest; low-code/BI knowledge '
-                        'advantageous. DE B2,EN B1. Docs: CV; enrolment proof except '
-                        'Gap Year; current transcript; university certificate for '
-                        'mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Presswerk-%28wmd%29-38436/1433294733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29992',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Grundierung-Korrosionsschutz-Klebstoffe-%28wmd%29-38436/1433292633/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-02',
-  'fields': {'title': 'Praktikum Grundierung Korrosionsschutz Klebstoffe (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Grundierung-Korrosionsschutz-Klebstoffe-%28wmd%29-38436/1433292633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Chemistry/chemical-process-engineering or related students or '
-                        'Gap Year; good–very good grades. Polymer chemistry, '
-                        'statistics and Office; analytical-chemistry experience '
-                        'advantageous. DE B2. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Grundierung-Korrosionsschutz-Klebstoffe-%28wmd%29-38436/1433292633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29950',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Lackiererei-%28wmd%29-30419/1433367433/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-02',
-  'fields': {'title': 'Praktikum Lackiererei (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Lackiererei-%28wmd%29-30419/1433367433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'CS/industrial/automation-engineering or related students or '
-                        'Gap Year; good–very good grades. Automotive experience '
-                        'preferred. DE B2. Docs: CV; enrolment proof except Gap Year; '
-                        'current transcript; university certificate for mandatory '
-                        'internship; work permit for non-EU applicants. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Lackiererei-%28wmd%29-30419/1433367433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29782',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vorserienlogistik-%28wmd%29-30419/1433366233/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-02',
-  'fields': {'title': 'Praktikum Vorserienlogistik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vorserienlogistik-%28wmd%29-30419/1433366233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business/technical or related students or Gap Year; logistics '
-                        'focus preferred; good–very good grades. Office; '
-                        'scientific-method knowledge advantageous. DE C1. Docs: CV; '
-                        'enrolment proof except Gap Year; current transcript; '
-                        'university certificate for mandatory internship; work permit '
-                        'for non-EU applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vorserienlogistik-%28wmd%29-30419/1433366233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '28321',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Schutz-und-Sicherheit-%28wmd%29-2027-34219/1412368133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-02',
-  'fields': {'title': 'Ausbildung Fachkraft für Schutz und Sicherheit (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Schutz-und-Sicherheit-%28wmd%29-2027-34219/1412368133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; licence B required. Interest in '
-                        'sports, technology/German. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations; current criminal-record '
-                        'certificate. €1327/month;35h/week;30 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Schutz-und-Sicherheit-%28wmd%29-2027-34219/1412368133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '30912',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Inboundlogistik-Just-in-Sequence-%28wmd%29-30419/1443606233/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-02',
-  'fields': {'title': 'Praktikum Inboundlogistik Just in Sequence (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Inboundlogistik-Just-in-Sequence-%28wmd%29-30419/1443606233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Logistics or related students or Gap Year; good–very good '
-                        'grades. Advanced Office; supply-chain knowledge preferred. DE '
-                        'C1,EN B2. Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work+residence permits for non-EU applicants. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Inboundlogistik-Just-in-Sequence-%28wmd%29-30419/1443606233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30991',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vertriebscontrolling-%28wmd%29-30419/1443903833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-02',
-  'fields': {'title': 'Praktikum Vertriebscontrolling (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vertriebscontrolling-%28wmd%29-30419/1443903833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business/economics/business-IT/industrial-engineering or '
-                        'related students or Gap Year; good–very good grades. '
-                        'Numerical affinity and advanced IT/BI knowledge preferred. DE '
-                        'C1,EN B2. Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work+residence permits for non-EU applicants. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vertriebscontrolling-%28wmd%29-30419/1443903833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29993',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Gefahrstoffanalytik-%28wmd%29-38436/1432775533/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-01',
-  'fields': {'title': 'Praktikum / Abschlussarbeit Gefahrstoffanalytik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Gefahrstoffanalytik-%28wmd%29-38436/1432775533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Technology/natural-science or related students or Gap Year; '
-                        'good–very good grades. Advanced Office; '
-                        'sample-preparation/hazardous-material and HPLC/GC experience '
-                        'preferred. Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work permit for non-EU applicants. Current statutory minimum '
-                        'wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Gefahrstoffanalytik-%28wmd%29-38436/1432775533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29731',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Bedarfs-&-Anforderungsmanagement-%28wmd%29-38436/1432777033/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-01',
-  'fields': {'title': 'Praktikum Bedarfs- & Anforderungsmanagement (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Bedarfs-&-Anforderungsmanagement-%28wmd%29-38436/1432777033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor applicants need ≥90CP; '
-                        'Vehicle/electrical/industrial/mechanical '
-                        'engineering/IT/science/business or related students or Gap '
-                        'Year. Very good Office, licence B or higher; JIRA/Confluence '
-                        'preferred. DE+EN B2. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship; work permit for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Bedarfs-&-Anforderungsmanagement-%28wmd%29-38436/1432777033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '26211',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vertrieb-Europa-%28wmd%29-30419/1401231733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-01',
-  'fields': {'title': 'Praktikum Vertrieb Europa (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vertrieb-Europa-%28wmd%29-30419/1401231733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Economics or related students or Gap Year; good–very good '
-                        'grades. Confident creative PowerPoint/Excel use. EN+DE C1. '
-                        'Docs: CV; enrolment proof; current transcript; university '
-                        'certificate for mandatory internship; work permit for non-EU '
-                        'applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Vertrieb-Europa-%28wmd%29-30419/1401231733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30736',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-R%C3%A4der-Reifenentwicklung-%28wmd%29-38436/1443186533/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-01',
-  'fields': {'title': 'Praktikum Räder-/Reifenentwicklung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-R%C3%A4der-Reifenentwicklung-%28wmd%29-38436/1443186533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Mechanical/vehicle engineering/business-IT/CS/data-management '
-                        'or related students or Gap Year; good–very good grades. Basic '
-                        'agile understanding, database/data-quality interest and '
-                        'Office. DE C2,EN B2. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship; work+residence permits and '
-                        'supplementary sheet if applicable for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-R%C3%A4der-Reifenentwicklung-%28wmd%29-38436/1443186533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '30821',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-UI-Design-f%C3%BCr-nutzerzentrierte-Softwarel%C3%B6sungen-%28mwd%29-38436/1443242233/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-01',
-  'fields': {'title': 'Praktikum UI-Design für nutzerzentrierte Softwarelösungen '
-                      '(m/w/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-UI-Design-f%C3%BCr-nutzerzentrierte-Softwarel%C3%B6sungen-%28mwd%29-38436/1443242233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'UX/UI/interaction/communication/product-design or related '
-                        'students or Gap Year. Figma/design tools, digital-interface '
-                        'and AI-design experience; basic agile/product understanding. '
-                        'EN B2. Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-UI-Design-f%C3%BCr-nutzerzentrierte-Softwarel%C3%B6sungen-%28mwd%29-38436/1443242233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30928',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Personal-Technische-Bereiche-%28wmd%29-38436/1443182433/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-01',
-  'fields': {'title': 'Praktikum Personal Technische Bereiche (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Personal-Technische-Bereiche-%28wmd%29-38436/1443182433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Economics/law/humanities/social-science or related students '
-                        'or Gap Year; good–very good grades. Office; HR '
-                        'focus/experience and personnel-software experience ideal. '
-                        'Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work+residence permits for non-EU applicants. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Personal-Technische-Bereiche-%28wmd%29-38436/1443182433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '28770',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Masterabschlussarbeit-Cybersecurity-%28wmd%29-38436/1432396533/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-30',
-  'fields': {'title': 'Masterabschlussarbeit Cybersecurity (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Masterabschlussarbeit-Cybersecurity-%28wmd%29-38436/1432396533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Master in CS/cybersecurity/mathematics/engineering or related '
-                        'field; good–very good grades. Embedded cybersecurity OR ML '
-                        'with secure-testing/fuzzing background; Python or C/C++. EN '
-                        'B2. Docs: CV; enrolment proof; current transcript; '
-                        'work+residence permits and supplementary sheet if applicable '
-                        'for non-EU applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Masterabschlussarbeit-Cybersecurity-%28wmd%29-38436/1432396533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29827',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Werkstudentin-Werkstudent-Arbeitsordnung-%28wmd%29-34225/1432221533/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-30',
-  'fields': {'title': 'Werkstudentin / Werkstudent Arbeitsordnung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Werkstudentin-Werkstudent-Arbeitsordnung-%28wmd%29-34225/1432221533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Employment/business-law or related students or Gap Year; '
-                        'good–very good grades. Good Office and proactive teamwork. DE '
-                        'B2. Docs: CV; enrolment proof; current transcript. €18.33 '
-                        'gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Baunatal, DE, 34225',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Werkstudentin-Werkstudent-Arbeitsordnung-%28wmd%29-34225/1432221533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '29028',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Betriebsstoffentwicklung-&-AGN-Systeme-%28wmd%29-38436/1431789533/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-29',
-  'fields': {'title': 'Werkstudentin / Werkstudent Betriebsstoffentwicklung & '
-                      'AGN-Systeme (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Betriebsstoffentwicklung-&-AGN-Systeme-%28wmd%29-38436/1431789533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Basic studies completed ≥89 credits or Master in '
-                        'engineering/science/chemistry or related field; good–very '
-                        'good grades. Data-management/analysis affinity; '
-                        'engine/chemistry interest preferred. DE C1 OR EN B2. Docs: '
-                        'CV; enrolment proof; current transcript; work+residence '
-                        'permits and supplementary sheet if applicable for non-EU '
-                        'applicants. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-Betriebsstoffentwicklung-&-AGN-Systeme-%28wmd%29-38436/1431789533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '25351',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Marketing-Campaigns-&-Content-%28wmd%29-38436/1388391933/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-29',
-  'fields': {'title': 'Praktikum International Marketing Campaigns & Content (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Marketing-Campaigns-&-Content-%28wmd%29-38436/1388391933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business/marketing/media-design/graphics or related students '
-                        'or Gap Year; good–very good grades. Office/photo-video '
-                        'editing; AI interest/experience. DE+EN B2. Docs: CV; '
-                        'enrolment proof; current transcript; university certificate '
-                        'for mandatory internship; work permit for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Marketing-Campaigns-&-Content-%28wmd%29-38436/1388391933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30626',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Abschlussarbeit-Operative-Automatisierungstechnik-%28wmd%29-26723/1442352133/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-29',
-  'fields': {'title': 'Abschlussarbeit Operative Automatisierungstechnik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Abschlussarbeit-Operative-Automatisierungstechnik-%28wmd%29-26723/1442352133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Mechanical-engineering or related students. '
-                        'Automation/manufacturing/work-organization, basic CAD and '
-                        'Office; metal-trade training ideal. DE B2,EN B1. Docs: CV; '
-                        'enrolment proof; current transcript; university certificate '
-                        'for mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26723',
-             'deadline': None,
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Abschlussarbeit-Operative-Automatisierungstechnik-%28wmd%29-26723/1442352133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '27653',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Praktikum-Operative-Automatisierungstechnik-%28wmd%29-26723/1442221833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-29',
-  'fields': {'title': 'Praktikum Operative Automatisierungstechnik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Praktikum-Operative-Automatisierungstechnik-%28wmd%29-26723/1442221833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Electrical/automation-engineering or related students or Gap '
-                        'Year; good–very good grades. Robotics and basic PLC coding; '
-                        'FANUC experience advantageous, body-building basics '
-                        'preferred. DE B2,EN B1. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26723',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Praktikum-Operative-Automatisierungstechnik-%28wmd%29-26723/1442221833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '27429',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Kfz-Mechatronikerin-Kfz-Mechatroniker-f%C3%BCr-System-&-Hochvolttechnik-%28wmd%29-2027-26703/1405507733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Kfz-Mechatronikerin / Kfz-Mechatroniker für System- '
-                      '& Hochvolttechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Kfz-Mechatronikerin-Kfz-Mechatroniker-f%C3%BCr-System-&-Hochvolttechnik-%28wmd%29-2027-26703/1405507733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology, '
-                        'physics/computing. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Kfz-Mechatronikerin-Kfz-Mechatroniker-f%C3%BCr-System-&-Hochvolttechnik-%28wmd%29-2027-26703/1405507733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27718',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-26703/1407824233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für '
-                      'Automatisierungstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-26703/1407824233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-26703/1407824233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27712',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fachinformatikerin-Fachinformatiker-f%C3%BCr-Systemintegration-%28wmd%29-2027-26703/1407816633/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Fachinformatikerin / Fachinformatiker für '
-                      'Systemintegration (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fachinformatikerin-Fachinformatiker-f%C3%BCr-Systemintegration-%28wmd%29-2027-26703/1407816633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fachinformatikerin-Fachinformatiker-f%C3%BCr-Systemintegration-%28wmd%29-2027-26703/1407816633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27709',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Industrieelektrikerin-Industrieelektriker-%28wmd%29-2027-26703/1407808033/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Industrieelektrikerin / Industrieelektriker (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Industrieelektrikerin-Industrieelektriker-%28wmd%29-2027-26703/1407808033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'maths/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Industrieelektrikerin-Industrieelektriker-%28wmd%29-2027-26703/1407808033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27726',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-26703/1407832133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Werkfeuerwehrfrau / Werkfeuerwehrmann (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-26703/1407832133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; age ≥16½ at start; licence B '
-                        'within18 months after training starts. Interest in sports, '
-                        'technology/German. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-26703/1407832133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27426',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fahrzeuglackiererin-Fahrzeuglackierer-%28wmd%29-2027-26703/1405499833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Fahrzeuglackiererin / Fahrzeuglackierer (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fahrzeuglackiererin-Fahrzeuglackierer-%28wmd%29-2027-26703/1405499833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/chemistry. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fahrzeuglackiererin-Fahrzeuglackierer-%28wmd%29-2027-26703/1405499833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27760',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-26703/1410689633/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Mechatronikerin / Mechatroniker (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-26703/1410689633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology/manual '
-                        'work. DE B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1327/month;35h/week;30 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-26703/1410689633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27748',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fachkraft-f%C3%BCr-Metalltechnik-Fachrichtung-Montagetechnik-%28wmd%29-2027-26703/1411220333/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Fachkraft für Metalltechnik Fachrichtung '
-                      'Montagetechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fachkraft-f%C3%BCr-Metalltechnik-Fachrichtung-Montagetechnik-%28wmd%29-2027-26703/1411220333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology, '
-                        'physics/computing. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Emden, DE, 26703',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Emden-Ausbildung-Fachkraft-f%C3%BCr-Metalltechnik-Fachrichtung-Montagetechnik-%28wmd%29-2027-26703/1411220333/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27248',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38231/1410622633/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Industriemechanikerin / Industriemechaniker (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38231/1410622633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38231/1410622633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27754',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Chemie-%28wmd%29-2027-38231/1410628733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Chemie (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Chemie-%28wmd%29-2027-38231/1410628733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good advanced-course '
-                        'maths/chemistry grades. Interest in modern '
-                        'technology,chemistry. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Year conflict:2027 title/2026 start; confirm. '
-                        'Pension, vehicle purchase/leasing conditions, bicycle '
-                        'leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Chemie-%28wmd%29-2027-38231/1410628733/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '26799',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Chemielaborantin-Chemielaborant-%28wmd%29-2027-38231/1410618533/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Chemielaborantin / Chemielaborant (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Chemielaborantin-Chemielaborant-%28wmd%29-2027-38231/1410618533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in chemistry, '
-                        'physics/maths. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Chemielaborantin-Chemielaborant-%28wmd%29-2027-38231/1410618533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27756',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-38231/1410635133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Elektro- und Informationstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-38231/1410635133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Year conflict:2027 title/2026 start; '
-                        'confirm. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-38231/1410635133/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27250',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38231/1410623433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Werkfeuerwehrfrau / Werkfeuerwehrmann (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38231/1410623433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; age ≥16½ at start; licence B '
-                        'within18 months after training starts. Interest in sports, '
-                        'technology/German. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38231/1410623433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27755',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Chemieingenieurwesen-%28wmd%29-2027-38231/1410629233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Chemieingenieurwesen (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Chemieingenieurwesen-%28wmd%29-2027-38231/1410629233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good advanced-course '
-                        'maths/chemistry grades. Interest in modern '
-                        'technology,chemistry. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Year conflict:2027 title/2026 start; confirm. '
-                        'Pension, vehicle purchase/leasing conditions, bicycle '
-                        'leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Chemieingenieurwesen-%28wmd%29-2027-38231/1410629233/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27763',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38231/1410645533/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Digital Engineering Maschinenbau (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38231/1410645533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,coding. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Year conflict:2027 title/2026 start; confirm. '
-                        'Pension, vehicle purchase/leasing conditions, bicycle '
-                        'leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38231/1410645533/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27146',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38231/1410620633/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für Informations- und '
-                      'Systemtechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38231/1410620633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38231/1410620633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27752',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Batterie-und-Wasserstofftechnologie-%28wmd%29-2027-38231/1410627233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Batterie- und Wasserstofftechnologie (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Batterie-und-Wasserstofftechnologie-%28wmd%29-2027-38231/1410627233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,renewable energy. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Year conflict:2027 title/2026 start; '
-                        'confirm. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Duales-Studium-Batterie-und-Wasserstofftechnologie-%28wmd%29-2027-38231/1410627233/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27143',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38231/1410619933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für '
-                      'Automatisierungstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38231/1410619933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38231/1410619933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '26977',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kauffrau-Kaufmann-f%C3%BCr-Digitalisierungsmanagement-%28wmd%29-2027-38436/1401791333/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Kauffrau / Kaufmann für Digitalisierungsmanagement '
-                      '(w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kauffrau-Kaufmann-f%C3%BCr-Digitalisierungsmanagement-%28wmd%29-2027-38436/1401791333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; Realschule recommended. Interest '
-                        'in computing, maths/English. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '>€1327/month;35h/week;30 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kauffrau-Kaufmann-f%C3%BCr-Digitalisierungsmanagement-%28wmd%29-2027-38436/1401791333/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '26986',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kauffrau-Kaufmann-f%C3%BCr-B%C3%BCromanagement-%28wmd%29-2027-38436/1401809933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Kauffrau / Kaufmann für Büromanagement (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kauffrau-Kaufmann-f%C3%BCr-B%C3%BCromanagement-%28wmd%29-2027-38436/1401809933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; Realschule recommended. Interest '
-                        'in German, English/maths. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations. >€1327/month;35h/week;30 '
-                        'leave days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Kauffrau-Kaufmann-f%C3%BCr-B%C3%BCromanagement-%28wmd%29-2027-38436/1401809933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27050',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38436/1411191933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für Informations- und '
-                      'Systemtechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38436/1411191933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38436/1411191933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27048',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38436/1411195433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für '
-                      'Automatisierungstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38436/1411195433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38436/1411195433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27179',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38037/1411109133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für '
-                      'Automatisierungstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38037/1411109133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-38037/1411109133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27898',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-38037/1411121033/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Elektro- und Informationstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-38037/1411121033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1401.50/month;35h/week;22 leave days; '
-                        'possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-38037/1411121033/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27404',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38037/1405555233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für Informations- und '
-                      'Systemtechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38037/1405555233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Informations-und-Systemtechnik-%28wmd%29-2027-38037/1405555233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '28013',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38037/1410616833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Werkfeuerwehrfrau / Werkfeuerwehrmann (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38037/1410616833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; age ≥16½ at start; driving '
-                        'licence within18 months after training starts. Interest in '
-                        'sports, technology/German. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations. >€1327/month;35h/week;30 '
-                        'leave days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-38037/1410616833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27186',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Fachkraft-f%C3%BCr-Lagerlogistik-%28wmd%29-2027-38037/1411109833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Fachkraft für Lagerlogistik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Fachkraft-f%C3%BCr-Lagerlogistik-%28wmd%29-2027-38037/1411109833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in German, '
-                        'maths/English. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Fachkraft-f%C3%BCr-Lagerlogistik-%28wmd%29-2027-38037/1411109833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27912',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38037/1411122233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Fahrzeuginformatik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38037/1411122233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,coding. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38037/1411122233/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27758',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38037/1411118833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Digital Engineering Maschinenbau (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38037/1411118833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,coding. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Year conflict:2027 title/2026 start; confirm. '
-                        'Pension, vehicle purchase/leasing conditions, bicycle '
-                        'leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38037/1411118833/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27759',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Mechatronik-%28wmd%29-2027-38037/1411119333/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Mechatronik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Mechatronik-%28wmd%29-2027-38037/1411119333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Year conflict:2027 title/2026 start; '
-                        'confirm. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Duales-Studium-Mechatronik-%28wmd%29-2027-38037/1411119333/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27192',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38037/1410102533/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Industriemechanikerin / Industriemechaniker (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38037/1410102533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-38037/1410102533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27197',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Zerspanungsmechanikerin-Zerspanungsmechaniker-%28wmd%29-2027-38037/1405554733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Zerspanungsmechanikerin / Zerspanungsmechaniker '
-                      '(w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Zerspanungsmechanikerin-Zerspanungsmechaniker-%28wmd%29-2027-38037/1405554733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. >€1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Braunschweig, DE, 38037',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Braunschweig-Ausbildung-Zerspanungsmechanikerin-Zerspanungsmechaniker-%28wmd%29-2027-38037/1405554733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27362',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-34219/1405077633/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Werkfeuerwehrfrau / Werkfeuerwehrmann (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-34219/1405077633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; age ≥16½ at start; licence B '
-                        'within18 months after training starts. Interest in sports, '
-                        'technology/German. DE B2. Docs: CV; all latest-report pages '
-                        'and all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Werkfeuerwehrfrau-Werkfeuerwehrmann-%28wmd%29-2027-34219/1405077633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27373',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Maschinenbau-%28wmd%29-2027-34219/1405120333/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Maschinenbau (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Maschinenbau-%28wmd%29-2027-34219/1405120333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Maschinenbau-%28wmd%29-2027-34219/1405120333/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27411',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-34219/1405439533/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Industriemechanikerin / Industriemechaniker (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-34219/1405439533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Industriemechanikerin-Industriemechaniker-%28wmd%29-2027-34219/1405439533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27377',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Elektrotechnik-%28wmd%29-2027-34219/1405129433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Wirtschaftsingenieurwesen Schwerpunkt '
-                      'Elektrotechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Elektrotechnik-%28wmd%29-2027-34219/1405129433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Elektrotechnik-%28wmd%29-2027-34219/1405129433/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27400',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Gie%C3%9Fereimechanikerin-Gie%C3%9Fereimechaniker-f%C3%BCr-Druck-und-Kokillenguss-%28wmd%29-2027-34219/1405395933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Gießereimechanikerin / Gießereimechaniker für Druck- '
-                      'und Kokillenguss (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Gie%C3%9Fereimechanikerin-Gie%C3%9Fereimechaniker-f%C3%BCr-Druck-und-Kokillenguss-%28wmd%29-2027-34219/1405395933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in maths, '
-                        'physics/German. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Gie%C3%9Fereimechanikerin-Gie%C3%9Fereimechaniker-f%C3%BCr-Druck-und-Kokillenguss-%28wmd%29-2027-34219/1405395933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27340',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Lagerlogistik-%28wmd%29-2027-34219/1404986633/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Fachkraft für Lagerlogistik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Lagerlogistik-%28wmd%29-2027-34219/1404986633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in German, '
-                        'maths/English. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Lagerlogistik-%28wmd%29-2027-34219/1404986633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27355',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-34219/1405053833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für '
-                      'Automatisierungstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-34219/1405053833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-34219/1405053833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27359',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-34219/1405067033/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Fachkraft für Systemgastronomie (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-34219/1405067033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in German, '
-                        'maths/business. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-34219/1405067033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27360',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-34219/1405072933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Mechatronikerin / Mechatroniker (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-34219/1405072933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology/manual '
-                        'work. DE B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1327/month;35h/week;30 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Mechatronikerin-Mechatroniker-%28wmd%29-2027-34219/1405072933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27365',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Elektrotechnik-%28wmd%29-2027-34219/1405084733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Elektrotechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Elektrotechnik-%28wmd%29-2027-34219/1405084733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Elektrotechnik-%28wmd%29-2027-34219/1405084733/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27407',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Werkstoffpr%C3%BCferin-Werkstoffpr%C3%BCfer-%28wmd%29-2027-34219/1405421433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Werkstoffprüferin / Werkstoffprüfer (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Werkstoffpr%C3%BCferin-Werkstoffpr%C3%BCfer-%28wmd%29-2027-34219/1405421433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in technology, '
-                        'physics/maths. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-Werkstoffpr%C3%BCferin-Werkstoffpr%C3%BCfer-%28wmd%29-2027-34219/1405421433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27380',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Maschinenbau-%28wmd%29-2027-34219/1405136533/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Wirtschaftsingenieurwesen Schwerpunkt '
-                      'Maschinenbau (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Maschinenbau-%28wmd%29-2027-34219/1405136533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsingenieurwesen-Schwerpunkt-Maschinenbau-%28wmd%29-2027-34219/1405136533/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27374',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Maschinenbau-Schwerpunkt-Gie%C3%9Fereitechnik-%28wmd%29-2027-34219/1405124733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Duales Studium Maschinenbau Schwerpunkt Gießereitechnik (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Maschinenbau-Schwerpunkt-Gie%C3%9Fereitechnik-%28wmd%29-2027-34219/1405124733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Maschinenbau-Schwerpunkt-Gie%C3%9Fereitechnik-%28wmd%29-2027-34219/1405124733/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27353',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-IT-Systemelektronikerin-IT-Systemelektroniker-%28wmd%29-2027-34219/1405034433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung IT-Systemelektronikerin / IT-Systemelektroniker '
-                      '(w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-IT-Systemelektronikerin-IT-Systemelektroniker-%28wmd%29-2027-34219/1405034433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in electrical '
-                        'technology. DE B2. Docs: CV; all latest-report pages and all '
-                        'school qualifications; foreign certificates need certified '
-                        'German translations. €1327/month;35h/week;30 leave days; '
-                        'possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Ausbildung-IT-Systemelektronikerin-IT-Systemelektroniker-%28wmd%29-2027-34219/1405034433/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27762',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Mediengestalterin-Mediengestalter-Digital-und-Print-%28wmd%29-2027-38436/1407959133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Mediengestalterin / Mediengestalter Digital und '
-                      'Print (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Mediengestalterin-Mediengestalter-Digital-und-Print-%28wmd%29-2027-38436/1407959133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; Realschule recommended. Interest '
-                        'in modern technology,design/digital media. DE B2. Docs: CV; '
-                        'all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations; 5–10 '
-                        'annotated work samples in onePDF; explain team-project role. '
-                        '>€1327/month;35h/week;30 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Mediengestalterin-Mediengestalter-Digital-und-Print-%28wmd%29-2027-38436/1407959133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '26984',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Industriekauffrau-Industriekaufmann-%28wmd%29-2027-38436/1401796233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Industriekauffrau / Industriekaufmann (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Industriekauffrau-Industriekaufmann-%28wmd%29-2027-38436/1401796233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; Realschule or (Fach-)Abitur '
-                        'recommended. Interest in business, maths/English. DE B2. '
-                        'Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1327/month;35h/week;30 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildung-Industriekauffrau-Industriekaufmann-%28wmd%29-2027-38436/1401796233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '27056',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-30419/1411198733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-28',
-  'fields': {'title': 'Ausbildung Elektronikerin / Elektroniker für '
-                      'Automatisierungstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-30419/1411198733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in computing, '
-                        'English/physics. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Elektronikerin-Elektroniker-f%C3%BCr-Automatisierungstechnik-%28wmd%29-2027-30419/1411198733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '28887',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Hardware-Test-Elektroantriebe-%28wmd%29-34225/1425947733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-25',
-  'fields': {'title': 'Praktikum Hardware-Test Elektroantriebe (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Hardware-Test-Elektroantriebe-%28wmd%29-34225/1425947733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Electronics/IT/electrical/communication-engineering or '
-                        'related students or Gap Year; good–very good grades. MATLAB, '
-                        'good coding, hardware/lab testing and basic ECAD; '
-                        'Git/power-electronics/PLECS/LTSpice advantageous. DE B2,EN '
-                        'B2; licence B required. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Baunatal, DE, 34225',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Hardware-Test-Elektroantriebe-%28wmd%29-34225/1425947733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '24196',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Global-Assignments-Steuern-und-Sozialversicherung-%28wmd%29-38436/1382060033/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-25',
-  'fields': {'title': 'Praktikum Global Assignments Steuern und Sozialversicherung '
-                      '(w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Global-Assignments-Steuern-und-Sozialversicherung-%28wmd%29-38436/1382060033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥90 CP or Master in '
-                        'economics/law/humanities/social-science, '
-                        'general-business/HR/tax focus, or related field; good–very '
-                        'good grades. Office; SAP preferred. DE+EN B2. Docs: CV; cover '
-                        'letter; enrolment proof; current transcript; university '
-                        'certificate for mandatory internship; work permit for non-EU '
-                        'applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Global-Assignments-Steuern-und-Sozialversicherung-%28wmd%29-38436/1382060033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '28876',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-KI-Systeme-Prozessplanung-Automobilproduktion-%28wmd%29-38436/1441334833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-25',
-  'fields': {'title': 'Doktorandin / Doktorand KI-Systeme Prozessplanung '
-                      'Automobilproduktion (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-KI-Systeme-Prozessplanung-Automobilproduktion-%28wmd%29-38436/1441334833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Good–very good doctoral-qualifying CS degree focused on AI. '
-                        'GenAI/agentic-AI/LLM/LangChain/DeepAgents expertise; very '
-                        'good Python and RAG/embeddings/vector-DB/prompt/system-design '
-                        'knowledge. Docs: CV; transcript or Master/Diplom certificate. '
-                        '35h; employment years1/2/3: €3030/3194/3497 gross/month +€167 '
-                        'allowance;49% variable-bonus participation. 30 leave '
-                        'days+Dec24/31 off; flex/mobile work, doctoral '
-                        'seminars/college; vehicle conditions.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs', 'training'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-KI-Systeme-Prozessplanung-Automobilproduktion-%28wmd%29-38436/1441334833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Doktoranden']}}},
- {'identity': '28503',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Konzernbeschaffung-Produktanl%C3%A4ufe-MEB-%28wmd%29-38436/1441415633/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-25',
-  'fields': {'title': 'Praktikum Konzernbeschaffung Produktanläufe MEB (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Konzernbeschaffung-Produktanl%C3%A4ufe-MEB-%28wmd%29-38436/1441415633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Economics/engineering or related students or Gap Year; third '
-                        'Bachelor semester completed ≥90 CP or Master; good–very good '
-                        'grades. Good Office. DE+EN B2. Docs: CV; enrolment proof '
-                        'except Gap Year; current transcript; university certificate '
-                        'for mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Konzernbeschaffung-Produktanl%C3%A4ufe-MEB-%28wmd%29-38436/1441415633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30643',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Projektmanagement-Filmstudio-%28wmd%29-30419/1441374733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-25',
-  'fields': {'title': 'Werkstudentin / Werkstudent Projektmanagement Filmstudio '
-                      '(w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Projektmanagement-Filmstudio-%28wmd%29-30419/1441374733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥89 CP or Master in '
-                        'CS/business/industrial-engineering or related field; '
-                        'good–very good grades. Initial camera/photo/video-editing '
-                        'experience and Office. DE C1. Docs: CV; enrolment proof; '
-                        'current transcript; work permit for non-EU applicants. €18.33 '
-                        'gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Projektmanagement-Filmstudio-%28wmd%29-30419/1441374733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '30718',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Finanzsteuerung-%28wmd%29-30419/1441366633/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-25',
-  'fields': {'title': 'Werkstudentin / Werkstudent Finanzsteuerung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Finanzsteuerung-%28wmd%29-30419/1441366633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥89 CP or Master in business or related field; '
-                        'good–very good grades. Business/finance understanding and '
-                        'Office. DE C1. Docs: CV; enrolment proof; current transcript; '
-                        'work permit for non-EU applicants. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Finanzsteuerung-%28wmd%29-30419/1441366633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '29816',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Vertriebscontrolling-%28wmd%29-38436/1430065033/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-24',
-  'fields': {'title': 'Praktikum Vertriebscontrolling (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Vertriebscontrolling-%28wmd%29-38436/1430065033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Economics/data-science/CS or related students or Gap Year; '
-                        'good–very good grades. Data modelling/visualization and '
-                        'BI/Microsoft experience; DAX/Python/SQL basics preferred. DE '
-                        'C1. Docs: CV; enrolment proof; current transcript; university '
-                        'certificate for mandatory internship. Current statutory '
-                        'minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Vertriebscontrolling-%28wmd%29-38436/1430065033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '26566',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-Analysezentrum-Gesamtfahrzeug-Elektrik-%28wmd%29-38436/1403184933/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-24',
-  'fields': {'title': 'Praktikum Qualitätssicherung Analysezentrum Gesamtfahrzeug '
-                      'Elektrik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-Analysezentrum-Gesamtfahrzeug-Elektrik-%28wmd%29-38436/1403184933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'CS/vehicle-informatics/digital-engineering or related '
-                        'students or Gap Year; good–very good grades. Basic coding; '
-                        'Python/databases preferred, measurement/embedded experience '
-                        'ideal. DE B2,EN B1. Docs: CV; enrolment proof; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work+residence permits if applicable. Current statutory '
-                        'minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-Analysezentrum-Gesamtfahrzeug-Elektrik-%28wmd%29-38436/1403184933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29253',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Softwareentwicklung-Messdatenanalyse-%28wmd%29-38436/1429942733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-24',
-  'fields': {'title': 'Praktikum Softwareentwicklung Messdatenanalyse (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Softwareentwicklung-Messdatenanalyse-%28wmd%29-38436/1429942733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'CS/software/electrical engineering/mathematics or related '
-                        'students or Gap Year; good–very good grades. Container '
-                        'knowledge and good–very good Python; AI/software-quality '
-                        'interest. EN B1,DE C1. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship; work+residence permits and '
-                        'supplementary sheet if applicable for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Softwareentwicklung-Messdatenanalyse-%28wmd%29-38436/1429942733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30476',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-%28wmd%29-38436/1440786033/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-24',
-  'fields': {'title': 'Praktikum Qualitätssicherung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-%28wmd%29-38436/1440786033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Technical/business students. Good–very good grades. DE+EN C1. '
-                        'Docs: CV; cover letter; enrolment proof except Gap Year; '
-                        'current transcript; university certificate for mandatory '
-                        'internship; work permit for non-EU applicants. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Qualit%C3%A4tssicherung-%28wmd%29-38436/1440786033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30623',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Produktmanagement-ID_-Buzz-%28wmd%29-30419/1441033733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-24',
-  'fields': {'title': 'Praktikum Produktmanagement ID. Buzz (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Produktmanagement-ID_-Buzz-%28wmd%29-30419/1441033733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Technical/business or related students or Gap Year; good–very '
-                        'good grades. Technical understanding, Office and good–very '
-                        'good presentation skills; automotive experience ideal. DE '
-                        'C1,EN B2. Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work permit for non-EU applicants. Current statutory minimum '
-                        'wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Produktmanagement-ID_-Buzz-%28wmd%29-30419/1441033733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30385',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Camper-Experience-California-App-%28wmd%29-30419/1441022933/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-24',
-  'fields': {'title': 'Werkstudentin / Werkstudent Camper Experience - California App '
-                      '(w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Camper-Experience-California-App-%28wmd%29-30419/1441022933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥89 CP or Master in '
-                        'CS/business/psychology/UX-research or related field; '
-                        'good–very good grades. Digital/customer-product interest and '
-                        'PowerPoint/Excel. DE B2. Docs: CV; enrolment proof; current '
-                        'transcript; work permit for non-EU applicants. €18.33 '
-                        'gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Camper-Experience-California-App-%28wmd%29-30419/1441022933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '30616',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-E-Commerce-Management-%28mwd%29-30419/1441028633/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-24',
-  'fields': {'title': 'Werkstudentin / Werkstudent E-Commerce Management (m/w/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-E-Commerce-Management-%28mwd%29-30419/1441028633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥89 CP or Master in education/business/CS or related '
-                        'field; good–very good grades. Very good Office and '
-                        'e-commerce/digital-sales understanding. DE B2. Docs: CV; '
-                        'enrolment proof; current transcript; work permit for non-EU '
-                        'applicants. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-E-Commerce-Management-%28mwd%29-30419/1441028633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '30727',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Beschaffung-Interieur-%28wmd%29-30419/1441031833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-24',
-  'fields': {'title': 'Praktikum Beschaffung Interieur (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Beschaffung-Interieur-%28wmd%29-30419/1441031833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business/industrial-engineering or related students or Gap '
-                        'Year; good–very good grades. Excel/PowerPoint; '
-                        'procurement/supply-chain/project experience advantageous. DE '
-                        'C1. Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work permit for non-EU applicants. Current statutory minimum '
-                        'wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Praktikum-Beschaffung-Interieur-%28wmd%29-30419/1441031833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30701',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Used-Car-Strategy-%28wmd%29-38436/1440469833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-23',
-  'fields': {'title': 'Praktikum International Used Car Strategy (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Used-Car-Strategy-%28wmd%29-38436/1440469833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business/social/engineering/information-science or related '
-                        'students or Gap Year. Office/strategy-transformation '
-                        'interest; consulting/strategy/sales/automotive/project '
-                        'experience ideal. DE+EN C1. Docs: CV; enrolment proof; '
-                        'current transcript; university certificate for mandatory '
-                        'internship; work+residence permits and supplementary sheet if '
-                        'applicable. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-International-Used-Car-Strategy-%28wmd%29-38436/1440469833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29739',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-Leistungselektronik-%28wmd%29-38436/1440148933/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-22',
-  'fields': {'title': 'Doktorandin / Doktorand Leistungselektronik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-Leistungselektronik-%28wmd%29-38436/1440148933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Good–very good doctoral-qualifying electrical-engineering or '
-                        'related degree. Power electronics/drives, circuit simulation '
-                        'and PCBA-layout tools. Docs: CV; transcript or Master/Diplom '
-                        'certificate. 35h; employment years1/2/3: €3030/3194/3497 '
-                        'gross/month +€167 allowance;49% variable-bonus participation. '
-                        '30 leave days+Dec24/31 off; flex/mobile work, doctoral '
-                        'seminars/college; vehicle conditions.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs', 'training'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Doktorandin-Doktorand-Leistungselektronik-%28wmd%29-38436/1440148933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Doktoranden']}}},
- {'identity': '30216',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-W%C3%A4rmeleitung-%28wmd%29-38436/1439987633/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-22',
-  'fields': {'title': 'Praktikum / Abschlussarbeit Wärmeleitung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-W%C3%A4rmeleitung-%28wmd%29-38436/1439987633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Materials/physics/mathematics/mechanical-engineering or '
-                        'related students; good–very good grades. Transport-process '
-                        'modelling/programming experience, e.g. COMSOL/MATLAB, '
-                        'preferred. DE+EN B2. Docs: CV; enrolment proof; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work permit for non-EU applicants. Current statutory minimum '
-                        'wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-W%C3%A4rmeleitung-%28wmd%29-38436/1439987633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30493',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Fachoberschule-kaufm%C3%A4nnisch-%28wmd%29-34225/1439332933/',
-  'application_window': {'opens': '2026-09-21',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-21',
-  'fields': {'title': 'Praktikum Fachoberschule kaufmännisch (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Fachoberschule-kaufm%C3%A4nnisch-%28wmd%29-34225/1439332933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Registered Fachoberschule pupil; good–very good school '
-                        'grades. Good Excel/PowerPoint, independent work and teamwork. '
-                        'DE B1. Docs: CV; brief cover letter specifying intended '
-                        'discipline; last3 school reports; work permit for non-EU '
-                        'applicants. Tariff leave (count unstated)+Dec24/31 off; '
-                        'education/advice and bicycle leasing.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Baunatal, DE, 34225',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Fachoberschule-kaufm%C3%A4nnisch-%28wmd%29-34225/1439332933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30462',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Fachoberschule-technisch-%28wmd%29-34225/1439333633/',
-  'application_window': {'opens': '2026-09-21',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-09-21',
-  'fields': {'title': 'Praktikum Fachoberschule technisch (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Fachoberschule-technisch-%28wmd%29-34225/1439333633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Registered Fachoberschule pupil; good–very good school '
-                        'grades. Good Excel/PowerPoint, independent work and teamwork. '
-                        'DE B1. Tariff leave (count unstated)+Dec24/31 off; '
-                        'education/advice and bicycle leasing.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Baunatal, DE, 34225',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Baunatal-Praktikum-Fachoberschule-technisch-%28wmd%29-34225/1439333633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '25218',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28Master%29-VW-Kraftwerk-GmbH-%28wmd%29-38436/1388142733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-20',
-  'fields': {'title': 'Werkstudentin / Werkstudent (Master) VW Kraftwerk GmbH (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28Master%29-VW-Kraftwerk-GmbH-%28wmd%29-38436/1388142733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Master students in architecture/civil-engineering or related '
-                        'field; good–very good grades. Office/CAD skills. Docs: CV; '
-                        'enrolment proof; current transcript; work permit for non-EU '
-                        'applicants. €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28Master%29-VW-Kraftwerk-GmbH-%28wmd%29-38436/1388142733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '25579',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Abschlussarbeit-Aerodynamik-%28wmd%29-38436/1391398833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-19',
-  'fields': {'title': 'Abschlussarbeit Aerodynamik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Abschlussarbeit-Aerodynamik-%28wmd%29-38436/1391398833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Engineering Master students or equivalent qualification; '
-                        'good–very good grades. Strong coding, optical-flow '
-                        'measurement, very good aerodynamics/testing and '
-                        'measurement-data analysis. DE B2. Docs: CV; enrolment proof; '
-                        'current transcript; work permit for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Abschlussarbeit-Aerodynamik-%28wmd%29-38436/1391398833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '27571',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1407454333/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-18',
-  'fields': {'title': 'Consultant Volkswagen Group Consulting (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1407454333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Very good university Master degree; automotive and/or '
-                        'consulting internships and practical intercultural '
-                        'experience. Problem-solving plus digital/AI-solution '
-                        'experience. DE C1,EN B2. Docs: motivation letter; academic '
-                        'certificates with final grades/transcript; certificates of '
-                        'prior practical experience/work. Possible €7136 gross/month '
-                        'for35h. Performance-based bonus;30 leave days+Dec24/31 off,6 '
-                        'extra after2 years; private-use car,pension,time-value '
-                        'retirement account,flex/mobile '
-                        'work,education/advice/health,vehicle conditions.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1407454333/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Berufseinsteigende']}}},
- {'identity': '30228',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Produktivit%C3%A4tssteuerung-%28wmd%29-38440/1437929933/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-17',
-  'fields': {'title': 'Praktikum Produktivitätssteuerung (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Produktivit%C3%A4tssteuerung-%28wmd%29-38440/1437929933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business/business-IT/digital-management/industrial-engineering '
-                        'or related students or Gap Year; good–very good grades. '
-                        'Digital applications, initial project/presentation experience '
-                        'and basic data/ERP. DE B2. Docs: CV; enrolment proof except '
-                        'Gap Year; current transcript; university certificate for '
-                        'mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38440',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Produktivit%C3%A4tssteuerung-%28wmd%29-38440/1437929933/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30231',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Werklogistik-%28wmd%29-38436/1437940633/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-17',
-  'fields': {'title': 'Praktikum Digitalisierung Werklogistik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Werklogistik-%28wmd%29-38436/1437940633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business/industrial-engineering or related students or Gap '
-                        'Year; good–very good grades. Digital tools, '
-                        'project/presentation experience and basic data/ERP. DE B2,EN '
-                        'B1. Docs: CV; enrolment proof except Gap Year; current '
-                        'transcript; university certificate for mandatory internship. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Digitalisierung-Werklogistik-%28wmd%29-38436/1437940633/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30318',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-1-&-4-%28wmd%29-38436/1437981133/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-17',
-  'fields': {'title': 'Praktikum Montagelinie 1 & 4 (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-1-&-4-%28wmd%29-38436/1437981133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business-IT/CS/industrial-engineering/data-science/production-management '
-                        'or related students or Gap Year; good–very good grades. '
-                        'Excel/basic data-analysis; PowerBI/SQL/database experience '
-                        'ideal. DE B2,EN B1. Docs: CV; enrolment proof except Gap '
-                        'Year; current transcript; university certificate for '
-                        'mandatory internship. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-1-&-4-%28wmd%29-38436/1437981133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30383',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Verkaufsplanung-Deutschland-%28wmd%29-30419/1437959833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-17',
-  'fields': {'title': 'Werkstudentin / Werkstudent Verkaufsplanung Deutschland (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Verkaufsplanung-Deutschland-%28wmd%29-30419/1437959833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥89 CP or Master in business or related field; '
-                        'good–very good grades. Business understanding, IT affinity '
-                        'and PowerPoint/Excel. DE C1. Docs: CV; enrolment proof; '
-                        'current transcript; work permit for non-EU applicants. €18.33 '
-                        'gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Werkstudentin-Werkstudent-Verkaufsplanung-Deutschland-%28wmd%29-30419/1437959833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '28785',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Customer-Data-Analytics-&-AI-%28wmd%29-38436/1427423533/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-16',
-  'fields': {'title': 'Praktikum / Abschlussarbeit Customer Data Analytics & AI '
-                      '(w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Customer-Data-Analytics-&-AI-%28wmd%29-38436/1427423533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Mechanical/vehicle/electrical '
-                        'engineering/data-science/CS/mathematics/physics or related '
-                        'students or Gap Year; good–very good grades. Very good Python '
-                        'and PyTorch/TensorFlow experience; ML advantageous, '
-                        'BigData/Spark preferred. DE+EN B2. Docs: CV; enrolment proof '
-                        'except Gap Year; current transcript; university certificate '
-                        'for mandatory internship; work+residence permits and '
-                        'supplementary sheet if applicable for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Abschlussarbeit-Customer-Data-Analytics-&-AI-%28wmd%29-38436/1427423533/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '22368',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Pilothallenverbund-%28wmd%29-38436/1427420833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-16',
-  'fields': {'title': 'Praktikum Pilothallenverbund (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Pilothallenverbund-%28wmd%29-38436/1427420833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Mechanical/industrial/production engineering/business or '
-                        'related students or Gap Year; good–very good grades. Very '
-                        'good Office; technical/automotive affinity. EN B1. Docs: CV; '
-                        'enrolment proof except Gap Year; current transcript; '
-                        'university certificate for mandatory internship. Current '
-                        'statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Pilothallenverbund-%28wmd%29-38436/1427420833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '28543',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Visuelle-Kommunikation-%28wmd%29-38436/1427432733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-16',
-  'fields': {'title': 'Praktikum Visuelle Kommunikation (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Visuelle-Kommunikation-%28wmd%29-38436/1427432733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Graphic/communication-design or related students or Gap Year; '
-                        'good–very good grades. '
-                        'Icon-design/Figma/vector/typography/media skills and basic '
-                        'UX/branding; Adobe skills advantageous. DE C1,EN B1. Docs: '
-                        'CV; enrolment proof except Gap Year; current transcript; '
-                        'university certificate for mandatory internship; work permit '
-                        'for non-EU applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Visuelle-Kommunikation-%28wmd%29-38436/1427432733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '29561',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Praktikum-Entwicklung-Batteriezelle-%28wmd%29-38231/1437461733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-16',
-  'fields': {'title': 'Praktikum Entwicklung Batteriezelle (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Praktikum-Entwicklung-Batteriezelle-%28wmd%29-38231/1437461733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Engineering/science/environmental/industrial-engineering or '
-                        'related students or Gap Year. Literature/data/knowledge-work '
-                        'experience, Office/digital tools; Chinese/Spanish/Indonesian '
-                        'preferred. DE C1,EN B2. Docs: CV; enrolment proof; current '
-                        'transcript; university certificate for mandatory internship; '
-                        'work+residence permits and supplementary sheet if applicable '
-                        'for non-EU applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Salzgitter, DE, 38231',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Salzgitter-Praktikum-Entwicklung-Batteriezelle-%28wmd%29-38231/1437461733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '30448',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28wmd%29-Werkstoffentwicklung-38436/1437580133/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-16',
-  'fields': {'title': 'Werkstudentin / Werkstudent (w/m/d) Werkstoffentwicklung',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28wmd%29-Werkstoffentwicklung-38436/1437580133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥89 CP or Master in mechanical/materials/vehicle '
-                        'engineering/business-IT/industrial-engineering or related '
-                        'field; good–very good grades. Excel and rules/standards '
-                        'understanding; IT affinity preferred. DE B2. Docs: CV; '
-                        'enrolment proof; current transcript; work+residence permits '
-                        'and supplementary sheet if applicable for non-EU applicants. '
-                        '€18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'jobs',
-             'categories': ['jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Werkstudentin-Werkstudent-%28wmd%29-Werkstoffentwicklung-38436/1437580133/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Studierende']}}},
- {'identity': '29834',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-Golf-%28wmd%29-38436/1437042733/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-09-15',
-  'fields': {'title': 'Praktikum Montagelinie Golf (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-Golf-%28wmd%29-38436/1437042733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Business-IT/CS/data-science/industrial-engineering/mathematics '
-                        'or related students or Gap Year; good–very good grades. '
-                        'Office and data/AI interest. DE B2,EN B1. Docs: CV; enrolment '
-                        'proof except Gap Year; current transcript; university '
-                        'certificate for mandatory internship. Current statutory '
-                        'minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Montagelinie-Golf-%28wmd%29-38436/1437042733/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '7255',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Rechtsreferendariat-Integrit%C3%A4t-&-Recht-%28wmd%29-38436/1074619901/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-13',
-  'fields': {'title': 'Rechtsreferendariat Integrität & Recht (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Rechtsreferendariat-Integrit%C3%A4t-&-Recht-%28wmd%29-38436/1074619901/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'First state law examination passed; understanding of '
-                        'economic/technical matters. Independent work, teamwork and '
-                        'communication. DE+EN B2.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Rechtsreferendariat-Integrit%C3%A4t-&-Recht-%28wmd%29-38436/1074619901/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Referendare']}}},
- {'identity': '10163',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Visiting-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1129477601/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-13',
-  'fields': {'title': 'Visiting Consultant Volkswagen Group Consulting (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Visiting-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1129477601/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Bachelor ≥90 CP or Master; very good grades; relevant '
-                        'consulting/automotive/industrial experience. Mobility '
-                        'interest. DE C1,EN B2. Docs: CV; cover letter; enrolment '
-                        'proof; current transcript; university certificate for '
-                        'mandatory internship; work permit for non-EU applicants. '
-                        'Internship/thesis pay: current minimum wage; student-worker '
-                        'pay: €18.33 gross/hour.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Visiting-Consultant-Volkswagen-Group-Consulting-%28wmd%29-38436/1129477601/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '29032',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-CO2-Einsatz-als-Rohstoff-inkl_-Analytik-%28wmd%29/1426505833/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Praktikum / Abschlussarbeit CO2 Einsatz als Rohstoff inkl. '
-                      'Analytik (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-CO2-Einsatz-als-Rohstoff-inkl_-Analytik-%28wmd%29/1426505833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Chemistry/electrochemistry/physics/chemical '
-                        'engineering/plastics/polymer/materials or related students; '
-                        'good–very good grades. Electrochemical-synthesis knowledge, '
-                        'Office and electronic-data-analysis experience. Docs: CV; '
-                        'enrolment proof; current transcript; university certificate '
-                        'for mandatory internship; work permit for non-EU applicants. '
-                        'Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': None,
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Praktikum-Abschlussarbeit-CO2-Einsatz-als-Rohstoff-inkl_-Analytik-%28wmd%29/1426505833/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '27701',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Smart-Vehicle-Systems-%28wmd%29-2027-38436/1415770133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Smart Vehicle Systems (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Smart-Vehicle-Systems-%28wmd%29-2027-38436/1415770133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,coding. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Smart-Vehicle-Systems-%28wmd%29-2027-38436/1415770133/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28303',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeugtechnik-%28wmd%29-2027-38436/1415746333/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Fahrzeugtechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeugtechnik-%28wmd%29-2027-38436/1415746333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1401.50/month;35h/week;22 leave days; '
-                        'possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeugtechnik-%28wmd%29-2027-38436/1415746333/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27702',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Logistik-und-Informationsmanagement-%28wmd%29-2027-38436/1415763933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Logistik und Informationsmanagement (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Logistik-und-Informationsmanagement-%28wmd%29-2027-38436/1415763933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,logistics. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Logistik-und-Informationsmanagement-%28wmd%29-2027-38436/1415763933/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27888',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Chemie-%28wmd%29-2027-38436/1415727933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Chemie (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Chemie-%28wmd%29-2027-38436/1415727933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good advanced-course '
-                        'maths/chemistry grades. Interest in modern '
-                        'technology,chemistry. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Chemie-%28wmd%29-2027-38436/1415727933/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28340',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38436/1415714633/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Ausbildungsintegriertes Duales Studium Digital Engineering '
-                      'Maschinenbau (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38436/1415714633/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,coding. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '>€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Digital-Engineering-Maschinenbau-%28wmd%29-2027-38436/1415714633/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27894',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsingenieur-Logistik-%28wmd%29-2027-38436/1415778433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Wirtschaftsingenieur Logistik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsingenieur-Logistik-%28wmd%29-2027-38436/1415778433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,logistics. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '>€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsingenieur-Logistik-%28wmd%29-2027-38436/1415778433/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27741',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-38436/1415753733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Ingenieurinformatik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-38436/1415753733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in coding,IT security. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '>€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-38436/1415753733/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27891',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-38436/1415771433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Wirtschaftsinformatik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-38436/1415771433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,coding. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '>€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-38436/1415771433/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27736',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Bauingenieurwesen-%28wmd%29-2027-38436/1415728933/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Bauingenieurwesen (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Bauingenieurwesen-%28wmd%29-2027-38436/1415728933/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good advanced-course '
-                        'maths/physics grades. Interest in modern '
-                        'technology,civil-engineering technology. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '>€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Bauingenieurwesen-%28wmd%29-2027-38436/1415728933/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28342',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Wirtschaftsingenieurwesen-Maschinenbau-%28wmd%29-2027-38436/1415722433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Ausbildungsintegriertes Duales Studium '
-                      'Wirtschaftsingenieurwesen Maschinenbau (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Wirtschaftsingenieurwesen-Maschinenbau-%28wmd%29-2027-38436/1415722433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1401.50/month;35h/week;22 leave days; '
-                        'possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Wirtschaftsingenieurwesen-Maschinenbau-%28wmd%29-2027-38436/1415722433/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27080',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Internationales-Management-%28wmd%29-2027-38436/1415756733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Internationales Management (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Internationales-Management-%28wmd%29-2027-38436/1415756733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.4; good relevant advanced-course '
-                        'grades. Interest in business processes. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Internationales-Management-%28wmd%29-2027-38436/1415756733/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28226',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Lehramt-Bildung-Beruf%2C-Fachrichtung-Wirtschaft-und-Verwaltung-%28wmd%29-2027-38436/1415762233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Lehramt - Bildung - Beruf, Fachrichtung '
-                      'Wirtschaft und Verwaltung (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Lehramt-Bildung-Beruf%2C-Fachrichtung-Wirtschaft-und-Verwaltung-%28wmd%29-2027-38436/1415762233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in IT. DE B2. Docs: CV; all latest-report '
-                        'pages and all school qualifications; foreign certificates '
-                        'need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Lehramt-Bildung-Beruf%2C-Fachrichtung-Wirtschaft-und-Verwaltung-%28wmd%29-2027-38436/1415762233/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27733',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38436/1415744133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Fahrzeuginformatik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38436/1415744133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,coding. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '>€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Fahrzeuginformatik-%28wmd%29-2027-38436/1415744133/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28345',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-WING-Elektro-und-Informationstechnik-%28wmd%29-2027-38436/1415719733/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Ausbildungsintegriertes Duales Studium WING Elektro- und '
-                      'Informationstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-WING-Elektro-und-Informationstechnik-%28wmd%29-2027-38436/1415719733/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1401.50/month;35h/week;22 leave days; '
-                        'possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-WING-Elektro-und-Informationstechnik-%28wmd%29-2027-38436/1415719733/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '29077',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Human-Factors-%28wmd%29-38436/1426504333/',
-  'application_window': None,
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Praktikum Human Factors (w/m/d)',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Human-Factors-%28wmd%29-38436/1426504333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Human-factors/cognitive-science/HCI or related students. '
-                        'Basic qualitative-user-research/concept/data/statistics '
-                        'skills; measurement-data knowledge preferred. DE+EN B2. Docs: '
-                        'CV; enrolment proof; current transcript; university '
-                        'certificate for mandatory internship; work permit for non-EU '
-                        'applicants. Current statutory minimum wage.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': None,
-             'language': 'de',
-             'category': 'internships',
-             'categories': ['internships'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Praktikum-Human-Factors-%28wmd%29-38436/1426504333/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Praktikanten']}}},
- {'identity': '28223',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Materialwissenschaft-und-Werkzeugtechnik-%28wmd%29-2027-38436/1415767533/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Materialwissenschaft und Werkzeugtechnik (w/m/d) '
-                      '2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Materialwissenschaft-und-Werkzeugtechnik-%28wmd%29-2027-38436/1415767533/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Technical understanding and analytical thinking. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Materialwissenschaft-und-Werkzeugtechnik-%28wmd%29-2027-38436/1415767533/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27084',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Informatik-%28wmd%29-2027-38436/1415749433/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Informatik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Informatik-%28wmd%29-2027-38436/1415749433/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in coding,IT security. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '>€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Informatik-%28wmd%29-2027-38436/1415749433/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28343',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Elektro-und-Informations%C2%ADtechnik-%28wmd%29-2027-38436/1415718033/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Ausbildungsintegriertes Duales Studium Elektro- und '
-                      'Informations\xadtechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Elektro-und-Informations%C2%ADtechnik-%28wmd%29-2027-38436/1415718033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. >€1401.50/month;35h/week;22 leave days; '
-                        'possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Ausbildungsintegriertes-Duales-Studium-Elektro-und-Informations%C2%ADtechnik-%28wmd%29-2027-38436/1415718033/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27698',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Betriebswirtschaft-%28wmd%29-2027-38436/1415731233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Betriebswirtschaft (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Betriebswirtschaft-%28wmd%29-2027-38436/1415731233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.4; good relevant advanced-course '
-                        'grades. Interest in business processes. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Betriebswirtschaft-%28wmd%29-2027-38436/1415731233/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28228',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Energie-und-Geb%C3%A4udetechnik-%28wmd%29-2027-38436/1415742833/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Energie- und Gebäudetechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Energie-und-Geb%C3%A4udetechnik-%28wmd%29-2027-38436/1415742833/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Technical understanding and analytical thinking. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Wolfsburg, DE, 38436',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Wolfsburg-Duales-Studium-Energie-und-Geb%C3%A4udetechnik-%28wmd%29-2027-38436/1415742833/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28642',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-30419/1415645233/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Ausbildung Fertigungsmechanikerin / Fertigungsmechaniker '
-                      '(w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-30419/1415645233/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education; Realschule recommended. Interest '
-                        'in business, maths/English. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '>€1327/month;35h/week;30 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fertigungsmechanikerin-Fertigungsmechaniker-%28wmd%29-2027-30419/1415645233/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '28638',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-30419/1415635033/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Ausbildung Fachkraft für Systemgastronomie (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-30419/1415635033/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Completed school education. Interest in German, '
-                        'maths/business. DE B2. Docs: CV; all latest-report pages and '
-                        'all school qualifications; foreign certificates need '
-                        'certified German translations. €1327/month;35h/week;30 leave '
-                        'days; possible hire after completion. Pension, vehicle '
-                        'purchase/leasing conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Ausbildung-Fachkraft-f%C3%BCr-Systemgastronomie-%28wmd%29-2027-30419/1415635033/',
-                                             'Actual publisher Karrierelevel: '
-                                             'Auszubildende']}}},
- {'identity': '26980',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-30419/1415752133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Ingenieurinformatik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-30419/1415752133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in coding,IT security. DE B2. Docs: CV; all '
-                        'latest-report pages and all school qualifications; foreign '
-                        'certificates need certified German translations. '
-                        '€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Ingenieurinformatik-%28wmd%29-2027-30419/1415752133/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '27119',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-30419/1415741333/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Elektro- und Informationstechnik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-30419/1415741333/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,technical drawing. DE '
-                        'B2. Docs: CV; all latest-report pages and all school '
-                        'qualifications; foreign certificates need certified German '
-                        'translations. €1401.50/month;35h/week;22 leave days; possible '
-                        'hire after completion. Pension, vehicle purchase/leasing '
-                        'conditions, bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Hannover, DE, 30419',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Hannover-Duales-Studium-Elektro-und-Informationstechnik-%28wmd%29-2027-30419/1415741333/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}},
- {'identity': '28625',
-  'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-34219/1415578133/',
-  'application_window': {'opens': '2026-08-01',
-                         'closes': '2027-04-30',
-                         'precision': 'calendar-date'},
-  'literal_publication_calendar_date': '2026-10-11',
-  'fields': {'title': 'Duales Studium Wirtschaftsinformatik (w/m/d) 2027',
-             'url': 'https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-34219/1415578133/',
-             'source': 'volkswagen-group',
-             'source_url': 'https://www.volkswagen-karriere.de/',
-             'published_at': None,
-             'summary': 'Abitur grade threshold 2.7; good relevant advanced-course '
-                        'grades. Interest in modern technology,coding. DE B2. Docs: '
-                        'CV; all latest-report pages and all school qualifications; '
-                        'foreign certificates need certified German translations. '
-                        '>€1401.50/month;35h/week;22 leave days; possible hire after '
-                        'completion. Pension, vehicle purchase/leasing conditions, '
-                        'bicycle leasing; Dec24+31 off.',
-             'summary_language': 'en',
-             'tags': [],
-             'location': 'Kassel, DE, 34219',
-             'deadline': '2027-04-30',
-             'language': 'de',
-             'category': 'training',
-             'categories': ['training', 'jobs'],
-             'kind': 'individual-opportunity',
-             'host_countries': ['DE'],
-             'eligible_countries': [],
-             'publisher_country': 'DE',
-             'classification': {'method': 'editorial-review',
-                                'status': 'classified',
-                                'evidence': ['https://jobs.volkswagen-group.com/Volkswagen/job/Kassel-Duales-Studium-Wirtschaftsinformatik-%28wmd%29-2027-34219/1415578133/',
-                                             'Actual publisher Karrierelevel: Dual '
-                                             'Studierende']}}}]
+_CURRENT_RECORD_IDS = None
+_DISCOVERED_URLS = set()
+_LEVEL_CATEGORIES = {
+    "Auszubildende": ("training", ["training", "jobs"]),
+    "Dual Studierende": ("training", ["training", "jobs"]),
+    "Praktikanten": ("internships", ["internships"]),
+    "Studierende": ("jobs", ["jobs"]),
+    "Doktoranden": ("jobs", ["jobs", "training"]),
+    "Berufseinsteigende": ("jobs", ["jobs"]),
+    "Referendare": ("training", ["training", "internships"]),
+}
+_EXCLUDED_LEVELS = {"Berufserfahrene", "Führungskräfte & Management"}
+_ENGLISH_LEVELS = {
+    "Interns": "Praktikanten",
+    "PhD students": "Doktoranden",
+    "Entry Level": "Berufseinsteigende",
+    "Professionals": "Berufserfahrene",
+}
+
+
+def read_document(url):
+    """Read a fresh permitted document without freezing ordinary job facts."""
+    _, headers, body = fetch_public(url)
+    content_type = (
+        headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+    )
+    if content_type not in {"text/html", "application/xhtml+xml"}:
+        raise AdapterError("Unexpected Volkswagen AG document format", "parse")
+    return document_root(body.decode("utf-8", "strict"))
+
+
+def unique_property(root, key):
+    values = {
+        n.text()
+        for n in nodes(root)
+        if n.attrs.get("data-careersite-propertyid") == key
+    }
+    if len(values) != 1 or not next(iter(values)):
+        raise AdapterError(
+            "Missing or conflicting native job field: " + key, "parse"
+        )
+    return values.pop()
+
+
+def listing_route(base, href, locale):
+    """Retain the advertised locale when following a literal pagination link."""
+    url = urllib.parse.urljoin(base, href)
+    parsed = urllib.parse.urlsplit(url)
+    pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    query = dict(pairs)
+    expected = {
+        "q": "",
+        "sortColumn": "referencedate",
+        "sortDirection": "desc",
+        "searchby": "location",
+        "d": "15",
+        "optionsFacetsDD_facility": "Volkswagen AG",
+    }
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "jobs.volkswagen-group.com"
+        or parsed.path != "/Volkswagen/search/"
+        or parsed.fragment
+        or len(pairs) != len(query)
+        or set(query) - set(expected) - {"startrow", "locale"}
+        or any(query.get(key) != value for key, value in expected.items())
+        or query.get("locale", locale) != locale
+        or not re.fullmatch(r"[0-9]+", query.get("startrow", ""))
+        or int(query["startrow"]) % 25
+        or not 0 < int(query["startrow"]) < 200
+    ):
+        raise AdapterError("Changed Volkswagen AG pagination route", "parse")
+    if "locale" not in query:
+        url += "&locale=" + locale
+    _DISCOVERED_URLS.add(url)
+    return url, int(query["startrow"])
+
+
+def parse_listing(root, url, language):
+    expression = (
+        r"Ergebnisse (\d+) [–-] (\d+) von (\d+) Seite (\d+) von (\d+)"
+        if language == "de"
+        else r"Results (\d+) [–-] (\d+) of (\d+) Page (\d+) of (\d+)"
+    )
+    spans = {
+        tuple(map(int, match)) for match in re.findall(expression, root.text())
+    }
+    if len(spans) != 1:
+        raise AdapterError(
+            "Missing complete advertised Volkswagen AG census", "parse"
+        )
+    first, last, total, page, pages = spans.pop()
+    if (
+        not 0 < total <= 200
+        or pages != math.ceil(total / 25)
+        or first != (page - 1) * 25 + 1
+        or last != min(page * 25, total)
+        or not 1 <= page <= pages
+    ):
+        raise AdapterError("Invalid Volkswagen AG page range", "parse")
+    rows = nodes(root, "tr", "data-row")
+    if len(rows) != last - first + 1:
+        raise AdapterError(
+            "Incomplete native Volkswagen AG listing page", "parse"
+        )
+    listings = {}
+    for row in rows:
+        anchors = nodes(row, "a", "jobTitle-link")
+        urls = {
+            urllib.parse.urljoin(url, n.attrs.get("href", "")) for n in anchors
+        }
+        titles = {n.text() for n in anchors}
+        if len(urls) != 1 or len(titles) != 1:
+            raise AdapterError(
+                "Conflicting native individual job links", "parse"
+            )
+        detail, title = urls.pop(), titles.pop()
+        parsed = urllib.parse.urlsplit(detail)
+        if (
+            parsed.scheme != "https"
+            or parsed.netloc != "jobs.volkswagen-group.com"
+            or not re.fullmatch(
+                r"/Volkswagen/job/[^/]+/[1-9][0-9]*/", parsed.path
+            )
+            or parsed.query
+            or parsed.fragment
+            or not title
+            or detail in listings
+        ):
+            raise AdapterError(
+                "Invalid literal Volkswagen AG detail route", "parse"
+            )
+        company = one(nodes(row, "td", "colFacility"), "company cell").text()
+        location = one(nodes(row, "td", "colLocation"), "location cell").text()
+        published = one(
+            nodes(row, "td", "colDate"), "publication date cell"
+        ).text()
+        if company != "Volkswagen AG" or not re.fullmatch(
+            r"DE|.+, DE, \d{5}(?: \+\d+ weitere …)?", location
+        ):
+            raise AdapterError(
+                "Advertised Volkswagen AG partition changed", "parse"
+            )
+        try:
+            stamp = datetime.strptime(
+                published, "%d.%m.%Y" if language == "de" else "%b %d, %Y"
+            )
+        except ValueError:
+            raise AdapterError(
+                "Unsupported literal publication date", "parse"
+            ) from None
+        _DISCOVERED_URLS.add(detail)
+        listings[detail] = {
+            "title": title,
+            "location": location,
+            "language": language,
+            "published_date": stamp.date().isoformat(),
+        }
+    locale = "de_DE" if language == "de" else "en_US"
+    next_pages = {}
+    for anchor in nodes(root, "a"):
+        href = anchor.attrs.get("href", "")
+        if "startrow=" in href:
+            route, offset = listing_route(url, href, locale)
+            if offset >= total:
+                raise AdapterError("Pagination exceeds current census", "parse")
+            before = next_pages.get(offset)
+            if before and before != route:
+                raise AdapterError(
+                    "Conflicting native pagination routes", "parse"
+                )
+            next_pages[offset] = route
+    return listings, next_pages, (first, last, total, page, pages)
+
+
+def discover_listing(seed, language):
+    pending = {0: seed}
+    visited = set()
+    inventory = {}
+    expected_total = None
+    while pending:
+        offset = min(pending)
+        url = pending.pop(offset)
+        if offset in visited:
+            continue
+        rows, following, span = parse_listing(read_document(url), url, language)
+        if span[0] != offset + 1:
+            raise AdapterError(
+                "Volkswagen AG pagination did not advance", "parse"
+            )
+        if expected_total is None:
+            expected_total = span[2]
+        if span[2] != expected_total or set(inventory) & set(rows):
+            raise AdapterError(
+                "Volkswagen AG current inventory changed mid-scan", "parse"
+            )
+        inventory.update(rows)
+        visited.add(offset)
+        for target, route in following.items():
+            if target not in visited:
+                pending[target] = route
+    if (
+        visited != set(range(0, expected_total, 25))
+        or len(inventory) != expected_total
+    ):
+        raise AdapterError(
+            "Incomplete current Volkswagen AG pagination", "parse"
+        )
+    return inventory
+
+
+def description_sections(description):
+    """Retain qualification, document and benefit boundaries."""
+    sections = {}
+    current = ""
+
+    def events(node):
+        if node.tag in {"h1", "h2", "h3", "p", "li"}:
+            yield node.tag, node.text()
+            return
+        for child in node.children:
+            if isinstance(child, Node):
+                yield from events(child)
+
+    for tag, text in events(description):
+        text = text.replace("\xad", "")
+        if (
+            tag.startswith("h")
+            or text == "Das bieten wir"
+            or text.startswith("Folgende Dokumente sind")
+            or text.startswith("Folgende Unterlagen sind")
+        ):
+            current = text
+        elif text:
+            sections.setdefault(current, []).append(text)
+    return sections
+
+
+def application_window(text):
+    matches = set(
+        re.findall(
+            (
+                r"(?:Bewerbungszeitraum|Bewerbungsfrist) (?:läuft|"
+                r"geht) vom (\d{2}\.\d{2}\.\d{4}) bis (?:zum "
+                r")?(\d{2}\.\d{2}\.\d{4})"
+            ),
+            text,
+        )
+    )
+    if len(matches) > 1:
+        raise AdapterError("Conflicting native application windows", "parse")
+    if not matches:
+        if re.search(r"Bewerbungszeitraum|Bewerbungsfrist", text):
+            raise AdapterError(
+                "Unsupported explicit application date clause", "parse"
+            )
+        return None
+    began, closes = matches.pop()
+    try:
+        opened = datetime.strptime(began, "%d.%m.%Y").date()
+        closed = datetime.strptime(closes, "%d.%m.%Y").date()
+    except ValueError:
+        raise AdapterError(
+            "Invalid native application dates", "parse"
+        ) from None
+    if opened > closed:
+        raise AdapterError("Native application window reversed", "parse")
+    return {"opens": opened.isoformat(), "closes": closed.isoformat()}
+
+
+def parse_detail(root, url, listing):
+    """Bind factual listings to the native JobID, never the postal slug."""
+    notices = (
+        "Der Veröffentlichungszeitraum für diese Position ist "
+        "bereits abgelaufen.",
+        "The posting for this position has already expired.",
+    )
+    if any(notice in root.text() for notice in notices):
+        if any(
+            node.attrs.get("data-careersite-propertyid") == "customfield1"
+            or node.attrs.get("itemprop") == "description"
+            for node in nodes(root)
+        ):
+            raise AdapterError(
+                "Conflicting native posting-expiry notice", "parse"
+            )
+        return None
+    identity = unique_property(root, "customfield1")
+    title = unique_property(root, "title").replace("\xad", "")
+    company = unique_property(root, "facility")
+    location = unique_property(root, "location")
+    level = unique_property(root, "customfield2")
+    addresses = {
+        n.attrs.get("content")
+        for n in nodes(root, "meta")
+        if n.attrs.get("itemprop") == "streetAddress"
+    }
+    if not addresses or any(
+        not isinstance(item, str) or not re.fullmatch(r"DE|.+, DE, \d{5}", item)
+        for item in addresses
+    ):
+        raise AdapterError(
+            "Native Volkswagen AG work locations changed scope", "parse"
+        )
+    advertised = listing["location"]
+    truncation = re.fullmatch(r"(.+, DE, \d{5}) \+(\d+) weitere …", advertised)
+    if truncation:
+        if (
+            truncation[1] not in addresses
+            or len(addresses) != int(truncation[2]) + 1
+        ):
+            raise AdapterError(
+                "Incomplete native multi-location opportunity", "parse"
+            )
+    elif addresses != {advertised}:
+        raise AdapterError("Native location contradicts listing", "parse")
+    locations = (
+        re.findall(r"[^,]+, DE, \d{5}", location)
+        if location != "DE"
+        else ["DE"]
+    )
+    if {value.strip() for value in locations} != addresses:
+        raise AdapterError("Native location fields disagree", "parse")
+    location = "; ".join(value.strip() for value in locations)
+    canonical = {
+        n.attrs.get("href")
+        for n in nodes(root, "link")
+        if n.attrs.get("rel") == "canonical"
+    }
+    if (
+        not re.fullmatch(r"[1-9][0-9]*", identity)
+        or company != "Volkswagen AG"
+        or title != listing["title"].replace("\xad", "")
+        or canonical != {url}
+    ):
+        raise AdapterError(
+            "Conflicting Volkswagen AG native job identity", "parse"
+        )
+    if listing["language"] == "en":
+        if level not in _ENGLISH_LEVELS:
+            raise AdapterError(
+                "Unknown native English career level: " + level, "parse"
+            )
+        level = _ENGLISH_LEVELS[level]
+    if level in _EXCLUDED_LEVELS:
+        return {
+            "identity": identity,
+            "excluded": True,
+            "url": url,
+            "level": level,
+        }
+    if level not in _LEVEL_CATEGORIES:
+        raise AdapterError(
+            "Unreviewed Volkswagen AG career level: " + level, "parse"
+        )
+    descriptions = [
+        n for n in nodes(root) if n.attrs.get("itemprop") == "description"
+    ]
+    if not descriptions or len({node.text() for node in descriptions}) != 1:
+        raise AdapterError(
+            "Conflicting native individual descriptions", "parse"
+        )
+    description = descriptions[0]
+    if not description.text():
+        raise AdapterError("Empty native job description", "parse")
+    return {
+        "identity": identity,
+        "excluded": False,
+        "url": url,
+        "level": level,
+        "title": title,
+        "location": location,
+        "language": listing["language"],
+        "published_date": listing["published_date"],
+        "description": description,
+    }
+
+
+def compact_qualification(text):
+    """Preserve qualification alternatives and numeric thresholds in recaps."""
+    text = text.replace("\u200b", "").replace("\xad", "")
+    for before, after in _FACT_CONTRACTIONS:
+        text = text.replace(before, after)
+    return " ".join(text.split()).strip(" .;,")
+
+
+def summarize_detail(detail):
+    sections = description_sections(detail["description"])
+    qualifications = sections.get(
+        "Anforderungen an die Qualifikation",
+        sections.get("Anforderung an die Qualifikation", []),
+    )
+    if not qualifications:
+        raise AdapterError("Missing native qualifications", "parse")
+    documents = []
+    benefits = sections.get("Das bieten wir", [])
+    for heading, values in sections.items():
+        if heading.startswith(
+            ("Folgende Dokumente sind", "Folgende Unterlagen sind")
+        ):
+            documents.extend(values)
+    facts = []
+    for requirement in qualifications:
+        if nonspecific_personality(requirement):
+            continue
+        value = compact_qualification(requirement)
+        if value:
+            facts.append(value)
+    docs = []
+    for value in documents:
+        if value.startswith(
+            (
+                "Für eine zügige",
+                "Kontakt für",
+                "Der Bruttostundenlohn",
+                "Das Bruttomonatsentgelt",
+                "Höhe des aktuellen Mindestlohns",
+                "Weitere Informationen",
+            )
+        ):
+            continue
+        if re.search(r"Bachelorstudierende.*(?:CP|CreditPoints)", value):
+            facts.append(compact_qualification(value))
+            continue
+        if re.search(
+            (
+                r"Lebenslauf|Anschreiben|Motivationsschreiben|"
+                r"Immatrikulations|Notenspiegel|Notenübersicht|"
+                r"Arbeitserlaubnis|Aufenthaltserlaubnis|"
+                r"Führungszeugnis|Zeugnis|Bescheinigung|Zertifikat|"
+                r"Abschluss|Portfolio|Arbeitsprobe|Mappe"
+            ),
+            value,
+            re.IGNORECASE,
+        ):
+            docs.append(compact_qualification(value))
+        else:
+            raise AdapterError(
+                "Unreviewed native application document clause", "parse"
+            )
+    if docs:
+        facts.append("Dok.: " + ", ".join(docs))
+    requirements = [
+        "Qualifikation: " + fact
+        for fact in facts
+        if not fact.startswith("Dok.:")
+    ]
+    requirements.extend("Dokument: " + doc for doc in docs)
+    text = detail["description"].text().replace("\xad", "")
+    window = application_window(text)
+    if window:
+        facts.append("Bewerbung ab " + window["opens"])
+    starts = set(
+        re.findall(
+            r"starten (?:zum|im) (\d{2}\.\d{2}\.\d{4}|[A-Za-zäöüÄÖÜ]+ \d{4})",
+            text,
+        )
+    )
+    title_years = set(re.findall(r"\b20\d{2}\b", detail["title"]))
+    if len(starts) > 1:
+        raise AdapterError("Conflicting native start dates", "parse")
+    if starts:
+        facts.append("Start: " + next(iter(starts)))
+    if starts and title_years:
+        start = next(iter(starts))
+        start_year = re.search(r"20\d{2}", start).group()
+        if start_year not in title_years:
+            facts.append(
+                "Titeljahr "
+                + "/".join(sorted(title_years))
+                + "; Start "
+                + start
+            )
+    pay = []
+    for clause in benefits:
+        if re.fullmatch(
+            (
+                r"Attraktive Vergütung & (\d+) Urlaubstage \(\+ "
+                r"24\.12\. und 31\.12\. frei\)"
+            ),
+            clause,
+        ):
+            days = re.search(r"(\d+) Urlaubstage", clause).group(1)
+            pay.append(days + " Urlaubstage+24./31.12. frei")
+        elif clause.startswith(
+            ("Attraktive Ausbildungsvergütung", "Attraktive Vergütung")
+        ):
+            match = re.fullmatch(
+                (
+                    r"Attraktive (?:Ausbildungsvergütung|Vergütung) "
+                    r"von monatlich (über )?([\d.,]+)\s*€"
+                ),
+                clause,
+            )
+            if not match:
+                raise AdapterError(
+                    "Unsupported native remuneration clause", "parse"
+                )
+            pay.append((">" if match[1] else "") + match[2] + "€/Monat")
+        elif re.fullmatch(
+            r"\d+ Urlaubstage \+ 24\.12\. und 31\.12\. frei", clause
+        ):
+            pay.append(clause.split()[0] + " Urlaubstage+24./31.12. frei")
+        elif re.fullmatch(r"\d+-Stunden-Woche", clause):
+            pay.append(clause.split("-")[0] + "h/W")
+        elif re.fullmatch(
+            r"(\d+)-Stunden-Woche, flexible Arbeitszeit, mobile Arbeit", clause
+        ):
+            hours = clause.split("-")[0]
+            pay.append(hours + "h/W; flexibel/mobil")
+        elif clause.startswith("Das Bruttomonatsentgelt für diese Stelle"):
+            pattern = (
+                r"Das Bruttomonatsentgelt für diese Stelle liegt auf "
+                r"Basis einer (\d+)-Stunden-Woche, gestaffelt nach "
+                r"dem jeweiligen Beschäftigungsjahr, bei ([\d.]+) € "
+                r"\(1\. Jahr\), ([\d.]+) € \(2\. Jahr\) und ([\d.]+) "
+                r"€ \(3\. Jahr\)\. Hinzu kommt eine monatliche Zulage "
+                r"i\.H\.v\. (\d+) € sowie eine Beteiligung am "
+                r"variablen Bonus zu (\d+)%\."
+            )
+            match = re.fullmatch(pattern, clause)
+            if not match:
+                raise AdapterError("Unsupported doctoral remuneration", "parse")
+            hours, first, second, third, allowance, bonus = match.groups()
+            pay.append(
+                "Jahr1/2/3: "
+                + "/".join((first, second, third))
+                + "€ brutto/Monat+"
+                + allowance
+                + "€ Zulage; "
+                + bonus
+                + "% variabler Bonus; "
+                + hours
+                + "h/W"
+            )
+        elif clause == (
+            "Seminare zu wissenschaftlichem Arbeiten und "
+            "überfachlicher Qualifizierung"
+        ):
+            pay.append("Wissenschafts-/Qualifizierungsseminare")
+        elif clause.startswith(
+            "Teilnahme am Doktorandenkolleg zum wissenschaftlichen Austausch"
+        ):
+            pay.append("Doktorandenkolleg")
+        elif clause == "Tarifliche Urlaubstage + 24.12. und 31.12. frei":
+            pay.append("Tarifurlaub (Zahl offen)+24./31.12. frei")
+        elif clause == "Bildungs- und Beratungsangebote":
+            pay.append("Bildungs-/Beratungsangebote")
+        elif clause == "Flexible Arbeitszeiten":
+            pay.append("flexible Arbeitszeiten")
+        elif clause == "Mobiles Arbeiten":
+            pay.append("mobiles Arbeiten")
+        elif clause == (
+            "Individuelle Sonderzahlung: Zusätzlich zum "
+            "Fixgehalt bieten wir eine variable Sonderzahlung, "
+            "die sich an Ihrer regelmäßigen Leistungsbeurteilung "
+            "orientiert"
+        ):
+            pay.append("leistungsabhängige variable Sonderzahlung")
+        elif clause == (
+            "30 Urlaubstage + 24.12. und 31.12. frei zzgl. 6 "
+            "Tage Tarifliche Freistellungszeit (Anspruch ab zwei "
+            "Jahren Konzernzugehörigkeit)"
+        ):
+            pay.append(
+                (
+                    "30 Urlaubstage+24./31.12. frei; 6 Freistelltage "
+                    "ab 2 Konzernjahren"
+                )
+            )
+        elif clause == "Dienstwagen inkl. Nutzung für private Zwecke":
+            pay.append("Dienstwagen privat nutzbar")
+        elif clause == (
+            "Beteiligung am Zeit-Wertpapier mit dem Anspruch auf "
+            "bezahlte Freistellung unmittelbar vor dem Übergang "
+            "in die gesetzliche Altersrente"
+        ):
+            pay.append("Zeit-Wertpapier: bezahlt frei vor Altersrente")
+        elif clause == "Erstklassige Gesundheitsangebote on the Job":
+            pay.append("Gesundheitsangebote bei der Arbeit")
+        elif clause.startswith("Das Einstiegsmonatsbruttoentgelt kann"):
+            match = re.fullmatch(
+                (
+                    r"Das Einstiegsmonatsbruttoentgelt kann für diese "
+                    r"Stelle bei einer (\d+)[-‑]Stunden[-‑]Woche "
+                    r"([\d.,]+) € betragen\."
+                ),
+                clause,
+            )
+            if not match:
+                raise AdapterError(
+                    "Unsupported entry-level remuneration", "parse"
+                )
+            pay.append(
+                "Einstieg kann "
+                + match[2]
+                + "€ brutto/Monat bei "
+                + match[1]
+                + "h/W betragen"
+            )
+        elif clause == "Betriebsrente":
+            pay.append("Betriebsrente")
+        elif clause == "Sonderkonditionen bei Kauf und Leasing von Fahrzeugen":
+            pay.append("Fahrzeugkauf/-leasing: Sonderkond.")
+        elif (
+            clause
+            == "FahrradleasingÜbernahmemöglichkeit nach erfolgreichem Abschluss"
+        ):
+            pay.append("Radleasing; Übernahme bei Abschluss möglich")
+        elif clause == "Fahrradleasing":
+            pay.append("Radleasing")
+        elif clause == "Übernahmemöglichkeit nach erfolgreichem Abschluss":
+            pay.append("Übernahme bei Abschluss möglich")
+        elif clause.startswith(
+            (
+                "Haben wir Ihr Interesse",
+                "Weitere Informationen",
+                "Wir freuen uns",
+                "Kontakt für",
+            )
+        ):
+            continue
+        else:
+            raise AdapterError("Unreviewed native benefit clause", "parse")
+    if pay:
+        facts.append("; ".join(pay))
+    internship_or_thesis = detail["level"] == "Praktikanten" or (
+        detail["level"] == "Studierende"
+        and re.search(r"Abschlussarbeit|Masterarbeit", detail["title"])
+    )
+    if internship_or_thesis:
+        minimum_wage = (
+            "Der Bruttostundenlohn für Praktika (auch Pflichtpraktika) und "
+            "Abschlussarbeiten entspricht der Höhe des aktuellen Mindestlohns"
+        )
+        if minimum_wage in text:
+            facts.append("Praktikum/Abschlussarbeit: aktueller Mindestlohn")
+        elif re.search(
+            r"Bruttostundenlohn für Praktika.*Abschlussarbeiten", text
+        ):
+            raise AdapterError("Unsupported placement pay clause", "parse")
+    elif detail["level"] == "Studierende":
+        wages = re.findall(
+            r"Bruttostundenlohn für Werkstudierende beträgt aktuell "
+            r"([\d.,]+) €",
+            text,
+        )
+        if wages:
+            if len(set(wages)) != 1:
+                raise AdapterError("Conflicting student pay", "parse")
+            facts.append(wages[0] + "€ brutto/h")
+        elif "Bruttostundenlohn für Werkstudierende" in text:
+            raise AdapterError("Unsupported student pay clause", "parse")
+    duration = re.findall(r"mindestens (zehn|drei|\d+) (Wochen|Monate)", text)
+    for count, unit in sorted(set(duration)):
+        facts.append(
+            "mindestens "
+            + {"zehn": "10", "drei": "3"}.get(count, count)
+            + " "
+            + unit
+        )
+    # The existing evidence array retains every extracted objective clause.
+    # The overview selects semantic groups consistently, never slices text.
+    overview = [facts[0]]
+    for item in facts[1:]:
+        if re.search(
+            (
+                r"Studienleistung|(?:DE|EN)\b.*[ABC][12]|"
+                r"(?:Sprachniveau|Mindestalter|Führerschein|"
+                r"Startalter|Grundstudium|Bachelorstudierende)|"
+                r"Titeljahr|Start:|Bewerbung ab|mindestens \d+ "
+                r"(?:Wochen|Monate)"
+            ),
+            item,
+        ):
+            overview.append(item)
+    overview.extend(pay)
+    overview.extend(
+        item
+        for item in facts
+        if re.fullmatch(
+            (
+                r"[\d.,]+€ brutto/h|Praktikum/Abschlussarbeit: "
+                r"aktueller Mindestlohn"
+            ),
+            item,
+        )
+    )
+    overview.append(
+        "Weitere Fach-/Dokumentanforderungen: offizielle Ausschreibung prüfen"
+    )
+    summary = "; ".join(overview) + "."
+    if len(summary.encode("utf-16-le")) // 2 > 600:
+        raise AdapterError(
+            "Native factual overview exceeds supported summary length", "parse"
+        )
+    return summary, window, requirements
+
+
+def nonspecific_personality(text):
+    """Omit exact generic traits while retaining mixed technical clauses."""
+    return text in {
+        "Ausgeprägte Team- und Kommunikationsfähigkeit",
+        "Selbstständige, strukturierte und zuverlässige Arbeitsweise",
+        "Selbstständige, strukturierte und engagierte Arbeitsweise",
+        "Selbstständige und strukturierte Arbeitsweise",
+        "Selbständige und strukturierte Arbeitsweise",
+        "Teamfähigkeit und eine ausgeprägte Kommunikationsfähigkeit",
+        "Ausgeprägte Kommunikations- und Teamfähigkeit",
+        "Hohe Eigeninitiative sowie wissenschaftliche Neugier",
+        "Ausgeprägte analytische und konzeptionelle Denkweise",
+        "Stark ausgeprägter Sinn für Kreativität",
+        "Klaren Denkvermögen und zielgerichtetem Arbeiten",
+        "Einsatzbereitschaft sowie eine selbständige Arbeitsweise",
+    }
+
+
+INPUTS = {
+    "input-193": {
+        (
+            "url"
+        ): "https://jobs.volkswagen-group.com/content/Nutzungsbedingungen/?locale=de_DE",
+        "format": "html",
+        (
+            "sha256"
+        ): "257d17b39bbddfb809d03015552a054c22a979f585f593ef52b91a5c1e58eafa",
+        "role": "legal terms",
+    },
+    "input-194": {
+        "url": "https://jobs.volkswagen-group.com/robots.txt",
+        "format": "robots",
+        (
+            "sha256"
+        ): "91669efc2767d124199e1d848655af18d64ac71e61ae1227be7b6aa866f03caf",
+        "role": "fresh origin robots/policy",
+    },
+    "input-195": {
+        "url": "https://www.hrd-portal.com/robots.txt",
+        "format": "robots",
+        (
+            "sha256"
+        ): "58c109cc44da82a7ff610aaaa11a3801cb99eaa3cd98f3e05183607801af6608",
+        "role": "fresh origin robots/policy",
+    },
+    "input-196": {
+        "url": "https://www.volkswagen-karriere.de/de.html",
+        "format": "html",
+        (
+            "sha256"
+        ): "f3e7a788aa530d33a4427a0ac1a0254a056ef9e8209139b76b386547e0b94e25",
+        "role": "official homepage",
+    },
+    "input-197": {
+        "url": "https://www.volkswagen-karriere.de/de/nutzungsbedingungen.html",
+        "format": "html",
+        (
+            "sha256"
+        ): "2c333250fb0f843e9ee1b1c414a8fff4e5a7bc69f804ce30007cf90e6b950185",
+        "role": "legal terms",
+    },
+    "input-198": {
+        "url": "https://www.volkswagen-karriere.de/en.html",
+        "format": "html",
+        (
+            "sha256"
+        ): "1a6f26069f0dfad07cdb9caabd2afa781b5867e48193369bc7fec10b59752eb7",
+        "role": "official homepage",
+    },
+    "input-199": {
+        "url": "https://www.volkswagen-karriere.de/robots.txt",
+        "format": "robots",
+        (
+            "sha256"
+        ): "dd84e3470dafcf77ca25f1d3d448c84dfd4255988f006a0318437961d06368fb",
+        "role": "fresh origin robots/policy",
+    },
+    "german-listing": {
+        (
+            "url"
+        ): "https://jobs.volkswagen-group.com/Volkswagen/search/?searchby=location&createNewAlert=false&q=&locationsearch=&geolocation=&optionsFacetsDD_city=&optionsFacetsDD_facility=Volkswagen+AG&optionsFacetsDD_department=&optionsFacetsDD_customfield2=&optionsFacetsDD_shifttype=&optionsFacetsDD_customfield3=&locale=de_DE",
+        "format": "listing",
+        (
+            "sha256"
+        ): "5653fda3ee4b50ad5d3ad8711ef3022e235ba78a98b4f0e6589cde7e226a0902",
+        "role": "official German discovery seed",
+    },
+    "english-listing": {
+        (
+            "url"
+        ): "https://jobs.volkswagen-group.com/Volkswagen/search/?searchby=location&createNewAlert=false&q=&locationsearch=&geolocation=&optionsFacetsDD_location=&optionsFacetsDD_facility=Volkswagen+AG&optionsFacetsDD_department=&optionsFacetsDD_customfield2=&optionsFacetsDD_shifttype=&optionsFacetsDD_customfield3=&locale=en_US",
+        "format": "listing",
+        (
+            "sha256"
+        ): "83d7d93cafb07a58ff34d248ffe7deee8915dd0205ceb6bdcde34495255c3f41",
+        "role": "official English alias discovery seed",
+    },
+}
+
+_FACT_CONTRACTIONS = (
+    (
+        "Für eine zügige und optimale Bearbeitung fordern wir vollständige "
+        "Bewerbungsunterlagen:",
+        "",
+    ),
+    (
+        "Aktueller vollständiger Lebenslauf, der unter anderem die derzeitige "
+        "Tätigkeit verdeutlicht",
+        "aktueller vollständiger CV",
+    ),
+    (
+        (
+            "Alle Seiten des letzten Zeugnisses sowie alle "
+            "erreichten Schulabschlüsse (bei ausländischen "
+            "Zeugnissen beglaubigte deutsche Übersetzung)"
+        ),
+        (
+            "letztes Zeugnis vollständig+alle Schulabschlüsse; "
+            "ausländisch: beglaubigte DE-Übersetzung"
+        ),
+    ),
+    (
+        "Auswahlverfahren, Ausbildung und Prüfungen finden auf Deutsch statt",
+        "Auswahl/Ausbildung/Prüfung auf DE",
+    ),
+    (
+        "Abitur mit einem Durchschnitt von mindestens ",
+        "Abitur-Schnitt mindestens ",
+    ),
+    (
+        "Gute Noten in studiennahen Leistungskursen",
+        "gute fachnahe Leistungskursnoten",
+    ),
+    (
+        (
+            "Abgeschlossene Schulausbildung, min. ein "
+            "Realschulabschluss wird empfohlen"
+        ),
+        "Schule abgeschlossen; Realschulabschluss empfohlen",
+    ),
+    ("Abgeschlossene Schulausbildung", "Schule abgeschlossen"),
+    ("Lust, sich mit ", "Interesse: "),
+    (
+        " zu beschäftigen und innovative Lösungen zu entwickeln",
+        "+innovative Lösungen",
+    ),
+    (" zu beschäftigen", ""),
+    ("Interesse an den Fächern ", "Interesse: "),
+    ("Besonders Ihr ", ""),
+    ("Besonders Ihre ", ""),
+    ("Besonders ihr ", ""),
+    (" zeichnen Sie aus", ""),
+    ("Deutsch Sprachniveau ", "DE "),
+    ("Englisch Sprachniveau ", "EN "),
+    ("Deutsch und Englisch Sprachniveau ", "DE UND EN "),
+    (
+        "Deutsch und Englisch Sprach- und Schriftniveau ",
+        "DE UND EN mündlich/schriftlich ",
+    ),
+    ("Sprachniveau Deutsch ", "DE "),
+    ("Sprachniveau Englisch ", "EN "),
+    ("Gute bis sehr gute Studienleistungen", "gut–sehr gute Studienleistungen"),
+    ("Sehr gute Studienleistungen", "sehr gute Studienleistungen"),
+    ("Studierende ", "Studium: "),
+    ("in den Bereichen ", ""),
+    ("im Bereich ", ""),
+    ("Fachrichtung ", ""),
+    ("vergleichbare Studienrichtungen", "vergleichbare Fächer"),
+    ("vergleichbaren Studienrichtungen", "vergleichbare Fächer"),
+    ("vergleichbarer Studienrichtungen", "vergleichbare Fächer"),
+    ("erfolgreich absolviertem Grundstudium", "abgeschlossenem Grundstudium"),
+    ("Credit Points", "CP"),
+    ("Gute Kenntnisse in der ", "gute Kenntnisse: "),
+    ("Gute Kenntnisse im ", "gute Kenntnisse: "),
+    ("Gute Kenntnisse ", "gute Kenntnisse "),
+    ("Grundkenntnisse im Bereich ", "Grundlagen: "),
+    ("Grundkenntnisse in der ", "Grundlagen: "),
+    ("Grundkenntnisse in ", "Grundlagen: "),
+    ("Grundlagen in ", "Grundlagen: "),
+    ("Kenntnisse im Umgang mit ", "Kenntnisse: "),
+    ("Kenntnisse im Bereich ", "Kenntnisse: "),
+    ("Kenntnisse über die Durchführung von ", "Kenntnisse: "),
+    ("Kenntnisse in ", "Kenntnisse: "),
+    ("Sicherer Umgang mit den gängigen ", "sicher: "),
+    ("Sicherer Umgang mit ", "sicher: "),
+    ("Erfahrung in ", "Erfahrung: "),
+    ("Erfahrungen in ", "Erfahrungen: "),
+    ("Ausgeprägte ", "starke "),
+    ("Kommunikationsfähigkeit", "Kommunikation"),
+    ("Problemlösungskompetenz", "Problemlösen"),
+    ("Kooperationsbereitschaft", "Kooperation"),
+    ("Organisationsstärke", "Organisation"),
+    ("Teamfähigkeit", "Teamarbeit"),
+    (
+        "Selbstständige, strukturierte und zuverlässige Arbeitsweise",
+        "selbstständig, strukturiert UND zuverlässig",
+    ),
+    ("sorgfältige Arbeitsweise", "sorgfältig"),
+    ("modernen Technologien in der Automobilindustrie", "moderner Autotechnik"),
+    ("logisches und analytisches Denken", "logisch UND analytisch"),
+    (
+        "Spaß an innovativen Problemlösungsstrategien",
+        "innovatives Problemlösen",
+    ),
+    (
+        "tiefes Verständnis für technische Zusammenhänge",
+        "tiefes technisches Verständnis",
+    ),
+    ("MS-Office-Anwendungen", "MS Office"),
+    (
+        "Erstellung und Bearbeitung von Medieninhalten (Bilder, Logos, Videos, "
+        "usw.)",
+        "Medienerstellung/-bearbeitung (Bild/Logo/Video)",
+    ),
+    ("Gestaltung und Pflege von Webseiten", "Webgestaltung/-pflege"),
+    ("Arbeitsweise", "Arbeit"),
+    ("Aktuelle Immatrikulationsbescheinigung", "aktuelle Immatrikulation"),
+    ("Aktueller Notenspiegel", "aktueller Notenspiegel"),
+    (
+        (
+            "Bei einem Pflichtpraktikum zusätzlich eine "
+            "Bescheinigung der Hochschule"
+        ),
+        "Pflichtpraktikum: Hochschulnachweis",
+    ),
+    (
+        "Arbeitserlaubnis für Nicht-EU Bürgerinnen / Bürger",
+        "Nicht-EU: Arbeitserlaubnis",
+    ),
+    ("Anschreiben und Lebenslauf", "Anschreiben+CV"),
+    ("Studierende im Bachelorstudium", "Bachelor"),
+    ("Studium: im Bachelorstudium", "Bachelor"),
+    (
+        "Masterstudierende mit guten bis sehr guten Studienleistungen",
+        "Master; Studienleistung gut–sehr gut:",
+    ),
+    (
+        "Studium: mit guten bis sehr guten Studienleistungen",
+        "Studium; Studienleistung gut–sehr gut:",
+    ),
+    (
+        (
+            "Gute Programmierkenntnisse, vorzugsweise in Python "
+            "(oder einer vergleichbaren Programmiersprache) sowie "
+            "Erfahrung mit GenAI, LLMs und AI-gestützten "
+            "Engineering-Workflows"
+        ),
+        (
+            "gut programmieren; Python oder vergl. Sprache "
+            "bevorzugt; Erfahrung GenAI, LLMs UND AI-Engineering"
+        ),
+    ),
+    (
+        (
+            "Erste Kenntnisse: Simulations- und "
+            "Engineering-Werkzeugen (z. B. MATLAB/Simulink, LTspice, "
+            "PCB-Entwicklungsumgebungen oder vergleichbare Software) "
+            "sind von Vorteil"
+        ),
+        "erste Simulations-/Engineering-Kenntnisse (MATLAB/Simulink, LTspice, "
+        "PCB-Tools oder vergl.) vorteilhaft",
+    ),
+    (
+        (
+            "Erste Kenntnisse oder Erfahrungen CFD-Berechnung und "
+            "1-D-Berechnung sind wünschenswert"
+        ),
+        "CFD- UND 1-D-Kenntnisse/Erfahrung erwünscht",
+    ),
+    (
+        "Gutes Verständnis für komplexe technische Zusammenhänge",
+        "gutes komplexes Technikverständnis",
+    ),
+    (
+        (
+            "Kreativität sowie Interesse an der Entwicklung neuer "
+            "Ansätze und Methoden"
+        ),
+        "Kreativität UND neue Methoden",
+    ),
+    (
+        "Selbstständige, strukturierte und engagierte Arbeit",
+        "selbstständig, strukturiert UND engagiert",
+    ),
+    (
+        (
+            "Versiert im Skizzieren von Konzepten, der Illustration "
+            "mit Photoshop und dem Erstellen von 3D-Modellen"
+        ),
+        "versiert: Konzeptskizzen, Photoshop-Illustration UND 3D-Modellierung",
+    ),
+    ("Stark ausgeprägter Sinn für Kreativität", "stark kreativ"),
+    (
+        "Klaren Denkvermögen und zielgerichtetem Arbeiten",
+        "klar denken UND zielgerichtet arbeiten",
+    ),
+    ("Deutsch und EN ", "DE UND EN "),
+    ("Englisch und DE ", "EN UND DE "),
+    ("Gute bis sehr gute ", "gut–sehr gute "),
+    ("mit guten bis sehr guten ", "mit gut–sehr guten "),
+    ("mit sehr guten ", "mit sehr guten "),
+    ("Grundkenntnisse mit ", "Grundlagen: "),
+    ("sind wünschenswert", "erwünscht"),
+    ("sind von Vorteil", "vorteilhaft"),
+    ("ist wünschenswert", "erwünscht"),
+    ("ist von Vorteil", "vorteilhaft"),
+    ("idealerweise", "bevorzugt"),
+    ("vorzugsweise", "bevorzugt"),
+    ("Studienrichtungen", "Fächer"),
+    ("Studiengänge", "Fächer"),
+    ("Studienrichtung", "Fach"),
+    ("oder einer vergleichbaren ", "oder vergl. "),
+    ("oder vergleichbare ", "oder vergl. "),
+    ("Erste Kenntnisse ", "erste Kenntnisse "),
+    (
+        "in der Programmierung und Datenanalyse",
+        "Programmierung UND Datenanalyse",
+    ),
+    ("Begeisterung für Themen rund um Mobilität", "Mobilitätsinteresse"),
+    (
+        (
+            "Relevante Erfahrungen in der Beratung, Automobilbranche "
+            "oder Industrie"
+        ),
+        "relevante Beratungs-, Auto- oder Industrieerfahrung",
+    ),
+    (
+        (
+            "Erfolgreiches bestandenes 1. Staatsexamen, Verständnis "
+            "für wirtschaftliche und technische Zusammenhänge"
+        ),
+        (
+            "1. Staatsexamen bestanden; wirtschaftliches UND "
+            "technisches Verständnis"
+        ),
+    ),
+    (
+        "Freude an juristisch anspruchsvoller Tätigkeit, ",
+        "Interesse an anspruchsvoller juristischer Arbeit; ",
+    ),
+    (
+        "Einsatzbereitschaft sowie eine selbständige Arbeit",
+        "einsatzbereit UND selbstständig",
+    ),
+    (
+        (
+            "Begeisterung, als Jurist/in in einem internationalen "
+            "Unternehmen tätig zu sein"
+        ),
+        "Interesse an internationaler juristischer Tätigkeit",
+    ),
+    (
+        (
+            "logistischen Prozessen in der Automobilindustrie und "
+            "modernen Technologien"
+        ),
+        "Automobillogistik UND moderner Technik",
+    ),
+    (
+        "technischen Zeichnungen sowie modernen Technologien",
+        "Technikzeichnen UND moderner Technik",
+    ),
+    (
+        "technischen Zeichnungen und modernen Technologien",
+        "Technikzeichnen UND moderner Technik",
+    ),
+    (
+        "Programmiersprachen, Coding und IT-Sicherheit",
+        "Programmiersprachen, Coding UND IT-Sicherheit",
+    ),
+    (
+        "betriebswirtschaftlichen Zusammenhängen in der Automobilindustrie",
+        "Automobilwirtschaft",
+    ),
+    ("aktueller vollständiger CV", "CV aktuell/vollständig"),
+    (
+        "letztes Zeugnis vollständig+alle Schulabschlüsse",
+        "letztes Zeugnis alle Seiten+alle Schulabschlüsse",
+    ),
+    ("Auswahl/Ausbildung/Prüfung auf DE", "Auswahl/Ausbildung/Prüfung DE"),
+    (
+        "Mindestalter 16 ½ bei Ausbildungsstart und Führerschein Klasse B "
+        "spätestens 18 Monate nach Ausbildungsbeginn",
+        "Startalter≥16½; Führerschein B spätestens 18 Monate nach Start",
+    ),
+    (
+        "Lust sich mit Rettungstechniken sowie Maßnahmen zur Brandbekämpfung",
+        "Interesse: Rettung UND Brandbekämpfung",
+    ),
+    (
+        (
+            "Sicherheitstechnik und Wartung von Hard- und "
+            "Softwarekomponenten sowie IT-Systemen"
+        ),
+        "Sicherheitstechnik UND Hard-/Software-/IT-Wartung",
+    ),
+    (
+        "Software im Bereich IT-Sicherheit sowie Netzwerk- und "
+        "Kommunikationstechnik",
+        "IT-Sicherheitssoftware, Netzwerk-/Kommunikationstechnik",
+    ),
+    (
+        "Arbeits- und Aufenthaltserlaubnis für Nicht-EU-Bürgerinnen / -Bürger",
+        "Nicht-EU: Arbeits-/Aufenthaltserlaubnis",
+    ),
+    (
+        "Arbeits- und Aufenthaltserlaubnis für Nicht-EU Bürgerinnen / Bürger",
+        "Nicht-EU: Arbeits-/Aufenthaltserlaubnis",
+    ),
+    (
+        "Ggf. Arbeits- und Aufenthaltserlaubnis inkl. Zusatzblatt für Nicht-EU "
+        "Bürgerinnen / Bürger",
+        "ggf. Nicht-EU: Arbeits-/Aufenthaltserlaubnis+Zusatzblatt",
+    ),
+    (
+        "Ggf. Arbeits- und Aufenthaltserlaubnis inkl. Zusatzblatt für "
+        "Nicht-EU-Bürgerinnen / -Bürger",
+        "ggf. Nicht-EU: Arbeits-/Aufenthaltserlaubnis+Zusatzblatt",
+    ),
+    (
+        "Ggf. Arbeits- und Aufenthaltserlaubnis inkl. Zusatzblatt für "
+        "Nicht-EU-Bürgerinnen/-Bürger",
+        "ggf. Nicht-EU: Arbeits-/Aufenthaltserlaubnis+Zusatzblatt",
+    ),
+    (
+        "Gute Kommunikations- und Teamarbeit",
+        "gute Kommunikation UND Teamarbeit",
+    ),
+    ("sicher: den MS Office", "sicher: MS Office"),
+    ("Idealerweise", "bevorzugt"),
+    ("oder vergleichbarer", "oder vergl."),
+    (
+        "Gut bis sehr gut abgeschlossenes Studium mit Promotionsberechtigung",
+        "Promotionsberechtigter Abschluss gut–sehr gut",
+    ),
+    ("Künstliche Intelligenz", "KI"),
+    ("Generativer Künstlicher Intelligenz", "GenAI"),
+    (
+        "Multi-Agenten-Systemen oder verwandten Technologien",
+        "Multi-Agenten-Systeme oder Verwandtes",
+    ),
+    ("Wirtschaftsingenieurwissenschaften", "Wirtschaftsingenieurwiss."),
+    (
+        "Softwareentwicklung oder der Entwicklung datenbasierter Systeme",
+        "Software- oder datenbasierte Systementwicklung",
+    ),
+    (
+        "Interesse an wissenschaftlicher Forschung und der Anwendung moderner "
+        "KI-Verfahren auf reale Problemstellungen",
+        "Forschungsinteresse UND reale KI-Anwendung",
+    ),
+    (
+        "Aktueller Notenspiegel / Master- oder Diplomzeugnis",
+        "Notenspiegel / Master- oder Diplomzeugnis",
+    ),
+    (
+        "Ausgeprägte analytische und konzeptionelle Denkweise",
+        "stark analytisch UND konzeptionell",
+    ),
+    ("Vorlage eines aktuellen Führungszeugnisses", "aktuelles Führungszeugnis"),
+    ("gut–sehr gute Studienleistungen", "Studienleistungen gut–sehr gut"),
+    ("sehr gute Studienleistungen", "Studienleistungen sehr gut"),
+    (
+        "Abgeschlossene Schulausbildung, mind. ein Realschulabschluss wird "
+        "empfohlen",
+        "Schule abgeschlossen; Realschulabschluss empfohlen",
+    ),
+    (
+        "Schule abgeschlossen, mind. ein Realschulabschluss wird empfohlen",
+        "Schule abgeschlossen; Realschulabschluss empfohlen",
+    ),
+    (
+        (
+            "Kreativität, gestalterisches Verständnis sowie ein "
+            "ausgeprägtes Gespür für Farben und Formen"
+        ),
+        "kreativ; starkes Gestaltungs-/Farb-/Formverständnis",
+    ),
+    (
+        "Interesse an Gestaltung, Medien, digitalen Technologien und kreativen "
+        "Prozessen",
+        "Interesse: Gestaltung, Medien, digitale Technik UND kreative Prozesse",
+    ),
+    (
+        (
+            "Bitte fügen Sie Ihrer Bewerbung 5 bis 10 Arbeitsproben "
+            "als eine zusammengefasste PDF-Datei bei. Die "
+            "Arbeitsproben sollen Ihre fachlichen Fähigkeiten und "
+            "Ihre Arbeitsweise veranschaulichen und jeweils mit "
+            "einer kurzen Beschreibung (Thema, Zielsetzung und Ihr "
+            "Beitrag) versehen sein. Bei Teamprojekten bitten wir "
+            "zusätzlich um eine kurze Erläuterung Ihrer Rolle im "
+            "Projekt."
+        ),
+        (
+            "5–10 Arbeitsproben in 1 PDF; je Thema/Ziel/eigener "
+            "Beitrag; Team: eigene Rolle erklären"
+        ),
+    ),
+    ("Deutsch oder EN ", "DE ODER EN "),
+    ("Sutidenleistungen", "Studienleistungen"),
+    (
+        (
+            "tiefes technisches Verständnis, -Dokumentationen und - "
+            "Programmen zeichnet Sie aus"
+        ),
+        (
+            "tiefes Verständnis: technische Zusammenhänge, "
+            "Dokumentationen UND Programme"
+        ),
+    ),
+    (
+        (
+            "Bitte fügen Sie Ihrer Bewerbung 5 bis 10 Arbeitsproben "
+            "als eine zusammengefasste PDF-Datei bei. Die "
+            "Arbeitsproben sollen Ihre fachlichen Fähigkeiten und "
+            "Ihre Arbeit veranschaulichen und jeweils mit einer "
+            "kurzen Beschreibung (Thema, Zielsetzung und Ihr "
+            "Beitrag) versehen sein. Bei Teamprojekten bitten wir "
+            "zusätzlich um eine kurze Erläuterung Ihrer Rolle im "
+            "Projekt."
+        ),
+        (
+            "5–10 Arbeitsproben in 1 PDF; je Thema/Ziel/eigener "
+            "Beitrag; Team: eigene Rolle erklären"
+        ),
+    ),
+)
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
