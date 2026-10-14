@@ -3,7 +3,7 @@
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -1290,9 +1290,9 @@ def make_record(
     }
 
 
-def validate_records(records):
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -1738,12 +1738,12 @@ def read_input(key):
 
 
 def read_pages():
-    """Exhaust all eighty-eight required inputs in their reviewed order."""
+    """Exhaust the complete required material inputs in reviewed order."""
     return {key: read_input(key) for key in INPUTS}
 
 
 def parse_inventory(pages):
-    """Normalize only the complete guarded fifty-three-identity partition."""
+    """Normalize the complete guarded current identity partition."""
     if set(pages) != set(INPUTS) or any(
         pages[key] != info["sha256"] for key, info in INPUTS.items()
     ):
@@ -1762,6 +1762,8 @@ def parse_inventory(pages):
         )
         record["id"] = profile_identity(profile)
         record["summary"] = profile["summary"]
+        if "summary_language" in profile:
+            record["summary_language"] = profile["summary_language"]
         record["country"] = PUBLISHER_COUNTRY
         record["deadline"] = profile["deadline"]
         record["location"] = profile["location"]
@@ -1777,7 +1779,7 @@ def parse_inventory(pages):
                 record["status"] = "expired"
         records.append(record)
     validate_records(records)
-    if len(records) != 53:
+    if len(records) != 57:
         raise AdapterError("Incomplete reviewed identity partition", "validate")
     return records
 
@@ -1817,7 +1819,7 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected {len(records)} reviewed FRSE opportunities"
+            else f"Validated refresh retains {len(records)} FRSE opportunities"
         ),
         "error": safe_error(error) if error else None,
     }
@@ -1917,6 +1919,35 @@ def serialize(value):
     return json.dumps(value, ensure_ascii=False, indent=2) + "\n"
 
 
+def remove_expired_records(records, checked):
+    """Filter the validated replacement, leaving prior publication untouched."""
+    validate_records(records)
+    now = datetime.fromisoformat(checked.replace("Z", "+00:00"))
+    if now.tzinfo is None:
+        raise AdapterError("Cleanup clock requires a timezone", "validate")
+    current = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if isinstance(deadline, str):
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+                # Without a documented zone, wait for worldwide day closure.
+                expired = (
+                    datetime.strptime(deadline, "%Y-%m-%d").date()
+                    < now.astimezone(timezone(timedelta(hours=-12))).date()
+                )
+            else:
+                instant = datetime.fromisoformat(
+                    deadline.replace("Z", "+00:00")
+                )
+                expired = instant.tzinfo is not None and instant < now
+        if not expired:
+            current.append(record)
+    # Valid nonempty retrieval may have no remaining eligible records.
+    validate_records(current, allow_empty=True)
+    return current
+
+
 def fresh_records(records, old, attempt, checked):
     prior = {record["id"]: record for record in old}
     temporal = {
@@ -1939,7 +1970,7 @@ def fresh_records(records, old, attempt, checked):
             last_checked_at=checked,
         )
     records.sort(key=lambda record: record["id"])
-    validate_records(records)
+    validate_records(records, allow_empty=True)
 
 
 def run_body(publishing):
@@ -1959,7 +1990,7 @@ def run_body(publishing):
                     candidate_metadata = json.loads(
                         candidate["files"]["metadata.json"]
                     )
-                    validate_records(candidate_records)
+                    validate_records(candidate_records, allow_empty=True)
                     validate_prior_metadata(
                         candidate_metadata, candidate_records
                     )
@@ -1967,6 +1998,7 @@ def run_body(publishing):
                 snapshot = candidate
             records = collect()
             checked = utc_now()
+            records = remove_expired_records(records, checked)
             fresh_records(records, old, attempt, checked)
             outcome = metadata(attempt, previous, records, checked_at=checked)
             desired = {
@@ -1998,7 +2030,10 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif (
+                        snapshot["files"]["data.json"] is not None
+                        and latest["files"] == snapshot["files"]
+                    ):
                         publish_files(
                             latest,
                             {
@@ -2607,8 +2642,7 @@ INPUTS = {
         "url": "https://www.frse.org.pl/wydarzenia-i-szkolenia",
         "format": "html",
         "sha256": (
-            "40d14282f1c8b2c9ae4bfae1f77cc96a2ff3c7db9a5269b5"
-            "a1aa95ceaabf17b4"
+            "d07ed7359c4770b413cebf6adc4355f23da7fa343bed91f612d2a13f4c52defa"
         ),
     },
     "events-history-page2": {
@@ -2650,8 +2684,7 @@ INPUTS = {
         ),
         "format": "html",
         "sha256": (
-            "57743467e2db85dc0407337a127b06ff761eb9398dfde3e1"
-            "ba22100bd565a640"
+            "a8673663ff9e3fa312c5f103b60f55b5ea591650bc4b99649171ca4d82457c8b"
         ),
     },
     "etwinning-call": {
@@ -2661,8 +2694,7 @@ INPUTS = {
         ),
         "format": "html",
         "sha256": (
-            "b4122e1312e1f451fc752417545a00486bb5279da011c6f1"
-            "3345c46d96bd767a"
+            "1cfdda0aa2b94e02661d01111cbb926f7ab9db74f50c5880b03473ade06f5cfb"
         ),
     },
     "professional-school": {
@@ -2672,8 +2704,7 @@ INPUTS = {
         ),
         "format": "html",
         "sha256": (
-            "97dce4fc0d0022f9e6b324448a6f7621df7ca31509761007"
-            "85517afc7a3c9359"
+            "5830546ea20a348e83c7ec9f606c08e6dfd81772f91787abb27de6fee7435ede"
         ),
     },
     "professional-school-hub": {
@@ -2772,8 +2803,7 @@ INPUTS = {
         "url": "https://eks.org.pl/dokumenty",
         "format": "html",
         "sha256": (
-            "98e4f064e3a4875e14d0ced0b9c33d20f2d46a073fab0fb3"
-            "ae87ff44e719e35a"
+            "8cd6ae73f0cc41cb3a60741445c66c1139611386b47bf79711eed9012ce05ba2"
         ),
     },
     "eks-guide2026": {
@@ -2992,6 +3022,54 @@ INPUTS = {
         "sha256": (
             "bd0844829db8c3bc5e84428399bcc1c101316e0b767dbe45"
             "ffb03ebcece19050"
+        ),
+    },
+    "anniversary-news": {
+        "url": "https://www.frse.org.pl/aktualnosci/40-lat-eramus-4-konkursy-miliony-historii",
+        "format": "html",
+        "sha256": (
+            "ee69da68965d8c50faed3013f79094d9"
+            "a47a69e9b86faf821c1cdce4ec093d40"
+        ),
+    },
+    "anniversary-calls": {
+        "url": "https://erasmusplus.org.pl/konkursy-40-lat-erasmus",
+        "format": "html",
+        "sha256": (
+            "4407e0c4881b9ea9da223739b4cdcfa7"
+            "1e09983d08fc90998fb4729bd66f7718"
+        ),
+    },
+    "anniversary-rules-1": {
+        "url": "https://erasmusplus.org.pl/brepo/panel_repo_files/2026/10/12/2vs32x/regulamin-konkursu-happy-birthday-erasmus-zyczenia.pdf",
+        "format": "pdf",
+        "sha256": (
+            "86b334fa1b8fe31ec06344d2ee6a2e26"
+            "4458a485459a30d84bf8537d2202e2a7"
+        ),
+    },
+    "anniversary-rules-2": {
+        "url": "https://erasmusplus.org.pl/brepo/panel_repo_files/2026/10/12/8hegsz/regulamin-konkursu-bez-erasmus-vs-z-erasmus.pdf",
+        "format": "pdf",
+        "sha256": (
+            "d1f18f8063fe269e822617f78adcafea"
+            "c2e6a6d11ddd7f31a9cc6669f75850a3"
+        ),
+    },
+    "anniversary-rules-3": {
+        "url": "https://erasmusplus.org.pl/brepo/panel_repo_files/2026/10/12/cb8okv/regulamin-konkursu-40-slow-o-erasmus.pdf",
+        "format": "pdf",
+        "sha256": (
+            "546cb6a3111bb97544ad1027f3565b90"
+            "1f1212404615abc84d738d27d6cbe1da"
+        ),
+    },
+    "anniversary-rules-4": {
+        "url": "https://erasmusplus.org.pl/brepo/panel_repo_files/2026/10/12/yymxfj/regulamin-konkursu-literackiego-40-lat-miliony-his.pdf",
+        "format": "pdf",
+        "sha256": (
+            "57ccbe0c35afedc81ce67edb9fd4177f"
+            "6cf8bdf8b8429efd54e9a0e23341131e"
         ),
     },
 }
@@ -4541,6 +4619,194 @@ PROFILES = [
             "publishing-review",
             "publishing-production",
         ],
+    },
+    {
+        "key": "anniversary-words",
+        "title": "40 słów o Erasmus+",
+        "deadline": "2026-12-11",
+        "summary": "Adults with past/current Erasmus+ participation: one "
+        "original unpublished Polish text, max40 words excluding its "
+        "title. Email entries12Oct–11Dec2026. Free; "
+        "FRSE/jury/close-family exclusions apply. Three in-kind "
+        "prizes up toPLN500 gross each, not guaranteed. Submission "
+        "grants unpaid indefinite worldwide nonexclusive promotional "
+        "use; rights/image consents required.",
+        "url": "https://erasmusplus.org.pl/konkursy-40-lat-erasmus#40-slow",
+        "categories": ["competitions"],
+        "kind": "opportunity",
+        "status": "open",
+        "hosts": [],
+        "location": None,
+        "proof": "Adults only with past/current Erasmus+ participation. One "
+        "Polish text answering what Erasmus+ means to the author; at "
+        "most40 words, title excluded. Submit12Oct–11Dec2026 by email; "
+        "results by15Jan2027. Adult eligibility in section3 controls "
+        "despite generic minor-consent template clauses. Free entry. "
+        "FRSE employees/collaborators, jury members and their close "
+        "family/cohabiting partners are excluded. Only the first entry "
+        "is evaluated if multiple are submitted. Work must be original, "
+        "unpublished and not previously awarded; participants must own "
+        "its rights, avoid third-party-rights infringement and supply "
+        "applicable image consents (legal exceptions remain). "
+        "Submission accepts the full rules and grants the organizer an "
+        "unpaid indefinite worldwide nonexclusive promotional licence, "
+        "including derivative uses. Entries include "
+        "participant/submitter names and institution where relevant; "
+        "use the official contest-specific email subject. Three in-kind "
+        "prizes up to PLN500 gross each, no cash substitution; "
+        "awards/mentions can be withheld. Contest operations in Poland "
+        "do not establish passport-nationality eligibility or a "
+        "physical host destination.",
+        "inputs": [
+            "anniversary-news",
+            "anniversary-calls",
+            "anniversary-rules-3",
+        ],
+        "summary_language": "en",
+    },
+    {
+        "key": "anniversary-birthday",
+        "title": "Happy Birthday Erasmus+! Życzenia na 40. urodziny Erasmus+",
+        "deadline": "2026-12-11",
+        "summary": "Past/current Erasmus+ participants, institutional "
+        "beneficiaries and supporters; minors via "
+        "guardian/institution. One original unpublished/unawarded max20s "
+        "video1080x1920(9:16), in Polish or a mobility language, or "
+        "maxA4 card with scan/photo. Email12Oct–11Dec2026. Free; "
+        "staff/jury/family exclusions. Three prizes up toPLN500 gross "
+        "each, not guaranteed; unpaid indefinite worldwide "
+        "promotional licence/image consents.",
+        "url": "https://erasmusplus.org.pl/konkursy-40-lat-erasmus#zyczenia-urodzinowe",
+        "categories": ["competitions"],
+        "kind": "opportunity",
+        "status": "open",
+        "hosts": [],
+        "location": None,
+        "proof": "Past/current participants, institutional Erasmus+ "
+        "beneficiaries and programme supporters. Adults submit directly "
+        "or via a beneficiary institution; minors via "
+        "guardian/beneficiary institution. One entry per "
+        "participant/group. Choose video max20s,1080x1920 "
+        "mandatory9:16, in Polish or a mobility language (solo/group), "
+        "or birthday card maxA4 with good-quality scan/photo. "
+        "Submit12Oct–11Dec2026; results by15Jan2027. Free entry. FRSE "
+        "employees/collaborators, jury members and their close "
+        "family/cohabiting partners are excluded. Only the first entry "
+        "is evaluated if multiple are submitted. Work must be original, "
+        "unpublished and not previously awarded; participants must own "
+        "its rights, avoid third-party-rights infringement and supply "
+        "applicable image consents (legal exceptions remain). "
+        "Submission accepts the full rules and grants the organizer an "
+        "unpaid indefinite worldwide nonexclusive promotional licence, "
+        "including derivative uses. Entries include "
+        "participant/submitter names and institution where relevant; "
+        "use the official contest-specific email subject. Three in-kind "
+        "prizes up to PLN500 gross each, no cash substitution; "
+        "awards/mentions can be withheld. Contest operations in Poland "
+        "do not establish passport-nationality eligibility or a "
+        "physical host destination.",
+        "inputs": [
+            "anniversary-news",
+            "anniversary-calls",
+            "anniversary-rules-1",
+        ],
+        "summary_language": "en",
+    },
+    {
+        "key": "anniversary-literature",
+        "title": "40 lat. Miliony historii. Opowiedz swoją",
+        "deadline": "2027-01-31",
+        "summary": "Adults with past/current Erasmus+ participation: one "
+        "original unpublished/unawarded Polish story about an "
+        "influential Erasmus+ experience,2200–2600 characters "
+        "including spaces/title. Email12Oct2026–31Jan2027. Free; "
+        "staff/jury/family exclusions. Three prizes up toPLN500 gross "
+        "each, not guaranteed; selected authors may be invited for "
+        "promotional video. Unpaid indefinite worldwide promotional "
+        "licence/image consents.",
+        "url": "https://erasmusplus.org.pl/konkursy-40-lat-erasmus#konkurs-literacki",
+        "categories": ["competitions"],
+        "kind": "opportunity",
+        "status": "open",
+        "hosts": [],
+        "location": None,
+        "proof": "Adults only with past/current Erasmus+ participation. One "
+        "Polish story about a personal Erasmus+ "
+        "event/decision/meeting;2200–2600 characters including spaces "
+        "and optional title. Direct/institution-mediated email "
+        "submission12Oct2026–31Jan2027; results by28Feb2027. Selected "
+        "works publish in Europa dla Aktywnych and official40-year "
+        "channels; selected authors are invited (not required) to a "
+        "creative video. Adult section3 controls generic minor-consent "
+        "templates. Free entry. FRSE employees/collaborators, jury "
+        "members and their close family/cohabiting partners are "
+        "excluded. Only the first entry is evaluated if multiple are "
+        "submitted. Work must be original, unpublished and not "
+        "previously awarded; participants must own its rights, avoid "
+        "third-party-rights infringement and supply applicable image "
+        "consents (legal exceptions remain). Submission accepts the "
+        "full rules and grants the organizer an unpaid indefinite "
+        "worldwide nonexclusive promotional licence, including "
+        "derivative uses. Entries include participant/submitter names "
+        "and institution where relevant; use the official "
+        "contest-specific email subject. Three in-kind prizes up to "
+        "PLN500 gross each, no cash substitution; awards/mentions can "
+        "be withheld. Contest operations in Poland do not establish "
+        "passport-nationality eligibility or a physical host "
+        "destination.",
+        "inputs": [
+            "anniversary-news",
+            "anniversary-calls",
+            "anniversary-rules-4",
+        ],
+        "summary_language": "en",
+    },
+    {
+        "key": "anniversary-before-after",
+        "title": "Bez Erasmus+ vs. z Erasmus+",
+        "deadline": "2026-12-11",
+        "summary": "Past/current Erasmus+ participants; minors via "
+        "guardian/institution. One original unpublished/unawarded "
+        "social-media work contrasting life before/after Erasmus+; "
+        "video max30s, vertical9:16 recommended, or "
+        "graphics/animation/other forms. Email12Oct–11Dec2026. Free; "
+        "staff/jury/family exclusions. Three in-kind prizes up "
+        "toPLN500 gross each, not guaranteed. Unpaid indefinite "
+        "worldwide promotional licence/image consents.",
+        "url": "https://erasmusplus.org.pl/konkursy-40-lat-erasmus#before-after",
+        "categories": ["competitions"],
+        "kind": "opportunity",
+        "status": "open",
+        "hosts": [],
+        "location": None,
+        "proof": "Past/current Erasmus+ participants; adults direct or via "
+        "beneficiary institution, minors via guardian/beneficiary "
+        "institution. One social-media-format entry contrasting life "
+        "before and after Erasmus+, including "
+        "video/graphics/carousel/poster/animation. Video max30s; "
+        "vertical9:16(1080x1920) recommended rather than mandatory. "
+        "Submit12Oct–11Dec2026; results by15Jan2027. Free entry. FRSE "
+        "employees/collaborators, jury members and their close "
+        "family/cohabiting partners are excluded. Only the first entry "
+        "is evaluated if multiple are submitted. Work must be original, "
+        "unpublished and not previously awarded; participants must own "
+        "its rights, avoid third-party-rights infringement and supply "
+        "applicable image consents (legal exceptions remain). "
+        "Submission accepts the full rules and grants the organizer an "
+        "unpaid indefinite worldwide nonexclusive promotional licence, "
+        "including derivative uses. Entries include "
+        "participant/submitter names and institution where relevant; "
+        "use the official contest-specific email subject. Three in-kind "
+        "prizes up to PLN500 gross each, no cash substitution; "
+        "awards/mentions can be withheld. Contest operations in Poland "
+        "do not establish passport-nationality eligibility or a "
+        "physical host destination.",
+        "inputs": [
+            "anniversary-news",
+            "anniversary-calls",
+            "anniversary-rules-2",
+        ],
+        "summary_language": "en",
     },
 ]
 

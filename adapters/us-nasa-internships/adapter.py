@@ -3,7 +3,7 @@
 from html.parser import HTMLParser
 from html import unescape
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SOURCE_ID = "us-nasa-internships"
 SOURCE_URL = "https://www.nasa.gov/learning-resources/internship-programs/"
@@ -103,7 +103,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 CATEGORIES = ('scholarships', 'internships', 'volunteering', 'fellowships', 'training', 'competitions', 'grants', 'jobs', 'other')
@@ -268,8 +268,8 @@ def make_record(title, url, categories, kind='opportunity', published_at=None, t
             'status': 'unknown', 'classification': {'method': method, 'status': 'unknown' if categories == ['other'] else 'classified', 'evidence': evidence or []}}
 
 
-def validate_records(records):
-    if not isinstance(records, list) or not records:
+def validate_records(records, *, allow_empty=False):
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError('Empty or invalid opportunity collection', 'validate')
     ids = set()
     for record in records:
@@ -372,18 +372,63 @@ def publish_files(snapshot, files):
 
 
 def metadata(attempt, previous, records, error=None):
-    result = {'source': SOURCE_ID, 'source_url': SOURCE_URL, 'website_url': WEBSITE_URL,
-              'language': LANGUAGE, 'publisher_country': PUBLISHER_COUNTRY, 'publisher_type': PUBLISHER_TYPE,
-              'status': 'fail' if error else 'success', 'last_attempt_at': attempt,
-              'last_success_at': previous.get('last_success_at') if error else attempt,
-              'last_checked_at': previous.get('last_checked_at') if error else attempt,
-              'record_count': len(records), 'message': 'Collection failed; last-good data preserved' if error else f'Collected and validated {len(records)} records',
-              'error': safe_error(error) if error else None}
+    result = {
+        "source": SOURCE_ID,
+        "source_url": SOURCE_URL,
+        "website_url": WEBSITE_URL,
+        "language": LANGUAGE,
+        "publisher_country": PUBLISHER_COUNTRY,
+        "publisher_type": PUBLISHER_TYPE,
+        "status": "fail" if error else "success",
+        "last_attempt_at": attempt,
+        "last_success_at": (
+            previous.get("last_success_at") if error else attempt
+        ),
+        "last_checked_at": (
+            previous.get("last_checked_at") if error else attempt
+        ),
+        "record_count": len(records),
+        "message": (
+            "Collection failed; last-good data preserved"
+            if error
+            else f"Validated refresh retains {len(records)} records"
+        ),
+        "error": safe_error(error) if error else None,
+    }
     if ATTRIBUTION:
-        result['attribution'] = ATTRIBUTION
+        result["attribution"] = ATTRIBUTION
     if error:
-        result['failure_stage'] = getattr(error, 'stage', 'parse')
+        result["failure_stage"] = getattr(error, "stage", "parse")
     return result
+
+
+def remove_expired_records(records, checked):
+    """Filter the validated replacement, leaving prior publication untouched."""
+    validate_records(records)
+    now = datetime.fromisoformat(checked.replace("Z", "+00:00"))
+    if now.tzinfo is None:
+        raise AdapterError("Cleanup clock requires a timezone", "validate")
+    current = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if isinstance(deadline, str):
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+                # Without a documented zone, wait for worldwide day closure.
+                expired = (
+                    datetime.strptime(deadline, "%Y-%m-%d").date()
+                    < now.astimezone(timezone(timedelta(hours=-12))).date()
+                )
+            else:
+                instant = datetime.fromisoformat(
+                    deadline.replace("Z", "+00:00")
+                )
+                expired = instant.tzinfo is not None and instant < now
+        if not expired:
+            current.append(record)
+    # Valid nonempty retrieval may have no remaining eligible records.
+    validate_records(current, allow_empty=True)
+    return current
 
 
 def main():
@@ -394,13 +439,13 @@ def main():
     old = json.loads(snapshot['files']['data.json']) if snapshot and snapshot['files']['data.json'] is not None else []
     previous = json.loads(snapshot['files']['metadata.json']) if snapshot and snapshot['files']['metadata.json'] is not None else {}
     if snapshot and snapshot['files']['data.json'] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get('source') != SOURCE_ID:
             raise AdapterError('Remote metadata source mismatch; no files changed', 'publish')
     attempt, failure = utc_now(), None
     try:
         records = collect()
-        validate_records(records)
+        records = remove_expired_records(records, utc_now())
         prior = {record['id']: record for record in old}
         temporal = {'created_at', 'updated_at', 'first_seen_at', 'last_seen_at', 'last_checked_at'}
         for record in records:
@@ -410,11 +455,15 @@ def main():
                           updated_at=before.get('updated_at', attempt) if same else attempt, last_seen_at=attempt, last_checked_at=attempt)
         records.sort(key=lambda record: record['id'])
         records.sort(key=lambda record: record['published_at'] or '', reverse=True)
-        validate_records(records)
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(attempt, previous, records, failure)
-    if args.publish and (not failure or old):
+    if args.publish and (
+        not failure
+        or (snapshot is not None
+            and snapshot['files']['data.json'] is not None)
+    ):
         files = {'metadata.json': json.dumps(outcome, ensure_ascii=False, indent=2) + '\n'}
         if not failure:
             files['data.json'] = json.dumps(records, ensure_ascii=False, indent=2) + '\n'
@@ -425,7 +474,10 @@ def main():
             outcome = metadata(attempt, previous, old, AdapterError('Publication failed: ' + safe_error(error), 'publish'))
             try:
                 latest = read_snapshot()
-                if not old or latest['files'] != snapshot['files']:
+                if (
+                    snapshot['files']['data.json'] is None
+                    or latest['files'] != snapshot['files']
+                ):
                     raise AdapterError('No safe previous snapshot for failure reporting', 'publish')
                 publish_files(latest, {'metadata.json': json.dumps(outcome, ensure_ascii=False, indent=2) + '\n'})
             except Exception:
