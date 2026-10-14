@@ -763,7 +763,8 @@ def request_bytes(
                         account_collection_bytes(len(body))
                     elif encoding != "identity":
                         raise AdapterError(
-                            "Unsupported publisher response encoding: " + encoding
+                            "Unsupported publisher response encoding: "
+                            + encoding
                             + ": " + current, "fetch"
                         )
         if status in (301, 302, 303, 307, 308):
@@ -1657,7 +1658,10 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Validated refresh retains {len(records)} reviewed Google programme information pages"
+            else (
+                f"Validated refresh retains {len(records)} "
+                "reviewed Google programme information pages"
+            )
         ),
         "error": safe_error(error) if error else None,
     }

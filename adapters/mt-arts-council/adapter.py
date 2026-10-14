@@ -1479,7 +1479,10 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Validated refresh retains {len(records)} reviewed Arts Council Malta opportunities"
+            else (
+                f"Validated refresh retains {len(records)} "
+                "reviewed Arts Council Malta opportunities"
+            )
         ),
         "error": safe_error(error) if error else None,
     }

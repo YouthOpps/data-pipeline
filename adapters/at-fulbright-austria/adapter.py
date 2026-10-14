@@ -1162,7 +1162,8 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
             "Collection failed; last-good data preserved"
             if error
             else (
-                f"Validated refresh retains {len(records)} validated Fulbright Austria "
+                f"Validated refresh retains {len(records)} "
+                "validated Fulbright Austria "
                 "awards and teaching positions"
             )
         ),
