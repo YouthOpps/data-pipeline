@@ -62,9 +62,16 @@ classified article provenance. Multiple taxonomy memberships remain visible;
 incidental mentions in prose do not create categories. There is no title-only
 classifier or broad editorial keyword exclusion.
 
-Stable IDs are `youth-opportunities:<publisher post ID>`, independent of card
-position, title and taxonomy. Separate publisher posts remain separate
-announcements even when programme names repeat; titles are not an identity
+Stable IDs are `youth-opportunities-<positive ASCII publisher post ID>`,
+independent of card position, title and taxonomy and compatible with website
+page identifiers. Fresh collections reject legacy colon IDs. Existing published
+snapshots may contain `youth-opportunities:<post ID>`; only snapshot validation
+accepts that legacy form. Successful atomic refresh migrates this source to
+hyphen IDs while preserving matching creation/first-seen times. A failed refresh
+retains unchanged legacy data and the prior success timestamp. Duplicate legacy
+and current representations of the same native post are rejected on read.
+Separate publisher posts remain separate announcements even when programme
+names repeat; titles are not an identity
 merging rule. Tags preserve publisher category names; original
 article links provide classification evidence. GMT publication dates come from
 `date_gmt` and are explicitly interpreted as UTC.
@@ -123,7 +130,11 @@ source has not changed. Matching records preserve first-seen timestamps;
 successful refreshes replace the complete source snapshot rather than merging
 old records back into it. Supported expired deadlines are removed after the
 fresh nonempty collection is validated. A valid retrieval that becomes empty
-through expiry can publish an empty successful replacement.
+through expiry can publish an empty successful replacement. Subsequent snapshot
+reads accept that valid empty result, while empty raw retrieval remains a
+failure. Closing instants use the explicit UTC epoch only; date-only labels do
+not become invented instants. Unknown deadlines remain eligible for retention,
+without inferring expiry from age, status or absence.
 
 Collection, parsing, validation and publication failures preserve last-good
 data and its success timestamp, and save sanitized failure metadata when safe.
