@@ -1,0 +1,98 @@
+# Opportunities for Youth adapter
+
+This standalone standard-library adapter reads the complete public post archive
+from the publisher's advertised WordPress API, not only its latest ten RSS items.
+
+## Access and reuse evidence
+
+Research on 14 October 2026 found the publisher homepage advertising both its
+[WordPress API](https://opportunitiesforyouth.org/wp-json/) and
+[RSS feed](https://opportunitiesforyouth.org/feed/). Its
+[robots policy](https://opportunitiesforyouth.org/robots.txt) permits public API
+and article paths; it disallows administrative and one plugin-data path, which
+this adapter does not request. The linked
+[privacy policy](https://opportunitiesforyouth.org/privacy-policy/) describes
+personal-data practices and provides no separate content reuse licence. This
+adapter publishes titles, publisher article links, taxonomy and timestamps with
+Opportunities for Youth attribution; it does not reproduce article bodies or
+claim a licence to reuse full articles.
+
+## Inventory and exclusions
+
+If API content is empty, the adapter checks that identified canonical article
+body, excluding menus and sharing widgets. Articles still lacking genuine body
+evidence are excluded explicitly. The real [Branco Weiss article](https://opportunitiesforyouth.org/2026/01/09/branco-weiss-fellowship-eth-zurich-postdoctoral-fellowship-for-innovative-research-2026/)
+(post 71002) was empty in both API and canonical article during research; its title alone
+is not fabricated into an opportunity. Nonempty API posts require no separate
+article requests.
+
+The categories endpoint is paginated until its declared total is reached.
+The posts endpoint requests 100 posts per page ordered by ascending publisher
+post ID. Every page, total, unique ID and final archive count is checked. Detected changes to declared totals, duplicate IDs or incomplete pages fail
+collection rather than publishing a partial archive. The API is not a
+transactional content snapshot: edits preserving these counts can occur during
+collection.
+There is no arbitrary page, date or record cap. The official API reported 5,357
+public posts and 28 categories during initial research. RSS pagination also
+works, but its default ten-item window is not the supported inventory.
+
+The adapter retains individual calls with application, eligibility, registration,
+enrolment, sign-up, nomination, RSVP or submission evidence in genuine publisher content. An
+external application anchor is not required: the publisher article itself is
+provenance for a materially documented call. Explicit editorial guidance without
+an actual call, material multi-call directories/roundups and articles without
+participation or genuine body evidence are excluded with diagnostics.
+
+Roundup evidence combines actual collection framing with distinct programme
+references or named entries. Separate named calls with independent closing
+labels and disjoint references, and early linked calls to distinct publisher
+articles, also establish material collections. Repeated links, different tracks
+of one common application, numbered benefits and quantities of awards or slots
+are not sufficient alone. Conferences and unmapped genuine calls use `other`.
+Degree-level tags require funding evidence before classification as scholarships.
+Publisher taxonomy is classification evidence, not geographic eligibility:
+continent tags never become host or eligible country codes. Canonical fallback
+also excludes the publisher's appended newsletter and sharing widgets.
+
+IDs use the source slug plus the immutable WordPress post ID, surviving changes
+to article URLs and titles. `published_at` uses the explicitly GMT API date.
+Exact publisher-labelled calendar deadline text is retained in summaries when
+recognized, without inventing a closing instant. Deadline, location and country
+fields remain null or empty because this adapter does not infer them from publisher category geography, titles or unzoned dates.
+Consequently archived calls can have unknown status; collection does not claim
+that every retained historical call remains open. Article bodies are read only
+to establish opportunity and classification evidence and are not published.
+
+## Run and test
+
+```sh
+python -B adapters/opportunities-for-youth/adapter.py
+python -B adapters/opportunities-for-youth/test_adapter.py
+```
+
+The sole test retrieves real nonempty records, validates every record and prints
+one complete JSON array to stdout. Diagnostics go to stderr. Tests do not
+publish, require credentials or create data output files. The folder can be
+copied and run independently with Python 3.12 or later.
+
+Publisher API requests start at least 12 seconds apart, with a shared process
+budget and collection lock coordinating local overlapping runs. All source
+endpoints, robots requests, retries and redirects obey at most ten starts per
+rolling minute and at least six-second spacing; stricter robots directives and
+Retry-After are honored. HTTP 429/503 retries add at least two minutes of
+backoff and are bounded. The initial six-second traversal received HTTP 429;
+the stricter API interval reflects that observed publisher limit. Exhaustive
+collection normally takes at least eleven minutes.
+
+## Publication
+
+The matching workflow runs on scoped pushes to main, manual dispatch and a
+six-hour schedule, guarded to the owning repository/main and serialized with
+other source publications. Its sole application command runs this adapter
+with `--publish` using the source publication token. Publication updates only
+`datas/opportunities-for-youth/{data,metadata}.json` atomically through a Git
+commit with non-force, conflict-safe reference updates. Collection failure
+before first success creates no source folder. Later failures preserve last-good
+data and the last success timestamp, recording sanitized failure metadata when
+possible. Tests and implementation validation do not invoke production Actions
+or certify production publication.
