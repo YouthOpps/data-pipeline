@@ -174,12 +174,12 @@ def deadline(text):
         23,
         59,
         59,
-        999000,
+        999999,
         tzinfo=ZoneInfo("Europe/Budapest"),
     )
     return (
         value.astimezone(timezone.utc)
-        .isoformat(timespec="milliseconds")
+        .isoformat(timespec="microseconds")
         .replace("+00:00", "Z")
     )
 
@@ -831,8 +831,33 @@ def make_record(
     }
 
 
-def validate_records(records):
-    if not isinstance(records, list) or not records:
+def remove_expired_records(records, now=None):
+    """Filter a validated refresh; never mutate the prior published snapshot."""
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(ZoneInfo("Europe/Budapest")).date()
+    retained = []
+    for record in records:
+        value = record.get("deadline")
+        expired = False
+        if isinstance(value, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    expired = datetime.fromisoformat(value).date() < today
+                else:
+                    closing = datetime.fromisoformat(
+                        value.replace("Z", "+00:00")
+                    )
+                    expired = closing.tzinfo is not None and closing < now
+            except ValueError:
+                # Ambiguous deadlines never establish expiry.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -1097,7 +1122,7 @@ def metadata(attempt, previous, records, error=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected and validated {len(records)} records"
+            else f"Validated refresh retains {len(records)} records"
         ),
         "error": safe_error(error) if error else None,
     }
@@ -1128,7 +1153,7 @@ def main():
         else {}
     )
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish"
@@ -1137,6 +1162,7 @@ def main():
     try:
         records = collect()
         validate_records(records)
+        records = remove_expired_records(records)
         prior = {record["id"]: record for record in old}
         temporal = {
             "created_at",
@@ -1169,11 +1195,11 @@ def main():
         records.sort(
             key=lambda record: record["published_at"] or "", reverse=True
         )
-        validate_records(records)
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(attempt, previous, records, failure)
-    if args.publish and (not failure or old):
+    if args.publish and (not failure or previous):
         files = {
             "metadata.json": json.dumps(outcome, ensure_ascii=False, indent=2)
             + "\n"
@@ -1196,7 +1222,7 @@ def main():
             )
             try:
                 latest = read_snapshot()
-                if not old or latest["files"] != snapshot["files"]:
+                if not previous or latest["files"] != snapshot["files"]:
                     raise AdapterError(
                         "No safe previous snapshot for failure reporting",
                         "publish",

@@ -69,7 +69,7 @@ The production command is exclusively:
 python -B adapters/hu-fulbright-hungary/adapter.py --publish
 ```
 
-Only `YouthOpps/data-source/datas/hu-fulbright-hungary/{data,metadata}.json` are published, atomically and with conflict-safe reference updates. Successful publication of validated nonempty records advances the durable success timestamp. Later failures preserve last-good data and its success timestamp while recording sanitized failure metadata when possible; a failure before first success creates no source folder. Tests never publish. Production publication was reviewed statically and was not invoked during implementation or QA.
+Only `YouthOpps/data-source/datas/hu-fulbright-hungary/{data,metadata}.json` are published, atomically and with conflict-safe reference updates. Successful publication after validated nonempty retrieval advances the durable success timestamp. Later failures preserve last-good data and its success timestamp while recording sanitized failure metadata when possible; a failure before first success creates no source folder. Tests never publish. Production publication was reviewed statically and was not invoked during implementation or QA.
 
 ## Homepage parse diagnostics
 
@@ -86,3 +86,25 @@ The 11 October 2026 parse failure in [run 38142601920](https://github.com/YouthO
 had no retained response artifact. Earlier and later runs on the same revision
 succeeded, so its specific cause remains unknown. A genuine fetch, parse or
 validation failure preserves last-good records and the prior success timestamp.
+
+## Expired-record cleanup
+
+A refresh first retrieves and validates the complete nonempty publisher inventory.
+Only then are records with a verified past `deadline` removed from the next
+source snapshot, including expired identities from the previous publication.
+The existing full replacement does not merge old records back into the result.
+Date-only deadlines remain eligible through their closing date in Europe/Budapest.
+Explicit timezone-aware timestamps expire strictly after the stated instant;
+missing deadlines remain eligible; unresolved publisher dates stay null.
+Invalid normalized deadlines fail validation and preserve last-good data. Status, record age and
+absence from a response are not expiry evidence. Publisher inventory coverage
+continues to be checked before filtering.
+
+The refreshed subset and success metadata are published atomically within this
+source. If every validated record has expired, success publishes an empty array;
+an empty raw retrieval still fails validation. Previously published empty arrays
+are valid snapshots. Retrieval, parsing, validation and publication failures
+preserve last-good data and its success timestamp; safe failure metadata may
+be updated. The sole live test remains non-publishing and verifies the complete
+raw inventory. Cleanup and failure boundaries are checked separately without
+production execution.

@@ -3,7 +3,7 @@
 import argparse
 import base64
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -1138,9 +1138,34 @@ def make_record(
     }
 
 
-def validate_records(records):
+def remove_expired_records(records, now=None):
+    """Filter a validated refresh; never mutate the prior published snapshot."""
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(timezone(timedelta(hours=-12))).date()
+    retained = []
+    for record in records:
+        value = record.get("deadline")
+        expired = False
+        if isinstance(value, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    expired = datetime.fromisoformat(value).date() < today
+                else:
+                    closing = datetime.fromisoformat(
+                        value.replace("Z", "+00:00")
+                    )
+                    expired = closing.tzinfo is not None and closing < now
+            except ValueError:
+                # Ambiguous deadlines never establish expiry.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
-    if not isinstance(records, list) or not records:
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -1512,7 +1537,10 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
         "message": (
             "Collection failed; last-good data preserved"
             if error
-            else f"Collected {len(records)} reviewed Study in Flanders opportunities"
+            else (
+                f"Validated refresh retains {len(records)} "
+                "Study in Flanders opportunities"
+            )
         ),
         "error": safe_error(error) if error else None,
     }
@@ -1554,7 +1582,7 @@ def fresh_records(records, old, attempt, checked):
             last_checked_at=checked,
         )
     records.sort(key=lambda record: record["id"])
-    validate_records(records)
+    validate_records(records, allow_empty=True)
 
 
 def validate_prior_metadata(value, records):
@@ -1623,7 +1651,7 @@ def run_body(publishing):
                     candidate_metadata = json.loads(
                         candidate["files"]["metadata.json"]
                     )
-                    validate_records(candidate_records)
+                    validate_records(candidate_records, allow_empty=True)
                     if (
                         not isinstance(candidate_metadata, dict)
                         or candidate_metadata.get("source") != SOURCE_ID
@@ -1637,6 +1665,8 @@ def run_body(publishing):
                     old, previous = candidate_records, candidate_metadata
                 snapshot = candidate
             records = collect()
+            validate_records(records)
+            records = remove_expired_records(records)
             checked = utc_now()
             fresh_records(records, old, attempt, checked)
             outcome = metadata(attempt, previous, records, checked_at=checked)
@@ -1669,7 +1699,7 @@ def run_body(publishing):
                     if desired is not None and latest["files"] == desired:
                         outcome = json.loads(desired["metadata.json"])
                         failure = None
-                    elif old and latest["files"] == snapshot["files"]:
+                    elif previous and latest["files"] == snapshot["files"]:
                         publish_files(
                             latest,
                             {
@@ -1685,7 +1715,7 @@ def run_body(publishing):
                     "Run failed; durable outcome unconfirmed. "
                     "No newer source pair was overwritten."
                 )
-        elif not old:
+        elif not previous:
             outcome["message"] = "Collection failed; no publication attempted"
     arm_alarm(_RUN_END - EXPORT_TIMEOUT)
     print(json.dumps(outcome, ensure_ascii=False))
