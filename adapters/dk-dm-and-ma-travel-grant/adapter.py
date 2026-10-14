@@ -101,7 +101,8 @@ def nodes(node, tag=None, class_name=None):
         for n in node.walk()
         if (tag is None or n.tag == tag)
         and (
-            class_name is None or class_name in n.attrs.get("class", "").split()
+            class_name is None
+            or class_name in n.attrs.get("class", "").split()
         )
     ]
 
@@ -132,60 +133,244 @@ def main_content(root):
     return one(nodes(root, "main"), "complete public programme content")
 
 
-def personal_nodes(key, root):
-    content = main_content(root)
-    selected = []
-    if key in ("grants-hub", "danish-membership"):
-        selected = [
-            n
-            for n in nodes(content, "span")
-            if "[writing-mode:vertical-lr]" in n.attrs.get("class", "").split()
-        ]
-        expected = 1
-    elif key == "online-courses":
-        selected = [
-            n
-            for n in nodes(content, "div")
-            if n.attrs.get("class") == "p-1.5 text-2xs"
-        ]
-        expected = 2
-    elif key == "sponsorship-danish":
-        selected = [
-            n
-            for n in nodes(content, "blockquote")
-            if n.attrs.get("class")
-            == "pl-11 pr-7 py-8 sm:px-20 md:pt-16 md:pb-5 md:px-28 xl:pl-32"
-        ]
-        expected = 1
-    else:
-        expected = 0
-    if len(selected) != expected:
-        raise AdapterError("Personal presentation structure changed", "parse")
-    for node in selected:
+MONTHS = {
+    name: number
+    for number, names in enumerate(
+        (
+            "january januar jaanuar jaanuari",
+            "february februar veebruar veebruari",
+            "march marts märts märtsi",
+            "april aprill aprilli",
+            "may maj mai",
+            "june juni juuni",
+            "july juli juuli",
+            "august augusti",
+            "september sept september septemberi septembri",
+            "october oktober oktoober oktoobri oktoobrist",
+            "november novemberi novembri novembrini",
+            "december decemberi detsember detsembri",
+        ),
+        1,
+    )
+    for name in names.split()
+}
+MONTH_PATTERN = "(?:" + "|".join(MONTHS) + ")"
+DATE_PATTERN = re.compile(
+    r"(?<!\d)(?:(?P<day>\d{1,2})(?:st|nd|rd|th|\.)?\s*(?:of\s+)?"
+    r"(?P<month>"
+    + MONTH_PATTERN
+    + r")|(?P<month_first>"
+    + MONTH_PATTERN
+    + r")\s+(?P<day_last>\d{1,2})(?:st|nd|rd|th|\.)?)"
+    r"(?:\s*,?\s*(?P<year>20\d{2}))?\b|"
+    r"(?<!\d)(?P<n_day>\d{1,2})\.(?P<n_month>\d{1,2})\."
+    r"(?P<n_year>20\d{2})(?!\d)",
+    re.I,
+)
+
+
+def dated_values(text):
+    """Resolve years only within one explicit application statement."""
+    matches = list(DATE_PATTERN.finditer(text))
+    years = {
+        match["year"] or match["n_year"]
+        for match in matches
+        if match["year"] or match["n_year"]
+    }
+    if not years:
+        years = set(re.findall(r"\b20\d{2}\b", text))
+    values = []
+    for match in matches:
+        year = match["year"] or match["n_year"]
+        if not year and len(years) == 1:
+            year = next(iter(years))
+        if not year:
+            continue
+        month = (
+            int(match["n_month"])
+            if match["n_month"]
+            else MONTHS[(match["month"] or match["month_first"]).lower()]
+        )
+        day = int(match["day"] or match["day_last"] or match["n_day"])
+        try:
+            date = datetime(int(year), month, day).date().isoformat()
+        except ValueError:
+            continue
+        values.append((match.start(), match.end(), date))
+    return values
+
+
+def content_blocks(root):
+    """Retain semantic text blocks once, including lists and table rows."""
+    result = []
+    block_tags = {"p", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def visit(node):
+        if node.tag in (
+            "script",
+            "style",
+            "noscript",
+            "form",
+            "nav",
+            "footer",
+            "button",
+        ):
+            return
+        if node.attrs.get("id", "").startswith(
+            ("accordion--tulemused", "warning-modal")
+        ):
+            return
+        if node.tag == "a" and node.attrs.get("id"):
+            result.append(("anchor", node.attrs["id"]))
+        if node.tag in block_tags:
+            nested = [
+                n for n in node.walk() if n is not node and n.tag in block_tags
+            ]
+            if not nested:
+                for anchor in nodes(node, "a"):
+                    if anchor.attrs.get("id"):
+                        result.append(("anchor", anchor.attrs["id"]))
+                text = node.text()
+                if text:
+                    result.append((node.tag, text))
+                return
+        for child in node.children:
+            if isinstance(child, Node):
+                visit(child)
+            elif child.strip():
+                result.append(("text", " ".join(child.split())))
+
+    visit(root)
+    return result
+
+
+def check_access(root):
+    title = " ".join(n.text() for n in nodes(root, "title"))
+    if re.search(
+        r"access denied|just a moment|attention required|checking your browser",
+        title,
+        re.I,
+    ):
+        raise AdapterError("Publisher access challenge", "access")
+    text = root.text()
+    if re.search(
+        r"(?:scraping|automated (?:access|collection)|text and data mining)"
+        r".{0,100}(?:prohibited|not permitted|forbidden)|"
+        r"(?:prohibit|forbid|do not permit).{0,100}(?:scraping|automated access)",
+        text,
+        re.I,
+    ):
+        raise AdapterError(
+            "Publisher restricts automated collection", "access"
+        )
+
+
+def fact_evidence(sections):
+    """Keep factual clauses and a full material-content change signature."""
+    evidence = [ATTRIBUTION]
+    for url, blocks in sections:
+        material = "\n".join(text for _, text in blocks)
+        evidence.append("Source: " + url)
+        evidence.append(
+            "HTML content SHA-256: "
+            + hashlib.sha256(material.encode()).hexdigest()
+        )
+        heading = ""
+        for tag, text in blocks:
+            if tag.startswith("h"):
+                heading = text
+                continue
+            text = re.sub(
+                r"[\w.+-]+@[\w.-]+|\[email protected\]",
+                "[publisher contact]",
+                text,
+            )
+            if re.search(
+                r"eligib|applican|appl(?:y|ication)|deadline|scholarship|grant|"
+                r"funding|EUR|DKK|euros?|must|required|exclud|citizen|residen|"
+                r"fee|tuition|accommod|reimburse|stipend|taotl|tähtaeg|euro|"
+                r"õpp|koda(?:nik|kond)|elamis|hüvit|ansøg|legat|medlem|"
+                r"kroner|kr\.|gratis|kurs|mentor|skal|støtte|udgift|kvitter|bilag|CVR|afregn|udlæg|"
+                r"book|Teams|Microsoft|Google|Adobe|Office|Windows|LaTeX|Stata|Excel",
+                text,
+                re.I,
+            ):
+                evidence.append((heading + ": " if heading else "") + text)
+    return list(dict.fromkeys(evidence))
+
+
+def concise_summary(title, category, deadline, evidence):
+    """Build a short factual index; all extracted conditions stay in evidence."""
+    summary = title + ". " + category.capitalize() + " programme. "
+    summary += (
+        ("Application deadline: " + deadline + ". ")
+        if deadline
+        else "No unambiguous dated application deadline extracted. "
+    )
+    amounts = []
+    for text in (
+        clause
+        for item in evidence
+        for clause in re.split(r"(?<=[.!?])\s+(?=[A-ZÆØÅ])|;", item)
         if re.search(
-            r"copyright|permission|repub|reuse|licen|ophavs|gengiv|"
-            r"applicants? must|eligib|requires? consent|written consent|"
-            r"skal være medlem|skal være indskrevet|automation|scraping",
-            node.text(),
+            r"may apply for funding|annual grant fund|is distributed|"
+            r"\bcosts\b|kan søge om støtte|samlede årlige legat|"
+            r"fordeles halvårligt|\bkoster\b",
+            clause,
+            re.I,
+        )
+    ):
+        for match in re.finditer(
+            r"(?:EUR|DKK)\s*[\d][\d ,.]*(?:/\w+)?|\d[\d ,.]*(?:euros?|EUR|DKK|kroner|kr\.)",
+            text,
             re.I,
         ):
-            raise AdapterError("Conditions in personal presentation", "parse")
-    return selected
+            value = match[0].strip()
+            if value not in amounts:
+                amounts.append(value)
+    if amounts:
+        summary += (
+            "Published amounts (rates, budgets or costs; see conditions): "
+            + ", ".join(amounts)
+            + ". "
+        )
+    summary += "Eligibility, benefits and application conditions are linked to the publisher in the supporting evidence."
+    if len(summary.encode("utf-16-le")) // 2 > 600:
+        summary = (
+            title
+            + ". "
+            + (
+                "Application deadline: " + deadline + ". "
+                if deadline
+                else "Application deadline not established. "
+            )
+            + "See publisher-linked evidence for eligibility, benefit rates, budgets and application conditions."
+        )
+    return summary
 
 
-def without_personal(node, excluded):
-    if node in excluded or node.tag in ("script", "style", "noscript"):
-        return ""
-    return " ".join(
-        " ".join(
-            without_personal(c, excluded) if isinstance(c, Node) else c
-            for c in node.children
-        ).split()
-    )
+ENTRY_URLS = (
+    "https://dm.dk/students/",
+    "https://dm.dk/studerende/",
+)
+PROGRAMME_WORDS = re.compile(
+    r"grant|fund|legat|sponsor|gratis.*kurs|free.*class|online.*cours|mentor",
+    re.I,
+)
+LEGACY_ROUTES = {
+    "/students/membership/travel-grant/": "travel-grant",
+    "/studerende/medlemskab/legater-og-sponsorater/rejselegat/": "travel-grant",
+    "/students/membership/activity-fund/": "activity-fund",
+    "/studerende/medlemskab/legater-og-sponsorater/sponsoratpulje/": "activity-fund",
+    "/students/membership/membership-benefits/come-to-free-classes-and-events/": "free-member-classes",
+    "/studerende/medlemskab/medlemsfordele/gratis-kurser-og-arrangementer/": "free-member-classes",
+    "/studerende/medlemskab/medlemsfordele/gratis-online-kurser/": "free-online-courses",
+    "/studerende/medlemskab/medlemsfordele/faglige-medlemsfordele/mentorordning-for-studerende-ved-sling-uling-og-naku/": "sling-uling-naku-mentoring",
+}
 
 
-def safe_route(value):
-    parsed = urllib.parse.urlsplit(urllib.parse.urljoin(WEBSITE_URL, value))
+def own_url(value, base):
+    parsed = urllib.parse.urlsplit(urllib.parse.urljoin(base, value))
     if (
         parsed.scheme != "https"
         or parsed.username
@@ -193,533 +378,257 @@ def safe_route(value):
         or parsed.port
         or (parsed.hostname or "").removeprefix("www.") != "dm.dk"
     ):
-        raise AdapterError("Invalid own publisher route", "parse")
-    return parsed.path
-
-
-def source_facts(key, root):
-    content = main_content(root)
-    if any(n.attrs.get("rel") == "canonical" for n in nodes(root, "link")):
-        raise AdapterError("Publisher canonical format changed", "parse")
-    canonical = one(
-        [
-            n.attrs.get("content", "")
-            for n in nodes(root, "meta")
-            if n.attrs.get("property") == "og:url"
-        ],
-        "publisher original URL metadata",
+        return None
+    if re.search(r"\.(?:pdf|docx?|xlsx?|jpg|png|zip)$", parsed.path, re.I):
+        return None
+    query = urllib.parse.parse_qs(parsed.query)
+    if any(key not in ("page", "p") for key in query):
+        return None
+    return urllib.parse.urlunsplit(
+        ("https", "dm.dk", parsed.path, parsed.query, "")
     )
-    if safe_route(canonical) != safe_route(PAGES[key]):
-        raise AdapterError("Publisher canonical changed: " + key, "parse")
-    routes = set()
-    for n in nodes(root, "a"):
-        value = n.attrs.get("href", "")
-        parsed = urllib.parse.urlsplit(urllib.parse.urljoin(PAGES[key], value))
-        if (parsed.hostname or "").removeprefix("www.") == "dm.dk":
-            route = safe_route(urllib.parse.urlunsplit(parsed))
-            # News reports are not the bounded member programme frontier.
-            if "/nyheder/" in route or route.startswith("/nyheder/"):
-                route = "<news-report>"
-            routes.add(route)
-    footer = one(nodes(root, "footer"), "publisher footer")
-    legal = [
-        n.text()
-        for n in nodes(footer)
-        if n.tag in ("p", "small", "span")
-        and re.search(
-            r"copyright|©|licen|permission|ophavs|gengiv|repub|reuse|"
-            r"scrap|automat|robot|tillad|vilkår|vilkaar",
-            n.text(),
-            re.I,
-        )
-    ]
-    legal_links = []
-    for node in nodes(root, "a"):
-        value = node.attrs.get("href", "")
-        if value.startswith("mailto:") and not node.text():
+
+
+def discovery_links(root, url):
+    """Follow both languages' member hubs and their programme detail links."""
+    for link in nodes(root, "a"):
+        target = own_url(link.attrs.get("href", ""), url)
+        if not target:
             continue
-        if re.search(
-            r"terms|privacy|cookie|licen|copyright|automation|automated|"
-            r"permission|reuse|repub|vilkår|vilkaar|privatliv|ophavs|gengiv",
-            node.text() + " " + value,
-            re.I,
-        ):
-            parsed = urllib.parse.urlsplit(
-                urllib.parse.urljoin(PAGES[key], value)
-            )
-            if parsed.scheme == "https" and not (
-                parsed.username or parsed.password
-            ):
-                legal_links.append(
-                    [
-                        node.text(),
-                        urllib.parse.urlunsplit(
-                            parsed._replace(query="", fragment="")
-                        ),
-                    ]
-                )
-            else:
-                raise AdapterError("Unsafe policy dependency", "parse")
-    text = without_personal(content, personal_nodes(key, root))
-    if key in ("home", "danish-students", "students"):
-        # Landing news/event cards change; retain own navigation and new
-        # funding, training and rights headings for substantive discovery.
-        text = " | ".join(
-            n.text()
-            for n in nodes(content)
-            if (
-                n.tag in ("h1", "h2", "h3", "p")
-                or any(
-                    isinstance(c, str)
-                    and re.search(
-                        r"permission|repub|reuse|licen|copyright|ophavs|gengiv|"
-                        r"scraping|automation|automated|terms of use|"
-                        r"scholarship|grant|funding|legat|sponsor",
-                        c,
-                        re.I,
-                    )
-                    for c in n.children
-                )
-            )
-            and re.search(
-                r"legat|sponsor|fund|grant|kurs|class|mentor|"
-                r"copyright|permission|licen|ophavs|gengiv|repub|reuse|"
-                r"scraping|automation|automated|terms of use|written consent",
-                n.text(),
-                re.I,
-            )
+        path = urllib.parse.urlsplit(target).path
+        if path == "/students/membership/":
+            # This is the membership signup redirect, not a programme hub.
+            continue
+        membership = path.startswith(
+            ("/students/membership/", "/studerende/medlemskab/")
         )
-    return json.dumps(
-        {
-            "text": text,
-            "routes": sorted(routes),
-            "canonical": safe_route(canonical),
-            "legal": legal,
-            "footer_text": footer.text(),
-            "legal_links": sorted(legal_links),
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-
-
-PAGES = {
-    "activity": "https://dm.dk/students/membership/activity-fund/",
-    "benefits": "https://dm.dk/students/membership/membership-benefits/",
-    "classes": (
-        "https://dm.dk/students/membership/membership-benefits/come-to-"
-        "free-classes-and-events/"
-    ),
-    "competition": "https://dm.dk/konkurrencebetingelser/",
-    "cookies": "https://dm.dk/cookies/",
-    "danish-benefits": "https://dm.dk/studerende/medlemskab/medlemsfordele/",
-    "danish-classes": (
-        "https://dm.dk/studerende/medlemskab/medlemsfordele/gratis-kurs"
-        "er-og-arrangementer/"
-    ),
-    "danish-cookie": "https://dm.dk/studerende/cookies/",
-    "danish-membership": "https://dm.dk/studerende/medlemskab/",
-    "danish-professional": (
-        "https://dm.dk/studerende/medlemskab/medlemsfordele/faglige-med"
-        "lemsfordele/"
-    ),
-    "danish-students": "https://dm.dk/studerende/",
-    "events": "https://dm.dk/studerende/arrangementer/",
-    "financial": (
-        "https://dm.dk/students/membership/membership-benefits/financia"
-        "l-member-benefits/"
-    ),
-    "grants-hub": (
-        "https://dm.dk/studerende/medlemskab/legater-og-sponsorater/"
-    ),
-    "home": "https://dm.dk/",
-    "mentor-specific": (
-        "https://dm.dk/studerende/medlemskab/medlemsfordele/faglige-med"
-        "lemsfordele/mentorordning-for-studerende-ved-sling-uling-og-na"
-        "ku/"
-    ),
-    "online-courses": (
-        "https://dm.dk/studerende/medlemskab/medlemsfordele/gratis-onli"
-        "ne-kurser/"
-    ),
-    "privacy": "https://dm.dk/privatlivspolitik/",
-    "professional": (
-        "https://dm.dk/students/membership/membership-benefits/professi"
-        "onal-member-benefits/"
-    ),
-    "reimbursement": "https://dm.dk/om-dm/refusion/",
-    "sponsorship-danish": (
-        "https://dm.dk/studerende/medlemskab/legater-og-sponsorater/spo"
-        "nsoratpulje/"
-    ),
-    "student-cookie": "https://dm.dk/students/cookie-policy/",
-    "students": "https://dm.dk/students/",
-    "terms": "https://dm.dk/handelsvilkaar/",
-    "travel-danish": (
-        "https://dm.dk/studerende/medlemskab/legater-og-sponsorater/rej"
-        "selegat/"
-    ),
-    "travel": "https://dm.dk/students/membership/travel-grant/",
-}
-
-CONDITIONS = {
-    "activity": (
-        "90a3444993922d8b1a2a341a4bd14dab9d8d04b32530c879ac08703fe09fb2" "a3"
-    ),
-    "benefits": (
-        "92a92c246232c0461e85c50cf34e821d2b220bb2fc46f1f01d98decefb0320" "72"
-    ),
-    "classes": (
-        "7f689769964c1249934ff2fb239eb23aad21f85911c93dff1fff9161a12077" "f4"
-    ),
-    "competition": (
-        "b192253e43cb0238fd7e1da9e5460d89ceb4ac37ede61aebb78dda14914ea596"
-    ),
-    "cookies": (
-        "110ba59a03f1ff10d522a7ef708650a177b9c1d042f9b89d81e809f52380a13b"
-    ),
-    "danish-benefits": (
-        "20f11fdf4155d43f4c8a026a71dc2f33f1e8bb25301089b8688caba6b74653" "c4"
-    ),
-    "danish-classes": (
-        "fb655101fb0a203380d7bb7e4e6700b0fa8042cff9f69e36af6234f4342e4e" "1c"
-    ),
-    "danish-cookie": (
-        "68fcda189f06ad16d5d1f96f9dde617fa00e9754d914299bad8ade7ec2e45c" "3a"
-    ),
-    "danish-membership": (
-        "03ebde57dc2105ba5833d6741512dcecd2767343e58e2dfe9c4c298c939ef4" "91"
-    ),
-    "danish-professional": (
-        "a27b394ab8168f34c5347ff6985265f366f98044a918aed509238e4d1f9e6f76"
-    ),
-    "danish-students": (
-        "14044f19b28899678308d769f953c3cad6e23765d8e91c87f5d2870bdde16e0b"
-    ),
-    "events": (
-        "7f8017b80ea1a74b22cac9960e982d8a30433a15b617d3890a68ea3b326afe" "80"
-    ),
-    "financial": (
-        "020f4f0bbc4dfa922c1f99174e55fb02d7d89a3c2938f6e6769360d0630ea1" "93"
-    ),
-    "grants-hub": (
-        "338042bd8780fa190033459c57c2eb062d48901476d35e9d666a39d8ad29d0" "91"
-    ),
-    "home": (
-        "4d47e4282ec0cfec4b1615205d768045c95c01f50dbd36836620959a0035bec8"
-    ),
-    "mentor-specific": (
-        "07419e69394a399e2ffa753284bf78bff0983b4f58b9a715967175e90d6949" "6a"
-    ),
-    "online-courses": (
-        "61e1c450a90cf2304525d026ec017cab39d1264165e39a13101211ffbfe295" "19"
-    ),
-    "privacy": (
-        "e1bf2dd2bd1991dfb4fc1cc8ba2dd21044b8258c75e55fca11c7029637c85732"
-    ),
-    "professional": (
-        "2df00faa52ea2aa82028ff97c62ebe59c65fcde051ed7f9d5f81a9661e5002" "dc"
-    ),
-    "reimbursement": (
-        "aa48575d8fac171f106d56cb93ecabbb89de601c5800c28e2139847dc7bac6d8"
-    ),
-    "sponsorship-danish": (
-        "e35c7400fd48fc2dc7434fa5aa0f3eac25d6d897b8985938fcb281d53f8b9c" "2d"
-    ),
-    "student-cookie": (
-        "b38b856a3ba3304e21d14c4ae94e47a1f0a23ec53d26255d8d6eccc11b109a" "48"
-    ),
-    "students": (
-        "bba55e098b24a128d8c8e4df45bea8980bc30efc494c507641b2c51df16238" "7b"
-    ),
-    "terms": (
-        "df851886d519a504a569b37571c81cc496849df4cf2f48f120c8c79f7ada976a"
-    ),
-    "travel": (
-        "2a18383a91ea385b12d9ab50d438fc332b6832b0248e970716c13cbc0d1acf" "e4"
-    ),
-    "travel-danish": (
-        "4fdf6f2d04fde1655b8eea0a885ab055e4a4892673d3ebab5971e883b62515" "4d"
-    ),
-}
-
-PROFILES = [
-    {
-        "track": "travel-grant",
-        "key": "travel",
-        "title": "DM Students Travel Grant — spring 2027 round",
-        "categories": ["scholarships"],
-        "kind": "opportunity",
-        "hosts": [],
-        "deadline": "2027-02-01",
-        "language": "en",
-        "summary": (
-            "Up to DKK 8,000 for DM student members undertaking "
-            "optional, academically approved bachelor’s or master’s "
-            "study trips, placements or fieldwork in Denmark or "
-            "abroad. Trips must last no more than six months; "
-            "mandatory or already university-funded activities are "
-            "excluded. The Danish page dates the next round November "
-            "1, 2026–February 1, 2027; its closing clock and time zone "
-            "are unspecified."
-        ),
-        "evidence": (
-            "DM student membership and current relevant "
-            "bachelor/master enrolment are required; membership is not "
-            "a nationality or residence test. Domestic and overseas "
-            "travel are supported, without a complete destination "
-            "list. Maximum individual award DKK8000; English 2026 "
-            "annual fund DKK150000 and twice-yearly DKK75000 "
-            "allocations are budgets, not individual entitlements. "
-            "Danish about10 recipients per half-year is capacity; the "
-            "student board assesses award size. Optional academically "
-            "relevant fieldwork/study trips/exchange/stays/internships;"
-            " <=6months, completed within1year of award; apply before "
-            "travel starts, cancellation returns funding. Mandatory "
-            "curriculum, regular teaching replacement and previously "
-            "university-funded activities excluded. Each traveller "
-            "applies individually; domestic awards taxable and "
-            "recipient must notify Skattestyrelsen, no foreign tax "
-            "treatment specified. Online application requires <=1A4 "
-            "motivation, academic approval/preapproval by "
-            "director/lecturer/supervisor, current enrolment proof, "
-            "<=1A4 budget explaining costs/financing and other "
-            "scholarships applied/received, combined PDFs<=6pages. No "
-            "tickets/booking receipts required at application. "
-            "Late/incomplete/noncompliant applications excluded. "
-            "English possible request for photos/content is optional; "
-            "Danish says preparedness to share experiences and "
-            "dissemination enthusiasm are considered, and motivation "
-            "may explain proposed communication. English recurring "
-            "autumn Jun1–Sep1 for majority Sep–Jan travel; spring "
-            "Nov1–Feb1 for majority Feb–Aug travel; those dates alone "
-            "lack years. English explicitly says next opening "
-            "Nov1,2026; Danish explicitly gives next spring round "
-            "Nov1,2026–Feb1,2027, with no closing clock/time zone. No "
-            "currently-open claim is inferred from a future opening. "
-            "Decisions expected roughly1month after cutoff. Danish "
-            "corroboration: https://dm.dk/studerende/medlemskab/legater"
-            "-og-sponsorater/rejselegat/."
-        ),
-    },
-    {
-        "track": "activity-fund",
-        "key": "activity",
-        "title": ("DM Students Activity Fund — student-led event sponsorship"),
-        "categories": ["grants"],
-        "kind": "institutional-grant",
-        "hosts": [],
-        "deadline": None,
-        "language": "en",
-        "summary": (
-            "DM supports student-member-led academic, social and "
-            "career events benefiting student groups. The Danish "
-            "sponsorship page requires university-enrolled "
-            "participants, a detailed budget and application at least "
-            "one month before the event. Funding normally reimburses "
-            "costs after the event; no standard award limit or dated "
-            "closing deadline is published. Alcohol, mandatory "
-            "teaching and already university-funded activities are "
-            "excluded."
-        ),
-        "evidence": (
-            "Activity Fund and Danish Sponsoratpulje are the same "
-            "student funding scheme: Danish form privacy calls it "
-            "aktivitetspulje. Responsible applicant must be a DM "
-            "member; group/student-association participants benefit, "
-            "not a personal travel scholarship. Danish requires all "
-            "participants university-enrolled and a detailed budget; "
-            "apply at least1month before the event, a relative lead "
-            "time not fixed closing date. No geography or citizenship "
-            "restriction stated. Supports professional/social/study/lab"
-            "our-market talks, debates, networking, company visits, "
-            "conferences; English exceptional social events may "
-            "support healthy learning environments across cohorts and "
-            "instructors. Evaluation: subject/social/career content, "
-            "participants and cost ratio, DM involvement/exposure. DM "
-            "logo expected in publicity; materials when possible, "
-            "consultant participation suggested, photos welcomed if "
-            "appropriate. If DM covers entire event, free DM-member "
-            "entry and openness to all are preferences, not "
-            "unconditional requirements. Alcohol, teaching "
-            "replacement, compulsory and previously university-funded "
-            "activities excluded. English additionally excludes "
-            "parties/Friday bars; Danish gives "
-            "social/revue/running-club examples without the same "
-            "blanket wording, a bilingual scope difference retained. "
-            "Normally disbursed after event; requested expenses, "
-            "responsible contact, group name, "
-            "participants/fees/catering, total budget, amount, "
-            "purpose/exposure and other funding specified. No common "
-            "maximum amount; Danish DKK7500 is a recipient "
-            "testimonial, not a grant rate. Linked public "
-            "reimbursement guidance requires expense receipts and "
-            "permits student associations without CVR to use an "
-            "expense form; those with CVR may invoice, no mandatory "
-            "CVR requirement inferred. No form/account operation "
-            "required here. Danish corroboration: "
-            "https://dm.dk/studerende/medlemskab/legater-og-sponsorater"
-            "/sponsoratpulje/; reimbursement: "
-            "https://dm.dk/om-dm/refusion/."
-        ),
-    },
-    {
-        "track": "free-member-classes",
-        "key": "classes",
-        "title": ("DM and MA — free classes and events for student members"),
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "hosts": ["DK"],
-        "deadline": None,
-        "language": "en",
-        "summary": (
-            "Students who are members of DM and MA can attend free "
-            "skills classes and events in Aalborg, Aarhus, Odense and "
-            "Copenhagen. Examples include InDesign, Excel, LaTeX, R, "
-            "Stata and Danish punctuation. This member entitlement "
-            "describes training access; individual course dates, "
-            "registration availability and application deadlines are "
-            "not specified on the programme page."
-        ),
-        "evidence": (
-            "Own English and Danish pages explicitly offer free "
-            "classes/events to students and members of DM and MA. "
-            "Examples are InDesign, Excel, LaTeX, R, Stata and Danish "
-            "punctuation, with study/work and job-search relevance. "
-            "Published cities Aalborg, Aarhus, Odense and Copenhagen "
-            "support known Danish hosting, not applicant nationality. "
-            "No cash award, stipend, certificate guarantee or "
-            "course-specific deadline is stated. The public "
-            "current-event calendar is JavaScript-rendered and the "
-            "reviewed HTML supplies no individual participant "
-            "programme terms; this record describes the member "
-            "entitlement, not every current event. Danish "
-            "corroboration: https://dm.dk/studerende/medlemskab/medlems"
-            "fordele/gratis-kurser-og-arrangementer/."
-        ),
-    },
-    {
-        "track": "free-online-courses",
-        "key": "online-courses",
-        "title": "DM — free online-course access for members",
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "hosts": [],
-        "deadline": None,
-        "language": "da",
-        "summary": (
-            "DM members receive free access to a published online "
-            "skills catalogue via onlinekurser.dk. Topics include "
-            "graphics, office software, job search, IT security, "
-            "economics and project management. The introductory "
-            "wording mentions DM and MA, while the specific access "
-            "paragraph names DM membership. A provider profile is "
-            "needed on first use; no cash award or closing deadline is "
-            "stated."
-        ),
-        "evidence": (
-            "Own page introductory wording says DM and MA membership; "
-            "the explicit access entitlement says DM members have free "
-            "access to the listed onlinekurser.dk courses. No "
-            "mandatory dual-MA condition is inferred from that wording "
-            "difference. Published subjects: remote work/Teams/Zoom, "
-            "CV/interviews/job search/social media, information search "
-            "and negotiation, workplace representation/APV/conflict/str"
-            "ess/strategy/voluntary board work, Google tools, "
-            "graphics/video/Adobe/Canva/Forms/Sway/AI, communication, "
-            "IT security/GDPR/economics, leadership/project "
-            "management/Agile-Scrum, Project Libre/Trello/Microsoft "
-            "Project, Office/SharePoint/Windows and punctuation. First "
-            "provider visit requires a profile used thereafter; no "
-            "external catalogue or account operation is needed to "
-            "establish this own member entitlement. No "
-            "programme-specific duration, certificate guarantee, "
-            "stipend or deadline stated. Online delivery has no "
-            "published physical host restriction or applicant "
-            "citizenship list. Membership fees and consumer discounts "
-            "are distinct from the waived course access charge."
-        ),
-    },
-    {
-        "track": "sling-uling-naku-mentoring",
-        "key": "mentor-specific",
-        "title": "DM mentoring for SLING, ULING and NAKU students",
-        "categories": ["training"],
-        "kind": "programme-overview",
-        "hosts": [],
-        "deadline": None,
-        "language": "da",
-        "summary": (
-            "DM members studying forest and landscape engineering, "
-            "urban landscape engineering, or nature and culture "
-            "communication can request a study-to-career mentor. "
-            "Meetings support study plans, workplace insight, skills "
-            "and job search. A typical arrangement lasts about a year "
-            "with four to seven meetings, adapted by agreement. "
-            "Matches are not guaranteed; no price, stipend or "
-            "application deadline is published."
-        ),
-        "evidence": (
-            "Students in forest/landscape engineering (SLING), urban "
-            "landscape engineering (ULING; formerly garden/park "
-            "engineering) or nature/culture communication (NAKU) AND "
-            "DM membership are eligible. No "
-            "nationality/residence/geographic restriction is stated. "
-            "Individual mentoring supports study/career plans, insight "
-            "into a company/work role, expressing skills, "
-            "CV/applications/job search, broader options, networking "
-            "and transition to employment. A student may already agree "
-            "a mentor with an employer, select/contact one, or ask the "
-            "secretariat for help finding a relevant mentor. Notify "
-            "the secretariat of an agreed arrangement/start. Explain "
-            "motivation for the workplace and planned use; matching is "
-            "not guaranteed because applicants may exceed available "
-            "mentors. Agree expectations and individual form/duration; "
-            "a year is encouraged, typically4–7meetings/year "
-            "lasting1–1.5h, usually at the company, with phone/email "
-            "possible. These are typical arrangements, not mandatory "
-            "fixed attendance quotas. No price/free-fee promise, "
-            "stipend or fixed closing date is published. No "
-            "last-half-year restriction is stated for this specific "
-            "programme."
-        ),
-    },
-]
+        excluded = re.search(
+            r"insurance|forsikring|membership-dues|kontingent|kontante|financial|bank|meld-dig|join|mentorliste|studiekunde|studiekonto|smil|mofibo|studierabat",
+            path,
+        )
+        if membership and excluded:
+            continue
+        policy = re.search(
+            r"cookie|privatliv|privacy|handelsvilkaar|konkurrencebetingelser",
+            path,
+        )
+        if policy or (membership and not excluded):
+            yield target
+        elif path == "/om-dm/refusion/":
+            yield target
+        elif (
+            path.startswith(("/students/", "/studerende/"))
+            and not re.search(r"/nyheder/|/login|/kontakt|/contact", path)
+            and PROGRAMME_WORDS.search(link.text())
+            and "medlemskab" in path
+        ):
+            yield target
 
 
 def read_pages():
-    return {key: page(url) for key, url in PAGES.items()}
+    pending = list(ENTRY_URLS)
+    pages = {}
+    while pending:
+        url = pending.pop(0)
+        if url in pages:
+            continue
+        root = page(url)
+        check_access(root)
+        pages[url] = root
+        for target in discovery_links(root, url):
+            if target not in pages and target not in pending:
+                pending.append(target)
+        if len(pages) + len(pending) > 150:
+            raise AdapterError(
+                "DM discovery exceeds reviewed student scope", "parse"
+            )
+    return pages
+
+
+def programme_blocks(root):
+    main = one(nodes(root, "main"), "publisher programme content")
+    blocks = content_blocks(main)
+    start = next((i for i, (tag, _) in enumerate(blocks) if tag == "h1"), None)
+    if start is None:
+        raise AdapterError("Missing DM programme heading", "parse")
+    result = []
+    skip = False
+    for tag, text in blocks[start:]:
+        if tag in ("h1", "h2", "h3"):
+            skip = bool(
+                re.search(
+                    r"^(?:Contact|Kontakt|Meld dig ind|Bliv medlem|Sarah |På feltarbejde|Mød Sanne)",
+                    text,
+                )
+            )
+        if not skip and not re.search(r"^Del artikel:|^Membership$", text):
+            result.append((tag, text))
+    return result
+
+
+def application_windows(blocks):
+    result = []
+    clauses = [
+        clause
+        for _, text in blocks
+        for clause in re.split(r"(?<=[.!?])\s+(?=[A-ZÆØÅ])|;", text)
+    ]
+    for text in clauses:
+        closing = re.search(
+            r"application deadline|ansøgningsfrist", text, re.I
+        )
+        period = re.search(
+            r"application (?:period|round)|ansøgnings(?:runde|periode)",
+            text,
+            re.I,
+        )
+        label = closing or period
+        if not label:
+            continue
+        statement = text[label.end() :]
+        matches = list(DATE_PATTERN.finditer(statement))
+        if not matches:
+            continue
+        prefix = statement[: matches[0].start()].strip(" :.,")
+        allowed = (
+            r"(?:(?:is|on|no later than|senest|er|den|by)\s*)*"
+            if closing
+            else r"(?:(?:is|will|be|open|from|er|til|forårssemestret|"
+            r"efterårssemestret|fra|den)\s*)*"
+        )
+        if not re.fullmatch(allowed, prefix, re.I):
+            continue
+        if closing:
+            dates = dated_values(matches[0][0])
+            if not dates:
+                continue
+            opening, deadline = None, dates[0][2]
+        else:
+            if len(matches) != 2:
+                continue
+            separator = statement[matches[0].end() : matches[1].start()]
+            if not re.fullmatch(
+                r"\s*(?:[-–—]|to|until|til)\s*", separator, re.I
+            ):
+                continue
+            dates = dated_values(
+                statement[matches[0].start() : matches[1].end()]
+            )
+            if len(dates) != 2:
+                continue
+            opening, deadline = dates[0][2], dates[1][2]
+        if opening and opening > deadline:
+            # A cross-year range with an unstated opening year is ambiguous.
+            opening = None
+        item = (opening, deadline)
+        if item not in result:
+            result.append(item)
+    return result
 
 
 def parse_inventory(pages):
-    if set(pages) != set(PAGES):
-        raise AdapterError("Incomplete DM source evidence", "parse")
-    for key in PAGES:
-        actual = hashlib.sha256(
-            source_facts(key, pages[key]).encode()
-        ).hexdigest()
-        if actual != CONDITIONS[key]:
-            raise AdapterError("DM facts/frontier changed: " + key, "parse")
+    groups = {}
+    for url, root in pages.items():
+        path = urllib.parse.urlsplit(url).path
+        if not path.startswith(
+            ("/students/membership/", "/studerende/medlemskab/")
+        ):
+            continue
+        blocks = programme_blocks(root)
+        title = next(text for tag, text in blocks if tag == "h1")
+        # Umbrellas discover detail programmes but are not separate awards.
+        if path.endswith(
+            (
+                "/membership/",
+                "/medlemskab/",
+                "/membership-benefits/",
+                "/medlemsfordele/",
+                "/legater-og-sponsorater/",
+                "/professional-member-benefits/",
+                "/faglige-medlemsfordele/",
+            )
+        ):
+            continue
+        if not PROGRAMME_WORDS.search(title):
+            continue
+        identity = LEGACY_ROUTES.get(path, path)
+        groups.setdefault(identity, []).append((url, blocks))
     records = []
-    for profile in PROFILES:
+    for identity, sections in groups.items():
+        sections.sort(key=lambda item: ("/students/" not in item[0], item[0]))
+        url, blocks = sections[0]
+        if identity == "activity-fund":
+            for guide_url, guide in pages.items():
+                if urllib.parse.urlsplit(guide_url).path == "/om-dm/refusion/":
+                    guidance = programme_blocks(guide)
+                    selected = []
+                    relevant = False
+                    for tag, value in guidance:
+                        if tag.startswith("h"):
+                            relevant = bool(
+                                re.search(
+                                    r"Afregningsblanket for udlæg|For studerende",
+                                    value,
+                                )
+                            )
+                        if relevant:
+                            selected.append((tag, value))
+                    sections.append((guide_url, selected))
+        title = next(text for tag, text in blocks if tag == "h1")
+        text = " ".join(
+            value for _, content in sections for _, value in content
+        )
+        category = (
+            "scholarships"
+            if re.search(r"travel grant|rejselegat", title, re.I)
+            else (
+                "grants"
+                if re.search(r"fund|sponsor|legat|grant", title, re.I)
+                else "training"
+            )
+        )
+        windows = sorted(
+            dict.fromkeys(
+                window
+                for _, content in sections
+                for window in application_windows(content)
+            ),
+            key=lambda window: (window[1], window[0] or ""),
+        )
+        evidence = fact_evidence(sections)
+        opening, deadline = windows[0] if len(windows) == 1 else (None, None)
         record = make_record(
-            profile["title"],
-            PAGES[profile["key"]],
-            profile["categories"],
-            kind=profile["kind"],
-            host_countries=profile["hosts"],
-            evidence=[ATTRIBUTION, profile["evidence"]],
+            title, url, [category], method="publisher-html", evidence=evidence
         )
         record["id"] = hashlib.sha256(
-            (SOURCE_ID + "|" + profile["track"]).encode()
+            (SOURCE_ID + "|" + identity).encode()
         ).hexdigest()[:24]
-        record["summary"] = profile["summary"]
-        record["deadline"] = profile["deadline"]
-        record["language"] = profile["language"]
-        # A date-only cutoff does not establish any time zone or clock.
-        # A future opening notice is not a presently open application claim.
-        if record["deadline"] and utc_now()[:10] > record["deadline"]:
+        record["deadline"] = deadline
+        record["application_windows"] = [
+            {"opening": start, "deadline": end} for start, end in windows
+        ]
+        record["language"] = "en" if "/students/" in url else "da"
+        record["kind"] = (
+            "institutional-grant"
+            if category == "grants"
+            else (
+                "programme-overview"
+                if category == "training"
+                else "opportunity"
+            )
+        )
+        if category == "training" and all(
+            city in text
+            for city in ("Aalborg", "Aarhus", "Odense", "Copenhagen")
+        ):
+            record["host_countries"] = ["DK"]
+        if deadline and utc_now()[:10] > deadline:
             record["status"] = "expired"
+        elif deadline and opening and opening <= utc_now()[:10] < deadline:
+            record["status"] = "open"
+        record["summary"] = concise_summary(
+            title, category, deadline, evidence
+        )
         records.append(record)
     validate_records(records)
     return records
@@ -799,7 +708,9 @@ def pace(url, interval=6):
     Production uses a serialized Action; separate machines must not overlap.
     """
     host = (
-        (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
+        (urllib.parse.urlsplit(url).hostname or "")
+        .lower()
+        .removeprefix("www.")
     )
     directory = os.path.join(
         tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
@@ -866,7 +777,9 @@ def save_budget(state, budget):
     os.fsync(state.fileno())
 
 
-def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
+def request_bytes(
+    url, *, interval=6, method="GET", headers=None, payload=None
+):
     state, budget = pace(url, interval)
     request_headers = {"User-Agent": _USER_AGENT, **(headers or {})}
     try:
@@ -941,7 +854,9 @@ def fetch_source(url, min_interval=6):
                         raise AdapterError(
                             "Invalid or excessive source redirects", "fetch"
                         )
-                    current = urllib.parse.urljoin(current, headers["Location"])
+                    current = urllib.parse.urljoin(
+                        current, headers["Location"]
+                    )
                     checked(current)
                     if original.path != "/robots.txt":
                         min_interval = max(min_interval, check_robots(current))
@@ -965,14 +880,17 @@ def fetch_source(url, min_interval=6):
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             if attempt:
                 raise AdapterError(
-                    "Publisher connection failed: " + safe_error(error), "fetch"
+                    "Publisher connection failed: " + safe_error(error),
+                    "fetch",
                 ) from error
     raise AdapterError("Publisher could not be read", "fetch")
 
 
 def check_robots(url):
     parsed = urllib.parse.urlsplit(url)
-    origin = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+    origin = urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, "", "", "")
+    )
     if origin not in _ROBOTS:
         try:
             _ROBOTS[origin] = fetch_source(origin + "/robots.txt")
@@ -1088,41 +1006,6 @@ def make_record(
     }
 
 
-def remove_expired_records(records, checked_at):
-    """Filter validated deadlines after retrieval, before atomic publication.
-
-    Unknown publisher zones use UTC-12 only as a global certainty bound:
-    a date remains eligible until its closing day has ended everywhere.
-    No age, status, missing response or unstated local clock implies expiry.
-    """
-    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
-    if checked.tzinfo is None:
-        raise AdapterError(
-            "Cleanup requires an aware check timestamp", "validate"
-        )
-    latest_day = checked.astimezone(timezone(timedelta(hours=-12))).date()
-    retained = []
-    for record in records:
-        deadline = record.get("deadline")
-        expired = False
-        if isinstance(deadline, str):
-            try:
-                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
-                    closing_day = datetime.strptime(deadline, "%Y-%m-%d").date()
-                    expired = closing_day < latest_day
-                else:
-                    cutoff = datetime.fromisoformat(
-                        deadline.replace("Z", "+00:00")
-                    )
-                    expired = cutoff.tzinfo is not None and cutoff < checked
-            except ValueError:
-                # Unsupported or ambiguous deadlines never authorize removal.
-                pass
-        if not expired:
-            retained.append(record)
-    return retained
-
-
 def validate_records(records, *, allow_empty=False):
     """Validate all real records against the source and consumer contracts."""
     if not isinstance(records, list) or (not records and not allow_empty):
@@ -1151,7 +1034,9 @@ def validate_records(records, *, allow_empty=False):
                 not isinstance(record.get(field), str)
                 or not record[field].strip()
             ):
-                raise AdapterError("Missing record field: " + field, "validate")
+                raise AdapterError(
+                    "Missing record field: " + field, "validate"
+                )
         if record["id"] in ids:
             raise AdapterError("Duplicate opportunity identifier", "validate")
         ids.add(record["id"])
@@ -1174,7 +1059,9 @@ def validate_records(records, *, allow_empty=False):
         ):
             value = record.get(field)
             if field not in record:
-                raise AdapterError("Missing record field: " + field, "validate")
+                raise AdapterError(
+                    "Missing record field: " + field, "validate"
+                )
             if value is not None:
                 try:
                     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -1217,7 +1104,9 @@ def validate_records(records, *, allow_empty=False):
             "institutional-grant",
             "unknown",
         ) or record.get("status") not in ("open", "expired", "unknown"):
-            raise AdapterError("Invalid opportunity kind or status", "validate")
+            raise AdapterError(
+                "Invalid opportunity kind or status", "validate"
+            )
         summary = record.get("summary")
         if not isinstance(summary, str) or re.search("<[^>]+>", summary):
             raise AdapterError("Invalid plain summary", "validate")
@@ -1230,7 +1119,9 @@ def validate_records(records, *, allow_empty=False):
                 or record[field] is not None
                 and not isinstance(record[field], str)
             ):
-                raise AdapterError("Invalid record field: " + field, "validate")
+                raise AdapterError(
+                    "Invalid record field: " + field, "validate"
+                )
         classification = record.get("classification")
         if (
             not isinstance(classification, dict)
@@ -1402,6 +1293,41 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
     if error:
         result["failure_stage"] = getattr(error, "stage", "parse")
     return result
+
+
+def remove_expired_records(records, checked_at):
+    """Filter validated deadlines after retrieval, before atomic publication.
+
+    Unknown publisher zones use UTC-12 only as a global certainty bound:
+    a date remains eligible until its closing day has ended everywhere.
+    No age, status, missing response or unstated local clock implies expiry.
+    """
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.tzinfo is None:
+        raise AdapterError(
+            "Cleanup requires an aware check timestamp", "validate"
+        )
+    latest_day = checked.astimezone(timezone(timedelta(hours=-12))).date()
+    retained = []
+    for record in records:
+        deadline = record.get("deadline")
+        expired = False
+        if isinstance(deadline, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+                    closing_day = datetime.strptime(deadline, "%Y-%m-%d").date()
+                    expired = closing_day < latest_day
+                else:
+                    cutoff = datetime.fromisoformat(
+                        deadline.replace("Z", "+00:00")
+                    )
+                    expired = cutoff.tzinfo is not None and cutoff < checked
+            except ValueError:
+                # Unsupported or ambiguous deadlines never authorize removal.
+                pass
+        if not expired:
+            retained.append(record)
+    return retained
 
 
 def main():

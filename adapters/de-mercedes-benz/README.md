@@ -39,6 +39,40 @@ prose, recruitment invitations, contact details and wholesale qualification text
 are not republished. The summary stays an original substantive English factual
 summary; readers must consult the linked publisher notice.
 
+### Current production block
+
+Production has not published this source. The first GitHub-hosted attempt
+[`38086095380`](https://github.com/YouthOpps/data-pipeline/actions/runs/38086095380)
+received HTTP 403 from `https://group.mercedes-benz.com/robots.txt`. Attempt
+[`38086095524`](https://github.com/YouthOpps/data-pipeline/actions/runs/38086095524)
+restored that durable refusal and stopped before further publisher requests.
+The workflow is manually disabled; its YAML triggers below do not mean it is
+currently scheduled. See the [recorded recovery requirements](https://github.com/YouthOpps/data-pipeline/issues/115#issuecomment-6102178365)
+and [follow-up review](https://github.com/YouthOpps/data-pipeline/issues/140).
+
+No API key is required by the existing public search protocol. A missing key
+is not the diagnosed failure, and HTTP 403 alone does not prove a robots
+`Disallow` or a legal prohibition. Earlier successful cloud collections do not
+establish access from a GitHub-hosted runner.
+
+Recovery remains blocked pending a reviewed official access route, an approved
+reachable runner, or an official feed. The distinct public API origin is a
+candidate for review, not an automatic fallback: the persisted refusal covers
+the entire publisher family, and the group pages below supply terms and
+additional eligibility facts. An API-only replacement needs evidence of
+permitted access, complete current inventory and authoritative coverage of
+those facts before an explicit reviewed recovery can proceed. It must not
+clear the refusal, rename the family, replace the latest artifact with the
+bootstrap, rotate identity, or silently omit qualification requirements.
+
+This access review does not certify the frozen inventory as current. After
+permitted access is established, the snapshot checks described above also
+need replacement with live extraction and pagination, followed by a complete
+non-publishing collection and independent review. Re-enabling the workflow or
+refreshing hashes alone is not a repair.
+
+The [provider notice](https://group.mercedes-benz.com/provider/) reserves rights in creative text, images, media and page arrangements and gives specific terms precedence. The [careers terms](https://group.mercedes-benz.com/careers/general-terms-conditions.html) do not expressly prohibit the reviewed bounded public discovery and minimal original factual summaries. Account, upload and moderation conditions are not an authorization to access private applicant data. The implementation follows fresh actual robots policies for the API and group origins. The API's observed ordinary robots 404 is treated as an absent policy, never as a way around a refusal. HTTP 401, 403 or 429 remains a durable family block.
+
 Country arrays describe actual API host locations, not nationality eligibility.
 No eligible-country restriction is inferred. API publication-language code 2 is preferred for variant selection.
 Only previously verified prose languages are retained; new recipes may leave
