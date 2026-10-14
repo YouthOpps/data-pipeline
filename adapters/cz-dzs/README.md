@@ -120,3 +120,24 @@ lifecycle with bounded publication, failure reporting and export; the job
 limit remains 30 minutes. Collection tests and static publication review
 do not establish production publication. Maintainer production execution
 is separate from local implementation.
+
+## Expired-record cleanup
+
+The source does not establish a reliable application timezone for every date-only deadline. Cleanup therefore uses UTC−12 as a conservative certainty bound: a calendar deadline expires only once its closing date has ended in every civil timezone. This does not invent a publisher closing clock. Offset-aware deadlines use their explicit instant.
+
+After complete nonempty collection and validation, the refresh removes only
+records with a validated deadline strictly before the successful check time.
+Missing or ambiguous publisher deadlines remain normalized as null; status, age
+and disappearance are never used as expiry evidence. Invalid normalized dates
+fail validation and preserve last-good data. The source uses complete replacement rather than merging
+old records, so expired previously published rows cannot survive a successful
+refresh, including when they are still present in the publisher response.
+Creation and first-seen history is retained for refreshed eligible identities.
+
+The retained subset and success metadata are published in one source-scoped
+atomic commit. A validated nonempty raw collection whose records all expire
+publishes `[]` with success and a zero count; an empty upstream collection still
+fails. A previously successful empty subset remains a valid last-good snapshot.
+Fetch, parse, validation and publication failures preserve last-good data and
+its success timestamp; only safe failure metadata may change. The sole live test
+continues to emit the complete unfiltered publisher collection without publishing.

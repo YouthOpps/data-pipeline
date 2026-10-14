@@ -2,7 +2,7 @@
 
 import argparse
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
@@ -124,11 +124,11 @@ def normalized(value):
 
 def calendar_deadline(year, month, day):
     value = datetime(
-        year, month, day, 23, 59, 59, 999000, tzinfo=ZoneInfo("Europe/Tallinn")
+        year, month, day, 23, 59, 59, 999999, tzinfo=ZoneInfo("Europe/Tallinn")
     )
     return (
         value.astimezone(timezone.utc)
-        .isoformat(timespec="milliseconds")
+        .isoformat(timespec="microseconds")
         .replace("+00:00", "Z")
     )
 
@@ -345,7 +345,7 @@ _OPENER = urllib.request.build_opener(NoRedirect)
 def utc_now():
     return (
         datetime.now(timezone.utc)
-        .isoformat(timespec="milliseconds")
+        .isoformat(timespec="microseconds")
         .replace("+00:00", "Z")
     )
 
@@ -658,8 +658,31 @@ def make_record(
     }
 
 
-def validate_records(records):
-    if not isinstance(records, list) or not records:
+def remove_expired_records(records, checked_at):
+    """Filter validated deadlines without guessing missing semantics."""
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    retained = []
+    for record in records:
+        deadline = record["deadline"]
+        if deadline is None:
+            retained.append(record)
+            continue
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+            closing_date = datetime.strptime(deadline, "%Y-%m-%d").date()
+            expired = (
+                checked.astimezone(ZoneInfo("Europe/Tallinn")).date()
+                > closing_date
+            )
+        else:
+            closing = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            expired = checked > closing
+        if not expired:
+            retained.append(record)
+    return retained
+
+
+def validate_records(records, *, allow_empty=False):
+    if not isinstance(records, list) or (not records and not allow_empty):
         raise AdapterError(
             "Empty or invalid opportunity collection", "validate"
         )
@@ -948,7 +971,7 @@ def main():
         else {}
     )
     if snapshot and snapshot["files"]["data.json"] is not None:
-        validate_records(old)
+        validate_records(old, allow_empty=True)
         if previous.get("source") != SOURCE_ID:
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish"
@@ -990,10 +1013,12 @@ def main():
             key=lambda record: record["published_at"] or "", reverse=True
         )
         validate_records(records)
+        records = remove_expired_records(records, utc_now())
+        validate_records(records, allow_empty=True)
     except Exception as error:
         failure, records = error, old
     outcome = metadata(attempt, previous, records, failure)
-    if args.publish and (not failure or old):
+    if args.publish and (not failure or previous):
         files = {
             "metadata.json": json.dumps(outcome, ensure_ascii=False, indent=2)
             + "\n"
@@ -1016,7 +1041,7 @@ def main():
             )
             try:
                 latest = read_snapshot()
-                if not old or latest["files"] != snapshot["files"]:
+                if not previous or latest["files"] != snapshot["files"]:
                     raise AdapterError(
                         "No safe previous snapshot for failure reporting",
                         "publish",
