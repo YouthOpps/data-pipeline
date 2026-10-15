@@ -57,3 +57,7 @@ The existing six-hour schedules for OeAD, FEBA and Fulbright Germany are preserv
 The workflow folder is the sole code-layout exception to the independent adapter folders: [GitHub discovers workflows in `.github/workflows/`](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows).
 
 Before publishing a data-layout migration, coordinate consumers to use `datas/<source-id>/{data,metadata}.json`. Website ingestion and the website's data-source pin belong to its own project.
+
+## License
+
+Original adapter implementations, workflow configuration, tests and documentation are licensed under Apache-2.0. Retrieved opportunity data and publisher content are not relicensed. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Apache-2.0 does not grant rights to publisher data or other third-party materials.
