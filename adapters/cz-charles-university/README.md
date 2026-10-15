@@ -37,11 +37,46 @@ it supplies no current call or amount. Veteran eligibility is not converted into
 U.S. citizenship.
 
 Requests across all `cuni.cz` faculty subdomains share one cross-process lock,
-at least six seconds between starts and at most ten starts in any rolling minute.
+at least 12.2 seconds between physical starts and at most five starts in any
+rolling 60 seconds.
 Robots, redirects, retries and the linked German DOCX count toward that allowance;
 stricter robots crawl delays and backoff are honored. An overlapping test or
 collection must use the same allowance. Network errors and incomplete publisher
 responses fail the whole collection.
+
+The scholarship, international, foundations, Germany, Erasmus, Carolina and MFF
+inventory hubs additionally retain at least 30 seconds from the previous
+inventory response completion to the next physical inventory start, including
+retries and redirects. Single-programme detail pages, robots and the linked DOCX
+use the physical allowance rather than an artificial pagination delay.
+
+Every 429 saves a doubled CURRENT physical interval and inventory gap, an
+increased counter and an exponential pause of at least 30 minutes (or a longer
+valid Retry-After) before its body is read; the collection stops. Ordinary rate
+limiting stays timed. Actual content 401/403/451 or primary visible verification
+retains a refusal. Hidden text, aria-hidden="true", inline display/visibility
+suppression and unrelated site chrome do not alone create a refusal. Challenges
+are checked before redirect follow; robots purpose requires literal robots.txt
+at every physical hop. Robots-only 4xx except 429 is unavailable REP; network,
+TLS, 5xx and 429 do not become unrestricted access. Malformed timing alone creates
+no permanent hold.
+
+The original local journal path and inode remain authoritative. A separately
+reviewed transition must preserve all known legacy job-completion upper bounds,
+actual research/native events and stronger timers; unlogged historical holds
+and 429 remain explicitly unknown. Missing or corrupt mature state fails closed.
+An authenticated main workflow restores the latest exact-attempt owned inert
+artifact before its data-source snapshot, and exports trusted state even if that
+snapshot or collection fails. Exact run/job/source/head identities, actual job
+completion chronology, artifact digest and source-code revision are validated.
+Only the explicitly reviewed 31 legacy attempts may use the separately approved
+full-native MAX seed; after the first new attempt a missing newest artifact cannot
+fall back to an older success. The artifact contains pacing state, never records,
+source bodies, headers or credentials. Native tests receive no publication token.
+
+The 30-minute job cap and fixed daily slot remain unchanged. Collection has a
+21-minute phase inside a 29-minute execution budget, with reserved export time;
+stronger pacing that cannot fit fails without truncation or an automatic recrawl.
 
 ## Complete bounded inventory
 
@@ -101,6 +136,17 @@ rather than publishing outdated amounts/eligibility or silently dropping awards.
 The factual summaries are protected by hashes of their actual scoped publisher
 content (tracking/navigation excluded; changing footer timestamps ignored).
 Changing a funding condition requires a fresh source review and adapter update.
+The Mobility Fund uses four complete material sections: eligibility, deadlines,
+application/financial conditions (including all nested funding and payment
+paragraphs), and completion obligations. Each section includes its full text and
+linked documents. Unexpected sections, headings, conditions or links fail review.
+The verified final contact-only section and changing content footer are excluded;
+the contact structure is checked so an added section is not silently discarded.
+The 15 October 2026 review verified the inter-university-scholarship funding
+exclusion, Category C event/contribution attachments and payment no earlier than
+31 December 2026, alongside the existing eligibility and indicative amounts.
+Historical HTML was unavailable, so this review does not identify the exact old
+textual change or classify the previous fingerprint failure as cosmetic.
 The collector still retrieves and verifies every required live page each run;
 it does not emit a cached snapshot when access or verification fails.
 
@@ -265,3 +311,29 @@ Published metadata uses `display_name` = **Charles University** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Current native verification
+
+One complete original nonpublishing native test of the updated implementation
+retrieved 54 genuine records; 43 remained after current expiry cleanup, and the
+11 genuinely expired records produced a valid empty subset. The actual current
+website consumer accepted all 54 raw records, all 43 current records and that
+empty envelope. This empty scenario does not claim the complete source is empty.
+
+The run made 29 physical requests, including actual redirects and the original
+linked DOCX. Measured physical starts were at least 12.975 seconds apart, with at
+most five in any rolling minute; inventory completion gaps were at least 30.000
+seconds. Complete actual response bytes, all headers and stdout were retained
+privately for independent verification; no publisher content or record dataset
+was added to this repository. Hosted publication remains a separate maintainer
+gate using the reviewed complete native pacing state.
+
+The maintainer approved the [complete known native pacing transition](https://github.com/YouthOpps/data-pipeline/issues/215#issuecomment-6198680829).
+Its 67 timing observations include historical job completion bounds, research,
+wire starts and five exact recent reservations; they are not 67 physical requests.
+Twenty-four earlier exact native reservation timestamps were not captured. Each
+is conservatively dominated by its independently matched later wire start; this
+is not a claim that every intermediate budget snapshot was retained. Historical
+429 and hold fields remain explicitly unknown. The first hosted transition
+requires the exact reviewed legacy attempts; subsequent attempts require the
+latest owned inert artifact. Approval does not assert hosted publication success.

@@ -10,6 +10,7 @@ on:
     - cron: '42 0 * * *'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: youthopps-cz-charles-university-publisher-v1
   queue: max
@@ -34,6 +35,17 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish this source
+        id: collect
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CHARLES_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
         run: python -B adapters/cz-charles-university/adapter.py --publish
+      - name: Retain this attempt's inert publisher state
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: charles-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 30
