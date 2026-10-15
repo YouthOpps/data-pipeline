@@ -65,15 +65,18 @@ _RUN_END = _PHASE_END = None
 _PHASE_NAME = None
 
 
+_ATTEMPT_HEADS = {}
 _PAGE_COMPLETED = None
 
 
 def fetch_inventory_page(fetch, *args, **kwargs):
     """Space logical inventory pages without changing native detail pacing."""
     global _PAGE_COMPLETED
+    with locked_budget():
+        page_interval = load_budget().get("page_interval", 12)
     if _PAGE_COMPLETED is not None:
         while True:
-            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            wait = _PAGE_COMPLETED + page_interval - time.monotonic()
             if wait <= 0:
                 break
             time.sleep(wait)
@@ -302,7 +305,12 @@ def numeric(value):
 
 def validate_budget(state):
     """Validate inert state without age-expiring a future publisher embargo."""
-    if not isinstance(state, dict) or set(state) - {"interval"} != {
+    if not isinstance(state, dict) or set(state) - {
+        "interval",
+        "page_interval",
+        "rate_failures",
+        "legacy_rate_history_unknown",
+    } != {
         "schema",
         "family",
         "observed_at",
@@ -328,8 +336,17 @@ def validate_budget(state):
         or any(t > state["observed_at"] for t in state["starts"])
     ):
         raise AdapterError("Invalid publisher pacing history", "access")
+    if (
+        type(state.get("legacy_rate_history_unknown", True)) is not bool
+        or type(state.get("rate_failures", 0)) is not int
+        or not 0 <= state.get("rate_failures", 0) <= 100
+        or not numeric(state.get("page_interval", 12))
+        or state.get("page_interval", 12) < 12
+    ):
+        raise AdapterError("Invalid adaptive publisher limits", "access")
     if time.time() + 1 < state["observed_at"]:
         raise AdapterError("Publisher pacing clock moved backwards", "access")
+    state.setdefault("legacy_rate_history_unknown", True)
     return state
 
 
@@ -342,6 +359,7 @@ def empty_budget(now):
         "starts": [],
         "blocked": False,
         "interval": 6,
+        "legacy_rate_history_unknown": True,
     }
 
 
@@ -437,6 +455,8 @@ def pace():
             raise AdapterError(
                 ("Publisher backoff requires reviewed recovery"), ("access")
             )
+        if state.get("rate_failures", 0) >= 100:
+            raise AdapterError("Rate-limit counter requires review", "access")
         now = time.time()
         starts = [t for t in state["starts"] if t > now - 60]
         target = max(now, state["not_before"])
@@ -470,7 +490,7 @@ def pace():
 
 
 def record_retry_after(value):
-    """Persist the embargo before reporting any refusal or retrieval failure."""
+    """Retain valid embargoes; unusable timing alone does not imply denial."""
     if value is None:
         return
     with locked_budget():
@@ -484,13 +504,262 @@ def record_retry_after(value):
                 if parsed.utcoffset() is None:
                     raise ValueError("Missing timezone")
                 until = parsed.timestamp()
-            if not numeric(until):
+            if not numeric(until) or until <= now:
                 raise ValueError("Invalid embargo")
+            datetime.fromtimestamp(until, timezone.utc)
             state["not_before"] = max(state["not_before"], until)
         except Exception:
-            state["blocked"] = True
+            pass
         state["observed_at"] = now
         save_budget(state)
+
+
+def retain_rate_limit():
+    """Persist a recoverable restriction before consuming a 429 body."""
+    with locked_budget():
+        state = load_budget()
+        count = state.get("rate_failures", 0) + 1
+        interval = max(state.get("interval", 6) * 2, 12)
+        page_interval = max(state.get("page_interval", 12) * 2, 30)
+        now = time.time()
+        if count > 100 or not numeric(interval) or not numeric(page_interval):
+            raise AdapterError("Rate-limit state exceeds safe range", "access")
+        state["rate_failures"] = count
+        state["interval"] = interval
+        state["page_interval"] = page_interval
+        state["not_before"] = max(
+            state["not_before"],
+            now + 1800 * 2 ** (count - 1),
+            now + interval,
+            now + page_interval,
+        )
+        state["observed_at"] = now
+        save_budget(state)
+
+
+class RateLimitText(HTMLParser):
+    """Read visible primary refusals, excluding unrelated ancillary notices."""
+
+    def __init__(self, document):
+        super().__init__(convert_charrefs=True)
+        self.parts, self.stack, self.head_title_parts = [], [], []
+        self.head_seen = self.head_allowed = False
+        self.title_depth = None
+        self.feed(document)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        # HTML block starts close a paragraph in button scope, including its
+        # inline descendants. Keep suppression inherited from outer elements.
+        if tag in {
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "center",
+            "details",
+            "dialog",
+            "dir",
+            "div",
+            "dl",
+            "fieldset",
+            "figcaption",
+            "figure",
+            "footer",
+            "header",
+            "hgroup",
+            "main",
+            "menu",
+            "nav",
+            "ol",
+            "p",
+            "search",
+            "section",
+            "summary",
+            "ul",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "pre",
+            "listing",
+            "hr",
+        }:
+            for index in range(len(self.stack) - 1, -1, -1):
+                ancestor = self.stack[index][0]
+                if ancestor == "p":
+                    del self.stack[index:]
+                    break
+                if ancestor in {
+                    "applet",
+                    "button",
+                    "caption",
+                    "html",
+                    "marquee",
+                    "object",
+                    "table",
+                    "td",
+                    "template",
+                    "th",
+                }:
+                    break
+        values = {}
+        for name, value in attrs:
+            values.setdefault(name, value)
+        style = re.sub(
+            r"/\*.*?\*/", "", values.get("style") or "", flags=re.S
+        ).lower()
+        declarations, priorities = {}, {}
+        for declaration in style.split(";"):
+            name, separator, value = declaration.partition(":")
+            if separator:
+                name = name.strip()
+                important = bool(re.search(r"!\s*important\s*$", value))
+                if priorities.get(name) and not important:
+                    continue
+                declarations[name] = re.sub(
+                    r"\s*!\s*important\s*$", "", value
+                ).strip()
+                priorities[name] = important
+        explicit_suppressed = (
+            "hidden" in values
+            or (values.get("aria-hidden") or "").strip().lower() == "true"
+            or declarations.get("display") == "none"
+            or declarations.get("visibility") == "hidden"
+        )
+        if (
+            tag == "head"
+            and not self.head_seen
+            and all(
+                name == "html" and not suppressed and not visibility
+                for name, suppressed, visibility in self.stack
+            )
+        ):
+            self.head_seen = True
+            self.head_allowed = not explicit_suppressed
+        if (
+            tag == "title"
+            and self.head_allowed
+            and self.stack
+            and self.stack[-1][0] == "head"
+            and not explicit_suppressed
+        ):
+            self.title_depth = len(self.stack) + 1
+        suppressed = (
+            tag
+            in {
+                "head",
+                "title",
+                "script",
+                "style",
+                "template",
+                "noscript",
+                "footer",
+                "nav",
+                "aside",
+            }
+            or "hidden" in values
+            or (values.get("aria-hidden") or "").strip().lower() == "true"
+            or declarations.get("display") == "none"
+        )
+        inherited = self.stack[-1][1] if self.stack else False
+        visibility = self.stack[-1][2] if self.stack else False
+        if declarations.get("visibility") == "hidden":
+            visibility = True
+        elif declarations.get("visibility") == "visible":
+            visibility = False
+        if tag not in {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        }:
+            self.stack.append((tag, inherited or suppressed, visibility))
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self.title_depth = None
+        if tag == "head":
+            self.head_allowed = False
+        for position in range(len(self.stack) - 1, -1, -1):
+            if self.stack[position][0] == tag:
+                del self.stack[position:]
+                break
+
+    def handle_data(self, value):
+        if (
+            self.title_depth is not None
+            and len(self.stack) == self.title_depth
+            and self.stack[-1][0] == "title"
+        ):
+            self.head_title_parts.append(value)
+        if not self.stack or not any(self.stack[-1][1:]):
+            self.parts.append(value)
+
+
+def stop_rate_limit(response):
+    """Read only bounded error evidence after the durable timer is saved."""
+    try:
+        try:
+            body = response.read(65537)
+        except Exception:
+            raise AdapterError(
+                "Publisher429 body unavailable; timed backoff retained",
+                "access",
+                429,
+            ) from None
+        if len(body) > 65536:
+            raise AdapterError(
+                "Publisher429 body exceeds bound; timed backoff retained",
+                "access",
+                429,
+            )
+        primary = RateLimitText(body.decode("utf-8", "replace"))
+        human = (
+            r"verify (?:that )?you are human|"
+            r"confirm (?:that )?you are (?:a )?human|"
+            r"checking your browser|enable javascript and cookies to continue|"
+            r"complete (?:the |a )?captcha"
+        )
+        title = " ".join(primary.head_title_parts)
+        if re.search(human, " ".join(primary.parts), re.I) or re.search(
+            human + r"|just a moment|attention required|access denied|captcha",
+            title,
+            re.I,
+        ):
+            with locked_budget():
+                state = load_budget()
+                state["blocked"] = True
+                state["observed_at"] = time.time()
+                save_budget(state)
+        raise AdapterError(
+            "Publisher429; durable adaptive backoff retained", "access", 429
+        )
+    finally:
+        with locked_budget():
+            state = load_budget()
+            now = time.time()
+            state["not_before"] = max(
+                state["not_before"],
+                now + state.get("interval", 6),
+                now + state.get("page_interval", 12),
+            )
+            state["observed_at"] = now
+            save_budget(state)
+
+
 
 
 def publisher_transport_error(error, url):
@@ -536,9 +805,7 @@ def request_bytes(
             current, data=payload, headers=headers, method=method
         )
         try:
-            response = _OPENER.open(
-                request, timeout=request_timeout(publisher)
-            )
+            response = _OPENER.open(request, timeout=request_timeout(publisher))
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, OSError) as error:
@@ -551,7 +818,14 @@ def request_bytes(
             retry = response.headers.get("Retry-After")
             if publisher:
                 record_retry_after(retry)
-            if publisher and status in (401, 403, 429):
+            if publisher and status == 429:
+                retain_rate_limit()
+                stop_rate_limit(response)
+            if publisher and (
+                status in (401, 403)
+                or status == 451
+                and urllib.parse.urlsplit(current).path != "/robots.txt"
+            ):
                 with locked_budget():
                     state = load_budget()
                     state["blocked"] = True
@@ -688,7 +962,7 @@ def check_robots(url):
         return
     if origin not in _ROBOTS:
         status, _, body = request_bytes(origin + "/robots.txt", publisher=True)
-        if status == 404:
+        if status in (404, 451):
             _ROBOTS[origin] = None
         elif status == 200:
             parser = urllib.robotparser.RobotFileParser()
@@ -700,9 +974,7 @@ def check_robots(url):
             )
     parser = _ROBOTS[origin]
     if parser is not None and not robots_directive(parser, "can_fetch", url):
-        raise AdapterError(
-            "Publisher robots excludes required input", "access"
-        )
+        raise AdapterError("Publisher robots excludes required input", "access")
     if parser is not None:
         delay = robots_directive(parser, "crawl_delay")
         if delay and delay > 6:
@@ -799,7 +1071,56 @@ def family_source(run):
     return None
 
 
-def completed_identity(run, expected=None):
+def attempt_completion(identity, attempt, head):
+    """Use actual exact-attempt job completion, never mutable run updated_at."""
+    total, jobs_seen = None, set()
+    finished = []
+    for page in range(1, 101):
+        result = workflow_api(
+            f"/actions/runs/{identity}/attempts/{attempt}/jobs"
+            f"?per_page=100&page={page}"
+        )
+        count, jobs = result.get("total_count"), result.get("jobs")
+        if (
+            type(count) is not int
+            or count <= 0
+            or not isinstance(jobs, list)
+            or len(jobs) > 100
+            or total is not None
+            and total != count
+        ):
+            raise ValueError("Incomplete exact-attempt job inventory")
+        total = count
+        for job in jobs:
+            if (
+                not isinstance(job, dict)
+                or type(job.get("id")) is not int
+                or job["id"] <= 0
+                or job["id"] in jobs_seen
+                or type(job.get("run_id")) is not int
+                or job["run_id"] != identity
+                or type(job.get("run_attempt")) is not int
+                or job["run_attempt"] != attempt
+                or job.get("head_sha") != head
+                or job.get("head_branch") != "main"
+                or job.get("status") != "completed"
+            ):
+                raise ValueError("Untrusted exact-attempt job")
+            jobs_seen.add(job["id"])
+            value = datetime.fromisoformat(
+                job["completed_at"].replace("Z", "+00:00")
+            )
+            if value.utcoffset() is None:
+                raise ValueError("Missing job completion timezone")
+            finished.append(value.timestamp())
+        if len(jobs_seen) == total:
+            return max(finished)
+        if len(jobs_seen) > total or len(jobs) != 100:
+            raise ValueError("Truncated exact-attempt job inventory")
+    raise ValueError("Exact-attempt job inventory exceeds bound")
+
+
+def completed_identity(run, expected=None, revision=None):
     """Bind a completed attempt and its chronological publisher interval."""
     try:
         source = family_source(run)
@@ -815,19 +1136,25 @@ def completed_identity(run, expected=None):
             or run[("head_repository")][("full_name")]
             != ("YouthOpps/data-pipeline")
             or run["head_branch"] != "main"
+            or not re.fullmatch(r"[0-9a-f]{40}", run.get("head_sha", ""))
+            or type(run.get("workflow_id")) is not int
+            or run["workflow_id"] <= 0
+            or revision is not None
+            and (run["head_sha"], run["workflow_id"]) != revision
             or expected
             and (identity, attempt, source) != expected
         ):
             raise ValueError("Untrusted completed attempt")
-        times = []
-        for field in ("run_started_at", "updated_at"):
-            value = datetime.fromisoformat(run[field].replace("Z", "+00:00"))
-            if value.utcoffset() is None:
-                raise ValueError("Missing attempt timezone")
-            times.append(value.timestamp())
-        began, finished = times
+        value = datetime.fromisoformat(
+            run["run_started_at"].replace("Z", "+00:00")
+        )
+        if value.utcoffset() is None:
+            raise ValueError("Missing attempt timezone")
+        began = value.timestamp()
+        finished = attempt_completion(identity, attempt, run["head_sha"])
         if not 0 <= began <= finished <= time.time() + 1:
             raise ValueError("Invalid attempt chronology")
+        _ATTEMPT_HEADS[(identity, attempt)] = run["head_sha"]
         return finished, began, identity, attempt, source
     except Exception:
         raise AdapterError(
@@ -854,7 +1181,16 @@ def latest_family_run():
 def scan_family_history():
     """Select newest completed chronology, including older-ID rerun attempts."""
     current_id, current_attempt = current_run_identity()
+    definition = workflow_api("/actions/workflows/fetch-" + SOURCE_ID + ".yml")
+    expected_path = ".github/workflows/fetch-" + SOURCE_ID + ".yml"
+    if (
+        type(definition.get("id")) is not int
+        or definition["id"] <= 0
+        or definition.get("path") != expected_path
+    ):
+        raise AdapterError("Untrusted family workflow definition", "access")
     candidates = []
+    current_seen = False
     total, scanned = None, 0
     seen_ids = set()
     for page in range(1, 101):
@@ -896,10 +1232,33 @@ def scan_family_history():
                 raise AdapterError(
                     ("Workflow repository or branch mismatch"), ("access")
                 )
+            if run.get("workflow_id") != definition["id"]:
+                raise AdapterError(
+                    "Family workflow identity mismatch", "access"
+                )
             identity, attempt = run.get("id"), run.get("run_attempt")
-            if type(identity) is not int or type(attempt) is not int:
+            if (
+                type(identity) is not int
+                or identity <= 0
+                or type(attempt) is not int
+                or attempt <= 0
+            ):
                 raise AdapterError("Invalid family run identity", "access")
             if identity == current_id:
+                current_seen = True
+                if (
+                    run.get("head_sha") != os.environ.get("GITHUB_SHA")
+                    or not re.fullmatch(
+                        r"[0-9a-f]{40}", run.get("head_sha", "")
+                    )
+                    or type(run.get("workflow_id")) is not int
+                    or run["workflow_id"] <= 0
+                    or run.get("path")
+                    != ".github/workflows/fetch-" + SOURCE_ID + ".yml"
+                ):
+                    raise AdapterError(
+                        "Current workflow binding mismatch", "access"
+                    )
                 if attempt != current_attempt:
                     raise AdapterError(
                         ("Current workflow attempt mismatch"), ("access")
@@ -913,7 +1272,9 @@ def scan_family_history():
                     )
                     candidates.append(
                         completed_identity(
-                            prior, (identity, current_attempt - 1, source)
+                            prior,
+                            (identity, current_attempt - 1, source),
+                            (run.get("head_sha"), run.get("workflow_id")),
                         )
                     )
                 continue
@@ -923,6 +1284,17 @@ def scan_family_history():
                 ("pending"),
                 ("requested"),
             ):
+                if attempt > 1:
+                    prior = workflow_api(
+                        f"/actions/runs/{identity}/attempts/{attempt - 1}"
+                    )
+                    candidates.append(
+                        completed_identity(
+                            prior,
+                            (identity, attempt - 1, source),
+                            (run.get("head_sha"), run.get("workflow_id")),
+                        )
+                    )
                 continue
             if run.get("status") != "completed":
                 raise AdapterError("Another family run is active", "access")
@@ -931,6 +1303,10 @@ def scan_family_history():
             if scanned != total:
                 raise AdapterError(
                     ("Workflow inventory count mismatch"), ("access")
+                )
+            if not current_seen:
+                raise AdapterError(
+                    "Current workflow missing from history", "access"
                 )
             if not candidates:
                 return None
@@ -1049,8 +1425,7 @@ def restore_family_artifact():
         try:
             bootstrap = json.loads(raw)
             if (
-                set(bootstrap)
-                != {"schema", "family", "not_before", "evidence"}
+                set(bootstrap) != {"schema", "family", "not_before", "evidence"}
                 or type(bootstrap["schema"]) is not int
                 or bootstrap["schema"] != 1
                 or bootstrap["family"] != FAMILY
@@ -1083,9 +1458,7 @@ def restore_family_artifact():
             or result.get(("total_count")) != len(artifacts)
             or len(artifacts) > 100
         ):
-            raise AdapterError(
-                "Incomplete family artifact inventory", "access"
-            )
+            raise AdapterError("Incomplete family artifact inventory", "access")
         matches = [a for a in artifacts if a.get("name") == expected]
         if len(matches) != 1 or matches[0].get("expired") is not False:
             raise AdapterError(
@@ -1097,6 +1470,12 @@ def restore_family_artifact():
             type(artifact.get("id")) is not int
             or artifact["id"] <= 0
             or artifact.get("workflow_run", {}).get("id") != run_id
+            or artifact.get("workflow_run", {}).get("head_sha")
+            != _ATTEMPT_HEADS.get((run_id, attempt))
+            or (run_id, attempt) not in _ATTEMPT_HEADS
+            or not re.fullmatch(
+                r"sha256:[0-9a-f]{64}", artifact.get("digest") or ""
+            )
             or not numeric(artifact.get("size_in_bytes"))
             or artifact["size_in_bytes"] > 32768
         ):
@@ -1114,6 +1493,15 @@ def restore_family_artifact():
         combined["blocked"] = local["blocked"] or incoming["blocked"]
         combined["interval"] = max(
             local.get("interval", 6), incoming.get("interval", 6)
+        )
+        combined["legacy_rate_history_unknown"] = local.get(
+            "legacy_rate_history_unknown", True
+        ) or incoming.get("legacy_rate_history_unknown", True)
+        combined["page_interval"] = max(
+            local.get("page_interval", 12), incoming.get("page_interval", 12)
+        )
+        combined["rate_failures"] = max(
+            local.get("rate_failures", 0), incoming.get("rate_failures", 0)
         )
         combined[("starts")] = sorted(
             set(local[("starts")] + incoming[("starts")])

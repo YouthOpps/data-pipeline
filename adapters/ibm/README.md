@@ -28,7 +28,7 @@ The actual [IBM robots policy](https://www.ibm.com/robots.txt) permits the revie
 
 ## Timing, failure and publication
 
-The preserved `youthopps-ibm-careers-publisher-v1` family coordinates all publisher requests, robots, retries and redirects: at least six seconds between starts and at most ten starts in any rolling minute. Existing embargoes, refused-access state and timing history are retained. A sixty-second startup embargo applies after restoration under the exclusive collector lock. Each physical attempt, including failure and response closure, persists its completion plus the stricter native interval. A monotonic gate protects the actual opener from reservation and filesystem timing variation. Request count follows the discovered graph. Hard bounds are 100 physical starts, 8 MiB per response and 64 MiB across publisher response bodies. Known HTTP 401/403/429 refusals persist Retry-After and block state before body reading; unreviewed redirects stop before following their destination.
+The preserved `youthopps-ibm-careers-publisher-v1` family coordinates all publisher requests, robots, retries and redirects: at least six seconds between starts and at most ten starts in any rolling minute. Existing embargoes, refused-access state and timing history are retained. A sixty-second startup embargo applies after restoration under the exclusive collector lock. Each physical attempt, including failure and response closure, persists its completion plus the stricter native interval. A monotonic gate protects the actual opener from reservation and filesystem timing variation. Request count follows the discovered graph. Hard bounds are 100 physical starts, 8 MiB per response and 64 MiB across publisher response bodies. Known HTTP 401/403 refusals retain block state before body reading; ordinary 429 responses persist timed adaptive backoff before their bounded error body is read; unreviewed redirects stop before following their destination.
 
 True POSIX alarms enforce a single 1,290-second run: prepublication at most 900 seconds, publication and conditional failure handling at most 180 seconds each, with the final 30 seconds reserved for trusted timing export. Nonexport work is clipped at the original 1,260-second deadline. Socket timeouts do not replace the wall-clock bound. Failure reconciliation protects a newer atomic data/metadata pair. A hard process kill cannot guarantee artifact export.
 
@@ -109,3 +109,74 @@ Published metadata uses `display_name` = **IBM** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Conditional rate-limit and state maintenance (#220)
+
+The normal collector, factual parsing, validation, default six-second physical
+spacing, ten-start rolling limit, twelve-second inventory page guard, source
+identity, collection/job/token caps and workflow schedule are unchanged. This
+scoped maintenance does not certify those legacy default limits against the
+current twelve-second/five-start/thirty-second policy. No new publisher crawl,
+source access release, workflow activation or production result is claimed.
+
+A future ordinary HTTP 429 stops the current run. Before reading at most 64 KiB
+of error evidence, retain at least 1,800 seconds of cooldown, doubling on each
+new observed 429, or any longer valid Retry-After/known embargo. Double the
+**current** retained physical and inventory intervals with minimums of twelve
+and thirty seconds. Both intervals, the observed new-event count, typed
+historical-unknown flag and embargo survive failure/export/restoration.
+Completion of the error read retains the stricter physical/page completion guard
+too. Existing stronger constraints remain MAX. Unusable negative, zero, stale,
+malformed or out-of-range 429 timing is not a new access hold, on any status.
+Genuine content refusals remain independent hard holds; valid longer timing is
+retained on every status.
+
+The optional schema-1 rate fields extend trusted older state without changing
+its family or clearing its blocked flag, starts, interval or embargo. A missing
+new-event count means no events observed **since this change**, not proof that
+no historical 429 occurred. The durable `legacy_rate_history_unknown` boolean
+defaults to true for old/missing state and merges with logical OR through
+restore/export, so a later process cannot mistake zero new events for known
+complete history. Unknown or mixed old holds remain held and require separate
+provenance review. Counts beyond the finite 0–100 range fail closed; a retained
+count of 100 stops before another source request. Increased gaps may exhaust
+unchanged collection limits; a later complete run is not guaranteed.
+
+Only the new 429 error path uses a source-local visible-text reader. A genuine
+visible human-verification/CAPTCHA challenge or genuine challenge HEAD title
+retains a hard hold as well as the timer. Ordinary rate-limit wording, hidden
+content, scripts, unrelated footer/navigation/aside notices and a fake body
+TITLE do not alone create a hold. The normal source DOM parser is unchanged. A
+body-read failure retains the saved timer and makes no same-run retry.
+
+Hosted restoration requires the current run with exact workflow/source/head and
+attempt identity. Every completed job must explicitly name the main branch.
+Completed attempts are ordered by authenticated exact-attempt
+job completion, including the previous attempt behind a queued older-ID rerun
+and the current run's previous attempt. Missing/partial jobs, mismatched heads,
+ambiguous completion ties or absent current runs fail closed. Mutable run
+updated_at is not completion evidence. Restore the newest applicable exact owned
+artifact, verify run/head/digest/envelope/source/schema, and MAX merge all
+restrictions; a missing newest artifact never permits an older fallback or a new
+allowance. Existing first-family bootstrap cannot replace mature state.
+
+Validation reuses exact genuine successful native evidence for unchanged factual
+behavior; it does not claim a fresh native collection. The then-current record
+consumer and dependency are byte-identical to the current consumer. Current
+actual source records and metadata pass complete RAM loadData checks, with
+actual filtering, derived expiry/empty controls and last-good failure
+preservation separately identified. Original complete native stdout was not
+saved or reconstructed from later publication. Actual mature owned ZIP state was
+restored through the real downloader/decoder into isolated temporary state; no
+live publisher family state was written. Error/chronology controls are inert and
+are not historical publisher responses or measured physical network gaps.
+
+IBM currently emits five standing programme overviews with unknown availability
+and null deadlines. Its source validator correctly rejects invented dated
+application deadlines. Generic dated helper controls and a valid empty consumer
+envelope do not establish a real all-expired IBM collection; no such event is
+claimed. All five current actual records are replayed through the consumer.
+
+Content HTTP 451 retains a hard hold independently of Retry-After. A literal
+robots.txt HTTP 451 is unavailable REP, without clearing an old hold; this
+narrow status correction does not claim a complete legacy robots migration.
