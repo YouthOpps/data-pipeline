@@ -32,7 +32,13 @@ Requests use the six previously reviewed official origins: `www.frse.org.pl`, `e
 
 The scoped policy migration used eight genuine responses that first matched all previous reviewed whole-page hashes. Within the unique `main`, legal selectors are `section.text_desc_box` (eTwinning), `section.standard_text_page` (Erasmus+), `section.text_page` (EKS, Selfie+, EDUinspiracje), and `div.split_view` (FRSE). FRSE's latter container includes the adjacent programme-specific privacy links, not just its `section.about` prose. Scoped hashes bind complete legal text and literal links; no blind whole-page fingerprint refresh was used.
 
-The shared publisher allowance retains at most ten request starts per rolling minute, at least six seconds between starts across origins, redirects and retries, and a 60-second preparation floor. The same secure family pacing namespace, collection locks, legacy migration, stronger limits, embargoes and refusal flags are preserved. Trusted Action state now also retains future adaptive 429 restrictions. Refusals and unsafe redirects stop collection. There is one bounded 503 retry, not a whole-collection retry.
+The shared publisher allowance retains at most five physical request starts
+per rolling minute, at least 12.2 seconds between starts across origins,
+redirects and retries, and a 60-second preparation floor. The same secure
+family pacing namespace, collection locks, legacy migration, stronger limits,
+embargoes and refusal flags are preserved. Trusted Action state now also
+retains future adaptive 429 restrictions. Refusals and unsafe redirects stop
+collection. There is one bounded 503 retry, not a whole-collection retry.
 
 ## Validation and publication
 
@@ -44,7 +50,15 @@ The sole live, nonpublishing test validates all actual records and emits the com
 
 Preparation retains its absolute 1,800-second bound and request-start guard. Total execution remains bounded to 2,190 seconds, with separate publication/failure phases and reserved pacing export. An incomplete or oversized frontier fails rather than publishing partial data.
 
-Production remains `python -B adapters/pl-frse/adapter.py --publish`, atomically publishing only `YouthOpps/data-source/datas/pl-frse/{data,metadata}.json` with conflict detection. First failure creates no folder. Later failure preserves last-good records and success timestamps, updating failure metadata only for an unchanged validated pair. The matching workflow and bootstrap are unchanged; the stricter newest-attempt artifact rules below apply. Tests do not exercise publication; production Actions are not used as tests. Independent review is required before PR handoff.
+Production remains `python -B adapters/pl-frse/adapter.py --publish`,
+atomically publishing only
+`YouthOpps/data-source/datas/pl-frse/{data,metadata}.json` with conflict
+detection. First failure creates no folder. Later failure preserves last-good
+records and success timestamps, updating failure metadata only for an
+unchanged validated pair. The matching workflow is unchanged; its old
+bootstrap value grants no fallback for this mature family. The newest-attempt
+rules below apply. Tests do not exercise publication; production Actions are
+not used as tests. Independent review is required before PR handoff.
 
 ## Expired-record cleanup
 
@@ -78,11 +92,11 @@ User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
 
 The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
-grant source access or clear retained refusals. Robots checks use the advertised
-product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+grant source access or clear retained refusals. Robots checks use the
+advertised product token. Applicable current and legacy product groups must
+both permit access; restrictive rate and delay directives remain effective.
+The physical/page limits are described below; backoff and durable family
+identities are retained. Existing disabled workflows remain disabled.
 
 ## Daily automation
 
@@ -96,14 +110,16 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
-This includes taxonomy/listing pages where applicable. The existing native
-transport still enforces its physical-request allowance across retries, redirects
-and detail requests, with stricter publisher limits and retained backoff taking
-precedence. The page guard does not raise the durable request interval for all
-subsequent article/detail requests or reset existing budget/refusal state.
-Inventory scope, parsing, validation and atomic publication are unchanged.
+All advertised catalogue pages, homepage call discovery and the official
+document index wait at least 30 seconds after the preceding physical inventory
+response completes. Redirect hops and the existing same-page transient retry
+retain this purpose and wait; a 429 never makes another same-run source
+request. Cached documents make no physical request or completion update.
+Separate detail, policy and robots requests retain the physical floor without
+a permanent 30-second detail interval. Stronger retained page gaps take
+precedence; the first inventory clock after restoration conservatively covers
+that gap across restarts. Complete discovery, parsing, validation and atomic
+publication remain unchanged.
 
 ## Workflow concurrency
 
@@ -123,24 +139,24 @@ older snapshots without it remain valid.
 
 ## Conditional rate-limit and state maintenance (#220)
 
-The normal collector, factual parsing, validation, default six-second physical
-spacing, ten-start rolling limit, twelve-second inventory page guard, source
-identity, collection/job/token caps and workflow schedule are unchanged. This
-scoped maintenance does not certify those legacy default limits against the
-current twelve-second/five-start/thirty-second policy. No new publisher crawl,
-source access release, workflow activation or production result is claimed.
+Issue #220 changed conditional rate-limit handling and state restoration while
+retaining the older normal pacing floors. Issue #224 replaces those floors
+with 12.2 seconds, five starts per rolling minute and a 30-second physical
+inventory completion guard. Source identity, factual parsing, validation,
+complete frontiers, collection/job/token caps and daily schedules are
+retained.
 
-A future ordinary HTTP 429 stops the current run. Before reading at most 64 KiB
-of error evidence, retain at least 1,800 seconds of cooldown, doubling on each
-new observed 429, or any longer valid Retry-After/known embargo. Double the
-**current** retained physical and inventory intervals with minimums of twelve
-and thirty seconds. Both intervals, the observed new-event count, typed
+A future ordinary HTTP 429 stops the current run. Before reading at most 64
+KiB of error evidence, retain at least 1,800 seconds of cooldown, doubling on
+each new observed 429, or any longer valid Retry-After/known embargo. Double
+the **current** retained physical and inventory intervals with minimums of
+12.2 and 30 seconds. Both intervals, the observed new-event count, typed
 historical-unknown flag and embargo survive failure/export/restoration.
-Completion of the error read retains the stricter physical/page completion guard
-too. Existing stronger constraints remain MAX. Unusable negative, zero, stale,
-malformed or out-of-range 429 timing is not a new access hold, on any status.
-Genuine content refusals remain independent hard holds; valid longer timing is
-retained on every status.
+Completion of the error read retains the stricter physical/page completion
+guard too. Existing stronger constraints remain MAX. Unusable negative, zero,
+stale, malformed or out-of-range 429 timing is not a new access hold, on any
+status. Genuine content refusals remain independent hard holds; valid longer
+timing is retained on every status.
 
 The optional schema-1 rate fields extend trusted older state without changing
 its family or clearing its blocked flag, starts, interval or embargo. A missing
@@ -153,11 +169,12 @@ provenance review. Counts beyond the finite 0–100 range fail closed; a retaine
 count of 100 stops before another source request. Increased gaps may exhaust
 unchanged collection limits; a later complete run is not guaranteed.
 
-Only the new 429 error path uses a source-local visible-text reader. A genuine
-visible human-verification/CAPTCHA challenge or genuine challenge HEAD title
-retains a hard hold as well as the timer. Ordinary rate-limit wording, hidden
-content, scripts, unrelated footer/navigation/aside notices and a fake body
-TITLE do not alone create a hold. The normal source DOM parser is unchanged. A
+The source-local visible-text reader also inspects bounded HTML before
+redirect follow or ordinary response processing. A genuine visible
+human-verification/CAPTCHA challenge or genuine challenge HEAD title retains a
+hard hold as well as the timer. Ordinary rate-limit wording, hidden content,
+scripts, unrelated footer/navigation/aside notices and a fake body TITLE do
+not alone create a hold. The normal source DOM parser is unchanged. A
 body-read failure retains the saved timer and makes no same-run retry.
 
 Hosted restoration requires the current run with exact workflow/source/head and
@@ -171,16 +188,17 @@ artifact, verify run/head/digest/envelope/source/schema, and MAX merge all
 restrictions; a missing newest artifact never permits an older fallback or a new
 allowance. Existing first-family bootstrap cannot replace mature state.
 
-Validation reuses exact genuine successful native evidence for unchanged factual
-behavior; it does not claim a fresh native collection. The then-current record
-consumer and dependency are byte-identical to the current consumer. Current
-actual source records and metadata pass complete RAM loadData checks, with
-actual filtering, derived expiry/empty controls and last-good failure
-preservation separately identified. Original complete native stdout was not
-saved or reconstructed from later publication. Actual mature owned ZIP state was
-restored through the real downloader/decoder into isolated temporary state; no
-live publisher family state was written. Error/chronology controls are inert and
-are not historical publisher responses or measured physical network gaps.
+Issue #220 validation reused genuine successful native evidence for unchanged
+factual behavior; those checks did not establish new physical pacing. The
+then-current record consumer and dependency are byte-identical to the current
+consumer. Current actual source records and metadata pass complete RAM
+loadData checks, with actual filtering, derived expiry/empty controls and
+last-good failure preservation separately identified. Original complete native
+stdout was not saved or reconstructed from later publication. Actual mature
+owned ZIP state was restored through the real downloader/decoder into isolated
+temporary state; no live publisher family state was written. Error/chronology
+controls are inert and are not historical publisher responses or measured
+physical network gaps.
 
 FRSE's prior genuine complete native collection contained sixty records; its
 current published snapshot contains fifty-four. The original sixty were fully
@@ -188,6 +206,69 @@ validated by the identical record validator at collection time. This change
 replays the actual current fifty-four through complete loadData; it does not
 claim that all sixty original native records are still retained for replay.
 
-Content HTTP 451 retains a hard hold independently of Retry-After. A literal
-robots.txt HTTP 451 is unavailable REP, without clearing an old hold; this
-narrow status correction does not claim a complete legacy robots migration.
+Content HTTP 401/403/451 retains a hard hold independently of Retry-After. For
+literal robots.txt retrieval only, every HTTP 4xx except 429 is unavailable
+REP and creates no new content hold. Old true/unknown holds remain unchanged.
+Robots purpose is checked on each physical hop; a redirect outside literal
+`/robots.txt` is rejected before following it. Valid explicit robots rules,
+stricter delays and rate restrictions remain effective.
+
+## Physical pacing migration (#224)
+
+The existing secure family path and exclusive collector lock retain all known
+request history, embargoes, stronger physical/page intervals, observed new-429
+counts, historical-unknown markers and genuine holds. Authentic older 6/12
+state remains readable; effective floors are raised with MAX before access.
+The bounded legacy ten-entry journal is retained, while the fifth-most-recent
+start gates any new request when at least five are still inside a minute.
+Completion gates protect actual transport starts, including failed reads and
+redirects, rather than relying on reservations alone. New restrictions survive
+failure and exact newest-owned-artifact restoration; no older fallback or
+fresh allowance is introduced.
+
+Bounded actual HTML is inspected before any redirect follow, including obvious
+HTML with a missing or wrong MIME. Ordinary JS/JSON/PDF text is not
+interpreted as HTML. The accepted visible-text algorithm excludes
+hidden/style/script and unrelated chrome, and distinguishes informational
+support wording from a real visible title or primary refusal. A genuine
+challenge 429 retains both timer and hold; ordinary rate limiting stays timed.
+Body-read failure retains saved timers. Factual HTML parsing and public record
+fields are unchanged.
+
+The existing hard collection/run/job limits and one-hour pre-minted App token
+are unchanged. Larger complete frontiers, slow responses or stronger retained
+backoff can exhaust a cap; such a run fails and preserves last-good data
+rather than truncating, raising a cap or resetting state. Earlier
+native/consumer receipts establish historical unchanged factual coverage, not
+current 12.2/30 timing. This candidate requires independent pre-access review
+and a separately released full current native test with complete RAM
+response/stdout and consumer evidence before merge; no new native or
+production result is claimed here.
+
+### Local and hosted restoration
+
+Every process restores fresh complete source workflow history and the newest
+exact owned ZIP before any publisher request, using read-only `GITHUB_TOKEN`
+access to Actions metadata/artifacts. Local collection requires all family
+runs to be terminal; a queued or active attempt stops it. Hosted collection
+retains mandatory current-run/attempt/head validation and exact completed
+prior-attempt chronology. Missing mature history, a newer missing/expired
+artifact or an identity/digest mismatch fails closed without bootstrap or
+older fallback. The existing exclusive collection and state locks protect the
+restrictive MAX merge into the original journal. A stronger hosted
+hold/backoff therefore also blocks a later local test. Native tests need the
+read-only state credential but never a publication token; they still run the
+unchanged sole live test.
+
+Local collection also requires the exact source workflow to be manually paused
+by the maintainer. Its immutable workflow ID, own file path and
+`disabled_manually` state are freshly checked before history and immediately
+before the first publisher request after startup quiet. A changed/enabled
+workflow stops before that request. This is a first-request coordination guard,
+not per-page GitHub polling; maintain the pause for the complete local run.
+Hosted workflow behavior and the daily schedule are unchanged.
+
+A failed physical-completion persistence write blocks further source access and
+refuses export. Any safely owned stale artifact is invalidated instead of
+handing incomplete restrictions to the next runner. This error-only guard does
+not change a successful collection or a healthy state export.
