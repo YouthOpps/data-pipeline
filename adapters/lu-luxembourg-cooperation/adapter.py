@@ -358,7 +358,8 @@ def request_bytes(
                             raise ValueError()
                         state["until"] = max(state["until"], until)
                     except (ValueError, TypeError, OverflowError):
-                        state["blocked"] = True
+                        if response.status != 429:
+                            state["blocked"] = True
             body = response.read(5_000_001)
             if len(body) > 5_000_000:
                 raise AdapterError("Response exceeds byte limit", "fetch")
