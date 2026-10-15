@@ -9,6 +9,7 @@ on:
       - adapters/us-nasa-internships/**
       - .github/workflows/fetch-us-nasa-internships.yml
 permissions:
+  actions: read
   contents: read
 concurrency:
   group: youthopps-us-nasa-internships-publisher-v1
@@ -34,6 +35,19 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish this source
+        id: collect
         env:
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          NASA_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+          NASA_PACING_MAINTENANCE: >-
+            {"schema":1,"family":"youthopps-us-nasa-internships-publisher-v1","evidence":"https://github.com/YouthOpps/data-pipeline/issues/269#issuecomment-6202558732","state":{"schema":3,"family":"youthopps-us-nasa-internships-publisher-v1","observed_at":1792098971.0031197,"not_before":1792099031.3439543,"starts":[1791473355.0,1791966337.0,1792040784.0,1792060573.0,1792067310.0,1792079295.0,1792098956.6148908,1792098957.3451345,1792098957.546229,1792098957.5478132,1792098969.7569516,1792098969.9032505,1792098970.123884,1792098970.9996052],"blocked":false,"interval":12.2,"completed":1792098971.0031197,"page_interval":30,"last_inventory_completed":1792079295.0,"rate_limit_strikes":0,"rate_limit_until":0,"legacy_rate_history_unknown":true,"in_flight":false,"flight_id":"e945a3202f540bf02beec5c17c140306","flight_started":1792098969.7569516,"completed_flight_id":"e945a3202f540bf02beec5c17c140306"}}
         run: python -B adapters/us-nasa-internships/adapter.py --publish
+      - name: Preserve owned publisher pacing state
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: us-nasa-internships-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
