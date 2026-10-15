@@ -32,7 +32,7 @@ Requests use the six previously reviewed official origins: `www.frse.org.pl`, `e
 
 The scoped policy migration used eight genuine responses that first matched all previous reviewed whole-page hashes. Within the unique `main`, legal selectors are `section.text_desc_box` (eTwinning), `section.standard_text_page` (Erasmus+), `section.text_page` (EKS, Selfie+, EDUinspiracje), and `div.split_view` (FRSE). FRSE's latter container includes the adjacent programme-specific privacy links, not just its `section.about` prose. Scoped hashes bind complete legal text and literal links; no blind whole-page fingerprint refresh was used.
 
-The shared publisher allowance retains at most ten request starts per rolling minute, at least six seconds between starts across origins, redirects and retries, and a 60-second preparation floor. Secure family pacing state, collection locks, legacy migration, stronger limits, embargoes, refusal flags and trusted Action artifacts remain unchanged. Refusals and unsafe redirects stop collection. There is one bounded 503 retry, not a whole-collection retry.
+The shared publisher allowance retains at most ten request starts per rolling minute, at least six seconds between starts across origins, redirects and retries, and a 60-second preparation floor. The same secure family pacing namespace, collection locks, legacy migration, stronger limits, embargoes and refusal flags are preserved. Trusted Action state now also retains future adaptive 429 restrictions. Refusals and unsafe redirects stop collection. There is one bounded 503 retry, not a whole-collection retry.
 
 ## Validation and publication
 
@@ -44,7 +44,7 @@ The sole live, nonpublishing test validates all actual records and emits the com
 
 Preparation retains its absolute 1,800-second bound and request-start guard. Total execution remains bounded to 2,190 seconds, with separate publication/failure phases and reserved pacing export. An incomplete or oversized frontier fails rather than publishing partial data.
 
-Production remains `python -B adapters/pl-frse/adapter.py --publish`, atomically publishing only `YouthOpps/data-source/datas/pl-frse/{data,metadata}.json` with conflict detection. First failure creates no folder. Later failure preserves last-good records and success timestamps, updating failure metadata only for an unchanged validated pair. The matching workflow, bootstrap and pacing-artifact handling are unchanged. Tests do not exercise publication; production Actions are not used as tests. Independent review is required before PR handoff.
+Production remains `python -B adapters/pl-frse/adapter.py --publish`, atomically publishing only `YouthOpps/data-source/datas/pl-frse/{data,metadata}.json` with conflict detection. First failure creates no folder. Later failure preserves last-good records and success timestamps, updating failure metadata only for an unchanged validated pair. The matching workflow and bootstrap are unchanged; the stricter newest-attempt artifact rules below apply. Tests do not exercise publication; production Actions are not used as tests. Independent review is required before PR handoff.
 
 ## Expired-record cleanup
 
@@ -120,3 +120,74 @@ Published metadata uses `display_name` = **FRSE** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Conditional rate-limit and state maintenance (#220)
+
+The normal collector, factual parsing, validation, default six-second physical
+spacing, ten-start rolling limit, twelve-second inventory page guard, source
+identity, collection/job/token caps and workflow schedule are unchanged. This
+scoped maintenance does not certify those legacy default limits against the
+current twelve-second/five-start/thirty-second policy. No new publisher crawl,
+source access release, workflow activation or production result is claimed.
+
+A future ordinary HTTP 429 stops the current run. Before reading at most 64 KiB
+of error evidence, retain at least 1,800 seconds of cooldown, doubling on each
+new observed 429, or any longer valid Retry-After/known embargo. Double the
+**current** retained physical and inventory intervals with minimums of twelve
+and thirty seconds. Both intervals, the observed new-event count, typed
+historical-unknown flag and embargo survive failure/export/restoration.
+Completion of the error read retains the stricter physical/page completion guard
+too. Existing stronger constraints remain MAX. Unusable negative, zero, stale,
+malformed or out-of-range 429 timing is not a new access hold, on any status.
+Genuine content refusals remain independent hard holds; valid longer timing is
+retained on every status.
+
+The optional schema-1 rate fields extend trusted older state without changing
+its family or clearing its blocked flag, starts, interval or embargo. A missing
+new-event count means no events observed **since this change**, not proof that
+no historical 429 occurred. The durable `legacy_rate_history_unknown` boolean
+defaults to true for old/missing state and merges with logical OR through
+restore/export, so a later process cannot mistake zero new events for known
+complete history. Unknown or mixed old holds remain held and require separate
+provenance review. Counts beyond the finite 0–100 range fail closed; a retained
+count of 100 stops before another source request. Increased gaps may exhaust
+unchanged collection limits; a later complete run is not guaranteed.
+
+Only the new 429 error path uses a source-local visible-text reader. A genuine
+visible human-verification/CAPTCHA challenge or genuine challenge HEAD title
+retains a hard hold as well as the timer. Ordinary rate-limit wording, hidden
+content, scripts, unrelated footer/navigation/aside notices and a fake body
+TITLE do not alone create a hold. The normal source DOM parser is unchanged. A
+body-read failure retains the saved timer and makes no same-run retry.
+
+Hosted restoration requires the current run with exact workflow/source/head and
+attempt identity. Every completed job must explicitly name the main branch.
+Completed attempts are ordered by authenticated exact-attempt
+job completion, including the previous attempt behind a queued older-ID rerun
+and the current run's previous attempt. Missing/partial jobs, mismatched heads,
+ambiguous completion ties or absent current runs fail closed. Mutable run
+updated_at is not completion evidence. Restore the newest applicable exact owned
+artifact, verify run/head/digest/envelope/source/schema, and MAX merge all
+restrictions; a missing newest artifact never permits an older fallback or a new
+allowance. Existing first-family bootstrap cannot replace mature state.
+
+Validation reuses exact genuine successful native evidence for unchanged factual
+behavior; it does not claim a fresh native collection. The then-current record
+consumer and dependency are byte-identical to the current consumer. Current
+actual source records and metadata pass complete RAM loadData checks, with
+actual filtering, derived expiry/empty controls and last-good failure
+preservation separately identified. Original complete native stdout was not
+saved or reconstructed from later publication. Actual mature owned ZIP state was
+restored through the real downloader/decoder into isolated temporary state; no
+live publisher family state was written. Error/chronology controls are inert and
+are not historical publisher responses or measured physical network gaps.
+
+FRSE's prior genuine complete native collection contained sixty records; its
+current published snapshot contains fifty-four. The original sixty were fully
+validated by the identical record validator at collection time. This change
+replays the actual current fifty-four through complete loadData; it does not
+claim that all sixty original native records are still retained for replay.
+
+Content HTTP 451 retains a hard hold independently of Retry-After. A literal
+robots.txt HTTP 451 is unavailable REP, without clearing an old hold; this
+narrow status correction does not claim a complete legacy robots migration.
