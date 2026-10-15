@@ -74,7 +74,9 @@ Research evidence is cached outside the repository in
 
 Requests, redirects and bounded transient retries share a source-specific
 cross-process lock and durable pacing state outside the repository: at least
-six seconds between starts and at most ten starts per rolling minute. Robots
+twelve seconds between physical starts and at most five starts per rolling
+minute. A conservative completion-to-next-start guard prevents reservation
+timing drift. Robots
 and Retry-After requirements can impose longer waits. Parser or policy changes
 fail the collection rather than publish a partial result.
 
@@ -96,21 +98,64 @@ concurrency. A single atomic commit updates only this source's data and metadata
 A first failed collection creates no source folder; later failures preserve
 last good data and its durable success timestamp while recording failure
 metadata. The success timestamp advances only after successful publication of
-validated nonempty records. Local tests do not publish or run Actions.
+validated refreshes, including an all-expired successful empty result. Local
+tests do not publish or run Actions.
 
-## Production access diagnostics
+## Robots availability and production recovery
 
-The initial automatic and manual hosted-runner collections returned HTTP 403
-before any source folder was published. Timing indicates the first publisher
-request, but the original error did not identify its endpoint. Identical
-identifying requests succeed from this cloud environment; an IP-based access
-restriction has not been established. Robots requests now advertise plain text,
-matching the publisher response, while HTML requests retain their ordinary HTML
-Accept header. HTTP failures identify only the public HTTPS host and path,
-excluding queries and user information. This change supplies actionable hosted
-failure evidence; it does not prove that the hosted access refusal is resolved.
-The identifying user agent, TLS verification, robots enforcement and no-retry
-policy for HTTP 403 remain unchanged.
+[RFC9309 section 2.3.1.3](https://www.rfc-editor.org/rfc/rfc9309.html#section-2.3.1.3)
+permits treating an unavailable robots file separately from content refusal.
+Only robots retrieval 400–499, except 429, caches an absent policy for that
+collection, including 401, 403, 404 and 410.
+An actual Disallow, applicable legacy product rule or stricter publisher limit
+still applies. Content 401/403 and a recognized challenge/refusal page stop
+collection and durably retain the refusal. Robots 429, 5xx and TLS/network
+failure are not converted to an empty policy. No browser impersonation,
+credentials workaround or content-status fallback is used. Robots absence is
+neither a reuse licence nor a requirement for universal written permission.
+
+All responses preserve valid Retry-After. A 429 stops the attempt without an
+immediate unchanged retry and records at least 30 minutes of backoff, doubled
+for subsequent rate failures (with a bounded exponent); physical request
+spacing also doubles durably. Stricter Retry-After wins. A later attempt fails
+fast during the retained embargo, and can try normally afterwards with the
+slower interval; a timed 429 alone is not a permanent access ban. Invalid backoff fails closed. Tests and production use the same original
+host budget path, MAX interval/embargo/completion history and OR refusal merge.
+A process collection lock serializes local collectors; the existing Action
+concurrency serializes hosted runs. State is never cleared to recover access.
+
+The four historical failed hosted attempts are 37849862305, 37849876657,
+37850591097 and 37850601262, all attempt 1. The last two logs identify
+`https://www.rtu.lv/robots.txt` HTTP 403; the first two omit the endpoint but
+fail at the original first robots operation. Their pinned heads, exact job
+completion times and zero pacing artifacts are checked before the one-time
+migration. The latest job ended 2026-10-08T22:00:50Z. Old response headers and
+arbitrary Retry-After were not exported: seven quiet days do not prove unknown
+historical backoff was zero. The user-authorized robots-only recovery requires
+independent review and maintainer acceptance of this explicitly incomplete
+legacy history before the first hosted attempt. The code requires all four
+exact attempts unchanged and at least 24 hours quiet; it conserves any existing
+local embargo/refusal rather than substituting a cleared budget.
+
+After any new completed attempt, including failed, cancelled or rerun attempts,
+the newest exact attempt's trusted `rtu-pacing-state-<attempt>` artifact is
+mandatory. Complete unfiltered source history is checked; an older-ID rerun
+cannot be skipped. Missing, expired, corrupt or mismatched state fails closed,
+without an older successful-artifact or first-migration fallback. Authenticated
+metadata, zip digest/size/member checks and repository/source/run/attempt/head
+bindings constrain the inert state; artifact storage receives no GitHub token.
+Export happens after finalized state and sets a fresh step output only on
+success, so the always-run upload cannot publish stale untrusted output.
+
+Keep the workflow disabled while this change is reviewed and merged. The
+separate maintainer verifies the merged main SHA, unchanged old history and
+quiet period, then explicitly enables and starts one recovery attempt. Inspect
+its source pair, complete logs and pacing artifact before claiming production
+or website delivery. Any actual content refusal remains a held state; no blind
+rerun or state reset is allowed. The daily 12:59 UTC cron, repository/main guard,
+source-only token, 30-minute job limit and publication queue remain unchanged.
+The one-hour publication token has ample room for the bounded nine-request
+native collection and state restore; job timeout does not extend token expiry.
 
 ## Expired-record cleanup
 
@@ -166,8 +211,8 @@ serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
 The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+pacing and publisher restrictions remain in force. There are no inventory-page
+continuations requiring an additional 30-second transition guard.
 
 ## Workflow concurrency
 
