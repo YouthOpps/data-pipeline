@@ -50,6 +50,19 @@ CATEGORIES = {
 FAMILY = "youthopps-artscouncilmalta-publisher-v1"
 FAMILY_SOURCES = {"mt-arts-council"}
 _REVIEWED_LOCAL_NOT_BEFORE = 1792070136.1917381
+_REVIEWED_NATIVE_STATE = {
+    "schema": 2,
+    "family": "youthopps-artscouncilmalta-publisher-v1",
+    "observed_at": 1792070119.53849,
+    "not_before": 1792069839.148789,
+    "starts": [1792070073.9316003, 1792070105.28068, 1792070118.2923744],
+    "blocked": False,
+    "interval": 12.1,
+    "page_interval": 30,
+    "rate_failures": 0,
+    "completed_at": 1792070119.53849,
+    "inventory_completed_at": 1792070106.1917381,
+}
 COLLECTION_TIMEOUT = 2100
 RUN_TIMEOUT = 2490
 EXPORT_TIMEOUT = 30
@@ -958,10 +971,117 @@ def latest_family_run():
                 ) from None
 
 
+def download_reviewed_log(job_id):
+    """Read a bounded complete job log without forwarding API credentials."""
+    request = urllib.request.Request(
+        _WORKFLOW_GITHUB + f"/actions/jobs/{job_id}/logs",
+        headers={
+            "Authorization": "Bearer " + os.environ.get("GITHUB_TOKEN", ""),
+            "User-Agent": _USER_AGENT,
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        try:
+            response = _OPENER.open(request, timeout=request_timeout())
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            if response.status != 302:
+                raise ValueError()
+            destination = response.headers.get("Location", "")
+            response.read(1001)
+        parsed = urllib.parse.urlsplit(destination)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.port
+            or "." not in parsed.hostname
+            or parsed.hostname.endswith((".local", ".internal", ".localhost"))
+        ):
+            raise ValueError()
+        try:
+            ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            pass
+        else:
+            raise ValueError()
+        status, _, body = request_bytes(destination, byte_limit=3_000_000)
+        if status != 200:
+            raise ValueError()
+        return body
+    except Exception:
+        raise AdapterError(
+            "Reviewed recovery log unavailable", "access"
+        ) from None
+
+
+def reviewed_zero_publisher_attempt(run):
+    """Exclude only two immutable restore failures proven to precede traffic."""
+    pins = {
+        38745452175: (
+            "push",
+            116457775228,
+            "31a65cc300105e0fbff4dfb3c033b6eb692e2c62676eb671eb33c95d859b592d",
+            "ef649323afdd494683c0a69e568eb77b03f904667c571571ddf3c5369ac3839a",
+            "Robots migration cannot replace a new attempt's state",
+        ),
+        38745452432: (
+            "workflow_dispatch",
+            116458268088,
+            "06e5982a8238811dffefaba06cb3054ca99bc0b04eeab66c77f2a24e9e0b1ab4",
+            "ae84a45299db996b493d68f37975649c6a5197be9e515060b2085b3c27d64c70",
+            "Latest exact attempt pacing artifact missing or expired",
+        ),
+    }
+    identity = run.get("id")
+    if identity not in pins:
+        return False
+    event, job_id, jobs_digest, log_digest, failure = pins[identity]
+    if (
+        run.get("run_attempt") != 1
+        or run.get("head_sha") != "e60eab85cf26eb1bfa6b0c9eaa93d8f13924b5fc"
+        or run.get("event") != event
+        or run.get("workflow_id") != 380704472
+        or run.get("status") != "completed"
+        or run.get("conclusion") != "failure"
+    ):
+        raise AdapterError("Reviewed zero-publisher identity changed", "access")
+    completed_identity(run, (identity, 1, SOURCE_ID))
+    jobs = workflow_api(
+        f"/actions/runs/{identity}/attempts/1/jobs?per_page=100"
+    )
+    canonical = json.dumps(jobs, sort_keys=True, separators=(",", ":")).encode()
+    if (
+        jobs.get("total_count") != 1
+        or len(jobs.get("jobs", [])) != 1
+        or jobs["jobs"][0].get("id") != job_id
+        or hashlib.sha256(canonical).hexdigest() != jobs_digest
+    ):
+        raise AdapterError("Reviewed zero-publisher jobs changed", "access")
+    artifacts = workflow_api(f"/actions/runs/{identity}/artifacts?per_page=100")
+    if artifacts.get("total_count") != 0 or artifacts.get("artifacts") != []:
+        raise AdapterError(
+            "Reviewed zero-publisher artifacts changed", "access"
+        )
+    log = download_reviewed_log(job_id)
+    if (
+        hashlib.sha256(log).hexdigest() != log_digest
+        or failure.encode() not in log
+        or b'"request_start"' in log
+        or b'"request_complete"' in log
+    ):
+        raise AdapterError("Reviewed zero-publisher log changed", "access")
+    return True
+
+
 def scan_family_history():
     """Select newest completed chronology, including older-ID rerun attempts."""
     current_id, current_attempt = current_run_identity()
     candidates = []
+    completed_rows = {}
     total, scanned = None, 0
     seen_ids = set()
     for page in range(1, 101):
@@ -1013,6 +1133,10 @@ def scan_family_history():
                 or not re.fullmatch(r"[0-9a-f]{40}", run["head_sha"])
             ):
                 raise AdapterError("Invalid family run identity", "access")
+            if identity in {38745452175, 38745452432} and attempt != 1:
+                raise AdapterError(
+                    "Reviewed recovery attempt changed", "access"
+                )
             if identity == current_id:
                 if attempt != current_attempt:
                     raise AdapterError(
@@ -1025,6 +1149,7 @@ def scan_family_history():
                             f"{current_attempt - 1}"
                         )
                     )
+                    completed_rows[(identity, current_attempt - 1)] = prior
                     candidates.append(
                         completed_identity(
                             prior,
@@ -1043,6 +1168,7 @@ def scan_family_history():
                     prior = workflow_api(
                         f"/actions/runs/{identity}/attempts/{attempt - 1}"
                     )
+                    completed_rows[(identity, attempt - 1)] = prior
                     candidates.append(
                         completed_identity(
                             prior,
@@ -1053,6 +1179,7 @@ def scan_family_history():
                 continue
             if run.get("status") != "completed":
                 raise AdapterError("Another family run is active", "access")
+            completed_rows[(identity, attempt)] = run
             candidates.append(completed_identity(run))
         if scanned >= total:
             if scanned != total:
@@ -1062,11 +1189,17 @@ def scan_family_history():
             if not candidates:
                 return None
             ordered = sorted(candidates)
-            if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
-                raise AdapterError(
-                    ("Ambiguous family attempt chronology"), ("access")
-                )
-            return ordered[-1][2:]
+            while ordered:
+                if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
+                    raise AdapterError(
+                        "Ambiguous family attempt chronology", "access"
+                    )
+                selected = ordered[-1]
+                row = completed_rows[(selected[2], selected[3])]
+                if not reviewed_zero_publisher_attempt(row):
+                    return selected[2:]
+                ordered.pop()
+            return None
         if len(runs) != 100:
             raise AdapterError("Incomplete workflow inventory", "access")
     raise AdapterError("Workflow inventory exceeds reviewed bound", "access")
@@ -2497,7 +2630,12 @@ def migrate_robots_hold(latest, incoming, artifact):
     runs = result.get("workflow_runs")
     if not isinstance(runs, list) or result.get("total_count") != len(runs):
         raise AdapterError("Incomplete migration history", "access")
-    historical = [run for run in runs if run.get("id") != current_id]
+    historical = [
+        run
+        for run in runs
+        if run.get("id") != current_id
+        and not reviewed_zero_publisher_attempt(run)
+    ]
     if len(historical) != 2 or {run.get("id") for run in historical} != set(
         pins
     ):
@@ -2553,11 +2691,28 @@ def migrate_robots_hold(latest, incoming, artifact):
         raise AdapterError(
             "Mixed/unknown refusal history cannot be reclassified", "access"
         )
-    return {
-        **incoming,
-        "blocked": False,
-        "not_before": max(incoming["not_before"], _REVIEWED_LOCAL_NOT_BEFORE),
-    }
+    native = validate_budget(dict(_REVIEWED_NATIVE_STATE))
+    combined = dict(incoming)
+    for key in (
+        "observed_at",
+        "not_before",
+        "interval",
+        "page_interval",
+        "rate_failures",
+        "completed_at",
+        "inventory_completed_at",
+    ):
+        combined[key] = max(first_state[key], incoming[key], native[key])
+    combined["starts"] = sorted(
+        set(first_state["starts"] + incoming["starts"] + native["starts"])
+    )[-10:]
+    # Only the exact two verified robots bits are reclassified; native/local
+    # refusals remain binding. restore_family_artifact merges live local state.
+    combined["blocked"] = native["blocked"]
+    combined["not_before"] = max(
+        combined["not_before"], _REVIEWED_LOCAL_NOT_BEFORE
+    )
+    return validate_budget(combined)
 
 
 if __name__ == "__main__":
