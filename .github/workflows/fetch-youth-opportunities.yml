@@ -10,6 +10,7 @@ on:
     - cron: '35 12 * * *'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: youthopps-youth-opportunities-publisher-v1
   queue: max
@@ -24,7 +25,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Create data-source publication token
+      - name: Prepare the complete source outcome without publication credentials
+        id: prepare
+        env:
+          YO_PHASE: prepare
+          GITHUB_TOKEN: ${{ github.token }}
+          YO_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+          YO_PACING_TRANSITION: '{"schema":1,"family":"youthopps-youth-opportunities-publisher-v1","prior_run_id":38763419724,"prior_run_attempt":1,"prior_head_sha":"f77eed642c4544bbeed009440c406064a4f5c6ad","prior_completed_at":"2026-10-15T15:49:53Z","prior_jobs_sha256":"34e687ecadae8c6e44416850229ddcf3650dc4d05f6156e5630926ab0c9efa9f","state":{"schema":1,"family":"youthopps-youth-opportunities-publisher-v1","starts":[1792078467.5705616,1792078499.4232178],"interval":12.1,"until":1792078530.1682713,"rate_failures":0,"page_interval":30,"blocked":false,"observed_at":1792078500.1686404,"legacy_rate_history_unknown":true},"not_before":1792079453.0,"evidence":"https://github.com/YouthOpps/data-pipeline/issues/188#issuecomment-6196810011"}'
+        run: python -B adapters/youth-opportunities/adapter.py --publish
+      - name: Create the late data-source publication token
+        if: always() && steps.prepare.outputs.handoff_ready == 'true'
         id: data-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
@@ -33,7 +43,19 @@ jobs:
           owner: YouthOpps
           repositories: data-source
           permission-contents: write
-      - name: Collect and publish this source
+      - name: Validate and publish the prepared outcome, then delete it
+        if: always()
         env:
+          YO_PHASE: publish
+          GITHUB_TOKEN: ${{ github.token }}
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
+          YO_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
         run: python -B adapters/youth-opportunities/adapter.py --publish
+      - name: Preserve only inert publisher pacing and refusal state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youth-opportunities-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
