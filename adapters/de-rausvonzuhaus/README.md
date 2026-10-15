@@ -4,7 +4,7 @@ This adapter reads the actual public [Last Minute Markt](https://www.rausvonzuha
 
 ## Access and reuse
 
-Reviewed on 8 October 2026: the public [robots policy](https://www.rausvonzuhaus.de/robots.txt) permits the normal listing and detail routes, but disallows `/typo3/` and paths containing `hide_page_frame`. Collection uses the normal listing only, without embedding queries, login, applicant data or external application requests. Requests identify YouthOpp and send an ordinary HTML Accept header. Transient HTTP failures receive at most one paced retry; Retry-After also applies to that retry. Robots is checked on each run and on content redirects. A complete HTML document and nonempty, valid card inventory are required.
+Reviewed on 8 October 2026: the public [robots policy](https://www.rausvonzuhaus.de/robots.txt) permits the normal listing and detail routes, but disallows `/typo3/` and paths containing `hide_page_frame`. Collection uses the normal listing only, without embedding queries, login, applicant data or external application requests. Requests use the declared YouthOppsBot identity and an ordinary HTML Accept header. Transient HTTP 500/502/503/504 or non-TLS connection failures receive at most one paced retry; HTTP 429 always stops the current attempt. Retry-After also applies to allowed retries. Robots is checked on each run and on content redirects. A complete HTML document and nonempty, valid card inventory are required.
 
 The publisher's [imprint](https://www.rausvonzuhaus.de/impressum) states:
 
@@ -12,7 +12,7 @@ The publisher's [imprint](https://www.rausvonzuhaus.de/impressum) states:
 
 It prohibits commercial distribution without prior written IJAB permission. YouthOpps' intended noncommercial youth information use matches the stated purpose. Records provide attributed partial factual metadata and our own concise summary; they do not reproduce photographs, image credits or full third-party descriptions. Every record and source metadata attribute `rausvonzuhaus.de / Eurodesk Deutschland (IJAB)`. The official contact for questions is `rausvonzuhaus@eurodesk.eu`, with IJAB contact `info@ijab.de` on the imprint.
 
-One robots request and one listing request normally provide the entire inventory. Requests, retries and redirects are separated by at least six seconds and limited to ten starts per rolling minute. The publisher's stricter robots delay and Retry-After are honored. A lock and durable pacing state in the operating system's temporary directory serialize overlapping local processes. Production Actions serialize this source; separate machines must not run this source simultaneously.
+One robots request and one listing request normally provide the entire inventory. Publisher requests, retries and redirects are separated by at least 12.1 seconds and limited to five starts per rolling minute, with a completion guard retaining longer intervals even after rolling starts expire. The publisher's stricter robots delay and Retry-After are honored. The original private `de-rausvonzuhaus-pacing-<uid>/<sha256(host)>` journal remains in use. One collection lock spans restore, snapshot, collection, publication and finally export. Production Actions serialize this source; separate machines must not run it simultaneously. Trusted per-attempt workflow artifacts preserve restrictions across hosted runners.
 
 ## Inventory and fields
 
@@ -104,9 +104,9 @@ GitHub can delay scheduled events; the existing publication concurrency
 serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
-The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+The current collector has no paginated inventory to delay. No inventory-page delay is added: all actual cards are already present in the
+one listing response. Physical request pacing and publisher restrictions apply
+to both robots and the listing, including retries and redirects.
 
 ## Workflow concurrency
 
@@ -116,3 +116,73 @@ daily automation schedule.
 publish in parallel. Existing source-only atomic publication rebases on
 unrelated repository updates, uses up to three publication attempts, and never
 force-overwrites newer data.
+
+## Retained throttling and state transition
+
+A publisher 429 ends this attempt before reading its body or retrying. Before
+stopping it increments the new-since-transition rate-failure counter, doubles
+the currently retained physical interval and retains at least 30 minutes of
+backoff, doubled after repeated failures. A finite positive representable
+numeric or timezone-aware HTTP-date Retry-After can extend that embargo.
+Malformed, negative, zero, overflow or unsupported timing does not create or
+clear an access hold; the exponential fallback remains. Existing stronger
+embargoes, completion history, intervals and genuine refusal holds merge by
+MAX/OR. A later attempt fails before publisher access until the embargo ends.
+
+Actual content 401/403, a clear primary visible denial/challenge, or a genuine
+robots Disallow remains a durable hold. Ordinary CAPTCHA scripts, navigation,
+footer or hidden decorations are not a visible primary refusal. Verified
+robots-only 400–499 except 429 is unavailable REP rules, rather than evidence
+of forbidden content. Robots 429, server failures, TLS failures and network
+failures do not become unrestricted access. Normal TLS verification and the
+bot identity remain enabled; no browser impersonation or workaround is used.
+
+The reviewed pre-artifact history has 28 first attempts across 18 heads:
+23 successful publications, four cancellations with no jobs, and one later
+publication failure after a genuine 461-card / 455-retained collection. The
+latest possible publisher-access upper bound is the last job completion,
+2026-10-15T10:44:50Z. All logs and exact job/attempt/head identities were read.
+They do not expose old physical starts, response Retry-After headers or
+successful internal rate retries. These values are unknown, never recovered
+or asserted zero. `legacy_rate_history_unknown` remains explicit; the new
+counter measures only failures observed since the approved transition.
+
+The first transition requires the maintainer's exact public approval and
+not-before/state receipt, pinned to all 28 old attempts and their actual jobs.
+It preserves any discovered local budget without changing its path, conserves
+known job-completion upper bounds and adds at least 60 seconds of startup
+quiet. Bootstrap approval placeholders fail before publisher access. Any new
+executed attempt makes this one-time legacy transition ineligible. Thereafter
+the newest completed attempt's owned artifact is mandatory; missing, expired,
+corrupt or ambiguous state fails before access, rather than using an older
+artifact or fresh allowance. Older-ID queued reruns retain their exact prior
+completed attempts, ordered by immutable attempt-job completion, with head,
+repository, branch and source checks. Jobless cancellations cannot have made a
+publisher request and add no replacement budget.
+
+Restore precedes even publication snapshot/auth work; finally exports trusted
+state while the collection lock remains held if that work fails. Source data
+and metadata still publish atomically through the existing source-only CAS.
+The existing 30-minute job and one-hour precreated publication token remain.
+A 1,290-second absolute lifecycle bounds prepublication to 900 seconds,
+publication/failure reporting to 180 seconds and final state export to 30
+seconds, with socket timeouts clipped to their remaining phase. Limits never
+renew the absolute deadline. The genuine normal source frontier remains two
+GETs (robots and one complete listing), without per-detail or PDF requests.
+Maintainer review, an approved sole native full collection/current consumer
+gate and separate production observation are required before delivery claims.
+
+Final IDs retain their existing deterministic native-ID digest mapping. The
+validator checks the website's alphanumeric/hyphen grammar and rejects IDs
+that collide case-insensitively; no valid source identity is renamed.
+
+On 15 October 2026, the sole complete native test inspected all 464 advertised
+cards and retained 456 valid native identities; eight cards had internally
+inconsistent project/application dates under the unchanged parser rule. The
+two genuine publisher requests both returned HTTP 200 with the declared bot
+identity. The run took 82.15 seconds including startup quiet; actual starts
+were 13.13 seconds apart, with at most two in a rolling minute. The complete
+456 raw, 456 expiry-filtered and derived-empty envelopes passed the current
+website consumer in RAM. These observed counts are evidence, not collection
+caps. This native success does not assert hosted publication; production
+requires separate approval of the complete retained native pacing MAX state.
