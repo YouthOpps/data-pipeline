@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+import contextlib
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
@@ -10,9 +11,12 @@ from html.parser import HTMLParser
 import ipaddress
 import json
 import os
+import random
 import re
+import signal
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -709,13 +713,15 @@ def safe_error(error):
     return " ".join(text.split())[:500]
 
 
-def pace(url, interval=6):
+def pace(url, interval=6, *, start_padding=0):
     """Lock shared publisher pacing state across overlapping local processes.
 
     State lives outside the checkout. The advisory lock stays held until the
     response and any Retry-After are recorded, so parallel runs cannot race.
     Production uses a serialized Action; separate machines must not overlap.
     """
+    if start_padding:
+        padding_until = None
     host = (
         (urllib.parse.urlsplit(url).hostname or "")
         .lower()
@@ -768,6 +774,10 @@ def pace(url, interval=6):
                     else now
                 ),
             )
+            if start_padding and ready <= now:
+                if padding_until is None:
+                    padding_until = now + start_padding
+                ready = max(ready, padding_until)
             if ready <= now:
                 budget["starts"].append(now)
                 save_budget(state, budget)
@@ -787,9 +797,19 @@ def save_budget(state, budget):
 
 
 def request_bytes(
-    url, *, interval=6, method="GET", headers=None, payload=None
+    url,
+    *,
+    interval=6,
+    method="GET",
+    headers=None,
+    payload=None,
+    deadline=None,
+    retry_jitter=0
 ):
-    state, budget = pace(url, interval)
+    if retry_jitter:
+        state, budget = pace(url, interval, start_padding=retry_jitter)
+    else:
+        state, budget = pace(url, interval)
     request_headers = {"User-Agent": _USER_AGENT, **(headers or {})}
     try:
         request = urllib.request.Request(
@@ -799,7 +819,15 @@ def request_bytes(
             headers=request_headers,
         )
         try:
-            response = _OPENER.open(request, timeout=30)
+            transport_timeout = 30
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AdapterError(
+                        "Publication deadline exhausted", "publish"
+                    )
+                transport_timeout = min(30, remaining)
+            response = _OPENER.open(request, timeout=transport_timeout)
         except urllib.error.HTTPError as error:
             response = error
         with response:
@@ -1183,7 +1211,7 @@ def validate_records(records, published=False):
             raise AdapterError("Invalid classification evidence", "validate")
 
 
-def github_error_details(method, path, status, body):
+def github_error_details(method, path, status, body, *, with_reason=False):
     """Return fixed labels from a bounded, unambiguous GitHub error body."""
     label = "unclassified"
     codes = set()
@@ -1249,7 +1277,238 @@ def github_error_details(method, path, status, body):
     detail = "; GitHub error: " + label
     if codes:
         detail += "; codes=" + ",".join(sorted(codes)[:3])
-    return detail
+    return (label, detail) if with_reason else detail
+
+
+_PUBLICATION_WINDOW = None
+_PUBLICATION_IDENTITY = None
+_PUBLICATION_FAILURE = None
+_PUBLICATION_RETRY_JITTER = 0
+
+
+@contextlib.contextmanager
+def publication_http_guard(deadline):
+    """Bound one reviewed Unix/Python call, including waits and body reads."""
+    if (
+        threading.current_thread() is not threading.main_thread()
+        or not hasattr(signal, "ITIMER_REAL")
+        or not hasattr(signal, "setitimer")
+        or not hasattr(signal, "getitimer")
+        or not hasattr(signal, "SIGALRM")
+    ):
+        raise AdapterError("Publication timer is unavailable", "publish")
+    active, repeating = signal.getitimer(signal.ITIMER_REAL)
+    if active or repeating:
+        raise AdapterError("An existing timer prevents publication", "publish")
+    end = min(deadline, time.monotonic() + 30)
+    remaining = end - time.monotonic()
+    if remaining <= 0:
+        raise AdapterError(
+            "Publication deadline exhausted", "publish"
+        )
+    previous = signal.getsignal(signal.SIGALRM)
+
+    def exhausted(signum, frame):
+        raise AdapterError("Publication call deadline exhausted", "publish")
+
+    try:
+        signal.signal(signal.SIGALRM, exhausted)
+        signal.setitimer(signal.ITIMER_REAL, remaining)
+        yield end
+        if time.monotonic() >= end:
+            raise AdapterError("Publication call deadline exhausted", "publish")
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def prove_publication_window():
+    """Prove and freeze the exact current hosted job's remaining time."""
+    global _PUBLICATION_WINDOW, _PUBLICATION_IDENTITY
+    run = os.environ.get("GITHUB_RUN_ID", "")
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    head = os.environ.get("GITHUB_SHA", "")
+    workflow = (
+        "YouthOpps/data-pipeline/.github/workflows/fetch-"
+        + SOURCE_ID
+        + ".yml@refs/heads/main"
+    )
+    identity = (run, attempt, head, workflow)
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("GITHUB_REPOSITORY") != "YouthOpps/data-pipeline"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+        or os.environ.get("GITHUB_JOB") != "collect"
+        or os.environ.get("GITHUB_WORKFLOW_REF") != workflow
+        or os.environ.get("GITHUB_WORKFLOW_SHA") != head
+        or not re.fullmatch(r"[1-9][0-9]{0,19}", run)
+        or not re.fullmatch(r"[1-9][0-9]{0,9}", attempt)
+        or not re.fullmatch(r"[0-9a-f]{40}", head)
+    ):
+        raise AdapterError(
+            "Exact hosted publication context required", "publish"
+        )
+    if _PUBLICATION_WINDOW is not None:
+        if identity != _PUBLICATION_IDENTITY:
+            raise AdapterError("Publication job identity changed", "publish")
+        return _PUBLICATION_WINDOW
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise AdapterError(
+            "Job deadline read credential is required", "publish"
+        )
+    url = (
+        "https://api.github.com/repos/YouthOpps/data-pipeline/actions/runs/"
+        + run
+        + "/attempts/"
+        + attempt
+        + "/jobs?per_page=100&deadline_observation="
+        + str(time.time_ns())
+    )
+    wall_anchor = time.time()
+    anchor = time.monotonic()
+    with publication_http_guard(anchor + 30) as call_end:
+        status, headers, body = request_bytes(
+            url,
+            headers={
+                "Authorization": "Bearer " + token,
+                "Accept": "application/vnd.github+json",
+                "Cache-Control": "no-cache",
+            },
+            deadline=call_end,
+        )
+    if status != 200:
+        raise AdapterError(
+            "GitHub job deadline context returned HTTP " + str(status),
+            "publish",
+            status,
+        )
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Ambiguous job context")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("Invalid job context constant")
+
+    try:
+        dates = headers.get_all("Date", [])
+        ages = headers.get_all("Age", [])
+        if len(dates) != 1 or ages not in ([], ["0"]):
+            raise ValueError("Untrusted job context time")
+        if not re.fullmatch(
+            r"[A-Za-z]{3}, [0-9]{2} [A-Za-z]{3} [0-9]{4} "
+            r"[0-9]{2}:[0-9]{2}:[0-9]{2} GMT",
+            dates[0],
+        ):
+            raise ValueError("Ambiguous HTTP Date")
+        server = parsedate_to_datetime(dates[0])
+        if server.tzinfo is None or server.utcoffset().total_seconds() != 0:
+            raise ValueError("Expected UTC server time")
+        if (
+            not wall_anchor - 2
+            <= server.timestamp()
+            <= (wall_anchor + time.monotonic() - anchor + 2)
+        ):
+            raise ValueError("Stale or inconsistent server time")
+        if len(body) > 65536:
+            raise ValueError("Oversized job context")
+        decoded = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=invalid_constant,
+        )
+        if (
+            not isinstance(decoded, dict)
+            or type(decoded.get("total_count")) is not int
+            or decoded["total_count"] != 1
+            or not isinstance(decoded.get("jobs"), list)
+            or len(decoded["jobs"]) != 1
+        ):
+            raise ValueError("Incomplete or ambiguous current jobs")
+        job = decoded["jobs"][0]
+        if (
+            not isinstance(job, dict)
+            or type(job.get("id")) is not int
+            or job["id"] <= 0
+            or job.get("name") != "collect"
+            or job.get("workflow_name") != "fetch-" + SOURCE_ID
+            or type(job.get("run_id")) is not int
+            or job["run_id"] != int(run)
+            or type(job.get("run_attempt")) is not int
+            or job["run_attempt"] != int(attempt)
+            or job.get("head_sha") != head
+            or job.get("head_branch") != "main"
+            or job.get("status") != "in_progress"
+            or "conclusion" not in job
+            or job["conclusion"] is not None
+            or type(job.get("runner_id")) is not int
+            or job["runner_id"] <= 0
+            or not isinstance(job.get("started_at"), str)
+        ):
+            raise ValueError("Current running job identity mismatch")
+        clock_type = getattr(datetime, "datetime", datetime)
+        started = clock_type.fromisoformat(
+            job["started_at"].replace("Z", "+00:00")
+        )
+        if started.tzinfo is None or started.utcoffset().total_seconds() != 0:
+            raise ValueError("Expected UTC job start")
+        elapsed = server.timestamp() - started.timestamp()
+        if not 0 <= elapsed < 1800:
+            raise ValueError("Job time is inconsistent or exhausted")
+        end = anchor + 1800 - elapsed - 2
+        if time.monotonic() >= end - 60:
+            raise ValueError("No safe publication write window remains")
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        RecursionError,
+        OverflowError,
+        OSError,
+    ):
+        raise AdapterError(
+            "Unusable exact job deadline proof", "publish"
+        ) from None
+    _PUBLICATION_IDENTITY = identity
+    _PUBLICATION_WINDOW = {"write": end - 60, "read": end - 30, "job": end}
+    return _PUBLICATION_WINDOW
+
+
+def publication_window():
+    """Reuse one proof or keep its first failure closed without another read."""
+    if _PUBLICATION_WINDOW is None and _PUBLICATION_FAILURE is not None:
+        raise _PUBLICATION_FAILURE
+    try:
+        return prove_publication_window()
+    except AdapterError as error:
+        stop_publication(error)
+        raise
+
+
+def wait_for_publication_retry(attempt):
+    """Queue padding after the next write reaches its ordinary pacing gate."""
+    global _PUBLICATION_RETRY_JITTER
+    if attempt not in (0, 1):
+        raise AdapterError("Publication retry limit reached", "publish")
+    delay = random.uniform(1, 2) if attempt == 0 else random.uniform(2, 4)
+    deadline = publication_window()["write"]
+    if deadline - time.monotonic() <= delay:
+        raise AdapterError("No publication retry headroom remains", "publish")
+    _PUBLICATION_RETRY_JITTER = delay
+
+
+def stop_publication(error):
+    """Keep a conclusive failure from starting another write phase."""
+    global _PUBLICATION_FAILURE, _PUBLICATION_RETRY_JITTER
+    _PUBLICATION_FAILURE = error
+    _PUBLICATION_RETRY_JITTER = 0
+    return error
 
 
 def github_error_context(method, path):
@@ -1270,11 +1529,20 @@ def github_error_context(method, path):
 
 
 def github(method, path, payload=None, missing_ok=False):
+    global _PUBLICATION_RETRY_JITTER
     token = os.environ.get("DATA_SOURCE_TOKEN")
     if not token:
         raise AdapterError(
             "DATA_SOURCE_TOKEN is required for publication", "publish"
         )
+    if method != "GET" and _PUBLICATION_FAILURE is not None:
+        raise _PUBLICATION_FAILURE
+    window = publication_window()
+    deadline = window["read"] if method == "GET" else window["write"]
+    retry_jitter = 0
+    if method != "GET":
+        retry_jitter = _PUBLICATION_RETRY_JITTER
+        _PUBLICATION_RETRY_JITTER = 0
     headers = {
         "Authorization": "Bearer " + token,
         "Accept": "application/vnd.github+json",
@@ -1283,14 +1551,19 @@ def github(method, path, payload=None, missing_ok=False):
     if payload is not None:
         headers["Content-Type"] = "application/json"
     try:
-        status, _, body = request_bytes(
-            _GITHUB + path,
-            method=method,
-            headers=headers,
-            payload=(
-                json.dumps(payload).encode() if payload is not None else None
-            ),
-        )
+        with publication_http_guard(deadline) as call_end:
+            status, _, body = request_bytes(
+                _GITHUB + path,
+                method=method,
+                headers=headers,
+                deadline=call_end,
+                retry_jitter=retry_jitter,
+                payload=(
+                    json.dumps(payload).encode()
+                    if payload is not None
+                    else None
+                ),
+            )
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         raise AdapterError(
             github_error_context(method, path)
@@ -1300,13 +1573,26 @@ def github(method, path, payload=None, missing_ok=False):
     if status == 404 and missing_ok:
         return None
     if status not in (200, 201):
-        raise AdapterError(
+        reason, detail = github_error_details(
+            method, path, status, body, with_reason=True
+        )
+        error = AdapterError(
             f"{github_error_context(method, path)} returned HTTP {status}"
-            + github_error_details(method, path, status, body),
+            + detail,
             "publish",
             status,
         )
-    return json.loads(body)
+        error.github_reason = reason
+        raise error
+    try:
+        return json.loads(body)
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        raise AdapterError(
+            github_error_context(method, path)
+            + " returned unusable JSON; publication is unconfirmed",
+            "publish",
+            status,
+        ) from None
 
 
 def read_snapshot():
@@ -1336,6 +1622,8 @@ def read_snapshot():
 
 
 def publish_files(snapshot, files):
+    if _PUBLICATION_FAILURE is not None:
+        raise _PUBLICATION_FAILURE
     expected = snapshot["files"].copy()
     desired = {**expected, **files}
     for attempt in range(3):
@@ -1372,7 +1660,12 @@ def publish_files(snapshot, files):
                 {"sha": candidate, "force": False},
             )
             return
-        except AdapterError as error:
+        except Exception as error:
+            if not isinstance(error, AdapterError):
+                error = AdapterError(
+                    "Unusable publication response; outcome is unconfirmed",
+                    "publish",
+                )
             try:
                 latest = read_snapshot()
             except Exception as verification:
@@ -1381,30 +1674,51 @@ def publish_files(snapshot, files):
                     if isinstance(verification, AdapterError)
                     else type(verification).__name__
                 )
-                raise AdapterError(
-                    f"Publication attempt {attempt + 1}/3 failed: "
-                    f"{safe_error(error)}; outcome verification failed: {detail}",
-                    "publish",
-                    getattr(verification, "status", None),
+                raise stop_publication(
+                    AdapterError(
+                        f"Publication attempt {attempt + 1}/3 failed: "
+                        f"{safe_error(error)}; outcome verification "
+                        f"failed: {detail}",
+                        "publish",
+                        getattr(verification, "status", None),
+                    )
                 ) from verification
             if candidate and (
                 latest["head"] == candidate or latest["files"] == desired
             ):
                 return
             if latest["files"] != expected:
-                raise AdapterError(
-                    "Source changed concurrently; "
-                    "newer remote data was not overwritten",
-                    "publish",
+                raise stop_publication(
+                    AdapterError(
+                        "Source changed concurrently; newer remote data "
+                        "was not overwritten",
+                        "publish",
+                    )
                 )
+            if getattr(error, "github_reason", None) != "non-fast-forward":
+                raise stop_publication(
+                    AdapterError(
+                        "Publication stopped after a non-retryable failure: "
+                        + safe_error(error),
+                        "publish",
+                        error.status,
+                    )
+                ) from error
             snapshot = latest
             if attempt == 2:
-                raise AdapterError(
-                    f"Publication failed after {attempt + 1} attempts; "
-                    f"last failure: {safe_error(error)}",
-                    "publish",
-                    error.status,
+                raise stop_publication(
+                    AdapterError(
+                        f"Publication failed after {attempt + 1} attempts; "
+                        f"last failure: {safe_error(error)}",
+                        "publish",
+                        error.status,
+                    )
                 ) from error
+            try:
+                wait_for_publication_retry(attempt)
+            except AdapterError as limit:
+                stop_publication(limit)
+                raise
 
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
