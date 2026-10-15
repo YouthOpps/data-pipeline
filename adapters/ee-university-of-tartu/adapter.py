@@ -6,40 +6,67 @@ adapter never accesses. The open-calls table gates current inventory; upcoming
 competitions and the evergreen scholarship directory are not opportunities.
 Partner call years come from explicit dated headings. ENLIGHT's abbreviated
 November deadline is anchored to the article's publication year, never today's
-year. A date-only deadline remains valid through the publisher's Tallinn day.
+year. A date-only deadline uses the index's UTC closing-calendar-day convention.
 Individual ENLIGHT course links are preserved without crawling external sites.
 """
 
 import argparse
 import base64
+import contextlib
+import copy
 from datetime import datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
+import email.utils
+import errno
 import fcntl
 import hashlib
 from html.parser import HTMLParser
+import io
 import ipaddress
 import json
+import math
 import os
 import re
+import signal
+import ssl
+import stat
 import sys
 import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from zoneinfo import ZoneInfo
 
 SOURCE_ID = "ee-university-of-tartu"
+
+
 SOURCE_URL = "https://ut.ee/en/open-calls"
+
+
 WEBSITE_URL = "https://ut.ee/en/scholarships-and-other-stipends"
+
+
 LANGUAGE = "en"
+
+
 PUBLISHER_COUNTRY = "EE"
+
+
 PUBLISHER_TYPE = "university"
+
+
 ATTRIBUTION = "University of Tartu"
+
+
 _PARTNERS_URL = "https://ut.ee/en/competitions-ut-partner-universities"
+
+
 _ENLIGHT_URL = (
     "https://ut.ee/en/news/enlight-short-term-blended-mobility-courses"
 )
+
+
 _COUNTRIES = {"Georgia": "GE", "Japan": "JP", "South Korea": "KR", "USA": "US"}
 
 
@@ -119,7 +146,9 @@ class PublisherHTML(HTMLParser):
 def publisher_page(url, delay):
     """Check every fetched content path against the current robots policy."""
     delay = max(delay, check_robots(url))
-    return PublisherHTML(fetch_source(url, min_interval=delay)).content
+    return PublisherHTML(
+        fetch_inventory_page(fetch_source, url, min_interval=delay)
+    ).content
 
 
 def date_deadline(value, year=None):
@@ -131,18 +160,7 @@ def date_deadline(value, year=None):
     date = datetime.strptime(
         f"{match[1]} {match[2]} {match[3] or year}", "%d %B %Y"
     )
-    return (
-        date.replace(
-            hour=23,
-            minute=59,
-            second=59,
-            microsecond=999999,
-            tzinfo=ZoneInfo("Europe/Tallinn"),
-        )
-        .astimezone(timezone.utc)
-        .isoformat(timespec="microseconds")
-        .replace("+00:00", "Z")
-    )
+    return date.date().isoformat()
 
 
 def current_rows(content):
@@ -192,7 +210,18 @@ def finish_record(record, identity, deadline, summary):
         if len(summary) <= 600
         else summary[:596].rsplit(" ", 1)[0] + "..."
     )
-    record["status"] = "expired" if deadline < utc_now() else "open"
+    if deadline is None:
+        record["status"] = "unknown"
+    else:
+        checked = datetime.fromisoformat(utc_now().replace("Z", "+00:00"))
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", deadline):
+            expired = (
+                deadline < checked.astimezone(timezone.utc).date().isoformat()
+            )
+        else:
+            cutoff = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            expired = cutoff < checked
+        record["status"] = "expired" if expired else "open"
     return record
 
 
@@ -352,7 +381,7 @@ def enlight_records(content, cells):
     return records
 
 
-def collect():
+def collect_body():
     """Collect only current calls using serialized, paced public requests."""
     content = publisher_page(SOURCE_URL, 6)
     records = []
@@ -377,7 +406,11 @@ CATEGORIES = (
     "jobs",
     "other",
 )
+
+
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
+
+
 _USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 
 
@@ -385,6 +418,10 @@ class AdapterError(Exception):
     def __init__(self, message, stage="parse", status=None):
         super().__init__(message)
         self.stage, self.status = stage, status
+
+
+class RobotsDisallow(AdapterError):
+    """An explicitly applicable publisher robots prohibition."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -425,253 +462,6 @@ def safe_error(error):
         text,
     )
     return " ".join(text.split())[:500]
-
-
-def pace(url, interval=6):
-    """Lock shared publisher pacing state across overlapping local processes.
-
-    State lives outside the checkout. The advisory lock stays held until the
-    response and any Retry-After are recorded, so parallel runs cannot race.
-    Production uses a serialized Action; separate machines must not overlap.
-    """
-    host = (
-        (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
-    )
-    directory = os.path.join(
-        tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
-    )
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    information = os.lstat(directory)
-    if (
-        not os.path.isdir(directory)
-        or os.path.islink(directory)
-        or information.st_uid != os.getuid()
-        or information.st_mode & 0o077
-    ):
-        raise AdapterError("Unsafe publisher pacing directory", "access")
-    key = hashlib.sha256(host.encode()).hexdigest()
-    descriptor = os.open(
-        os.path.join(directory, key),
-        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-        0o600,
-    )
-    state = os.fdopen(descriptor, "r+", encoding="utf-8")
-    try:
-        fcntl.flock(state.fileno(), fcntl.LOCK_EX)
-        raw = state.read()
-        budget = (
-            json.loads(raw)
-            if raw
-            else {"starts": [], "interval": 6, "until": 0}
-        )
-        budget["interval"] = max(budget["interval"], interval, 6)
-        while True:
-            now = time.time()
-            budget["starts"] = [
-                start for start in budget["starts"] if now - start < 60
-            ]
-            ready = max(
-                budget["until"],
-                (
-                    budget["starts"][-1] + budget["interval"]
-                    if budget["starts"]
-                    else now
-                ),
-                (
-                    budget["starts"][0] + 60
-                    if len(budget["starts"]) >= 10
-                    else now
-                ),
-            )
-            if ready <= now:
-                budget["starts"].append(now)
-                save_budget(state, budget)
-                return state, budget
-            time.sleep(min(ready - now, 60))
-    except Exception:
-        state.close()
-        raise
-
-
-def save_budget(state, budget):
-    state.seek(0)
-    json.dump(budget, state)
-    state.truncate()
-    state.flush()
-    os.fsync(state.fileno())
-
-
-def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
-    state, budget = pace(url, interval)
-    try:
-        request = urllib.request.Request(
-            url,
-            data=payload,
-            method=method,
-            headers={"User-Agent": _USER_AGENT, **(headers or {})},
-        )
-        try:
-            response = _OPENER.open(request, timeout=30)
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            retry = response.headers.get("Retry-After")
-            if retry:
-                try:
-                    seconds = (
-                        float(retry)
-                        if re.fullmatch(r"\d+(?:\.\d+)?", retry)
-                        else parsedate_to_datetime(retry).timestamp()
-                        - time.time()
-                    )
-                    budget["until"] = max(
-                        budget["until"], time.time() + max(0, seconds)
-                    )
-                    save_budget(state, budget)
-                except (ValueError, TypeError, OverflowError):
-                    pass
-            body = response.read(5_000_001)
-            if len(body) > 5_000_000:
-                raise AdapterError("Response exceeds 5 MB", "fetch")
-            return response.status, response.headers, body
-    finally:
-        state.close()
-
-
-def fetch_source(url, min_interval=6):
-    original = urllib.parse.urlsplit(url)
-
-    def checked(value):
-        parsed = urllib.parse.urlsplit(value)
-        host = (parsed.hostname or "").lower().removeprefix("www.")
-        if (
-            parsed.scheme != "https"
-            or parsed.username
-            or parsed.password
-            or host != (original.hostname or "").lower().removeprefix("www.")
-            or parsed.port != original.port
-        ):
-            raise AdapterError(
-                "Source redirect leaves the reviewed HTTPS host", "fetch"
-            )
-        if host == "localhost" or host.endswith(".localhost"):
-            raise AdapterError("Public HTTPS source required", "fetch")
-        try:
-            if not ipaddress.ip_address(host).is_global:
-                raise AdapterError("Public HTTPS source required", "fetch")
-        except ValueError:
-            pass
-
-    for attempt in range(2):
-        current = url
-        try:
-            for hop in range(4):
-                checked(current)
-                status, headers, body = request_bytes(
-                    current, interval=min_interval
-                )
-                if status in (301, 302, 303, 307, 308):
-                    if hop == 3 or not headers.get("Location"):
-                        raise AdapterError(
-                            "Invalid or excessive source redirects", "fetch"
-                        )
-                    current = urllib.parse.urljoin(current, headers["Location"])
-                    checked(current)
-                    if original.path != "/robots.txt":
-                        min_interval = max(min_interval, check_robots(current))
-                    continue
-                if status != 200:
-                    raise AdapterError(
-                        f"Publisher returned HTTP {status}", "fetch", status
-                    )
-                return body.decode(headers.get_content_charset() or "utf-8")
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            if attempt:
-                raise AdapterError(
-                    "Publisher connection failed: " + safe_error(error), "fetch"
-                ) from error
-    raise AdapterError("Publisher could not be read", "fetch")
-
-
-def check_robots(url):
-    parsed = urllib.parse.urlsplit(url)
-    try:
-        text = fetch_source(
-            urllib.parse.urlunsplit(
-                (parsed.scheme, parsed.netloc, "/robots.txt", "", "")
-            )
-        )
-    except AdapterError as error:
-        if error.status == 404:
-            return 6
-        raise
-    groups, group = [], {"agents": [], "rules": [], "delay": 0}
-    for line in text.splitlines():
-        key, separator, value = line.split("#", 1)[0].strip().partition(":")
-        if not separator:
-            continue
-        key, value = key.lower().strip(), value.strip()
-        if key == "user-agent":
-            if group["rules"] or group["delay"]:
-                groups.append(group)
-                group = {"agents": [], "rules": [], "delay": 0}
-            group["agents"].append(value.lower())
-        elif key in ("allow", "disallow"):
-            group["rules"].append((key, value))
-        elif key == "crawl-delay":
-            try:
-                group["delay"] = float(value)
-                if not 0 <= group["delay"] <= 60:
-                    raise ValueError()
-            except ValueError:
-                raise AdapterError("Unsupported robots crawl delay", "access")
-    groups.append(group)
-    directives = [
-        line.split("#", 1)[0].strip().lower()
-        for line in text.splitlines()
-        if line.split("#", 1)[0].strip()
-    ]
-    if (
-        directives
-        and not any(g["agents"] for g in groups)
-        and not all(line.startswith("sitemap:") for line in directives)
-    ):
-        raise AdapterError("Robots policy is unavailable or invalid", "access")
-    agent = _USER_AGENT.split("/", 1)[0].lower()
-    specific = [g for g in groups if agent in g["agents"]]
-    legacy = [g for g in groups if "youthopp" in g["agents"]]
-    policies = [policy for policy in (specific, legacy) if policy]
-    if not policies:
-        policies = [[g for g in groups if "*" in g["agents"]]]
-    path = parsed.path + ("?" + parsed.query if parsed.query else "")
-    for selected in policies:
-        matches = []
-        for g in selected:
-            for directive, pattern in g["rules"]:
-                if not pattern:
-                    continue
-                expression = (
-                    "^"
-                    + ".*".join(
-                        re.escape(part)
-                        for part in pattern.removesuffix("$").split("*")
-                    )
-                    + ("$" if pattern.endswith("$") else "")
-                )
-                if re.search(expression, path):
-                    matches.append(
-                        (
-                            len(pattern.replace("*", "").removesuffix("$")),
-                            directive == "allow",
-                        )
-                    )
-        if matches and not max(matches)[1]:
-            raise AdapterError(
-                "Robots policy disallows this source endpoint", "access"
-            )
-    return max(
-        [6] + [g["delay"] for policy in policies for g in policy]
-    )
 
 
 def make_record(
@@ -721,16 +511,16 @@ def make_record(
 def remove_expired_records(records, checked_at):
     """Filter validated deadlines after retrieval, before atomic publication.
 
-    Unknown publisher zones use UTC-12 only as a global certainty bound:
-    a date remains eligible until its closing day has ended everywhere.
-    No age, status, missing response or unstated local clock implies expiry.
+    Date-only values use the shared index's UTC closing-calendar-day rule;
+    they do not assert a publisher clock or timezone. Aware timestamps retain
+    their exact instant. No age, status or missing response implies expiry.
     """
     checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
     if checked.tzinfo is None:
         raise AdapterError(
             "Cleanup requires an aware check timestamp", "validate"
         )
-    latest_day = checked.astimezone(timezone(timedelta(hours=-12))).date()
+    latest_day = checked.astimezone(timezone.utc).date()
     retained = []
     for record in records:
         deadline = record.get("deadline")
@@ -806,6 +596,13 @@ def validate_records(records, *, allow_empty=False):
                 raise AdapterError("Missing record field: " + field, "validate")
             if value is not None:
                 try:
+                    if (
+                        field == "deadline"
+                        and isinstance(value, str)
+                        and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)
+                    ):
+                        datetime.strptime(value, "%Y-%m-%d")
+                        continue
                     if (
                         datetime.fromisoformat(
                             value.replace("Z", "+00:00")
@@ -905,7 +702,7 @@ def github(method, path, payload=None, missing_ok=False):
     return json.loads(body)
 
 
-def read_snapshot():
+def read_snapshot_body():
     head = github("GET", "/git/ref/heads/main")["object"]["sha"]
     tree = github("GET", "/git/commits/" + head)["tree"]["sha"]
     files = {}
@@ -931,7 +728,7 @@ def read_snapshot():
     return {"head": head, "tree": tree, "files": files}
 
 
-def publish_files(snapshot, files):
+def publish_files_body(snapshot, files):
     expected = snapshot["files"].copy()
     desired = {**expected, **files}
     for attempt in range(3):
@@ -1019,7 +816,2576 @@ def metadata(attempt, previous, records, error=None):
     return result
 
 
-def main():
+FAMILY = "youthopps-ee-university-of-tartu-publisher-v1"
+
+
+FAMILY_SOURCES = {SOURCE_ID}
+
+
+_WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
+
+
+_WORKFLOW_ID = 378390326
+
+
+_ARTIFACT_NAME = "tartu-pacing-state"
+
+
+COLLECTION_TIMEOUT = 1350
+
+
+RUN_TIMEOUT = 1740
+
+
+EXPORT_TIMEOUT = 30
+
+
+_STATE_PATH = _STATE_LOCK = None
+
+
+_JOURNAL_NEW = False
+
+
+_COLLECTION_LOCK_FD = None
+
+
+_RESTORED = _STATE_TRUSTED = False
+
+
+_PUBLISHER_GATE_FAILED = False
+
+
+_LAST_KNOWN_STATE = None
+
+
+_JOURNAL_LOCKS = {}
+
+
+_VERIFIED_REMOTE_CREATE = None
+
+
+_INITIAL_DIRECTORY_PROVEN = False
+
+
+_STATE_PARENT_FD = None
+
+
+_STATE_PARENT_ID = None
+
+
+_STATE_PARENT_PATH = None
+
+
+_RUN_END = _PHASE_END = _PHASE_NAME = None
+
+
+_SCANNED_HISTORY = {}
+
+
+_SCANNED_JOB_DIGESTS = {}
+
+
+_ATTEMPT_HEADS = {}
+
+
+_INVENTORY_ACTIVE = False
+
+
+_ROBOTS_CONTEXT = None
+
+
+_INFRASTRUCTURE_UNTIL = {}
+
+
+_LOCAL_FIRST_ACCESS_CHECKED = False
+
+
+_RESTORED_LATEST = None
+
+
+_RESTORED_HISTORY = None
+
+
+_LOCAL_RESEARCH_MIGRATION = {
+    "source": "ee-university-of-tartu",
+    "sha256": (
+        "b0b24dc46e82ff237eb5824b3ad902e145e4f604dd75319567c49da119f58eaf"
+    ),
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/279"
+        "#issuecomment-6203714896"
+    ),
+}
+
+
+_REVIEWED_NATIVE_MIGRATION = {
+    "schema": 1,
+    "source": "ee-university-of-tartu",
+    "evidence": "https://github.com/YouthOpps/data-pipeline/issues/279#issuecomment-6204053214",
+    "state": {
+        "schema": 3,
+        "family": "youthopps-ee-university-of-tartu-publisher-v1",
+        "legacy_hold_history": "unlogged_fields_unknown",
+        "research_provenance": {
+            "kind": "explicit_unknown_legacy_transition",
+            "source": "ee-university-of-tartu",
+            "legacy_wrapper_count": 11,
+            "executed_completion_upper_bounds": 10,
+            "exact_cancelled_no_job_count": 1,
+            "complete_history_manifest_sha256": "dd42a0939f62bde63c1e343dc2918afd0e532625df473d995232193f496ca945",
+            "all_actual_log_hash_manifest_sha256": "5c73fbcf8b9aa11f11a6d53d237b352c9db3d366efd0da027cb86c69873cdbb1",
+            "old_local_journal": "AUTHENTIC_ABSENT_NOT_ZERO",
+            "legacy_429_history": "unknown",
+            "legacy_hold_history": "unlogged_fields_unknown",
+            "in_flight_legacy_semantics": "Unknown "
+            "old "
+            "semantics; "
+            "False "
+            "proposed "
+            "ONLY for "
+            "explicitly "
+            "reviewed "
+            "one-off "
+            "transition, "
+            "never "
+            "old-schema "
+            "default",
+            "scope": "Complete ten actual success "
+            "logs provide no recovered "
+            "content refusal; unlogged "
+            "headers/strikes remain "
+            "unknown. Old job completions "
+            "are conservative upper "
+            "bounds, not actual request "
+            "starts.",
+        },
+        "starts": [
+            1792104166.4833934,
+            1792104167.3899724,
+            1792104179.590142,
+            1792104179.5919755,
+            1792104180.4125512,
+            1792104180.6398733,
+            1792104197.3905509,
+            1792104197.3911424,
+            1792104197.6323326,
+            1792104199.693189,
+        ],
+        "interval": 12.2,
+        "until": 1792104259.8407485,
+        "page_gap": 30,
+        "completed": 1792104199.6945276,
+        "inventory_completed": 1792104199.6945276,
+        "blocked": False,
+        "in_flight": False,
+        "legacy_429_history": "unknown",
+        "observed_429_since_transition": 0,
+        "rate_limit_until": 0,
+        "observed_at": 1792104199.6948047,
+    },
+    "state_sha256": "2c5dd8f2b5069f1ffceaf9bc8da34d5c2b65c87894e23ecb90925c766525d739",
+}
+
+
+_LEGACY_HEADS = {
+    37809621343: "ce76427dcc2bfc744961a6058bac6d0100bea31e",
+    37810563514: "10e7dc06e65127013bf2a5ba6c835cac6a749aa8",
+    37818503497: "9ab03a510dba38548ed53dd378c797be03547bdf",
+    37819106792: "9ab03a510dba38548ed53dd378c797be03547bdf",
+    38071840355: "9b155b179283c8fa08cf56c1a83a54bd19d51814",
+    38536206685: "3f6ab17f4698de58f7365682a22384cd08788f69",
+    38684235995: "9b97e13c2e2a56ee77700e40202eb6acd2212cf5",
+    38720084006: "a62a88f5cad62f4fb1ef5230358557d37d2b2bba",
+    38721259407: "cb14a94366e7c9f3a518a6bd9f8a3da5331da39f",
+    38763419353: "f77eed642c4544bbeed009440c406064a4f5c6ad",
+    38767785897: "f3b6e313a7680479d083c98d5ed32e94dc44fdc5",
+}
+
+
+_LEGACY_JOB_DIGESTS = {
+    37809621343: "bd338e8881b6eb0824776ca99e028166bf114c44e6ed0f98086e3564b30d4677",
+    37810563514: "336b8e1e1a637370409999977b24e8353269c8b2e657900bb8fa6a9fe69bef8c",
+    37818503497: "b512fdf501ffbdb48c1ff8a334798223dc87ae5ec6e009140ec9c2633b967b7f",
+    37819106792: "00a6ccb0e63588957037895247792d52a867d1b1489c856f6bb6919b98c161a3",
+    38071840355: "97eedc7aeab54556057e90b4a681c181a1ac982ad92c38d12ff17fb357e34d9e",
+    38536206685: "6c5c5ddd964b825960c44250aa2d0bc02782d10fe43c1035e8c7c251d2f785fa",
+    38684235995: "b945eec4174c4a7b1ee1309a439087f67aba30e02ccffd81b01381db1a2e097d",
+    38720084006: "9a92710d2629d74e5fa17233fb5132272f4e0bc97bd39f766aba1c35e5b921dc",
+    38721259407: "12e047da549a6dea392e240bca436f95e6cc37f0a2d45ac90fb61a2157ff1e4f",
+    38763419353: "3efbe10604c86607970814f2e54b9e9560cd98565aa6bc1645cd65752ecb1022",
+    38767785897: "d6d960ac3e66c71ed618d0f2b8d9abcbcf3b7ee5b47f9c95499e4e42ad8c1a73",
+}
+
+
+_LEGACY_NO_JOB = {
+    37818503497: {
+        "conclusion": "cancelled",
+        "created_at": "2026-10-08T17:41:23Z",
+        "head_sha": "9ab03a510dba38548ed53dd378c797be03547bdf",
+        "jobs_sha256": "b512fdf501ffbdb48c1ff8a334798223dc87ae5ec6e009140ec9c2633b967b7f",
+        "run_attempt": 1,
+    }
+}
+
+
+class PhaseExpired(Exception):
+    """A nonrenewable deadline with reserved failure-reporting headroom."""
+
+    stage = "runtime"
+    status = None
+
+    def __init__(self):
+        super().__init__("Nonrenewable runtime phase deadline expired")
+
+
+class PrimaryText(HTMLParser):
+    """Inspect primary visible text and genuine head titles."""
+
+    def __init__(self, document):
+        super().__init__(convert_charrefs=True)
+        self.parts, self.stack, self.head_title_parts = [], [], []
+        self.head_seen = self.head_allowed = False
+        self.title_depth = None
+        self.feed(document)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        # HTML block starts close a paragraph in button scope, including its
+        # inline descendants. Keep suppression inherited from outer elements.
+        if tag in {
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "center",
+            "details",
+            "dialog",
+            "dir",
+            "div",
+            "dl",
+            "fieldset",
+            "figcaption",
+            "figure",
+            "footer",
+            "header",
+            "hgroup",
+            "main",
+            "menu",
+            "nav",
+            "ol",
+            "p",
+            "search",
+            "section",
+            "summary",
+            "ul",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "pre",
+            "listing",
+            "hr",
+        }:
+            for index in range(len(self.stack) - 1, -1, -1):
+                ancestor = self.stack[index][0]
+                if ancestor == "p":
+                    del self.stack[index:]
+                    break
+                if ancestor in {
+                    "applet",
+                    "button",
+                    "caption",
+                    "html",
+                    "marquee",
+                    "object",
+                    "table",
+                    "td",
+                    "template",
+                    "th",
+                }:
+                    break
+        values = {}
+        for name, value in attrs:
+            values.setdefault(name, value)
+        style = re.sub(
+            r"/\*.*?\*/", "", values.get("style") or "", flags=re.S
+        ).lower()
+        declarations, priorities = {}, {}
+        for declaration in style.split(";"):
+            name, separator, value = declaration.partition(":")
+            if separator:
+                name = name.strip()
+                important = bool(re.search(r"!\s*important\s*$", value))
+                if priorities.get(name) and not important:
+                    continue
+                declarations[name] = re.sub(
+                    r"\s*!\s*important\s*$", "", value
+                ).strip()
+                priorities[name] = important
+        explicit_suppressed = (
+            "hidden" in values
+            or (values.get("aria-hidden") or "").strip().lower() == "true"
+            or declarations.get("display") == "none"
+            or declarations.get("visibility") == "hidden"
+        )
+        if (
+            tag == "head"
+            and not self.head_seen
+            and all(
+                name == "html" and not suppressed and not visibility
+                for name, suppressed, visibility in self.stack
+            )
+        ):
+            self.head_seen = True
+            self.head_allowed = not explicit_suppressed
+        if (
+            tag == "title"
+            and self.head_allowed
+            and self.stack
+            and self.stack[-1][0] == "head"
+            and not explicit_suppressed
+        ):
+            self.title_depth = len(self.stack) + 1
+        suppressed = (
+            tag
+            in {
+                "head",
+                "title",
+                "script",
+                "style",
+                "template",
+                "noscript",
+                "footer",
+                "nav",
+                "aside",
+            }
+            or "hidden" in values
+            or (values.get("aria-hidden") or "").strip().lower() == "true"
+            or declarations.get("display") == "none"
+        )
+        inherited = self.stack[-1][1] if self.stack else False
+        visibility = self.stack[-1][2] if self.stack else False
+        if declarations.get("visibility") == "hidden":
+            visibility = True
+        elif declarations.get("visibility") == "visible":
+            visibility = False
+        if tag not in {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        }:
+            self.stack.append((tag, inherited or suppressed, visibility))
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self.title_depth = None
+        if tag == "head":
+            self.head_allowed = False
+        for position in range(len(self.stack) - 1, -1, -1):
+            if self.stack[position][0] == tag:
+                del self.stack[position:]
+                break
+
+    def handle_data(self, value):
+        if (
+            self.title_depth is not None
+            and len(self.stack) == self.title_depth
+            and self.stack[-1][0] == "title"
+        ):
+            self.head_title_parts.append(value)
+        if not self.stack or not any(self.stack[-1][1:]):
+            self.parts.append(value)
+
+
+def visible_access_challenge(body, challenge_only=False):
+    """Recognize primary HTML refusals, not arbitrary JS/JSON/PDF strings."""
+    document = body.decode("utf-8-sig", "replace")
+    if not document.lstrip().startswith("<"):
+        return False
+
+    class RefusalText(PrimaryText):
+        """Retain already-visible headlines as independent refusal evidence."""
+
+        def __init__(self, value):
+            self.headlines = []
+            self.heading = None
+            super().__init__(value)
+
+        def handle_starttag(self, tag, attrs):
+            super().handle_starttag(tag, attrs)
+            if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                self.headlines.append([])
+                self.heading = (tag, len(self.headlines) - 1)
+
+        def handle_endtag(self, tag):
+            super().handle_endtag(tag)
+            if self.heading is not None and self.heading[0] == tag:
+                self.heading = None
+
+        def handle_data(self, value):
+            before = len(self.parts)
+            super().handle_data(value)
+            if self.heading is not None and len(self.parts) > before:
+                self.headlines[self.heading[1]].append(value)
+
+    parser = RefusalText(document)
+
+    # This support instruction describes a possible error, not a refusal.
+    # Remove only its own mention; adjacent denials and real HEAD titles stay.
+    def without_instruction(parts):
+        text = " ".join(" ".join(parts).lower().split())
+        return re.sub(
+            r"\bif you see access denied\s*,?\s*"
+            r"(?:please\s+)?contact support\b",
+            " ",
+            text,
+        )
+
+    units = [parser.parts, parser.head_title_parts] + parser.headlines
+    text = " ".join(without_instruction(parts) for parts in units)
+    phrases = (
+        "verify you are human",
+        "verify that you are human",
+        "human verification",
+        "complete the captcha",
+        "enable javascript and cookies to continue",
+        "checking your browser",
+    )
+    if not challenge_only:
+        phrases += (
+            "access denied",
+            "permission denied",
+            "request rejected",
+            "request denied",
+            "request blocked",
+            "unusual traffic",
+        )
+    explicit_title = without_instruction(parser.head_title_parts)
+    return any(phrase in text for phrase in phrases) or bool(
+        re.search(
+            r"just a moment|attention required|access denied|captcha",
+            explicit_title,
+        )
+    )
+
+
+def numeric(value):
+    try:
+        return (
+            type(value) in (int, float) and math.isfinite(value) and value >= 0
+        )
+    except OverflowError:
+        return False
+
+
+def empty_budget(now):
+    return {
+        "schema": 3,
+        "family": FAMILY,
+        "legacy_hold_history": "unlogged_fields_unknown",
+        "research_provenance": {},
+        "starts": [],
+        "interval": 12.2,
+        "until": now + 60,
+        "page_gap": 30,
+        "completed": 0,
+        "inventory_completed": 0,
+        "blocked": False,
+        "in_flight": False,
+        "legacy_429_history": "unknown",
+        "observed_429_since_transition": 0,
+        "rate_limit_until": 0,
+        "observed_at": now,
+    }
+
+
+def validate_budget(state):
+    """Validate retained constraints without resetting unknown history."""
+    if not isinstance(state, dict):
+        raise AdapterError("Invalid publisher state", "access")
+    expected = set(empty_budget(0))
+    if (
+        set(state) != expected
+        or type(state["schema"]) is not int
+        or state["schema"] != 3
+        or state["family"] != FAMILY
+        or any(
+            not numeric(state[k])
+            for k in (
+                "interval",
+                "until",
+                "page_gap",
+                "completed",
+                "inventory_completed",
+                "rate_limit_until",
+                "observed_at",
+            )
+        )
+        or state["interval"] < 12.2
+        or state["page_gap"] < 30
+        or state["legacy_429_history"] != "unknown"
+        or state["legacy_hold_history"] != "unlogged_fields_unknown"
+        or not isinstance(state["research_provenance"], dict)
+        or type(state["blocked"]) is not bool
+        or type(state["in_flight"]) is not bool
+        or type(state["observed_429_since_transition"]) is not int
+        or not 0 <= state["observed_429_since_transition"] <= 100
+        or not isinstance(state["starts"], list)
+        or len(state["starts"]) > 1000
+        or any(
+            not numeric(t) or t > state["observed_at"] for t in state["starts"]
+        )
+        or state["starts"] != sorted(set(state["starts"]))
+        or state["completed"] > state["observed_at"]
+        or state["inventory_completed"] > state["observed_at"]
+        or state["observed_at"] > time.time() + 1
+    ):
+        raise AdapterError("Invalid retained publisher constraints", "access")
+    return state
+
+
+def state_parent(directory=None):
+    """Pin the verified parent and refuse replacement of its current path."""
+    global _STATE_PARENT_FD, _STATE_PARENT_ID, _STATE_PARENT_PATH
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+    directory = directory or (
+        os.path.dirname(_STATE_PATH) if _STATE_PATH else _STATE_PARENT_PATH
+    )
+    if not directory or not os.path.isabs(directory):
+        raise AdapterError("Publisher state parent unavailable", "access")
+    fresh = _STATE_PARENT_FD is None
+    descriptor = (
+        os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        if fresh
+        else _STATE_PARENT_FD
+    )
+    try:
+        info = os.fstat(descriptor)
+        current = os.stat(directory, follow_symlinks=False)
+        identity = (info.st_dev, info.st_ino)
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_mode & 0o077
+            or not stat.S_ISDIR(current.st_mode)
+            or current.st_uid != os.getuid()
+            or current.st_mode & 0o077
+            or identity != (current.st_dev, current.st_ino)
+            or not fresh
+            and (
+                directory != _STATE_PARENT_PATH or identity != _STATE_PARENT_ID
+            )
+        ):
+            raise AdapterError("Publisher state parent changed", "access")
+    except BaseException:
+        _STATE_TRUSTED = False
+        _PUBLISHER_GATE_FAILED = True
+        if fresh:
+            os.close(descriptor)
+        raise
+    if fresh:
+        _STATE_PARENT_FD = descriptor
+        _STATE_PARENT_ID = identity
+        _STATE_PARENT_PATH = directory
+    return descriptor
+
+
+def validate_state_descriptor(descriptor, parent, name):
+    """Bind a safe current journal inode within the retained parent."""
+    info = os.fstat(descriptor)
+    validate_owned_output(info)
+    current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
+        raise AdapterError("Publisher journal path changed", "access")
+    state_parent(_STATE_PARENT_PATH)
+    return info
+
+
+def budget_file():
+    global _STATE_PATH, _STATE_LOCK, _INITIAL_DIRECTORY_PROVEN
+    directory = os.path.join(
+        tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
+    )
+    if _STATE_PARENT_FD is not None:
+        state_parent(directory)
+    else:
+        try:
+            os.mkdir(directory, mode=0o700)
+        except FileExistsError:
+            pass
+        else:
+            _INITIAL_DIRECTORY_PROVEN = True
+    info = os.stat(directory, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_mode & 0o077
+    ):
+        raise AdapterError("Unsafe publisher state directory", "access")
+    state_parent(directory)
+    _STATE_PATH = _STATE_LOCK = os.path.join(
+        directory, hashlib.sha256(b"ut.ee").hexdigest()
+    )
+
+
+def locked_budget():
+    global _JOURNAL_NEW
+    budget_file()
+    parent = state_parent()
+    name = os.path.basename(_STATE_PATH)
+    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+    if (
+        _INITIAL_DIRECTORY_PROVEN
+        and not _RESTORED
+        and (
+            os.environ.get("GITHUB_ACTIONS") == "true"
+            or _VERIFIED_REMOTE_CREATE is not None
+        )
+    ):
+        try:
+            fd = os.open(
+                name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent
+            )
+            _JOURNAL_NEW = True
+        except FileExistsError:
+            fd = os.open(name, flags, dir_fd=parent)
+            _JOURNAL_NEW = False
+    else:
+        fd = os.open(name, flags, dir_fd=parent)
+    try:
+        info = validate_state_descriptor(fd, parent, name)
+    except BaseException:
+        os.close(fd)
+        raise
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_nlink != 1
+        or info.st_mode & 0o077
+    ):
+        os.close(fd)
+        raise AdapterError("Unsafe publisher journal", "access")
+    file = os.fdopen(fd, "r+")
+    try:
+        fcntl.flock(file.fileno(), fcntl.LOCK_EX)
+        return BudgetLock(file, info)
+    except BaseException:
+        file.close()
+        raise
+
+
+def load_budget():
+    parent = state_parent()
+    name = os.path.basename(_STATE_PATH)
+    fd = os.open(
+        name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+    )
+    with os.fdopen(fd, "rb") as file:
+        validate_state_descriptor(file.fileno(), parent, name)
+        raw = file.read(16385)
+        validate_state_descriptor(file.fileno(), parent, name)
+    if len(raw) > 16384:
+        raise AdapterError("Oversized publisher journal", "access")
+    if not raw and _JOURNAL_NEW and _VERIFIED_REMOTE_CREATE is not None:
+        return validate_budget(copy.deepcopy(_VERIFIED_REMOTE_CREATE))
+    if (
+        not raw
+        and _JOURNAL_NEW
+        and os.environ.get("GITHUB_ACTIONS") == "true"
+        and not _RESTORED
+    ):
+        return empty_budget(time.time())
+    try:
+        value = json.loads(raw)
+        return validate_budget(value)
+    except (ValueError, TypeError):
+        raise AdapterError("Corrupt publisher journal", "access") from None
+
+
+def write_budget(state):
+    """Latch and invalidate the original journal on persistence failure."""
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED, _LAST_KNOWN_STATE
+    if _LAST_KNOWN_STATE is None:
+        _LAST_KNOWN_STATE = copy.deepcopy(state)
+    else:
+        _LAST_KNOWN_STATE = merge_budget(_LAST_KNOWN_STATE, state)
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher persistence gate failed", "access")
+    try:
+        return write_budget_body(state)
+    except BaseException:
+        _STATE_TRUSTED = False
+        _PUBLISHER_GATE_FAILED = True
+        invalidate_failed_journal()
+        raise
+
+
+class BudgetLock:
+    """Retain the validated original journal descriptor until unlock."""
+
+    def __init__(self, file, info):
+        self.file = file
+        self.descriptor = file.fileno()
+        _JOURNAL_LOCKS[self.descriptor] = (info.st_dev, info.st_ino)
+
+    def __getattr__(self, name):
+        return getattr(self.file, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def close(self):
+        if self.descriptor is not None:
+            _JOURNAL_LOCKS.pop(self.descriptor, None)
+            self.descriptor = None
+            self.file.close()
+
+
+def invalidate_failed_journal():
+    """Invalidate stale JSON through retained, validated journal FDs."""
+    parent = state_parent()
+    if not _JOURNAL_LOCKS:
+        raise AdapterError(
+            "No retained journal descriptor after failure", "access"
+        )
+    retained = list(_JOURNAL_LOCKS.items())
+    for descriptor, identity in retained:
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_mode & 0o077
+            or info.st_nlink not in (0, 1)
+            or (info.st_dev, info.st_ino) != identity
+        ):
+            raise AdapterError("Publisher journal identity changed", "access")
+    name = os.path.basename(_STATE_PATH)
+    current = os.open(
+        name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+    )
+    try:
+        validate_state_descriptor(current, parent, name)
+        # Atomic replacement may leave the lock on an older safe inode.
+        # Invalidate the current validated journal before those old handles.
+        for descriptor in [current] + [item[0] for item in retained]:
+            os.ftruncate(descriptor, 0)
+            os.fsync(descriptor)
+    finally:
+        os.close(current)
+
+
+def write_budget_body(state):
+    """Persist one validated state while its original journal lock is held."""
+    global _INITIAL_DIRECTORY_PROVEN
+    state = validate_budget(state)
+    parent = state_parent()
+    name = os.path.basename(_STATE_PATH)
+    fd = os.open(
+        name, os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+    )
+    with os.fdopen(fd, "w") as file:
+        info = validate_state_descriptor(file.fileno(), parent, name)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+            or info.st_mode & 0o077
+        ):
+            raise AdapterError("Unsafe publisher journal write", "access")
+        file.seek(0)
+        json.dump(state, file, separators=(",", ":"))
+        file.truncate()
+        file.flush()
+        _INITIAL_DIRECTORY_PROVEN = False
+        os.fsync(file.fileno())
+        validate_state_descriptor(file.fileno(), parent, name)
+
+
+def merge_budget(left, right):
+    left, right = validate_budget(left), validate_budget(right)
+    result = empty_budget(time.time())
+    for key in (
+        "until",
+        "interval",
+        "page_gap",
+        "completed",
+        "inventory_completed",
+        "observed_429_since_transition",
+        "rate_limit_until",
+    ):
+        result[key] = max(left[key], right[key])
+    if (
+        left["research_provenance"]
+        and right["research_provenance"]
+        and left["research_provenance"] != right["research_provenance"]
+    ):
+        raise AdapterError("Research provenance differs across state", "access")
+    result["research_provenance"] = (
+        left["research_provenance"] or right["research_provenance"]
+    )
+    result["starts"] = sorted(set(left["starts"] + right["starts"]))
+    result["blocked"] = left["blocked"] or right["blocked"]
+    result["in_flight"] = left["in_flight"] or right["in_flight"]
+    return validate_budget(result)
+
+
+def remaining():
+    check_deadline()
+    return min(_RUN_END - EXPORT_TIMEOUT, _PHASE_END) - time.monotonic()
+
+
+def pace(interval=12.2):
+    """Hold the physical journal lock through the response completion."""
+    lock = locked_budget()
+    try:
+        state = load_budget()
+        if state["in_flight"]:
+            raise AdapterError("Unsettled publisher request retained", "access")
+        if state["blocked"]:
+            raise AdapterError("Retained actual publisher refusal", "access")
+        if state["observed_429_since_transition"] >= 100:
+            raise AdapterError(
+                "Unsupported retained429 history; no traffic", "access"
+            )
+        state["interval"] = max(state["interval"], interval, 12.2)
+        if state["rate_limit_until"] > time.time():
+            raise AdapterError(
+                "Retained publisher rate-limit embargo", "access", 429
+            )
+        while True:
+            now = time.time()
+            recent = [t for t in state["starts"] if now - t < 60]
+            ready = max(
+                state["until"],
+                state["completed"] + state["interval"],
+                recent[-1] + state["interval"] if recent else now,
+                recent[-5] + 60 if len(recent) >= 5 else now,
+            )
+            if ready - now + 30 >= remaining():
+                raise AdapterError(
+                    "Retained pacing exceeds remaining collection budget",
+                    "access",
+                )
+            if ready <= now:
+                state["starts"] = recent + [now]
+                state["observed_at"] = now
+                state["in_flight"] = True
+                write_budget(state)
+                return lock, state
+            time.sleep(min(ready - now, 30))
+    except BaseException:
+        lock.close()
+        raise
+
+
+def retain_refusal():
+    with locked_budget():
+        state = load_budget()
+        state["blocked"] = True
+        state["observed_at"] = time.time()
+        write_budget(state)
+
+
+def retry_embargo(value):
+    """Return finite future timing without mutating malformed input."""
+    if value is None:
+        return 0
+    try:
+        value = value.strip()
+        if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value):
+            until = time.time() + float(value)
+        else:
+            date = email.utils.parsedate_to_datetime(value)
+            if date.utcoffset() is None:
+                return 0
+            until = date.timestamp()
+        if not numeric(until) or until <= time.time():
+            return 0
+        datetime.fromtimestamp(until, timezone.utc)
+        return until
+    except (ValueError, TypeError, OverflowError, OSError, AttributeError):
+        return 0
+
+
+def legacy_transport_pace(url, interval=6):
+    """Lock shared publisher pacing state across overlapping local processes.
+
+    State lives outside the checkout. The advisory lock stays held until the
+    response and any Retry-After are recorded, so parallel runs cannot race.
+    Production uses a serialized Action; separate machines must not overlap.
+    """
+    host = (
+        (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
+    )
+    directory = os.path.join(
+        tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
+    )
+    if _STATE_PARENT_FD is not None:
+        state_parent(directory)
+    else:
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+    information = os.lstat(directory)
+    if (
+        not os.path.isdir(directory)
+        or os.path.islink(directory)
+        or information.st_uid != os.getuid()
+        or information.st_mode & 0o077
+    ):
+        raise AdapterError("Unsafe publisher pacing directory", "access")
+    parent = state_parent(directory)
+    key = hashlib.sha256(host.encode()).hexdigest()
+    descriptor = os.open(
+        key,
+        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+        0o600,
+        dir_fd=parent,
+    )
+    try:
+        validate_state_descriptor(descriptor, parent, key)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    state = os.fdopen(descriptor, "r+", encoding="utf-8")
+    try:
+        fcntl.flock(state.fileno(), fcntl.LOCK_EX)
+        raw = state.read()
+        budget = (
+            json.loads(raw)
+            if raw
+            else {"starts": [], "interval": 6, "until": 0}
+        )
+        budget["interval"] = max(budget["interval"], interval, 6)
+        while True:
+            now = time.time()
+            budget["starts"] = [
+                start for start in budget["starts"] if now - start < 60
+            ]
+            ready = max(
+                budget["until"],
+                (
+                    budget["starts"][-1] + budget["interval"]
+                    if budget["starts"]
+                    else now
+                ),
+                (
+                    budget["starts"][0] + 60
+                    if len(budget["starts"]) >= 10
+                    else now
+                ),
+            )
+            if ready <= now:
+                budget["starts"].append(now)
+                save_transport_budget(state, budget)
+                return state, budget
+            time.sleep(min(ready - now, 60))
+    except Exception:
+        state.close()
+        raise
+
+
+def save_transport_budget(state, budget):
+    state_parent(_STATE_PARENT_PATH)
+    state.seek(0)
+    json.dump(budget, state)
+    state.truncate()
+    state.flush()
+    os.fsync(state.fileno())
+    state_parent(_STATE_PARENT_PATH)
+
+
+def legacy_request_bytes(
+    url, *, interval=6, method="GET", headers=None, payload=None
+):
+    state, budget = legacy_transport_pace(url, interval)
+    try:
+        request = urllib.request.Request(
+            url,
+            data=payload,
+            method=method,
+            headers={"User-Agent": _USER_AGENT, **(headers or {})},
+        )
+        try:
+            response = _OPENER.open(request, timeout=request_timeout())
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            retry = response.headers.get("Retry-After")
+            if retry:
+                try:
+                    seconds = (
+                        float(retry)
+                        if re.fullmatch(r"\d+(?:\.\d+)?", retry)
+                        else email.utils.parsedate_to_datetime(
+                            retry
+                        ).timestamp()
+                        - time.time()
+                    )
+                    budget["until"] = max(
+                        budget["until"], time.time() + max(0, seconds)
+                    )
+                    save_transport_budget(state, budget)
+                except (ValueError, TypeError, OverflowError):
+                    pass
+            body = response.read(5_000_001)
+            if len(body) > 5_000_000:
+                raise AdapterError("Response exceeds 5 MB", "fetch")
+            return response.status, response.headers, body
+    finally:
+        state.close()
+
+
+def infrastructure_pace(url):
+    """Honor new metadata embargoes without adding a publication floor."""
+    host = urllib.parse.urlsplit(url).hostname
+    while True:
+        wait = _INFRASTRUCTURE_UNTIL.get(host, 0) - time.time()
+        if wait <= 0:
+            return
+        if wait + 1 >= remaining():
+            raise AdapterError("GitHub embargo exceeds phase budget", "access")
+        time.sleep(min(wait, 30))
+
+
+def retain_infrastructure_retry(url, value):
+    host = urllib.parse.urlsplit(url).hostname
+    _INFRASTRUCTURE_UNTIL[host] = max(
+        _INFRASTRUCTURE_UNTIL.get(host, 0), retry_embargo(value)
+    )
+
+
+def request_bytes(
+    url,
+    *,
+    interval=6,
+    method="GET",
+    headers=None,
+    payload=None,
+    robots=False,
+    byte_limit=5_000_000,
+    infrastructure=False,
+):
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher persistence gate failed", "access")
+    if type(byte_limit) is not int or not 0 < byte_limit <= 5_000_000:
+        raise AdapterError("Invalid response byte bound", "fetch")
+    if robots and urllib.parse.urlsplit(url).path != "/robots.txt":
+        raise AdapterError(
+            "Robots purpose requires literal robots.txt", "access"
+        )
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    publisher = host == "ut.ee" or host.endswith(".ut.ee")
+    if not publisher and not infrastructure:
+        if byte_limit != 5_000_000:
+            raise AdapterError("Invalid legacy transport byte bound", "fetch")
+        return legacy_request_bytes(
+            url,
+            interval=interval,
+            method=method,
+            headers=headers,
+            payload=payload,
+        )
+    if infrastructure:
+        if publisher:
+            raise AdapterError(
+                "Publisher cannot use metadata purpose", "access"
+            )
+        infrastructure_pace(url)
+    if publisher and (not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
+        raise AdapterError(
+            "Trusted publisher state required before access", "access"
+        )
+    if publisher and _INVENTORY_ACTIVE and not robots:
+        inventory_guard()
+    lock, state = pace(interval) if publisher else (None, None)
+    attempted = response_received = response_constraints_saved = False
+    retryable_connection_failure = False
+    try:
+        if publisher:
+            verify_local_publisher_start()
+        request = urllib.request.Request(
+            url,
+            data=payload,
+            method=method,
+            headers={**(headers or {}), "User-Agent": _USER_AGENT},
+        )
+        if publisher:
+            print(
+                json.dumps(
+                    {
+                        "event": "request_start",
+                        "url": url,
+                        "time": time.time(),
+                        "user_agent": request.get_header("User-agent"),
+                    }
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+        try:
+            attempted = True
+            response = _OPENER.open(request, timeout=request_timeout(publisher))
+        except urllib.error.HTTPError as error:
+            response = error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            reason = getattr(error, "reason", error)
+            if publisher and isinstance(reason, ssl.SSLError):
+                raise AdapterError(
+                    "Publisher TLS verification failed; pending retained",
+                    "access",
+                ) from error
+            if publisher and not (
+                isinstance(reason, (ConnectionError, TimeoutError))
+                or isinstance(reason, OSError)
+                and reason.errno
+                in (
+                    errno.ECONNABORTED,
+                    errno.ECONNREFUSED,
+                    errno.ECONNRESET,
+                    errno.EHOSTDOWN,
+                    errno.EHOSTUNREACH,
+                    errno.ENETDOWN,
+                    errno.ENETUNREACH,
+                    errno.EPIPE,
+                    errno.ETIMEDOUT,
+                )
+            ):
+                raise AdapterError(
+                    "Unclassified connection failure; pending retained",
+                    "access",
+                ) from error
+            retryable_connection_failure = True
+            raise
+        response_received = True
+        with response:
+            status = response.status
+            if infrastructure:
+                retain_infrastructure_retry(
+                    url, response.headers.get("Retry-After")
+                )
+            if publisher:
+                state["until"] = max(
+                    state["until"],
+                    retry_embargo(response.headers.get("Retry-After")),
+                )
+                if status == 429:
+                    strikes = state["observed_429_since_transition"] + 1
+                    state["observed_429_since_transition"] = strikes
+                    state["interval"] = max(
+                        state["interval"] * 2, 12.2 * 2**strikes
+                    )
+                    state["page_gap"] = max(
+                        state["page_gap"] * 2, 30 * 2**strikes
+                    )
+                    state["until"] = max(
+                        state["until"], time.time() + 1800 * 2 ** (strikes - 1)
+                    )
+                    state["rate_limit_until"] = max(
+                        state["rate_limit_until"], state["until"]
+                    )
+                if status in (401, 403, 451) and not robots:
+                    state["blocked"] = True
+                state["observed_at"] = time.time()
+                write_budget(state)
+            try:
+                body = response.read(byte_limit + 1)
+            except Exception as error:
+                if publisher:
+                    raise AdapterError(
+                        "Publisher body incomplete; pending state retained",
+                        "access",
+                        status,
+                    ) from error
+                raise
+            if len(body) > byte_limit:
+                raise AdapterError("Response exceeds5MB", "fetch")
+            challenge = (
+                publisher
+                and not (robots and 400 <= status < 500 and status != 429)
+                and visible_access_challenge(body, status == 429)
+            )
+            if publisher and not (robots and status == 200):
+                response_constraints_saved = True
+            if challenge:
+                if not robots or status == 429:
+                    state["blocked"] = True
+                raise AdapterError(
+                    "Visible publisher verification or refusal", "access"
+                )
+            if publisher and robots and status == 200:
+                response_constraints_saved = False
+                target = (
+                    _ROBOTS_CONTEXT["target"]
+                    if _ROBOTS_CONTEXT is not None
+                    else SOURCE_URL
+                )
+                text = body.decode(
+                    response.headers.get_content_charset() or "utf-8"
+                )
+                try:
+                    delay = apply_robots_policy(text, target, state)
+                except RobotsDisallow:
+                    response_constraints_saved = True
+                    raise
+                if _ROBOTS_CONTEXT is not None:
+                    _ROBOTS_CONTEXT["delay"] = delay
+                response_constraints_saved = True
+            if publisher and status == 429:
+                raise AdapterError(
+                    "Publisher429; durable adaptive cooldown retained",
+                    "access",
+                    429,
+                )
+            return status, response.headers, body
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        if publisher and response_received:
+            raise AdapterError(
+                "Received publisher response failed; no connection retry",
+                "access",
+            ) from error
+        raise
+    finally:
+        if lock is not None:
+            try:
+                state["completed"] = state["observed_at"] = time.time()
+                if (
+                    attempted
+                    and not _PUBLISHER_GATE_FAILED
+                    and (
+                        response_constraints_saved
+                        or not response_received
+                        and retryable_connection_failure
+                    )
+                ):
+                    state["in_flight"] = False
+                if _INVENTORY_ACTIVE and not robots:
+                    state["inventory_completed"] = state["completed"]
+                try:
+                    write_budget(state)
+                    if state["in_flight"]:
+                        _STATE_TRUSTED = False
+                        _PUBLISHER_GATE_FAILED = True
+                except BaseException:
+                    _STATE_TRUSTED = False
+                    _PUBLISHER_GATE_FAILED = True
+                    raise
+                print(
+                    json.dumps(
+                        {
+                            "event": "request_complete",
+                            "url": url,
+                            "time": time.time(),
+                        }
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+            finally:
+                lock.close()
+
+
+def inventory_guard():
+    """Each physical inventory retry/redirect retains the completion gap."""
+    with locked_budget():
+        state = load_budget()
+    while True:
+        wait = state["inventory_completed"] + state["page_gap"] - time.time()
+        if wait <= 0:
+            return
+        if wait + 30 >= remaining():
+            raise AdapterError(
+                "Page guard exceeds remaining collection budget", "access"
+            )
+        time.sleep(min(wait, 30))
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    global _INVENTORY_ACTIVE
+    previous = _INVENTORY_ACTIVE
+    _INVENTORY_ACTIVE = True
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _INVENTORY_ACTIVE = previous
+
+
+def prepare_collection():
+    global _COLLECTION_LOCK_FD, _STATE_TRUSTED, _LOCAL_FIRST_ACCESS_CHECKED
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher completion persistence failed", "access")
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        local_workflow_definition()
+    if _COLLECTION_LOCK_FD is None:
+        path = os.path.join(tempfile.gettempdir(), SOURCE_ID + ".lock")
+        fd = os.open(
+            path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600
+        )
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+            or info.st_mode & 0o077
+        ):
+            os.close(fd)
+            raise AdapterError("Unsafe lifecycle lock", "access")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            raise AdapterError(
+                "Another publisher collector is active", "access"
+            ) from None
+        _COLLECTION_LOCK_FD = fd
+    if _STATE_TRUSTED and os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    _LOCAL_FIRST_ACCESS_CHECKED = False
+    budget_file()
+    restore_family_artifact()
+    _STATE_TRUSTED = True
+
+
+def check_deadline():
+    if _PHASE_END is None or _RUN_END is None:
+        raise AdapterError("Bounded execution context required", "access")
+    if time.monotonic() >= min(_PHASE_END, _RUN_END):
+        raise PhaseExpired()
+
+
+def request_timeout(publisher=False):
+    check_deadline()
+    remaining = min(_PHASE_END, _RUN_END) - time.monotonic()
+    if remaining <= 0:
+        raise PhaseExpired()
+    return min(30, remaining)
+
+
+def alarm_expired(signum, frame):
+    raise PhaseExpired()
+
+
+def arm_alarm(deadline):
+    """Keep the absolute alarm armed even outside named phases."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise PhaseExpired()
+    signal.setitimer(signal.ITIMER_REAL, remaining)
+
+
+@contextlib.contextmanager
+def execution():
+    global _RUN_END, _COLLECTION_LOCK_FD
+    if _RUN_END is not None:
+        raise AdapterError("Nested execution context refused", "access")
+    previous = signal.getsignal(signal.SIGALRM)
+    if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
+        raise AdapterError("Existing process alarm refused", "access")
+    signal.signal(signal.SIGALRM, alarm_expired)
+    _RUN_END = time.monotonic() + RUN_TIMEOUT
+    arm_alarm(_RUN_END - EXPORT_TIMEOUT)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+        _RUN_END = None
+        if _COLLECTION_LOCK_FD is not None:
+            try:
+                os.close(_COLLECTION_LOCK_FD)
+            except OSError:
+                pass
+            _COLLECTION_LOCK_FD = None
+
+
+@contextlib.contextmanager
+def phase(name, seconds, reserve=EXPORT_TIMEOUT):
+    global _PHASE_END, _PHASE_NAME
+    if _PHASE_END is not None or _RUN_END is None:
+        raise AdapterError("Invalid phase transition", "access")
+    _PHASE_NAME = name
+    limit = _RUN_END if name == "export" else _RUN_END - reserve
+    _PHASE_END = min(time.monotonic() + seconds, limit)
+    try:
+        check_deadline()
+        arm_alarm(_PHASE_END)
+        yield
+        check_deadline()
+    finally:
+        _PHASE_END = _PHASE_NAME = None
+        arm_alarm(limit)
+
+
+def local_workflow_definition():
+    """Require the exact publisher workflow paused during local collection."""
+    definition = workflow_api(f"/actions/workflows/{_WORKFLOW_ID}")
+    if (
+        definition.get("id") != _WORKFLOW_ID
+        or definition.get("path") != f".github/workflows/fetch-{SOURCE_ID}.yml"
+        or definition.get("state") != "disabled_manually"
+    ):
+        raise AdapterError(
+            "Local collection requires its paused publisher workflow", "access"
+        )
+
+
+def reviewed_local_legacy_state():
+    """Authenticate the existing reviewed research origin, never reset state."""
+    marker = _LOCAL_RESEARCH_MIGRATION
+    if (
+        not isinstance(marker, dict)
+        or set(marker) != {"source", "sha256", "evidence"}
+        or marker.get("source") != SOURCE_ID
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/279"
+            r"#issuecomment-[0-9]+",
+            marker.get("evidence", ""),
+        )
+    ):
+        raise AdapterError("Reviewed local legacy transition missing", "access")
+    with locked_budget():
+        current = load_budget()
+        original = json.dumps(
+            current["research_provenance"], sort_keys=True
+        ).encode()
+        if hashlib.sha256(original).hexdigest() != marker["sha256"]:
+            raise AdapterError("Local legacy research origin changed", "access")
+        return current
+
+
+def verify_local_publisher_start():
+    """Recheck remote continuity after the local startup quiet guard."""
+    global _LOCAL_FIRST_ACCESS_CHECKED
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        or _LOCAL_FIRST_ACCESS_CHECKED
+    ):
+        return
+    latest = latest_family_run()
+    current = (_SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS)
+    if latest != _RESTORED_LATEST or current != _RESTORED_HISTORY:
+        raise AdapterError(
+            "Family history changed before local publisher access", "access"
+        )
+    local_workflow_definition()
+    _LOCAL_FIRST_ACCESS_CHECKED = True
+
+
+def workflow_api(path):
+    """Read verified workflow metadata without publication permissions."""
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token and os.environ.get("GITHUB_ACTIONS") == "true":
+        raise AdapterError("Workflow state credentials missing", "access")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Cache-Control": "no-cache, no-store",
+        "Pragma": "no-cache",
+    }
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    nonce = urllib.parse.urlencode({"state_read": time.time_ns()})
+    path += ("&" if "?" in path else "?") + nonce
+    try:
+        status, _, body = request_bytes(
+            _WORKFLOW_GITHUB + path,
+            headers=headers,
+            infrastructure=True,
+        )
+        if status != 200:
+            raise ValueError("Workflow API status")
+        return json.loads(body)
+    except Exception:
+        raise AdapterError(
+            ("Workflow pacing state unavailable"), ("access")
+        ) from None
+
+
+def current_run_identity():
+    if (
+        os.environ.get("GITHUB_REPOSITORY") != "YouthOpps/data-pipeline"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+    ):
+        raise AdapterError("Unexpected workflow repository", "access")
+    values = [
+        os.environ.get(key, "")
+        for key in (("GITHUB_RUN_ID"), ("GITHUB_RUN_ATTEMPT"))
+    ]
+    if any(not re.fullmatch(r"[1-9][0-9]*", value) for value in values):
+        raise AdapterError("Invalid workflow run identity", "access")
+    return tuple(map(int, values))
+
+
+def family_source(run):
+    path = run.get("path", "")
+    for source in FAMILY_SOURCES:
+        if path == ".github/workflows/fetch-" + source + ".yml":
+            return source
+    return None
+
+
+def attempt_completion(identity, attempt, head):
+    """Use exact-attempt job completion rather than mutable run updates."""
+    total, jobs_seen = None, set()
+    finished = []
+    for page in range(1, 101):
+        result = workflow_api(
+            f"/actions/runs/{identity}/attempts/{attempt}/jobs"
+            f"?per_page=100&page={page}"
+        )
+        _SCANNED_JOB_DIGESTS[(identity, attempt, page)] = hashlib.sha256(
+            json.dumps(result, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        count, jobs = result.get("total_count"), result.get("jobs")
+        if count == 0 and jobs == []:
+            marker = _LEGACY_NO_JOB.get(identity)
+            if (
+                page != 1
+                or attempt != 1
+                or not marker
+                or marker["head_sha"] != head
+                or _SCANNED_JOB_DIGESTS[(identity, attempt, page)]
+                != marker["jobs_sha256"]
+            ):
+                raise ValueError("Unreviewed empty exact-attempt jobs")
+            return None
+        if (
+            type(count) is not int
+            or count <= 0
+            or not isinstance(jobs, list)
+            or len(jobs) > 100
+            or total is not None
+            and total != count
+        ):
+            raise ValueError("Incomplete exact-attempt job inventory")
+        total = count
+        for job in jobs:
+            if (
+                not isinstance(job, dict)
+                or type(job.get("id")) is not int
+                or job["id"] <= 0
+                or job["id"] in jobs_seen
+                or type(job.get("run_id")) is not int
+                or job["run_id"] != identity
+                or type(job.get("run_attempt")) is not int
+                or job["run_attempt"] != attempt
+                or job.get("head_sha") != head
+                or job.get("head_branch") != "main"
+                or job.get("status") != "completed"
+            ):
+                raise ValueError("Untrusted exact-attempt job")
+            jobs_seen.add(job["id"])
+            value = datetime.fromisoformat(
+                job["completed_at"].replace("Z", "+00:00")
+            )
+            if value.utcoffset() is None:
+                raise ValueError("Missing job completion timezone")
+            finished.append(value.timestamp())
+        if len(jobs_seen) == total:
+            return max(finished)
+        if len(jobs_seen) > total or len(jobs) != 100:
+            raise ValueError("Truncated exact-attempt job inventory")
+    raise ValueError("Exact-attempt job inventory exceeds bound")
+
+
+def completed_identity(run, expected=None, revision=None):
+    """Bind a completed attempt and its chronological publisher interval."""
+    try:
+        source = family_source(run)
+        identity, attempt = run["id"], run["run_attempt"]
+        if (
+            not source
+            or type(identity) is not int
+            or identity <= 0
+            or type(attempt) is not int
+            or attempt <= 0
+            or run["status"] != "completed"
+            or run["repository"]["full_name"] != "YouthOpps/data-pipeline"
+            or run[("head_repository")][("full_name")]
+            != ("YouthOpps/data-pipeline")
+            or run["head_branch"] != "main"
+            or not re.fullmatch(r"[0-9a-f]{40}", run.get("head_sha", ""))
+            or type(run.get("workflow_id")) is not int
+            or run["workflow_id"] != _WORKFLOW_ID
+            or revision is not None
+            and (run["head_sha"], run["workflow_id"]) != revision
+            or expected
+            and (identity, attempt, source) != expected
+        ):
+            raise ValueError("Untrusted completed attempt")
+        if identity in _LEGACY_NO_JOB and attempt == 1:
+            marker = _LEGACY_NO_JOB[identity]
+            if (
+                run["head_sha"] != marker["head_sha"]
+                or run.get("conclusion") != marker["conclusion"]
+                or run.get("created_at") != marker["created_at"]
+            ):
+                raise ValueError("Reviewed cancelled attempt changed")
+            finished = attempt_completion(identity, attempt, run["head_sha"])
+            if finished is not None:
+                raise ValueError("Reviewed no-job attempt now contains jobs")
+            _ATTEMPT_HEADS[(identity, attempt)] = run["head_sha"]
+            return None
+        value = datetime.fromisoformat(
+            run["run_started_at"].replace("Z", "+00:00")
+        )
+        if value.utcoffset() is None:
+            raise ValueError("Missing attempt timezone")
+        began = value.timestamp()
+        finished = attempt_completion(identity, attempt, run["head_sha"])
+        if not 0 <= began <= finished <= time.time() + 1:
+            raise ValueError("Invalid attempt chronology")
+        _ATTEMPT_HEADS[(identity, attempt)] = run["head_sha"]
+        return finished, began, identity, attempt, source
+    except Exception:
+        raise AdapterError(
+            ("Untrusted completed family attempt"), ("access")
+        ) from None
+
+
+def latest_family_run():
+    """Restart only count-drift races, without reusing partial candidates."""
+    for attempt in range(3):
+        try:
+            return scan_family_history()
+        except InventoryRace:
+            if attempt == 2:
+                raise AdapterError(
+                    "Workflow inventory remained unstable", "access"
+                ) from None
+
+
+def scan_family_history():
+    """Select completed chronology, including older-ID rerun attempts."""
+    global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
+    _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    current_id, current_attempt = (
+        current_run_identity() if hosted else (None, None)
+    )
+    if not hosted:
+        local_workflow_definition()
+    current_seen = False
+    candidates = []
+    total, scanned = None, 0
+    seen_ids = set()
+    for page in range(1, 101):
+        route = (
+            "/actions/workflows/fetch-ee-university-of-tartu.yml/runs"
+            if hosted
+            else f"/actions/workflows/{_WORKFLOW_ID}/runs"
+        )
+        result = workflow_api(route + f"?per_page=100&page={page}")
+        count, runs = result.get("total_count"), result.get("workflow_runs")
+        if (
+            type(count) is not int
+            or count < 0
+            or not isinstance(runs, list)
+            or len(runs) > 100
+        ):
+            raise AdapterError("Invalid workflow run inventory", "access")
+        if total is None:
+            total = count
+        elif total != count:
+            raise InventoryRace(
+                ("Workflow inventory changed during restore"), ("access")
+            )
+        scanned += len(runs)
+        for run in runs:
+            if not isinstance(run, dict):
+                raise AdapterError("Invalid workflow run entry", "access")
+            run_id = run.get("id")
+            if type(run_id) is not int or run_id <= 0 or run_id in seen_ids:
+                raise AdapterError(
+                    "Invalid or duplicate workflow run identity", "access"
+                )
+            seen_ids.add(run_id)
+            source = family_source(run)
+            if not source:
+                if not hosted:
+                    raise AdapterError(
+                        "Unexpected local family workflow", "access"
+                    )
+                continue
+            if not hosted and run.get("status") != "completed":
+                raise AdapterError(
+                    "Local collection requires terminal family history",
+                    "access",
+                )
+            if (
+                run.get(("repository"), {}).get(("full_name"))
+                != ("YouthOpps/data-pipeline")
+                or run.get("head_repository", {}).get("full_name")
+                != ("YouthOpps/data-pipeline")
+                or run.get(("head_branch")) != ("main")
+            ):
+                raise AdapterError(
+                    ("Workflow repository or branch mismatch"), ("access")
+                )
+            identity, attempt = run.get("id"), run.get("run_attempt")
+            if (
+                type(identity) is not int
+                or identity <= 0
+                or type(attempt) is not int
+                or attempt <= 0
+            ):
+                raise AdapterError("Invalid family run identity", "access")
+            if identity != current_id:
+                _SCANNED_HISTORY[(identity, attempt)] = (
+                    run.get("head_sha"),
+                    run.get("workflow_id"),
+                )
+            if identity == current_id:
+                if (
+                    run.get("head_sha") != os.environ.get("GITHUB_SHA")
+                    or run.get("workflow_id") != _WORKFLOW_ID
+                ):
+                    raise AdapterError(
+                        "Current workflow head or identity changed", "access"
+                    )
+                if attempt != current_attempt:
+                    raise AdapterError(
+                        ("Current workflow attempt mismatch"), ("access")
+                    )
+                current_seen = True
+                if current_attempt > 1:
+                    prior = workflow_api(
+                        (
+                            f"/actions/runs/{identity}/attempts/"
+                            f"{current_attempt - 1}"
+                        )
+                    )
+                    candidates.append(
+                        completed_identity(
+                            prior,
+                            (identity, current_attempt - 1, source),
+                            (run.get("head_sha"), run.get("workflow_id")),
+                        )
+                    )
+                continue
+            if run.get(("status")) in (
+                ("queued"),
+                ("waiting"),
+                ("pending"),
+                ("requested"),
+            ):
+                if attempt > 1:
+                    prior = workflow_api(
+                        f"/actions/runs/{identity}/attempts/{attempt - 1}"
+                    )
+                    candidates.append(
+                        completed_identity(
+                            prior,
+                            (identity, attempt - 1, source),
+                            (run.get("head_sha"), run.get("workflow_id")),
+                        )
+                    )
+                continue
+            if run.get("status") != "completed":
+                raise AdapterError("Another family run is active", "access")
+            candidates.append(completed_identity(run))
+        if scanned >= total:
+            if scanned != total:
+                raise AdapterError(
+                    ("Workflow inventory count mismatch"), ("access")
+                )
+            if hosted and not current_seen:
+                raise AdapterError(
+                    "Current workflow absent from complete history", "access"
+                )
+            if not candidates:
+                return None
+            ordered = sorted(c for c in candidates if c is not None)
+            if not ordered:
+                raise AdapterError(
+                    "No trusted executed family attempt", "access"
+                )
+            if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
+                raise AdapterError(
+                    ("Ambiguous family attempt chronology"), ("access")
+                )
+            return ordered[-1][2:]
+        if len(runs) != 100:
+            raise AdapterError("Incomplete workflow inventory", "access")
+    raise AdapterError("Workflow inventory exceeds reviewed bound", "access")
+
+
+class InventoryRace(AdapterError):
+    """The advertised complete workflow inventory changed during reading."""
+
+
+def source_revision_digest(head):
+    """Bind an artifact code digest to its authenticated source revision."""
+    if not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+        raise ValueError("Invalid source revision")
+    path = "adapters/" + SOURCE_ID + "/adapter.py"
+    result = workflow_api("/contents/" + path + "?ref=" + head)
+    if result.get("path") != path or result.get("encoding") != "base64":
+        raise ValueError("Unexpected source revision response")
+    content = base64.b64decode(result["content"], validate=False)
+    if len(content) != result.get("size") or len(content) > 5_000_000:
+        raise ValueError("Invalid source revision size")
+    blob = b"blob " + str(len(content)).encode() + b"\0" + content
+    if hashlib.sha1(blob).hexdigest() != result.get("sha"):
+        raise ValueError("Source revision blob mismatch")
+    return hashlib.sha256(content).hexdigest()
+
+
+def download_inert_artifact(identity, artifact_id, digest=None):
+    (
+        "Download a bounded authenticated artifact, stripping "
+        "cross-origin auth."
+    )
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token and os.environ.get("GITHUB_ACTIONS") == "true":
+        raise AdapterError("Workflow state credentials missing", "access")
+    headers = {
+        "User-Agent": _USER_AGENT,
+        "Accept": "application/vnd.github+json",
+    }
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    url = _WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip"
+    request = urllib.request.Request(
+        url,
+        headers=headers,
+    )
+    infrastructure_pace(url)
+    try:
+        try:
+            response = _OPENER.open(request, timeout=request_timeout())
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            retain_infrastructure_retry(
+                url, response.headers.get("Retry-After")
+            )
+            if response.status != 302:
+                raise ValueError("Expected artifact redirect")
+            destination = response.headers.get("Location", "")
+            response.read(1001)
+        parsed = urllib.parse.urlsplit(destination)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.port
+        ):
+            raise ValueError("Unsafe artifact URL")
+        if "." not in parsed.hostname or parsed.hostname.endswith(
+            ((".local"), (".internal"), (".localhost"))
+        ):
+            raise ValueError("Private artifact hostname")
+        try:
+            ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("Literal artifact address")
+        # Signed URL is never stored or included in exceptions; no auth header.
+        status, _, body = request_bytes(
+            destination, byte_limit=32768, infrastructure=True
+        )
+        if status != 200 or len(body) > 32768:
+            raise ValueError("Invalid artifact response")
+        if digest is not None:
+            if (
+                not isinstance(digest, str)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+                or digest[7:] != hashlib.sha256(body).hexdigest()
+            ):
+                raise ValueError("Artifact digest mismatch")
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            entries = archive.infolist()
+            if len(entries) != 1 or entries[0].filename != "pacing-state.json":
+                raise ValueError("Unexpected artifact members")
+            entry = entries[0]
+            if entry.file_size > 16384 or entry.flag_bits & 1:
+                raise ValueError("Oversized or encrypted state")
+            if entry.external_attr >> 16 & 0o170000 == 0o120000:
+                raise ValueError("State symlink")
+            raw = archive.read(entry)
+        envelope = json.loads(raw)
+        if not isinstance(envelope, dict) or set(envelope) != {
+            "schema",
+            "repository",
+            "run_id",
+            "run_attempt",
+            "source",
+            "head_sha",
+            "adapter_sha256",
+            "state_sha256",
+            "state",
+        }:
+            raise ValueError("Invalid artifact envelope")
+        run_id, attempt, source = identity
+        if (
+            type(envelope["schema"]) is not int
+            or envelope["schema"] != 1
+            or envelope["repository"] != "YouthOpps/data-pipeline"
+            or type(envelope["run_id"]) is not int
+            or type(envelope["run_attempt"]) is not int
+            or envelope["run_id"] != run_id
+            or envelope["run_attempt"] != attempt
+            or envelope["source"] != source
+            or envelope["head_sha"] != _ATTEMPT_HEADS.get((run_id, attempt))
+            or envelope["adapter_sha256"]
+            != source_revision_digest(envelope["head_sha"])
+            or envelope["state_sha256"]
+            != hashlib.sha256(
+                json.dumps(
+                    envelope["state"], sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+        ):
+            raise ValueError("Artifact ownership mismatch")
+        return validate_budget(envelope["state"])
+    except Exception:
+        raise AdapterError(
+            ("Invalid or unavailable family pacing artifact"), ("access")
+        ) from None
+
+
+def source_file_digest():
+    """Hash this standalone implementation without retaining its contents."""
+    descriptor = os.open(__file__, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        current = os.stat(__file__, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+            or info.st_mode & 0o022
+            or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise AdapterError("Unsafe implementation file", "access")
+        content = stream.read(5_000_001)
+        current = os.stat(__file__, follow_symlinks=False)
+        if (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
+            raise AdapterError("Implementation file changed", "access")
+    if len(content) > 5_000_000:
+        raise AdapterError(
+            "Source implementation exceeds reviewed bound", "access"
+        )
+    return hashlib.sha256(content).hexdigest()
+
+
+
+@contextlib.contextmanager
+def owned_artifact_directory(path):
+    """Pin the verified directory for all relative artifact operations."""
+    root, before = checked_artifact_path(path)
+    descriptor = os.open(
+        root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+    )
+    try:
+        held = os.fstat(descriptor)
+        if (held.st_dev, held.st_ino) != (before.st_dev, before.st_ino):
+            raise AdapterError("Artifact directory changed", "access")
+        verify_artifact_directory(root, descriptor)
+        yield root, descriptor
+    finally:
+        os.close(descriptor)
+
+
+def verify_artifact_directory(root, descriptor):
+    """Reject replacement parents without following their contents."""
+    held = os.fstat(descriptor)
+    current = os.stat(root, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(current.st_mode)
+        or current.st_uid != os.getuid()
+        or current.st_mode & 0o022
+        or (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino)
+    ):
+        raise AdapterError("Artifact directory changed", "access")
+
+
+def owned_artifact_info(root, directory):
+    """Inspect only the current safely owned artifact in the pinned parent."""
+    verify_artifact_directory(root, directory)
+    try:
+        info = os.stat(
+            "pacing-state.json", dir_fd=directory, follow_symlinks=False
+        )
+    except FileNotFoundError:
+        return None
+    validate_owned_output(info)
+    return info
+
+
+def same_owned_artifact(root, directory, expected):
+    """Prevent replacing or unlinking an independently replaced file."""
+    current = owned_artifact_info(root, directory)
+    if current is None or expected is None:
+        same = current is None and expected is None
+    else:
+        same = (current.st_dev, current.st_ino) == (
+            expected.st_dev,
+            expected.st_ino,
+        )
+    if not same:
+        raise AdapterError("Owned artifact identity changed", "access")
+
+
+def workflow_output_signal(value):
+    """Append readiness only to a nonblocking, verified regular signal."""
+    descriptor = os.open(
+        os.environ["GITHUB_OUTPUT"],
+        os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
+    )
+    with os.fdopen(descriptor, "a") as output:
+        info = os.fstat(output.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+            or info.st_mode & 0o022
+        ):
+            raise AdapterError("Unsafe workflow output signal", "access")
+        output.write(f"pacing_ready={value}\n")
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def invalidate_owned_artifact(root, directory):
+    """Invalidate safe JSON before fallible signal and unlink operations."""
+    stale = owned_artifact_info(root, directory)
+    descriptor = None
+    if stale is not None:
+        descriptor = os.open(
+            "pacing-state.json",
+            os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=directory,
+        )
+        try:
+            held = os.fstat(descriptor)
+            validate_owned_output(held)
+            if (held.st_dev, held.st_ino) != (stale.st_dev, stale.st_ino):
+                raise AdapterError("Owned artifact identity changed", "access")
+            same_owned_artifact(root, directory, stale)
+        except BaseException:
+            os.close(descriptor)
+            raise
+    errors = []
+    try:
+        if descriptor is not None:
+            try:
+                os.ftruncate(descriptor, 0)
+                os.fsync(descriptor)
+            except BaseException as error:
+                errors.append(error)
+        try:
+            workflow_output_signal("false")
+        except BaseException as error:
+            errors.append(error)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+            try:
+                same_owned_artifact(root, directory, stale)
+                os.unlink("pacing-state.json", dir_fd=directory)
+            except BaseException as error:
+                errors.append(error)
+    if errors:
+        raise AdapterError("Owned state invalidation failed closed", "access")
+
+
+def invalidate_family_artifact():
+    """Invalidate safely owned stale state before readiness signal IO."""
+    path = os.environ.get("TARTU_PACING_ARTIFACT_PATH")
+    if not path:
+        return
+    with owned_artifact_directory(path) as (root, directory):
+        invalidate_owned_artifact(root, directory)
+
+
+
+def validate_owned_output(info):
+    """Refuse unsafe output before reading or modifying it."""
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_nlink != 1
+        or info.st_mode & 0o077
+    ):
+        raise AdapterError("Unsafe owned artifact output", "access")
+
+
+
+def checked_artifact_path(path):
+    """Validate this attempt's private output directory and basename."""
+    configured = os.environ.get("RUNNER_TEMP", "")
+    if not os.path.isabs(configured):
+        raise AdapterError("Runner temporary directory required", "access")
+    root = os.path.realpath(configured)
+    if (
+        os.path.dirname(os.path.abspath(path)) != root
+        or os.path.basename(path) != "pacing-state.json"
+    ):
+        raise AdapterError("Unsafe artifact output path", "access")
+    info = os.stat(root, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_mode & 0o022
+    ):
+        raise AdapterError("Unsafe artifact output directory", "access")
+    return root, info
+
+
+
+def export_family_artifact():
+    """Atomically export trusted state; invalidate owned output on failure."""
+    path = os.environ.get("TARTU_PACING_ARTIFACT_PATH")
+    if not path:
+        return
+    if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED:
+        invalidate_family_artifact()
+        return
+    with owned_artifact_directory(path) as (root, directory):
+        prior = owned_artifact_info(root, directory)
+        temporary = None
+        temporary_info = None
+        try:
+            run_id, attempt = current_run_identity()
+            with locked_budget():
+                state = load_budget()
+            if state["in_flight"]:
+                raise AdapterError(
+                    "Unsettled state cannot be exported", "access"
+                )
+            envelope = {
+                "schema": 1,
+                "repository": "YouthOpps/data-pipeline",
+                "run_id": run_id,
+                "run_attempt": attempt,
+                "source": SOURCE_ID,
+                "head_sha": os.environ.get("GITHUB_SHA"),
+                "adapter_sha256": source_file_digest(),
+                "state_sha256": hashlib.sha256(
+                    json.dumps(
+                        state, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest(),
+                "state": state,
+            }
+            if not re.fullmatch(r"[0-9a-f]{40}", envelope["head_sha"] or ""):
+                raise AdapterError("Invalid artifact source revision", "access")
+            temporary = ".owned-pacing-" + os.urandom(16).hex()
+            verify_artifact_directory(root, directory)
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | os.O_NOFOLLOW
+                | os.O_NONBLOCK,
+                0o600,
+                dir_fd=directory,
+            )
+            temporary_info = os.fstat(descriptor)
+            with os.fdopen(descriptor, "w") as stream:
+                json.dump(envelope, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            same_owned_artifact(root, directory, prior)
+            os.replace(
+                temporary,
+                "pacing-state.json",
+                src_dir_fd=directory,
+                dst_dir_fd=directory,
+            )
+            temporary = None
+            same_owned_artifact(root, directory, temporary_info)
+            workflow_output_signal("true")
+        except BaseException:
+            invalidate_owned_artifact(root, directory)
+            raise
+        finally:
+            if temporary is not None and temporary_info is not None:
+                verify_artifact_directory(root, directory)
+                current = os.stat(
+                    temporary, dir_fd=directory, follow_symlinks=False
+                )
+                validate_owned_output(current)
+                if (current.st_dev, current.st_ino) != (
+                    temporary_info.st_dev,
+                    temporary_info.st_ino,
+                ):
+                    raise AdapterError("Temporary artifact changed", "access")
+                os.unlink(temporary, dir_fd=directory)
+
+
+
+def restore_family_artifact():
+    """Require exact history for the reviewed legacy state handoff."""
+    global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
+    global _VERIFIED_REMOTE_CREATE
+    if _RESTORED and os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    _STATE_TRUSTED = False
+    latest = latest_family_run()
+    if latest is None:
+        raise AdapterError(
+            "Existing source history missing; no empty bootstrap", "access"
+        )
+    run_id, attempt, source = latest
+    if run_id in _LEGACY_HEADS:
+        expected = {
+            (identity, 1): (head, _WORKFLOW_ID)
+            for identity, head in _LEGACY_HEADS.items()
+        }
+        if (
+            latest != (38767785897, 1, SOURCE_ID)
+            or _SCANNED_HISTORY != expected
+        ):
+            raise AdapterError(
+                "Reviewed complete legacy chronology changed", "access"
+            )
+        for identity in _LEGACY_HEADS:
+            if (
+                _SCANNED_JOB_DIGESTS.get((identity, 1, 1))
+                != _LEGACY_JOB_DIGESTS[identity]
+            ):
+                raise AdapterError(
+                    "Reviewed exact legacy jobs changed", "access"
+                )
+            artifacts = workflow_api(
+                f"/actions/runs/{identity}/artifacts?per_page=100"
+            )
+            if (
+                artifacts.get("total_count") != 0
+                or artifacts.get("artifacts") != []
+            ):
+                raise AdapterError(
+                    "Reviewed legacy artifact inventory changed", "access"
+                )
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            incoming = reviewed_local_legacy_state()
+        else:
+            marker = _REVIEWED_NATIVE_MIGRATION
+            if (
+                not isinstance(marker, dict)
+                or set(marker)
+                != {"schema", "source", "evidence", "state", "state_sha256"}
+                or marker["schema"] != 1
+                or marker["source"] != SOURCE_ID
+                or not re.fullmatch(
+                    (
+                        r"https://github\.com/YouthOpps/data-pipeline/"
+                        r"issues/279#issuecomment-[0-9]+"
+                    ),
+                    marker.get("evidence", ""),
+                )
+                or hashlib.sha256(
+                    json.dumps(
+                        marker["state"], sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+                != marker["state_sha256"]
+            ):
+                raise AdapterError(
+                    "Reviewed full native/local migration state required",
+                    "access",
+                )
+            incoming = validate_budget(marker["state"])
+    else:
+        result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        artifacts = result.get("artifacts")
+        if (
+            not isinstance(artifacts, list)
+            or result.get("total_count") != len(artifacts)
+            or len(artifacts) > 100
+        ):
+            raise AdapterError("Incomplete newest artifact inventory", "access")
+        matches = [
+            a
+            for a in artifacts
+            if a.get("name") == f"{_ARTIFACT_NAME}-{attempt}"
+        ]
+        if (
+            len(matches) != 1
+            or matches[0].get("expired") is not False
+            or type(matches[0].get("id")) is not int
+            or matches[0]["id"] <= 0
+            or matches[0].get("workflow_run", {}).get("id") != run_id
+            or matches[0].get("workflow_run", {}).get("head_sha")
+            != _ATTEMPT_HEADS.get((run_id, attempt))
+            or type(matches[0].get("size_in_bytes")) is not int
+            or not 0 < matches[0]["size_in_bytes"] <= 32768
+            or not re.fullmatch(
+                r"sha256:[0-9a-f]{64}", matches[0].get("digest", "")
+            )
+        ):
+            raise AdapterError(
+                "Newest mature attempt lacks exact trusted state", "access"
+            )
+        incoming = download_inert_artifact(
+            latest, matches[0]["id"], matches[0]["digest"]
+        )
+    if run_id not in _LEGACY_HEADS:
+        _VERIFIED_REMOTE_CREATE = incoming
+    try:
+        with locked_budget():
+            local = load_budget()
+            combined = merge_budget(local, incoming)
+            combined["until"] = max(combined["until"], time.time() + 60)
+            write_budget(combined)
+            if combined["in_flight"]:
+                raise AdapterError("Unsettled newest publisher state", "access")
+    finally:
+        _VERIFIED_REMOTE_CREATE = None
+    _RESTORED_LATEST = latest
+    _RESTORED_HISTORY = (
+        copy.deepcopy(_SCANNED_HISTORY),
+        copy.deepcopy(_SCANNED_JOB_DIGESTS),
+        copy.deepcopy(_ATTEMPT_HEADS),
+    )
+    _RESTORED = _STATE_TRUSTED = True
+
+
+def fetch_source(url, min_interval=12.2):
+    original = urllib.parse.urlsplit(url)
+
+    def checked(value):
+        parsed = urllib.parse.urlsplit(value)
+        host = (parsed.hostname or "").lower().removeprefix("www.")
+        if (
+            parsed.scheme != "https"
+            or parsed.username
+            or parsed.password
+            or host != (original.hostname or "").lower().removeprefix("www.")
+            or parsed.port != original.port
+        ):
+            raise AdapterError(
+                "Source redirect leaves the reviewed HTTPS host", "fetch"
+            )
+        if host == "localhost" or host.endswith(".localhost"):
+            raise AdapterError("Public HTTPS source required", "fetch")
+        try:
+            if not ipaddress.ip_address(host).is_global:
+                raise AdapterError("Public HTTPS source required", "fetch")
+        except ValueError:
+            pass
+
+    for attempt in range(2):
+        current = url
+        try:
+            for hop in range(4):
+                checked(current)
+                literal_robots = (
+                    urllib.parse.urlsplit(current).path == "/robots.txt"
+                )
+                if original.path == "/robots.txt" and not literal_robots:
+                    raise AdapterError(
+                        "Robots redirect leaves robots.txt", "access"
+                    )
+                status, headers, body = request_bytes(
+                    current, interval=min_interval, robots=literal_robots
+                )
+                if status in (301, 302, 303, 307, 308):
+                    if hop == 3 or not headers.get("Location"):
+                        raise AdapterError(
+                            "Invalid or excessive source redirects", "fetch"
+                        )
+                    current = urllib.parse.urljoin(current, headers["Location"])
+                    checked(current)
+                    if original.path != "/robots.txt":
+                        min_interval = max(min_interval, check_robots(current))
+                    continue
+                if literal_robots and 400 <= status < 500 and status != 429:
+                    return ""
+                if status != 200:
+                    raise AdapterError(
+                        f"Publisher returned HTTP {status}", "fetch", status
+                    )
+                return body.decode(headers.get_content_charset() or "utf-8")
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            if attempt:
+                raise AdapterError(
+                    "Publisher connection failed: " + safe_error(error), "fetch"
+                ) from error
+    raise AdapterError("Publisher could not be read", "fetch")
+
+
+def robots_policy(text, url):
+    """Assess the unchanged source-local REP selection and matching rules."""
+    parsed = urllib.parse.urlsplit(url)
+    groups, group = [], {"agents": [], "rules": [], "delay": 0, "rate": 0}
+    for line in text.splitlines():
+        key, separator, value = line.split("#", 1)[0].strip().partition(":")
+        if not separator:
+            continue
+        key, value = key.lower().strip(), value.strip()
+        if key == "user-agent":
+            if group["rules"] or group["delay"] or group["rate"]:
+                groups.append(group)
+                group = {"agents": [], "rules": [], "delay": 0, "rate": 0}
+            group["agents"].append(value.lower())
+        elif key in ("allow", "disallow"):
+            group["rules"].append((key, value))
+        elif key == "request-rate":
+            match = re.fullmatch(r"([1-9][0-9]*)/([1-9][0-9]*)", value)
+            if not match:
+                raise AdapterError("Invalid robots request rate", "access")
+            group["rate"] = int(match[2]) + 0.01
+            if not numeric(group["rate"]):
+                raise AdapterError("Unsupported robots request rate", "access")
+        elif key == "crawl-delay":
+            try:
+                group["delay"] = float(value)
+                if not 0 <= group["delay"] <= 60:
+                    raise ValueError()
+            except ValueError:
+                raise AdapterError("Unsupported robots crawl delay", "access")
+    groups.append(group)
+    directives = [
+        line.split("#", 1)[0].strip().lower()
+        for line in text.splitlines()
+        if line.split("#", 1)[0].strip()
+    ]
+    if (
+        directives
+        and not any(g["agents"] for g in groups)
+        and not all(line.startswith("sitemap:") for line in directives)
+    ):
+        raise AdapterError("Robots policy is unavailable or invalid", "access")
+    agent = _USER_AGENT.split("/", 1)[0].lower()
+    specific = [g for g in groups if agent in g["agents"]]
+    legacy = [g for g in groups if "youthopp" in g["agents"]]
+    policies = [policy for policy in (specific, legacy) if policy]
+    if not policies:
+        policies = [[g for g in groups if "*" in g["agents"]]]
+    path = parsed.path + ("?" + parsed.query if parsed.query else "")
+    for selected in policies:
+        matches = []
+        for g in selected:
+            for directive, pattern in g["rules"]:
+                if not pattern:
+                    continue
+                expression = (
+                    "^"
+                    + ".*".join(
+                        re.escape(part)
+                        for part in pattern.removesuffix("$").split("*")
+                    )
+                    + ("$" if pattern.endswith("$") else "")
+                )
+                if re.search(expression, path):
+                    matches.append(
+                        (
+                            len(pattern.replace("*", "").removesuffix("$")),
+                            directive == "allow",
+                        )
+                    )
+        if matches and not max(matches)[1]:
+            raise RobotsDisallow(
+                "Robots policy disallows this source endpoint", "access"
+            )
+    return max(
+        [12.2]
+        + [max(g["delay"], g["rate"]) for policy in policies for g in policy]
+    )
+
+
+def apply_robots_policy(text, url, state=None):
+    """Keep policy application pending until restrictive state is durable."""
+    if state is None:
+        with locked_budget() as lock:
+            current = load_budget()
+            if current["in_flight"]:
+                raise AdapterError("Unsettled publisher transaction", "access")
+            current["in_flight"] = True
+            write_budget(current)
+            try:
+                delay = apply_robots_policy(text, url, current)
+            except RobotsDisallow:
+                current["in_flight"] = False
+                write_budget(current)
+                raise
+            current["in_flight"] = False
+            write_budget(current)
+            return delay
+    try:
+        delay = robots_policy(text, url)
+    except RobotsDisallow:
+        state["blocked"] = True
+        state["observed_at"] = time.time()
+        write_budget(state)
+        raise
+    state["interval"] = max(state["interval"], delay)
+    state["observed_at"] = time.time()
+    write_budget(state)
+    return delay
+
+
+def check_robots(url):
+    global _ROBOTS_CONTEXT
+    parsed = urllib.parse.urlsplit(url)
+    previous = _ROBOTS_CONTEXT
+    context = {"target": url, "delay": None}
+    _ROBOTS_CONTEXT = context
+    try:
+        try:
+            text = fetch_source(
+                urllib.parse.urlunsplit(
+                    (parsed.scheme, parsed.netloc, "/robots.txt", "", "")
+                )
+            )
+        except AdapterError as error:
+            if error.status == 404:
+                return 12.2
+            raise
+        if context["delay"] is not None:
+            return context["delay"]
+        # A supplied/cached policy still needs its own durable transaction.
+        return apply_robots_policy(text, url)
+    finally:
+        _ROBOTS_CONTEXT = previous
+
+
+def read_snapshot():
+    if _PHASE_END is not None:
+        return read_snapshot_body()
+    with phase("snapshot", 120):
+        return read_snapshot_body()
+
+
+def publish_files(snapshot, files):
+    if _PHASE_END is not None:
+        return publish_files_body(snapshot, files)
+    with phase("publication", 240):
+        return publish_files_body(snapshot, files)
+
+
+def collect():
+    """Run the complete unchanged inventory within bounded access phases."""
+    if _RUN_END is None:
+        with execution():
+            return collect()
+    with phase("collection", COLLECTION_TIMEOUT, reserve=390):
+        prepare_collection()
+        return collect_body()
+
+
+def run():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--publish",
@@ -1027,6 +3393,9 @@ def main():
         help="Write only this source to YouthOpps/data-source using DATA_SOURCE_TOKEN",
     )
     args = parser.parse_args()
+    if args.publish:
+        with phase("restore", 180):
+            prepare_collection()
     snapshot = read_snapshot() if args.publish else None
     old = (
         json.loads(snapshot["files"]["data.json"])
@@ -1044,7 +3413,7 @@ def main():
             raise AdapterError(
                 "Remote metadata source mismatch; no files changed", "publish"
             )
-    attempt, failure = utc_now(), None
+    attempt, failure = (utc_now(), None)
     try:
         records = collect()
         validate_records(records)
@@ -1083,7 +3452,7 @@ def main():
         records = remove_expired_records(records, utc_now())
         validate_records(records, allow_empty=True)
     except Exception as error:
-        failure, records = error, old
+        failure, records = (error, old)
     outcome = metadata(attempt, previous, records, failure)
     if args.publish and (
         not failure or snapshot["files"]["data.json"] is not None
@@ -1099,44 +3468,68 @@ def main():
         try:
             publish_files(snapshot, files)
         except Exception as error:
-            failure = error
-            outcome = metadata(
-                attempt,
-                previous,
-                old,
-                AdapterError(
-                    "Publication failed: " + safe_error(error), "publish"
-                ),
-            )
-            try:
-                latest = read_snapshot()
-                if (
-                    snapshot["files"]["data.json"] is None
-                    or latest["files"] != snapshot["files"]
-                ):
-                    raise AdapterError(
-                        "No safe previous snapshot for failure reporting",
-                        "publish",
-                    )
-                publish_files(
-                    latest,
-                    {
-                        "metadata.json": json.dumps(
-                            outcome, ensure_ascii=False, indent=2
+            with phase("failure", 120):
+                failure = error
+                outcome = metadata(
+                    attempt,
+                    previous,
+                    old,
+                    AdapterError(
+                        "Publication failed: " + safe_error(error), "publish"
+                    ),
+                )
+                try:
+                    latest = read_snapshot()
+                    if (
+                        snapshot["files"]["data.json"] is None
+                        or latest["files"] != snapshot["files"]
+                    ):
+                        raise AdapterError(
+                            "No safe previous snapshot for failure reporting",
+                            "publish",
                         )
-                        + "\n"
-                    },
-                )
-            except Exception:
-                outcome["message"] = (
-                    "Publication failed; durable failure status could not be recorded. Remote data was not force-overwritten."
-                )
+                    publish_files(
+                        latest,
+                        {
+                            "metadata.json": json.dumps(
+                                outcome, ensure_ascii=False, indent=2
+                            )
+                            + "\n"
+                        },
+                    )
+                except Exception:
+                    outcome["message"] = (
+                        "Publication failed; durable failure status could not be recorded. Remote data was not force-overwritten."
+                    )
     elif args.publish:
         outcome["message"] = (
             "First collection failed; no published source folder created"
         )
     print(json.dumps(outcome, ensure_ascii=False))
     return 1 if failure else 0
+
+
+def main():
+    with execution():
+        try:
+            return run()
+        except PhaseExpired:
+            print(
+                json.dumps(
+                    {
+                        "source": SOURCE_ID,
+                        "status": "fail",
+                        "error": "Nonrenewable runtime phase deadline expired",
+                        "failure_stage": "runtime",
+                        "last_attempt_at": utc_now(),
+                    }
+                )
+            )
+            return 1
+        finally:
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                with phase("export", EXPORT_TIMEOUT):
+                    export_family_artifact()
 
 
 if __name__ == "__main__":
