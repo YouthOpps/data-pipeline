@@ -10,6 +10,7 @@ on:
     - cron: '59 12 * * *'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: youthopps-lv-riga-technical-university-publisher-v1
   queue: max
@@ -34,6 +35,17 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish this source
+        id: collect
         env:
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RTU_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
         run: python -B adapters/lv-riga-technical-university/adapter.py --publish
+      - name: Preserve source pacing and refusal state
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtu-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
