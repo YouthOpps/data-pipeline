@@ -1,186 +1,180 @@
 # Mercedes-Benz public youth vacancies
 
-Collects the official public job-search API linked by
-https://jobs.mercedes-benz.com/en using the publisher's explicit youth
-career-level codes 19–27, EN search language and ascending PositionID order.
-All matching current language variants are retrieved; records group only an
-identical publisher PositionID. Separate J000 identifiers are never merged.
-Stable IDs remain SHA-256 of `de-mercedes-benz|mercedes-public-position|<PositionID>`
-(first 24 hex characters), retaining existing published identity semantics.
+This standalone adapter indexes the official public job-search API linked by
+https://jobs.mercedes-benz.com/en. It uses the publisher's youth career-level
+codes 19–27, EN search language and ascending PositionID order. It retrieves all
+matching current language variants, grouping only the same publisher PositionID.
+Separate J000 identifiers are never merged.
 
-## Inventory and source facts
+## Inventory and factual output
 
-The older reviewed snapshot contained 1,396 variants/492 identities. A paced
-2026-10-14 official research response reports 1,459 variants and new identities
-including J000233950/J000233952. Publishing old known recipes would omit current
-opportunities. The adapter therefore discovers current totals and complete
-100-row windows with three-row overlaps, repeats the full traversal, and requires
-identical complete descriptor maps and exact unique variant totals before
-normalizing. Structural validation replaces the obsolete fixed count/window frontier.
-The 461 complete groups whose variant membership and full material hashes
-match the prior review retain their original substantive factual summaries.
-Fifty-four new/changed groups receive reviewed original summaries and complete
-original factual condition evidence. Each recipe remains bound to exact current
-descriptor hashes: unreviewed new/changed qualifications fail safely, rather than
-being published with generic or stale summaries. Current robots and full
-policy/entry-condition material guards remain. Inventories above 1,552 variants fail safely because
-complete discovery would exceed the bounded physical request allowance.
+Each traversal discovers the current total and reads every 100-row window with a
+three-row overlap. A second complete traversal must have the same total, variant
+IDs and complete descriptors before normalization. Duplicate conflicting variants,
+missing pages, changed totals or material changes between traversals fail without
+publishing partial data. This checks consistency across two observations; it does
+not claim an atomic publisher snapshot. The existing bound of 1,552 variants and
+42 physical requests remains in force.
 
-Actual career-level labels and titles classify internships as internships,
-working-student/holiday employment and thesis placements as jobs under the
-existing source classification, doctorates as jobs and vocational/dual
-study as training (with explicitly reviewed role-specific exceptions). Work placement alone does not establish an internship:
-explicit working-student titles stay jobs. Hybrid internship/working-student
-routes remain explicit. Classification evidence contains all variant URLs,
-verified descriptor hashes, date facts and original factual condition summaries
-covering actual eligibility, alternatives, application documents, mandatory and
-preferred skills, timing, contract/pay and conditional benefits. Creative task
-prose, recruitment invitations, contact details and wholesale qualification text
-are not republished. The summary stays an original substantive English factual
-summary; readers must consult the linked publisher notice.
+Frozen per-vacancy recipes and material hashes no longer supply the output or
+require manual updates when current vacancies change. Each live record contains
+its title, original URL, location, actual host countries and the publisher's
+career-level labels. A short original English template explains the listing type
+and directs readers to the original notice for role-specific eligibility and
+application conditions. Descriptions, creative task prose, qualification sections,
+images, applicant details and contact information are not republished. Full API
+material is used only in memory for structural validation and SHA-256 freshness
+provenance. Additional entry-condition URLs are retained when actually linked by
+a descriptor; this index does not reproduce or independently summarize all their
+conditions. Source attribution and all current variant URLs remain explicit.
 
-### Current production block
+Career labels and titles classify apprenticeships/dual study as training,
+internships as internships, and working-student/holiday/thesis/doctoral placements
+as jobs. Explicit hybrid working-student/internship listings retain both
+categories. A working-student title does not become an internship merely because
+the career label also describes placements. Country arrays describe advertised
+host locations, never citizenship eligibility. Publication-language numeric codes
+do not establish prose language, so language stays unknown. Date-only API
+publication/start/end fields remain provenance, not invented application deadlines.
 
-Production has not published this source. The first GitHub-hosted attempt
-[`38086095380`](https://github.com/YouthOpps/data-pipeline/actions/runs/38086095380)
-received HTTP 403 from `https://group.mercedes-benz.com/robots.txt`. Attempt
-[`38086095524`](https://github.com/YouthOpps/data-pipeline/actions/runs/38086095524)
-restored that durable refusal and stopped before further publisher requests.
-The workflow is manually disabled; its YAML triggers below do not mean it is
-currently scheduled. See the [recorded recovery requirements](https://github.com/YouthOpps/data-pipeline/issues/115#issuecomment-6102178365)
-and [follow-up review](https://github.com/YouthOpps/data-pipeline/issues/140).
+IDs preserve the existing SHA-256 namespace
+`de-mercedes-benz|mercedes-public-position|<PositionID>` (first 24 hex characters).
+Newly discovered positions use the same rule. Final IDs, uniqueness, complete
+records and source ownership are validated after normalization. A complete scan
+remains necessary: no documented modified-since/removal feed or durable change
+cursor establishes safe coverage of edits, reopening and removals. No known-ID
+pagination shortcut or incremental watermark is used.
 
-No API key is required by the existing public search protocol. A missing key
-is not the diagnosed failure, and HTTP 403 alone does not prove a robots
-`Disallow` or a legal prohibition. Earlier successful cloud collections do not
-establish access from a GitHub-hosted runner.
+## Access, robots and retained recovery
 
-Recovery remains blocked pending a reviewed official access route, an approved
-reachable runner, or an official feed. The distinct public API origin is a
-candidate for review, not an automatic fallback: the persisted refusal covers
-the entire publisher family, and the group pages below supply terms and
-additional eligibility facts. An API-only replacement needs evidence of
-permitted access, complete current inventory and authoritative coverage of
-those facts before an explicit reviewed recovery can proceed. It must not
-clear the refusal, rename the family, replace the latest artifact with the
-bootstrap, rotate identity, or silently omit qualification requirements.
-
-This access review does not certify the frozen inventory as current. After
-permitted access is established, the snapshot checks described above also
-need replacement with live extraction and pagination, followed by a complete
-non-publishing collection and independent review. Re-enabling the workflow or
-refreshing hashes alone is not a repair.
-
-The [provider notice](https://group.mercedes-benz.com/provider/) reserves rights in creative text, images, media and page arrangements and gives specific terms precedence. The [careers terms](https://group.mercedes-benz.com/careers/general-terms-conditions.html) do not expressly prohibit the reviewed bounded public discovery and minimal original factual summaries. Account, upload and moderation conditions are not an authorization to access private applicant data. The implementation follows fresh actual robots policies for the API and group origins. The API's observed ordinary robots 404 is treated as an absent policy, never as a way around a refusal. HTTP 401, 403 or 429 remains a durable family block.
-
-Country arrays describe actual API host locations, not nationality eligibility.
-No eligible-country restriction is inferred. API publication-language code 2 is preferred for variant selection.
-Only previously verified prose languages are retained; new recipes may leave
-record language unknown instead of treating numeric API labels as proof of
-the prose language.
-All date-only publication/start/end facts remain in provenance; `published_at`
-and `deadline` stay null because notice publication lifetime and employment start
-are not verified application deadlines. Potential timing conflicts remain visible
-in complete variant evidence rather than being silently reconciled.
-
-## Access and rights
-
-Fresh official API and group robots policies precede retrieval. Ordinary API
-robots 404 means no robots policy; HTTP 401/403/429 remains a durable family
-block and is never bypassed. The 2026-10-14 whole-page rights/condition review refreshed changed policy
-fingerprints after checking actual current facts; all documented numerical school
-and student-duration requirements, alternatives and residence/document clauses
-remain present. The official
+The user's current factual-indexing instruction permits ordinary public factual
+indexing when no clear restriction applies. The official
 [provider notice](https://group.mercedes-benz.com/provider/) reserves rights in
-creative material and the
+creative text, images and arrangements. The
 [careers terms](https://group.mercedes-benz.com/careers/general-terms-conditions.html)
-do not expressly prohibit bounded public factual indexing. This is not a blanket
-content-reuse licence: photographs, branding, media and creative task prose are
-excluded. Publisher provenance and original summaries remain explicit.
+and four publisher-linked student/school entry-condition pages are retrieved
+before vacancy traversal. Missing substantive HTML, a challenge or an explicit
+automated-access restriction stops collection. Current content is reviewed as
+current content rather than compared with a frozen whole-page hash. No blanket
+content licence or permission to access private applicant systems is claimed.
 
-Four publisher-linked entry-condition pages remain guarded and are identified
-in evidence only for descriptors that actually reference them:
+Both the API and Group origin receive a fresh robots request. An HTTP 400–499 response other than 429 **only at those exact robots URLs**
+means an unavailable REP file,
+under the user's policy and RFC 9309 section 2.3.1.3. It is not interpreted as
+`Disallow`. HTTP 200 robots rules are enforced for YouthOppsBot and applicable
+legacy YouthOpps product rules, retaining the stricter restrictions. HTML or a
+recognizable challenge is not accepted as a valid robots policy. Visible
+challenges inside otherwise normal primary content are also retained as hard
+holds before parsing succeeds; ordinary CAPTCHA script/footer mentions are not
+classified as access challenges. A content 403,
+401, explicit applicable robots prohibition, challenge or TLS verification
+failure remains a stop. HTTP 429 stops the run and retains timed rate backoff,
+as detailed below. Retry-After and stronger pacing restrictions remain.
+There is no alternate origin, identity rotation, browser impersonation or TLS
+bypass.
 
-- [Dual-study applications](https://group.mercedes-benz.com/karriere/schueler/duales-studium/bewerbung/): technical Abitur average at most 2.7/mathematics at least 8 points; business average at most 2.5/mathematics at least 10 points; Fachhochschulreife average and mathematics at most 2.0 plus DHBW aptitude test. These alternatives stay distinct.
-- [Working students](https://group.mercedes-benz.com/karriere/studenten/werkstudenten/): excellent grades, regular study duration plus at most three semesters, outstanding examinations and 7–20 weekly hours, relevant internships preferred.
-- [Internships](https://group.mercedes-benz.com/karriere/studenten/praktikum/): study documentation, voluntary-internship duration, degree-gap alternatives and applicable residence/work documents; accommodation depends on location/capacity.
-- [Theses](https://group.mercedes-benz.com/karriere/studenten/abschlussarbeit/): above-average grades, relevant internships and applicable study/residence documents.
+The original hosted failure was a 403 from
+`https://group.mercedes-benz.com/robots.txt`, in
+[run 38086095380](https://github.com/YouthOpps/data-pipeline/actions/runs/38086095380).
+[Run 38086095524](https://github.com/YouthOpps/data-pipeline/actions/runs/38086095524)
+then restored the same hold and made no publisher request. Both authenticated
+pacing artifacts were downloaded with normal TLS and checked against their
+GitHub artifact digests and complete logs. The recovery accepts only these exact
+canonical state SHA-256 values:
 
-## Runtime, pacing and publication
+- `b649b04a88505deef9e072371668796671411de359a099f826b6344e06bd0668`
+- `80f02fd04e978032f090e20cfe003593524f854e2adc32de79f503e3a0f79b93`
 
-Run `python -B adapter.py` for non-publishing run metadata or
-`python -B test_adapter.py` for the actual complete validated live JSON collection.
-The sole live test rejects publication credentials and never writes source data.
-`python -B adapter.py --publish` is reserved for authorized production automation.
-Python standard library only; the folder runs independently when copied.
+Only their robots-only blocked flag is migrated; the original request starts,
+not-before timestamp and interval are preserved, and recovery provenance is
+retained through later merges/artifacts. Unknown or modified blocked states,
+including mixed/content/challenge/rate-limit holds, cannot match and remain
+blocked. The latest actual family artifact remains mandatory after any family run;
+the obsolete first-family bootstrap is not a recovery mechanism. Queued reruns
+of older run IDs contribute their exact previous completed attempt. Every
+candidate is bound to its exact attempt jobs and immutable head SHA and ranked
+by actual job completion,
+not a mutable run update timestamp. Missing or ambiguous attempt/job evidence
+fails closed instead of restoring an older budget. See
+[issue #115](https://github.com/YouthOpps/data-pipeline/issues/115) for the original
+hold and the scoped recovery authorization/evidence.
 
-The unchanged secure family pacing enforces at least six seconds between physical
-starts, ten starts per rolling minute and a 60-second startup embargo. Two robots,
-six policy/condition pages and at most 32 search windows consume at most 40 nominal
-starts; the hard cap remains 42 including retries/redirects. At most two attempts
-retry typed transient failures/HTTP503 with a persisted 30-second embargo.
-Stricter publisher limits and durable family blocks remain enforced. Responses
-are bounded to 8 MiB each/64 MiB aggregate. Prepublication is bounded to 1,800
-seconds, publication 240, failure metadata 120 and pacing export 120; the absolute
-process ceiling remains 2,280 seconds. Missing latest completed family pacing
-artifacts block production instead of resetting request history. Existing
-source-scoped App authentication, fresh healthy artifact export, schedule,
-manual dispatch and scoped main-push workflow are preserved.
+## Runtime and publication
 
-Publication atomically commits only this source's data/metadata, uses nonforce
-compare-and-update and preserves a concurrently newer pair. Matching records
-retain first-seen/creation times; substantive current evidence advances updated
-time. A fetch/parse/validation/publication failure preserves last-good data and
-success timestamps and records safe failure metadata when possible. First failure
-creates no source folder. Tests/static review do not prove production delivery.
+Run `python -B adapters/de-mercedes-benz/test_adapter.py` from the repository, or
+copy this folder and run `python -B test_adapter.py`. The sole live test retrieves
+and validates the complete nonempty raw collection, emits its actual full JSON on
+stdout, receives no publication credential and writes no dataset. Standard library
+only. Diagnostics go to stderr. `python -B adapter.py --publish` is reserved for
+separately authorized production automation.
+
+The secure publisher-family lock and budget retain at least twelve seconds between
+physical requests, including a completion-to-next-start guard, and no more than
+five starts per rolling minute. A 60-second startup floor, stronger limits, history
+merging and durable refusals remain. Inventory windows, including the transition
+between complete traversals, wait at least 30 seconds after the preceding page
+finishes; this guard does not promote every detail/policy request to a permanent
+longer interval. Two robots, six policy/condition pages and at most 32 windows fit
+the unchanged 42-start cap including redirects/retries. There are at most two
+attempts for typed transient failures/HTTP 503, with retained 30-second backoff.
+Content HTTP 429 stops the current run without creating a permanent access
+block. It durably doubles both the physical interval and inventory page gap.
+Without Retry-After it saves an embargo of at least 30 minutes, doubled for each
+subsequent recorded 429; counters, both gaps and embargo survive local/artifact
+merges by MAX. A later bounded run may resume only after that embargo at the
+retained slower pacing. Explicit Retry-After and stronger restrictions remain
+authoritative. Existing unknown/mixed hard holds are never cleared this way.
+Responses remain bounded to 8 MiB each and 64 MiB total.
+
+Prepublication remains bounded to 1,800 seconds, publication 240, failure metadata
+120 and pacing export 120; the whole process ceiling remains 2,280 seconds. The
+45-minute job limit and one-hour source-scoped App token cover these phases;
+complete live timing must confirm actual headroom. No cap is raised for recovery. If stronger retained pacing exhausts the fixed
+phase, collection fails while preserving last-good data; it never relaxes that
+pacing or claims a partial collection succeeded. The current 32-window inventory
+needs at least 31 × 60 seconds between pages after a first 429 doubles the page
+gap, which cannot fit the unchanged 30-minute collection phase with startup,
+policy requests and reserved time. Once the first current total is known, a
+lower-bound check fails early when the remaining traversal is provably infeasible.
+Timed backoff does not promise that every subsequent attempt can complete.
+
+Publication atomically updates only
+`datas/de-mercedes-benz/{data,metadata}.json` with nonforce compare-and-update.
+Concurrent newer source pairs are preserved. Matching IDs retain creation and
+first-seen clocks; actual descriptor changes advance semantic freshness. A failed
+collection, validation or publication preserves the last-good data and success
+time, recording failure metadata only when safe. A first failure creates no source
+folder. Pacing restoration and trust happen before the snapshot read; later
+snapshot/auth failures still reach the finally-protected pacing artifact export,
+so a zero-publisher-request failure does not discard the restored history. Tests
+and static publication checks do not certify production delivery.
 
 ## Expired-record cleanup
 
-Complete raw retrieval must validate as nonempty before deadline filtering.
-Supported explicit offset timestamps expire strictly after their closing instant;
-date-only deadlines, if supported by the source validator, wait until the date
-ends worldwide in UTC−12 when no official publisher timezone is established.
-Missing/ambiguous deadlines, status labels, record age and absence from a response
-are never expiry evidence. Current API notice lifetimes are not application
-deadlines. A successful full replacement never merges old records back, so
-expired old entries cannot survive it. All-expired validated raw retrieval
-publishes an empty successful replacement; later retrieval failures preserve
-that empty successful pair and its success timestamp. Cleanup has no separate
-remote deletion and occurs only in the next atomic source publication.
+Complete raw retrieval must validate as nonempty before filtering. Supported
+explicit timestamp deadlines expire strictly after their closing instant. Current
+API publication lifetimes and employment start dates are not application deadlines;
+unknown dates, status labels, record age and absence are not expiry evidence.
+Successful publication uses the complete filtered replacement, so no old expired
+records are merged back. A valid all-expired raw collection produces an empty
+successful pair; subsequent published-snapshot reads accept that empty result.
+Retrieval failure preserves the last-good pair, including a valid empty one.
 
-## Bot identity
+## Automation and recovery handoff
 
-This adapter sends the following identifying HTTP header:
+The source keeps its daily slot **19:59 UTC** (`59 19 * * *`), scoped main-push and
+manual triggers, source-family serialization, source-scoped App token and pacing
+artifact export. The remote workflow remains disabled until a separate maintainer
+accepts the change, merges it and explicitly performs production recovery. No
+production Action is invoked as an implementation test. That maintainer must
+verify current latest-family artifact restoration, successful source-pair delivery
+and the website consumer before claiming production recovery.
+
+Every publisher request uses exactly:
 
 ```http
 User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
 ```
 
-The [bot information page](https://youthopps.org/bot/) explains the project
-and provides contact and indexing-removal information. This identity does not
-grant source access or clear retained refusals. Robots checks use the advertised
-product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
-
-## Daily automation
-
-The scheduled refresh runs once daily at **19:59 UTC** (`59 19 * * *`).
-This fixed time was selected randomly within a staggered daily timetable; it
-is not randomized again on each run. Main-merge and manual triggers remain
-available, so this is one scheduled run per day, not a hard limit on all runs.
-GitHub can delay scheduled events; the existing publication concurrency
-serializes source jobs when they queue. Existing disabled workflows remain
-disabled until their access hold is separately resolved.
-
-### Pagination spacing
-
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
-This includes taxonomy/listing pages where applicable. The existing native
-transport still enforces its physical-request allowance across retries, redirects
-and detail requests, with stricter publisher limits and retained backoff taking
-precedence. The page guard does not raise the durable request interval for all
-subsequent article/detail requests or reset existing budget/refusal state.
-Inventory scope, parsing, validation and atomic publication are unchanged.
+The [bot information page](https://youthopps.org/bot/) provides project information
+and indexing-removal contact details. Changing this identity never clears holds.
