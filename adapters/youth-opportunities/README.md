@@ -139,10 +139,19 @@ without inferring expiry from age, status or absence.
 Collection, parsing, validation and publication failures preserve last-good
 data and its success timestamp, and save sanitized failure metadata when safe.
 First-run failure creates no source folder. Failure to record durable metadata
-is explicitly reported. The matching workflow runs every six hours UTC, on
+is explicitly reported. The matching workflow runs once daily at 02:41 UTC, on
 changes to this adapter or its own workflow merged to main, and on manual
 dispatch. It preserves the repository/main guard, source-scoped credentials and
 serialized publication. Production Actions are not used for implementation QA.
+
+The daily schedule reduces repeated full-inventory retrieval from four scheduled
+runs to one per day. GitHub may delay scheduled runs, and a source-scoped merge
+or manual dispatch can still start an additional run. Each request retains the
+existing pacing and stricter publisher limits. This schedule change does not
+make collection incremental: known IDs alone do not prove that older calls are
+unchanged or that browse ordering is strictly newest-first. A future incremental
+implementation needs verified ordering/change coverage and periodic complete
+browse reconciliation before it can replace this full-inventory refresh.
 
 ## Bot identity
 
