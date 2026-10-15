@@ -66,8 +66,8 @@ legacy YouthOpps product rules, retaining the stricter restrictions. HTML or a
 recognizable challenge is not accepted as a valid robots policy. Visible
 challenges inside otherwise normal primary content are also retained as hard
 holds before parsing succeeds; ordinary CAPTCHA script/footer mentions are not
-classified as access challenges. A content 403,
-401, explicit applicable robots prohibition, challenge or TLS verification
+classified as access challenges. Content 401/403/451, an explicit applicable
+robots prohibition, a challenge or TLS verification
 failure remains a stop. HTTP 429 stops the run and retains timed rate backoff,
 as detailed below. Retry-After and stronger pacing restrictions remain.
 There is no alternate origin, identity rotation, browser impersonation or TLS
@@ -119,14 +119,17 @@ the unchanged 42-start cap including redirects/retries. There are at most two
 attempts for typed transient failures/HTTP 503, with retained 30-second backoff.
 Content HTTP 429 stops the current run without creating a permanent access
 block. It durably doubles both the physical interval and inventory page gap.
-Without a usable Retry-After it saves an embargo of at least 30 minutes, doubled for each
+Every 429 saves an embargo of at least 30 minutes, doubled for each
 subsequent recorded 429; counters, both gaps and embargo survive local/artifact
 merges by MAX. A later bounded run may resume only after that embargo at the
 retained slower pacing. Explicit Retry-After and stronger restrictions remain
 authoritative. Malformed, nonpositive, nonfinite or unrepresentable 429 timing
 is unusable: it uses the exponential fallback without creating or clearing a
-hard hold. Invalid backoff on other responses retains protective failure
-behavior. Existing unknown/mixed hard holds are never cleared this way.
+hard hold. A valid short header cannot reduce that exponential minimum; a
+longer valid header or retained embargo wins by MAX. Invalid headers on other
+statuses are ignored without inventing or clearing a hold. Actual content
+401/403/451 and existing challenge/refusal checks remain controlling.
+Existing unknown/mixed hard holds are never cleared this way.
 Responses remain bounded to 8 MiB each and 64 MiB total.
 
 Prepublication remains bounded to 1,800 seconds, publication 240, failure metadata
@@ -188,3 +191,28 @@ Published metadata uses `display_name` = **Mercedes-Benz** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Conditional header safety maintenance
+
+[Issue 229](https://github.com/YouthOpps/data-pipeline/issues/229) changes only
+invalid-header-induced holds, the content451 denial branch and the 429 fallback
+minimum when a valid short header exists. Existing stronger physical/page gaps
+still double; valid longer embargoes, actual refusal/artifact/recovery identity,
+normal collection/facts, validation, expiry and publication are unchanged.
+Literal robots451 remains unavailable REP. No workflow or timing-floor change,
+state reset, source request, native retake or production run is authorized.
+
+The genuine earlier complete native retrieved 526 records and passed the
+then-current consumer 526/526/0. Its exact tested source `8b570bef` is retained
+and independently reconstructed byte-identically; later conditional guard
+changes have prior independent reuse acceptance. Full native records/bodies
+are no longer retained. Current consumer `2fabcc52` differs from historical
+`7f23d601`; this maintenance does not claim byte-identical whole-current code
+or a fresh full-record replay. Qualification is limited historical native
+reuse plus unchanged normal/facts AST and actual-function inert controls.
+
+Production [38740150497](https://github.com/YouthOpps/data-pipeline/actions/runs/38740150497)
+failed on an actual required Group content403 and retained its owned blocked
+artifact. This correction preserves that hold, the disabled workflow and all
+limits; source issue115 remains blocked. It does not certify current publisher
+accessibility or production recovery.

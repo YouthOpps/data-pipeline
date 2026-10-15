@@ -521,7 +521,7 @@ def publisher_attempt(publisher):
         _PUBLISHER_GATE_FAILED = False
 
 
-def record_retry_after(value, *, rate_limited=False):
+def record_retry_after(value):
     """Persist the embargo before reporting any refusal or retrieval failure."""
     if value is None:
         return False
@@ -543,8 +543,6 @@ def record_retry_after(value, *, rate_limited=False):
             usable = True
         except Exception:
             usable = False
-            if not rate_limited:
-                state["blocked"] = True
         state["observed_at"] = now
         save_budget(state)
         return usable
@@ -622,17 +620,14 @@ def request_bytes(
                 status = response.status
                 response_headers = response.headers
                 retry = response.headers.get("Retry-After")
-                retry_usable = False
                 if publisher:
-                    retry_usable = record_retry_after(
-                        retry, rate_limited=status == 429
-                    )
+                    record_retry_after(retry)
                 robots_unavailable = publisher and unavailable_robots(
                     current, status
                 )
                 if (
                     publisher
-                    and status in (401, 403, 429)
+                    and status in (401, 403, 429, 451)
                     and not robots_unavailable
                 ):
                     with locked_budget():
@@ -648,11 +643,10 @@ def request_bytes(
                             state["page_interval"] = (
                                 max(30, state.get("page_interval", 30)) * 2
                             )
-                            if not retry_usable:
-                                state["not_before"] = max(
-                                    state["not_before"],
-                                    time.time() + 1800 * 2 ** (count - 1),
-                                )
+                            state["not_before"] = max(
+                                state["not_before"],
+                                time.time() + 1800 * 2 ** (count - 1),
+                            )
                         else:
                             state["blocked"] = True
                         state["observed_at"] = time.time()
