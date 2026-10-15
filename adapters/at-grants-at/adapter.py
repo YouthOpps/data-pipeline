@@ -124,12 +124,13 @@ def pace(url, interval=12.2):
             raise AdapterError(
                 "Retained publisher refusal requires review", "access"
             )
+        if budget["rate_limit_strikes"] >= 100:
+            raise AdapterError(
+                "Publisher rate-limit history requires review", "access", 429
+            )
         if budget["rate_limit_until"] > time.time():
             raise AdapterError(
-                "Retained publisher rate-limit embargo until "
-                + datetime.fromtimestamp(
-                    budget["rate_limit_until"], timezone.utc
-                ).isoformat(),
+                "Retained publisher rate-limit embargo remains active",
                 "access",
                 429,
             )
@@ -177,6 +178,7 @@ def request_bytes(
     headers=None,
     payload=None,
     byte_limit=5_000_000,
+    robots=False,
 ):
     publisher = urllib.parse.urlsplit(url).hostname in _ALLOWED_HOSTS
     state, budget = pace(url, interval) if publisher else (None, None)
@@ -196,28 +198,28 @@ def request_bytes(
                 value = response.headers.get("Retry-After")
                 if value:
                     try:
-                        seconds = (
-                            float(value)
-                            if re.fullmatch(r"\d+(?:\.\d+)?", value)
-                            else parsedate_to_datetime(value).timestamp()
-                            - time.time()
-                        )
-                        if math.isfinite(seconds):
-                            budget["not_before"] = max(
-                                budget["not_before"],
-                                time.time() + max(0, seconds),
-                            )
-                    except (ValueError, TypeError, OverflowError):
+                        if re.fullmatch(r"\d+(?:\.\d+)?", value):
+                            seconds = float(value)
+                        else:
+                            date = parsedate_to_datetime(value)
+                            if date.tzinfo is None:
+                                raise ValueError(
+                                    "Retry-After requires timezone"
+                                )
+                            seconds = date.timestamp() - time.time()
+                        if not math.isfinite(seconds) or seconds <= 0:
+                            raise ValueError("Unusable Retry-After")
+                        until = time.time() + seconds
+                        datetime.fromtimestamp(until, timezone.utc)
+                        budget["not_before"] = max(budget["not_before"], until)
+                    except (ValueError, TypeError, OverflowError, OSError):
                         pass
-                if (
-                    response.status in {401, 403}
-                    and urllib.parse.urlsplit(url).path != "/robots.txt"
-                ):
+                if response.status in {401, 403} and not robots:
                     budget["blocked"] = True
                 if response.status == 429:
                     strikes = budget["rate_limit_strikes"] + 1
                     budget["rate_limit_strikes"] = strikes
-                    factor = 2 ** min(strikes, 8)
+                    factor = 2**strikes
                     budget["interval"] = max(
                         budget["interval"] * 2, 12.2 * factor
                     )
@@ -226,7 +228,7 @@ def request_bytes(
                     )
                     budget["not_before"] = max(
                         budget["not_before"],
-                        time.time() + 1800 * (2 ** min(strikes - 1, 8)),
+                        time.time() + 1800 * (2 ** (strikes - 1)),
                     )
                     budget["rate_limit_until"] = max(
                         budget["rate_limit_until"], budget["not_before"]
@@ -732,7 +734,7 @@ def validate_budget(state):
         or state["interval"] < 12.2
         or state["page_interval"] < 30
         or type(state["rate_limit_strikes"]) is not int
-        or state["rate_limit_strikes"] < 0
+        or not 0 <= state["rate_limit_strikes"] <= 100
     ):
         raise AdapterError("Invalid persisted pacing/backoff", "access")
     if state["completed"] > state["observed_at"]:
@@ -1384,24 +1386,28 @@ class VisibleText(HTMLParser):
             self.text.append(data)
 
 
-def reject_visible_challenge(body, headers):
+def reject_visible_challenge(body, headers, *, challenge_only=False):
     if "html" not in headers.get("Content-Type", "").lower():
         return
     parser = VisibleText()
     parser.feed(body.decode("utf-8", "replace"))
     text = " ".join(" ".join(parser.text).lower().split())
-    if any(
-        phrase in text
-        for phrase in (
-            "verify you are human",
-            "verify that you are human",
+    phrases = (
+        "verify you are human",
+        "verify that you are human",
+        "complete the captcha",
+        "enable javascript and cookies to continue",
+        "checking your browser",
+    )
+    if not challenge_only:
+        phrases += (
             "access denied",
+            "permission denied",
+            "request denied",
+            "request blocked",
             "unusual traffic",
-            "complete the captcha",
-            "enable javascript and cookies to continue",
-            "checking your browser",
         )
-    ):
+    if any(phrase in text for phrase in phrases):
         with locked_budget():
             state = load_budget()
             state["blocked"] = True
@@ -1414,6 +1420,8 @@ def source_request(
     url, *, interval=12.2, method="GET", payload=None, robots=False
 ):
     """Use only literal official public hosts; preserve redirect method/body."""
+    if robots and urllib.parse.urlsplit(url).path != "/robots.txt":
+        raise AdapterError("Robots retrieval requires robots.txt", "access")
     current = url
     for hop in range(4):
         parsed = urllib.parse.urlsplit(current)
@@ -1432,6 +1440,7 @@ def source_request(
             interval=interval,
             method=method,
             payload=payload,
+            robots=robots,
             headers=(
                 {"Content-Type": "application/json; charset=utf-8"}
                 if payload is not None
@@ -1450,14 +1459,16 @@ def source_request(
                 raise AdapterError("Unexpected public POST redirect", "fetch")
             current = target
             continue
+        if not robots:
+            reject_visible_challenge(
+                body, headers, challenge_only=status == 429
+            )
         if status != 200 and not robots:
             raise AdapterError(
                 "Publisher content returned HTTP " + str(status),
                 "fetch",
                 status,
             )
-        if not robots and status == 200:
-            reject_visible_challenge(body, headers)
         return status, headers, body
     raise AdapterError("Source redirect limit exceeded", "fetch")
 

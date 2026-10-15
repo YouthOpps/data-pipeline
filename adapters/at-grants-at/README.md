@@ -44,7 +44,8 @@ native IDs; the third component is a presentation index and is fixed at zero.
 Requests identify as `YouthOppsBot/1.0 (+https://youthopps.org/bot/)`.
 Only the three literal public hosts `grants.at`, `ajs.scholarships.at` and
 `oead.at` are permitted. TLS verification remains enabled. Redirects must stay on
-the same reviewed host. The published attribution is
+the same reviewed host. Verified robots-retrieval purpose survives those redirects;
+ordinary content cannot opt into unavailable-policy handling. The published attribution is
 `Source: grants.at / OeAD (© OeAD)` and every record links to its original page.
 
 The [OeAD imprint](https://oead.at/en/imprint-en), Copyright section, states:
@@ -72,7 +73,10 @@ rules. A robots 429, 5xx, invalid HTML response or applicable Disallow stops the
 run. Matching advertised and legacy protective groups are checked conservatively;
 stronger Crawl-delay and Request-rate limits prevail. Content 401/403 and visible
 human-verification/denial pages create a retained hard hold. No alternate identity,
-proxy, endpoint or TLS bypass is used to overcome a refusal.
+proxy, endpoint or TLS bypass is used to overcome a refusal. A genuine visible
+challenge on a content 429 retains both its timed embargo and a hard hold;
+an ordinary rate-limit response without a specific human-verification challenge
+remains recoverable, including generic request-blocked/rate-limit wording.
 
 ## Request budgets and failure state
 
@@ -88,6 +92,12 @@ has a 30-minute timeout and runs once daily at 01:23 UTC.
 A 429 ends the current run without an immediate retry. It durably increases both
 physical and partition intervals exponentially and applies at least 30 minutes
 of cooldown, at least 60 minutes on a second occurrence, or a longer Retry-After.
+Only finite positive Retry-After delays or supported timezone-aware future dates
+can add an embargo. Malformed, negative, stale, timezone-free and unrepresentable
+values leave the exponential minimum and all stronger known embargoes intact.
+Cooldown continues increasing beyond the ninth recorded 429. State counters are
+validated in the range 0–100; a counter of 100 stops before publisher traffic
+for review, preserving the original history instead of resetting it.
 Future runs fast fail during that timed embargo and can retry normally at the
 retained slower pace after it expires. A 429 alone does not become an indefinite
 hard hold. Other known hard refusals remain held for review. Repeated 429
