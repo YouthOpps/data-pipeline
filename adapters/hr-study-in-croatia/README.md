@@ -21,7 +21,43 @@ All twelve summaries are English and fit 580 JavaScript UTF-16 units without tru
 
 The actual robots policy allows public routes. Portal identity, privacy and cookie statements were reviewed; no factual-summary permission requirement was observed there. The footer Content Disclaimer is a 200 soft404, not a valid licence or permission ban. No open licence is asserted. Use original summaries, source credit and official links; do not copy full articles, images, recipient datasets or application documents.
 
-Each runtime freshly checks the one origin's robots. All HTTP starts, retries and redirects share `youthopps-studyincroatia-publisher-v1` pacing: at least six seconds between starts and at most ten starts in any rolling minute. Durable timestamps, future embargo and blocked state are preserved. Known refusals and unreviewed/downgrade redirects are classified before response-body reading; Retry-After is persisted first. A 503 permits one bounded same-endpoint retry after a preserved thirty-second backoff. Publisher denial never authorizes alternate access.
+Each runtime freshly checks the one origin's robots. All physical publisher
+requests, including robots, redirects and retries, share
+`youthopps-studyincroatia-publisher-v1`: at least 12.2 seconds after the previous
+physical response completes and at most five starts in any rolling 60 seconds.
+The five news inventory pages additionally wait at least 30 seconds after the
+previous physical inventory attempt completes, including redirects and the
+existing one bounded HTTP 503 retry. Separate detail and policy requests retain
+the physical floor. Stronger known limits, embargoes and actual refusals remain.
+No alternate identity, route or transport is attempted after refusal.
+
+HTTP 429 stops the run without retrying that request. Persist at least 1,800
+seconds of cooldown, exponentially increasing for each newly observed 429, and
+any longer valid Retry-After or known embargo before reading bounded error
+HTML. Double the current retained physical and page intervals, preserving
+stronger limits. Ordinary rate-limit wording creates a timed restriction;
+genuine visible human-verification or challenge HEAD-title evidence retains
+both the timer and a hard hold. Malformed, stale or unusable Retry-After alone
+never creates a hard hold. Genuine content 401/403/451 and visible challenges
+remain held; body-read failure retains already persisted restrictions.
+
+The bounded HTML guard runs before following any redirect, including obvious
+HTML served with a missing or incorrect MIME type. Hidden content, scripts,
+unrelated footer/navigation and narrowly identified informational instructions
+do not alone establish a challenge. Literal robots purpose is checked at every
+physical hop; a robots redirect cannot turn content into robots. Robots-only
+4xx responses except 429 mean unavailable REP without inventing Disallow or
+clearing existing holds. Valid explicit robots restrictions remain effective.
+
+Old schema-1 artifacts remain readable. Optional interval, page interval,
+new-event count and typed historical-unknown fields retain all known starts,
+embargoes and holds. Missing old counters mean no events observed since this
+migration, not zero lifetime events. Restoration MAX merges every timing/count,
+bounded unions the last ten starts, and OR merges holds and historical unknown.
+Unsupported state fails closed without resetting the original journal. If
+physical completion cannot be persisted, export refuses that state and
+invalidates any safely owned stale artifact instead of presenting incomplete
+restrictions as a valid handoff.
 
 The material guard excludes only the reviewed random `DidYouKnowCnt` trivia sidebar, outside material content with its exact three-child shape, and the six plain `NewsOsobnaDatum` display dates. Literal links inside trivia remain guarded. Unknown counts, attributes, placement, date markup or unrelated text/link changes fail closed for fresh review. No PDF or guessed pager/API is required.
 
@@ -34,9 +70,38 @@ python -B adapters/hr-study-in-croatia/adapter.py --publish
 
 The sole live test performs one real nonpublishing collection, validates all twelve records and prints complete JSON to stdout. Hold stdout in memory; do not save normalized records or provide publication credentials to tests. The matching workflow's sole application command publishes this source's own pair atomically.
 
-Twenty HTML inputs plus one robots request require 21 nominal starts: 60-second transport reservation plus twenty six-second gaps gives a 180-second minimum allowance. The complete prepublication phase, including history/artifact restore, is capped at 900 seconds; this nominal floor is not a worst-case access guarantee. Publication and conditional failure reconciliation each have 180 seconds. Whole-process cap is 1290 seconds, nonexport work 1260 seconds, with up to thirty remaining seconds for trusted state export. POSIX main-thread absolute alarms cover reads, sleep, parse, output and cleanup; expired phases do not renew. The collector lock stays held through bounded export. The thirty-minute workflow mints its one-hour App token immediately before the command.
+Twenty HTML inputs plus one nominal robots request preserve the complete
+reviewed frontier. A 375.2-second nominal pacing estimate includes startup quiet
+and inventory spacing before response/history overhead; the previous actual
+collection step was 255 seconds. These are planning evidence, not current
+source or runtime acceptance. Redirects, retries or stronger retained limits
+can exceed the unchanged cap and then fail closed; no input is truncated.
+The complete prepublication phase, including history/artifact restore, remains
+capped at 900 seconds with the existing 120-second request headroom guard.
+Publication and conditional failure reconciliation each have 180 seconds.
+Whole-process cap remains 1290 seconds, nonexport work 1260 seconds, with up to
+30 remaining seconds for trusted state export. POSIX main-thread absolute
+alarms cover reads, sleep, parse, output and cleanup; expired phases do not
+renew. The collector lock stays held through bounded export. The unchanged
+30-minute workflow mints its one-hour App token immediately before the command.
 
-Full stable family history selects the exact newest completed attempt, including failed/cancelled runs, and requires its bounded digest/schema/source/run/attempt-bound inert artifact. The first-family workflow bootstrap is bound to the [reviewed public pacing handoff](https://github.com/YouthOpps/data-pipeline/issues/27#issuecomment-6095631036), which records complete absent-family history and preserved local state after both live acceptance collections. It applies only when complete history proves no family run; existing pacing state is never reset. After any completed run, including failure, the newest trusted artifact is mandatory and this marker cannot replace it. First collection failure creates no source folder. Later failures preserve last-good data and success time, with sanitized durable failure status only when safe. Guarded compare-and-swap protects siblings and newer/uncertain source pairs. Successful collection records attempt start as `last_success_at` and completion as `last_checked_at`. Before collection or writes, an existing source pair must have coherent identity, status, error, record count and aware timestamps; every record must share its metadata check time. Invalid prior pairs receive no failure metadata write.
+Local and hosted collection require complete authenticated family history and
+the newest exact owned artifact before any publisher request. Exact-attempt
+jobs establish completion chronology, including reruns, with explicit
+workflow/source/head/attempt and main-branch binding. Hosted history must
+contain its exact current run; local history rejects every active or queued
+family attempt. Missing, expired, mismatched or incomplete newest state fails
+closed, with no older fallback or mature bootstrap. Artifact digest, source,
+run and attempt are checked before restrictive MAX/OR restoration into the
+original family journal under its existing locks. A missing local journal
+requires the newest owned state and does not establish a new allowance.
+
+Local collection additionally requires the maintainer to pause this exact
+workflow. Its fixed ID, own workflow path and `disabled_manually` state are
+freshly checked before history and again immediately before the first publisher
+GET after startup quiet. A changed state stops before that request; this is not
+per-page GitHub polling. Keep the workflow paused for the entire local run.
+The old first-family workflow marker cannot replace mature history. First collection failure creates no source folder. Later failures preserve last-good data and success time, with sanitized durable failure status only when safe. Guarded compare-and-swap protects siblings and newer/uncertain source pairs. Successful collection records attempt start as `last_success_at` and completion as `last_checked_at`. Before collection or writes, an existing source pair must have coherent identity, status, error, record count and aware timestamps; every record must share its metadata check time. Invalid prior pairs receive no failure metadata write.
 
 ## Expired-record cleanup
 
@@ -58,8 +123,8 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
+access; restrictive rate and delay directives remain effective. The advertised identity and durable family identity remain unchanged; current
+pacing and backoff follow the access section above. Existing
 disabled workflows remain disabled.
 
 ## Daily automation
@@ -74,14 +139,11 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
-This includes taxonomy/listing pages where applicable. The existing native
-transport still enforces its physical-request allowance across retries, redirects
-and detail requests, with stricter publisher limits and retained backoff taking
-precedence. The page guard does not raise the durable request interval for all
-subsequent article/detail requests or reset existing budget/refusal state.
-Inventory scope, parsing, validation and atomic publication are unchanged.
+Each physical news inventory hop waits at least 30 seconds after the previous
+inventory attempt finishes, including redirects and the bounded existing 503
+retry. Detail and policy pages remain separate under the physical floor.
+Inventory scope, all twenty fingerprints, twelve record identities, parsing,
+validation, expiry and atomic publication are unchanged.
 
 ## Workflow concurrency
 
