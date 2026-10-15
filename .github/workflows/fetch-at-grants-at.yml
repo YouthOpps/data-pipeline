@@ -1,0 +1,79 @@
+name: Fetch grants.at public funding programmes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - adapters/at-grants-at/**
+      - .github/workflows/fetch-at-grants-at.yml
+  schedule:
+    - cron: '23 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  queue: max
+  group: youthopps-grants-at-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: >-
+      github.repository == 'YouthOpps/data-pipeline' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate data-source publication
+        id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.WEBSITE_APP_ID }}
+          private-key: ${{ secrets.WEBSITE_APP_PRIVATE_KEY }}
+          owner: YouthOpps
+          repositories: data-source
+          permission-contents: write
+      - name: Collect and publish reviewed source
+        run: python -B adapters/at-grants-at/adapter.py --publish
+        env:
+          DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GRANTS_AT_PACING_BOOTSTRAP: >-
+            {
+              "schema": 1,
+              "family": "youthopps-grants-at-publisher-v1",
+              "not_before": 1792068255.101424,
+              "evidence": "https://github.com/YouthOpps/data-pipeline/issues/26#issuecomment-6192771195",
+              "state": {
+                "schema": 1,
+                "family": "youthopps-grants-at-publisher-v1",
+                "observed_at": 1792068195.101424,
+                "not_before": 1792067649.9943218,
+                "starts": [
+                  1792068163.257482,
+                  1792068194.6272607
+                ],
+                "blocked": false,
+                "interval": 12.2,
+                "page_interval": 30,
+                "rate_limit_strikes": 0,
+                "rate_limit_until": 0,
+                "completed": 1792068195.101424
+              }
+            }
+          GRANTS_AT_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+      - name: Preserve inert publisher pacing state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grants-at-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
