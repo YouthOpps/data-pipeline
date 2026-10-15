@@ -1445,15 +1445,12 @@ def request_bytes(
                     if not math.isfinite(seconds) or seconds <= 0:
                         raise ValueError("Unusable Retry-After")
                     datetime.fromtimestamp(until, timezone.utc)
+                except (ValueError, TypeError, OverflowError, OSError):
+                    # An unusable header alone does not establish refusal.
+                    until = None
+                if until is not None:
                     budget["until"] = max(budget["until"], until)
                     save_budget(state, budget)
-                except (ValueError, TypeError, OverflowError, OSError):
-                    if response.status != 429:
-                        budget["blocked"] = True
-                        save_budget(state, budget)
-                        raise AdapterError(
-                            "Invalid publisher Retry-After", "access"
-                        )
             if publisher and response.status == 429:
                 budget["rate_failures"] += 1
                 budget["interval"] = max(budget["interval"], 12) * 2
@@ -1466,7 +1463,7 @@ def request_bytes(
                 raise AdapterError(
                     "Publisher rate limit; retained backoff", "access", 429
                 )
-            if publisher and response.status in (401, 403):
+            if publisher and response.status in (401, 403, 451):
                 if not robots:
                     budget["blocked"] = True
                     save_budget(state, budget)

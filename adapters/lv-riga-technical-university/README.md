@@ -108,7 +108,7 @@ permits treating an unavailable robots file separately from content refusal.
 Only robots retrieval 400–499, except 429, caches an absent policy for that
 collection, including 401, 403, 404 and 410.
 An actual Disallow, applicable legacy product rule or stricter publisher limit
-still applies. Content 401/403 and a recognized challenge/refusal page stop
+still applies. Content 401/403/451 and a recognized challenge/refusal page stop
 collection and durably retain the refusal. Robots 429, 5xx and TLS/network
 failure are not converted to an empty policy. No browser impersonation,
 credentials workaround or content-status fallback is used. Robots absence is
@@ -122,7 +122,9 @@ fast during the retained embargo, and can try normally afterwards with the
 slower interval; a timed 429 alone is not a permanent access ban. Unusable
 429 Retry-After (malformed, nonpositive, nonfinite or outside the supported date
 range) uses that timed fallback without creating or clearing an access hold.
-Invalid backoff on other responses retains protective failure behavior. Tests
+Unusable Retry-After on other statuses is ignored without inventing an access
+hold or masking the actual response status. Valid embargo persistence failures
+still stop collection; they are not classified as malformed headers. Tests
 and production use the same original
 host budget path, MAX interval/embargo/completion history and OR refusal merge.
 A process collection lock serializes local collectors; the existing Action
@@ -242,3 +244,32 @@ Published metadata uses `display_name` = **Riga Technical University** for the v
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Conditional header safety maintenance
+
+[Issue 229](https://github.com/YouthOpps/data-pipeline/issues/229) changes only
+unusable Retry-After handling and the actual content451 denial branch. Valid
+longer embargoes, exponential 429 fallback, doubled current physical spacing,
+existing refusal/artifact/recovery identity and all successful parsing, facts,
+validation, expiry and publication remain unchanged. Literal robots451 retains
+the existing unavailable-REP treatment. No workflow or timing floor changes.
+This is not a page-gap/schema migration: the existing RTU state has no durable
+inventory page-interval or legacy-rate-unknown field, and an absent historical
+counter is not proof of lifetime zero rate limits.
+
+The genuine earlier native test retrieved eleven raw records, ten after expiry,
+and the then-current consumer accepted 11/10/0. Its receipt did not record the
+exact tested-source SHA or discovery dependency hash. Frozen author revision
+`c3177140b4b7fea41a303bfdbc6178be54e2c1bb` (source `8e7b779c`)
+has prior independent conditional-reuse acceptance; it is not represented as
+the exact original tested bytes. Full native records/bodies are no longer
+retained. The current consumer `2fabcc52` differs from historical `7f23d601`;
+no byte-identical whole-current-consumer or fresh full-record replay is claimed.
+This maintenance uses that explicitly limited historical qualification plus
+unchanged normal-path AST and actual-function inert error controls.
+
+Production [38737282568](https://github.com/YouthOpps/data-pipeline/actions/runs/38737282568)
+failed on actual content403 and retained its owned blocked-state artifact.
+That hold remains controlling. No publisher request, new native collection,
+state reset, workflow enable/dispatch or production recovery accompanies this
+conditional maintenance. Source issue16 remains blocked independently.
