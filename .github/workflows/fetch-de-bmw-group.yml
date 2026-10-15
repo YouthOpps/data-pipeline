@@ -1,0 +1,79 @@
+name: Fetch BMW Group public youth vacancies
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - adapters/de-bmw-group/**
+      - .github/workflows/fetch-de-bmw-group.yml
+  schedule:
+    - cron: '5 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  queue: max
+  group: youthopps-bmw-group-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: >-
+      github.repository == 'YouthOpps/data-pipeline' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate data-source publication
+        id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.WEBSITE_APP_ID }}
+          private-key: ${{ secrets.WEBSITE_APP_PRIVATE_KEY }}
+          owner: YouthOpps
+          repositories: data-source
+          permission-contents: write
+      - name: Collect and publish reviewed source
+        run: python -B adapters/de-bmw-group/adapter.py --publish
+        env:
+          DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          BMW_GROUP_PACING_BOOTSTRAP: >-
+            {
+              "schema": 1,
+              "family": "youthopps-bmw-group-publisher-v1",
+              "not_before": 1792071376.7676826,
+              "evidence": "https://github.com/YouthOpps/data-pipeline/issues/116#issuecomment-6193553257",
+              "state": {
+                "schema": 1,
+                "family": "youthopps-bmw-group-publisher-v1",
+                "observed_at": 1792071316.7676826,
+                "not_before": 1792070388.5782976,
+                "starts": [
+                  1792071285.4000778,
+                  1792071316.1141105
+                ],
+                "blocked": false,
+                "interval": 12.2,
+                "page_interval": 30,
+                "rate_limit_strikes": 0,
+                "rate_limit_until": 0,
+                "completed": 1792071316.7676826
+              }
+            }
+          BMW_GROUP_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+      - name: Preserve inert publisher pacing state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmw-group-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
