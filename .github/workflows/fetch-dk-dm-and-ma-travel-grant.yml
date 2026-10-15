@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-dk-dm-and-ma-travel-grant.yml'
   workflow_dispatch:
   schedule:
-    - cron: '17 3/6 * * *'
+    - cron: '56 17 * * *'
 permissions:
   contents: read
 concurrency:

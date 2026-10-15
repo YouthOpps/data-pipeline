@@ -29,3 +29,17 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **18:51 UTC** (`51 18 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+The current collector has no paginated inventory to delay. Its existing request
+pacing and publisher restrictions remain in force; this source changes only its
+daily automation schedule.

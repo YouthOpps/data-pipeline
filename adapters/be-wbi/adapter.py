@@ -27,6 +27,24 @@ PUBLISHER_TYPE = "government"
 ATTRIBUTION = "Wallonie-Bruxelles International (WBI) – www.wbi.be"
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -830,7 +848,9 @@ PROFILES = [
 
 def read_pages():
     """Read every required hub, leaf, current call and legal article."""
-    return {key: page(url) for key, url in PAGES.items()}
+    return {key: (fetch_inventory_page(page, url)
+                  if key.startswith("listing") else page(url))
+            for key, url in PAGES.items()}
 
 
 def parse_inventory(pages):

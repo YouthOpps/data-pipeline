@@ -31,7 +31,7 @@ python -B adapters/youth-for-europe/test_adapter.py
 python -B adapters/youth-for-europe/adapter.py
 ```
 
-The sole live test collects real nonempty records and emits the complete validated JSON array on stdout; test diagnostics go to stderr. It neither requires publication credentials nor writes datasets. The ordinary adapter command prints run metadata without publication. The matching main-push/manual/six-hour workflow's only application command is:
+The sole live test collects real nonempty records and emits the complete validated JSON array on stdout; test diagnostics go to stderr. It neither requires publication credentials nor writes datasets. The ordinary adapter command prints run metadata without publication. The matching main-push/manual/daily workflow's only application command is:
 
 ```sh
 python -B adapters/youth-for-europe/adapter.py --publish
@@ -54,3 +54,24 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **05:40 UTC** (`40 5 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+### Pagination spacing
+
+Inventory page continuations and partitions wait at least 12 seconds after the
+previous inventory page finishes before fetching the next page in this process.
+This includes taxonomy/listing pages where applicable. The existing native
+transport still enforces its physical-request allowance across retries, redirects
+and detail requests, with stricter publisher limits and retained backoff taking
+precedence. The page guard does not raise the durable request interval for all
+subsequent article/detail requests or reset existing budget/refusal state.
+Inventory scope, parsing, validation and atomic publication are unchanged.

@@ -50,7 +50,7 @@ python -B adapters/de-rausvonzuhaus/test_adapter.py
 
 The single live test collects actual nonempty records, validates them, and emits the complete JSON document on stdout. Diagnostics go to stderr. It has no publication credentials and writes no output files. The folder operates independently using Python's standard library; its test imports only its own adapter in addition to standard modules.
 
-The matching `fetch-de-rausvonzuhaus.yml` runs after changes to its own adapter/workflow are merged to `main`, supports manual dispatch and runs every six hours at minute 41. A repository/main guard, minimal permissions, data-source-only GitHub App token and global publication concurrency constrain the Action. Its sole application command uses `adapter.py --publish`; tests and formatting never run in production.
+The matching `fetch-de-rausvonzuhaus.yml` runs after changes to its own adapter/workflow are merged to `main`, supports manual dispatch and runs once daily at 14:33 UTC. A repository/main guard, minimal permissions, data-source-only GitHub App token and global publication concurrency constrain the Action. Its sole application command uses `adapter.py --publish`; tests and formatting never run in production.
 
 Production starts after maintainer merge. It atomically publishes only `datas/de-rausvonzuhaus/data.json` and `metadata.json` using a conflict-safe Git commit. First-run failure creates no source folder. After a successful publication, later failure preserves last-good data and the last successful timestamp and records sanitized failure metadata when possible. The success timestamp advances only after a validated nonempty retrieval and its filtered result are successfully published. Failed metadata publication is reported rather than claimed to have been saved. This adapter does not alter any other source or create a catalog.
 
@@ -93,3 +93,17 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **14:33 UTC** (`33 14 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+The current collector has no paginated inventory to delay. Its existing request
+pacing and publisher restrictions remain in force; this source changes only its
+daily automation schedule.

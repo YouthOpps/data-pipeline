@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-de-rausvonzuhaus.yml'
   workflow_dispatch:
   schedule:
-    - cron: "41 */6 * * *"
+    - cron: '33 14 * * *'
 permissions:
   contents: read
 concurrency:

@@ -20,7 +20,7 @@ Every physical publisher attempt shares one durable family budget across endpoin
 
 The newest completed family attempt's validated inert pacing artifact is mandatory once any family history exists, including failed attempts. Missing/expired newest artifacts cannot trigger fresh bootstrap or older fallback. The original first-production bootstrap remains bound to the [issue #117 handoff](https://github.com/YouthOpps/data-pipeline/issues/117#issuecomment-6102086900), exhaustive unfiltered history and secure MAX/OR conservation. It applies only when history proves no completed family attempt exists. Artifact export requires healthy durably finalized state and a positive signal through the current step's fresh output file; stale state cannot be uploaded after failed completion persistence.
 
-Every GitHub publication request obtains or renews a repository-scoped installation token through the configured App. The matching workflow discovers the `YouthOpps/data-source` installation using `actions/create-github-app-token@v2`, supplies its authoritative installation ID and preserves native JIT renewal; it does not pass the action's temporary token as a static fallback. Atomic source-scoped CAS writes affect only `datas/volkswagen-group/{data,metadata}.json`. Initial failure creates no folder; later failure preserves validated last-good data and success/check timestamps when safe failure metadata can be written. Creation/first-seen/last-seen use attempt start, last-checked uses successful end, and updated-at advances only on a material change. Push routing, manual dispatch, weekly schedule, repository/main guard and serialized family publication remain unchanged. Maintainer merge starts production; implementation does not dispatch Actions or publish.
+Every GitHub publication request obtains or renews a repository-scoped installation token through the configured App. The matching workflow discovers the `YouthOpps/data-source` installation using `actions/create-github-app-token@v2`, supplies its authoritative installation ID and preserves native JIT renewal; it does not pass the action's temporary token as a static fallback. Atomic source-scoped CAS writes affect only `datas/volkswagen-group/{data,metadata}.json`. Initial failure creates no folder; later failure preserves validated last-good data and success/check timestamps when safe failure metadata can be written. Creation/first-seen/last-seen use attempt start, last-checked uses successful end, and updated-at advances only on a material change. The daily schedule is staggered with other sources. Push routing, manual dispatch, repository/main guard and serialized family publication remain unchanged. Maintainer merge starts production; implementation does not dispatch Actions or publish.
 
 Run the sole real nonpublishing test from the repository root:
 
@@ -47,3 +47,24 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **00:10 UTC** (`10 0 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+### Pagination spacing
+
+Inventory page continuations and partitions wait at least 12 seconds after the
+previous inventory page finishes before fetching the next page in this process.
+This includes taxonomy/listing pages where applicable. The existing native
+transport still enforces its physical-request allowance across retries, redirects
+and detail requests, with stricter publisher limits and retained backoff taking
+precedence. The page guard does not raise the durable request interval for all
+subsequent article/detail requests or reset existing budget/refusal state.
+Inventory scope, parsing, validation and atomic publication are unchanged.

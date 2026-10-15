@@ -7,7 +7,7 @@ on:
       - adapters/google/**
       - .github/workflows/fetch-google.yml
   schedule:
-    - cron: '21 9 * * 3'
+    - cron: '9 16 * * *'
   workflow_dispatch:
 
 permissions:

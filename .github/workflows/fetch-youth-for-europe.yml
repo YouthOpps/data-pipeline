@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-youth-for-europe.yml'
   workflow_dispatch:
   schedule:
-    - cron: '47 */6 * * *'
+    - cron: '40 5 * * *'
 permissions:
   contents: read
 concurrency:

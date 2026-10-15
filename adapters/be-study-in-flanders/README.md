@@ -46,7 +46,7 @@ Collection and both prepublication gates are 900 seconds. Original whole-run cap
 
 Production restores the newest completed real family workflow attempt from complete stable bounded repository history, including failed/cancelled/rerun attempts. Validate inert pacing artifact size/hash/envelope/repository/source/attempt/schema; missing newest state fails closed without older fallback or reset. First-family bootstrap requires a separately reviewed public evidence binding, not an author-invented default. Preserve refusal/backoff state; an explicit denial requires reviewed recovery before another publisher request.
 
-The single main-push/manual/weekly workflow publishes only `datas/be-study-in-flanders/{data,metadata}.json`. Success atomically creates/replaces both files through source-scoped non-force compare-and-swap, preserving all sibling sources. Validate prior complete own pair before changes. Initial failures create no folder; later failures preserve last-good data and last-success time, updating only safe failure metadata when possible. Uncertain commits are reconciled against exact desired bytes; newer own pairs are never overwritten. Logs distinguish unconfirmed durable outcome from saved failure. Source metadata is the durable status record after first success; pacing artifacts contain infrastructure state only.
+The single main-push/manual/daily workflow publishes only `datas/be-study-in-flanders/{data,metadata}.json`. Success atomically creates/replaces both files through source-scoped non-force compare-and-swap, preserving all sibling sources. Validate prior complete own pair before changes. Initial failures create no folder; later failures preserve last-good data and last-success time, updating only safe failure metadata when possible. Uncertain commits are reconciled against exact desired bytes; newer own pairs are never overwritten. Logs distinguish unconfirmed durable outcome from saved failure. Source metadata is the durable status record after first success; pacing artifacts contain infrastructure state only.
 
 ## Expired-record cleanup
 
@@ -87,3 +87,17 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **10:21 UTC** (`21 10 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+The current collector has no paginated inventory to delay. Its existing request
+pacing and publisher restrictions remain in force; this source changes only its
+daily automation schedule.

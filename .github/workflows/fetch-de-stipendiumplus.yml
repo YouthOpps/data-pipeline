@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-de-stipendiumplus.yml'
   workflow_dispatch:
   schedule:
-    - cron: '37 2/6 * * *'
+    - cron: '45 23 * * *'
 permissions:
   contents: read
 concurrency:

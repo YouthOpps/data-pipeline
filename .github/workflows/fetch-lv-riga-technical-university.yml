@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-lv-riga-technical-university.yml'
   workflow_dispatch:
   schedule:
-    - cron: "49 */6 * * *"
+    - cron: '59 12 * * *'
 permissions:
   contents: read
 concurrency:
