@@ -14,7 +14,7 @@ returned ordinary HTTPS HTML during the 9 October 2026 review. Their robots
 responses were HTTP 200 with empty bodies, a valid policy with no restrictions.
 The issue's historical robots/HTTP 403 limitation was not reproduced. Normal
 TLS/proxy behavior and the identifying project User-Agent
-`YouthOpp/1.0 (+https://github.com/YouthOpps/data-pipeline)` are preserved.
+`YouthOppsBot/1.0 (+https://youthopps.org/bot/)` are preserved.
 
 The actual [SAIA legal page](https://www.saia.sk/en/main/about-us-main/legal-information-and-data-protection/)
 links the binding [Slovak website terms](https://www.saia.sk/_user/documents/SAIA/pravne-info/VZP-SAIA-weby2018-SK.pdf)
@@ -36,17 +36,16 @@ the binding Slovak conditions. Copyright/footer alone is not treated as an
 additional permission gate.
 
 All official SAIA-family origins, robots, redirects and retries share one
-process-locked publisher allowance: at least six seconds between starts and
-no more than ten starts in any rolling 60 seconds. The state directory/key
-is deliberately publisher-wide (`saia-publisher-pacing-<uid>`,
-`scholarships.sk`) across `scholarships.sk`, `stipendia.sk`, `saia.sk` and its
+process-locked publisher allowance: at least 12.1 seconds between physical starts and
+no more than five starts in any rolling 60 seconds. The state directory is publisher-wide (`saia-publisher-pacing-<uid>`); both
+legacy `saia.sk` and `scholarships.sk` hash-key inodes are locked in sorted
+order and receive the MAX-merged state across `scholarships.sk`, `stipendia.sk`, `saia.sk` and its
 subdomains, so the separately implemented SAIA grant database must use the
 same key. No cross-folder import/shared framework is required. Separate cloud
 machines and production runs must be coordinated, including between sources
 17 and 18; serialized publication alone does not grant separate publisher
 allowances. Any stricter robots delay or Retry-After is honored. GitHub API
-requests have their own host key. Harno-specific 12-second/durable-cooldown
-logic is not copied without a source requirement.
+requests have their own host key.
 
 ## Current complete inventory
 
@@ -205,15 +204,74 @@ received HTTP 403 from `https://www.scholarships.sk/robots.txt`, before any
 programme collection or source publication. These observations establish an
 access difference; they do not identify its cause.
 
-As one bounded normal content-negotiation trial, requests for `/robots.txt`
-on the reviewed SAIA publisher family send `Accept: text/plain, */*;q=0.1`.
-The identifying project User-Agent, exact origin/path, TLS, shared pacing and
-all access checks remain the same. Programme/PDF and GitHub API requests do
-not receive this robots-specific header. HTTP 403 remains fatal, with no
-robots fallback, browser imitation, cookies or policy bypass. A successful
-cloud test does not establish that production access is resolved; maintainers
-must verify the changed request once in production and stop if it remains
-blocked.
+Under the reviewed [workspace access policy](https://github.com/YouthOpps/ai-workspace/issues/18),
+HTTP 4xx except 429 from a verified robots retrieval, including its reviewed
+same-host redirects, means unavailable REP rules. This does not imply content
+permission or invent a sitewide Disallow. The robots request retains
+`Accept: text/plain, */*;q=0.1`, the exact bot identity, verified TLS and shared
+pacing. Actual content 401/403, a clear access challenge or applicable explicit
+Disallow remains a retained refusal. Robots/content 429 stops this job and
+retains a timed embargo, rather than becoming a permanent permission denial.
+TLS/network/5xx failures are never treated as absent robots.
+
+### Durable family state and narrowly reviewed recovery
+
+The [last NSP hosted run](https://github.com/YouthOpps/data-pipeline/actions/runs/37866043357)
+at revision `08df07fee129bbe1c416e0f417df2c727ea423b3` failed on
+`https://www.scholarships.sk/robots.txt` HTTP 403 before programme collection.
+Its complete three-run history is pinned with runs `37865230903` and
+`37865212036`. These old NSP jobs exported no state artifact: unlogged historic
+Retry-After headers cannot be reconstructed and are not claimed restored.
+
+The sibling [first Study in Slovakia run](https://github.com/YouthOpps/data-pipeline/actions/runs/38070837752)
+at `9c27a9e15b9c2fdb6c734952ea8359658fc5cbb4` made its sole publisher
+request to robots.txt and retained the resulting HTTP 403. The
+[following run](https://github.com/YouthOpps/data-pipeline/actions/runs/38070842559)
+restored that refusal and made no content request. Its real
+`saia-pacing-state-1` artifact (ID `11676726932`, ZIP SHA-256
+`ba99101b643c8c6f298bab6d19b8e091ed5ec5c6f9747d5ddf0176505fbcfdf4`)
+contains the known starts, interval, embargo and that robots-only blocked flag.
+
+Only this exact reviewed artifact may reclassify the incoming blocked flag:
+both source histories must match all five pinned attempts and revisions, and
+the old sibling workflow must still be manually disabled. Unknown local holds
+are OR-retained and never cleared. Every known timing constraint from the real
+artifact, both local inodes and the complete successful native journal
+(`_REVIEWED_MIGRATION_NATIVE`, schema 1, native SHA-256
+`2711ed565eddd1d9d4e7900797c76a55d99422e79558a092e42e108beaa10088`)
+is MAX-merged, with at least 60 seconds of new
+startup quiet time. This explicit policy migration acknowledges the old NSP
+header-evidence gap; it is not a generic cache reset or permission bypass.
+Actual content refusal after recovery stops retrieval and remains durable.
+
+Each hosted run restores the latest completed attempt across both source
+workflows before reading the data-source snapshot or contacting a publisher.
+Older-ID reruns and queued reruns' previous completed attempts participate in
+completion chronology from authenticated exact-attempt job completion times,
+not mutable run `updated_at` metadata. Active competing collectors, missing/incomplete history,
+ambiguous chronology, missing/expired/invalid artifacts and wrong source,
+repository, attempt or head bindings fail closed. ZIP input is bounded and inert;
+authentication is stripped from signed download destinations. New state is
+exported even after collection, snapshot or publication failure and uploaded as
+`saia-pacing-state-<attempt>` with a repository/source/run/attempt/head-bound
+schema-1 envelope. No normalized opportunity records or credentials belong in it.
+
+A 429 at least doubles the already retained physical and page intervals,
+including stronger publisher limits, with an exponential count-based floor. Without
+a valid Retry-After, the embargo starts at 30 minutes and doubles on repeated
+429s; longer publisher embargoes remain in force. An active embargo fails before
+another publisher start. After expiry, a bounded normal attempt may proceed at
+the slower persisted intervals. Hard access refusals remain distinct. The
+completion guard holds the family budget lock through each response and records
+the following interval, so actual starts cannot race timestamp reservations.
+
+The shared `collection.lock` rejects overlapping local SAIA collections;
+`youthopps-saia-publisher-v1` serializes hosted jobs. Separate machines still
+require operator coordination. The old sibling runtime rejects source17
+reactivation and cannot consume the new timed-rate state keys; it must remain
+disabled until its separately reviewed family migration is merged. This PR does
+not activate either workflow or dispatch Actions. Hosted reachability and durable
+artifact upload require separate maintainer verification after merge.
 
 ## Expired-record cleanup
 
@@ -254,9 +312,9 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+access; restrictive rate and delay directives remain effective. Durable budget
+identities are preserved; current pacing and backoff behavior is described
+above. Existing disabled workflows remain disabled.
 
 ## Daily automation
 
@@ -268,9 +326,9 @@ GitHub can delay scheduled events; the existing publication concurrency
 serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
-The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+The current collector has no paginated inventory, so no inventory-page guard
+is exercised. Physical requests retain the publisher pacing, backoff and
+restrictions described above; the daily schedule is unchanged.
 
 ## Workflow concurrency
 
@@ -280,4 +338,5 @@ active runs are not cancelled (`cancel-in-progress: false`). Unrelated publisher
 families may collect and publish in parallel. Existing source-only atomic
 publication rebases on unrelated repository updates, uses up to three
 publication attempts, and never force-overwrites newer data.
-This grouping does not enable the disabled legacy scholarship workflow.
+This grouping does not enable a disabled workflow; re-enablement belongs to
+the separate maintainer handoff after independent QA.
