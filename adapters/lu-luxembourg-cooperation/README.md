@@ -74,3 +74,22 @@ Published metadata uses `display_name` = **Luxembourg Development Cooperation** 
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+
+### Completion persistence and artifact failure
+
+A failed publisher-completion state write makes this process unhealthy. It
+refuses further source requests and collection reentry, and cannot export an
+apparently valid pacing artifact containing older state. Export invalidates
+a safely owned prior artifact through its pinned descriptor before unlinking;
+unsafe files, symlinks and hardlinks are preserved and rejected. The new output
+descriptor remains open through serialization and any workflow readiness
+signal, so a later failure truncates it before attempting removal. No state
+history, actual access hold, collection scope or pacing limit is reset.
+
+This conditional safety repair is checked with offline actual-function failure
+controls. It does not claim a new publisher collection, fresh complete current
+consumer replay, or certification of other legacy pacing/rate-limit behavior.
+Historical native proof is reused only for unchanged normal collection, facts,
+normalization, validation, expiry and publication functions; retained record
+and dependency limits are documented in the linked maintenance issue.

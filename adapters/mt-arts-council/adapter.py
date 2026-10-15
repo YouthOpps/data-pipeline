@@ -36,6 +36,7 @@ ATTRIBUTION = "Arts Council Malta https://artscouncilmalta.gov.mt/ and the named
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
 _USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
+_PUBLISHER_GATE_FAILED = False
 CATEGORIES = {
     "scholarships",
     "grants",
@@ -468,6 +469,8 @@ def save_budget(state):
 
 def pace(inventory=False):
     """Keep real starts within durable physical and inventory-page limits."""
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher completion persistence failed", "access")
     check_deadline()
     with locked_budget():
         state = load_budget()
@@ -1366,45 +1369,129 @@ def restore_family_artifact():
     _RESTORED, _STATE_TRUSTED = True, True
 
 
-def export_family_artifact():
-    """Atomically export fresh trusted state and signal the current workflow step."""
-    path = os.environ.get("ARTSCOUNCILMALTA_PACING_ARTIFACT_PATH")
-    if not path or not _STATE_TRUSTED:
+def invalidate_artifact(parent, name):
+    """Invalidate only a safely owned artifact, before attempting unlink."""
+    try:
+        descriptor = os.open(
+            name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=parent
+        )
+    except FileNotFoundError:
         return
-    run_id, attempt = current_run_identity()
+    try:
+        info = os.fstat(descriptor)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (
+            info.st_uid != os.getuid()
+            or not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise AdapterError("Unsafe existing pacing artifact", "access")
+        os.ftruncate(descriptor, 0)
+        os.fsync(descriptor)
+        os.unlink(name, dir_fd=parent)
+        os.fsync(parent)
+    finally:
+        os.close(descriptor)
+
+
+@contextlib.contextmanager
+def artifact_output(path):
+    """Keep a pinned output descriptor until export and signaling succeed."""
+    global _PUBLISHER_GATE_FAILED
     configured = os.environ.get("RUNNER_TEMP", "")
-    if not os.path.isabs(configured):
+    if not configured or not os.path.isabs(configured):
         raise AdapterError("Runner temporary directory required", "access")
     root = os.path.realpath(configured)
     if (
         os.path.dirname(os.path.abspath(path)) != root
         or os.path.basename(path) != "pacing-state.json"
     ):
-        raise AdapterError("Unsafe artifact output path", "access")
-    info = os.stat(root, follow_symlinks=False)
-    if (
-        not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != os.getuid()
-        or info.st_mode & 0o022
-    ):
-        raise AdapterError("Unsafe artifact output directory", "access")
-    with locked_budget():
-        state = load_budget()
-    envelope = {
-        "schema": 1,
-        "repository": "YouthOpps/data-pipeline",
-        "run_id": run_id,
-        "run_attempt": attempt,
-        "source": SOURCE_ID,
-        "state": state,
-    }
-    fd, temporary = tempfile.mkstemp(prefix=".arts-pacing-", dir=root)
+        raise AdapterError("Unsafe pacing artifact path", "access")
+    parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    descriptor = None
+    name = os.path.basename(path)
     try:
-        with os.fdopen(fd, "w") as file:
-            json.dump(envelope, file)
+        info = os.fstat(parent)
+        if (
+            info.st_uid != os.getuid()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_mode & 0o022
+            or info.st_mode & 0o700 != 0o700
+        ):
+            raise AdapterError("Unsafe pacing artifact directory", "access")
+        invalidate_artifact(parent, name)
+        if _PUBLISHER_GATE_FAILED:
+            raise AdapterError(
+                "Publisher completion cannot be exported", "access"
+            )
+        descriptor = os.open(
+            name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent,
+        )
+        try:
+            yield descriptor
+            os.fsync(descriptor)
+            os.fsync(parent)
+        except BaseException:
+            _PUBLISHER_GATE_FAILED = True
+            # Keep the exact owned descriptor open until failure cleanup.
+            # Truncate before unlink: failed unlink still leaves invalid JSON.
+            os.ftruncate(descriptor, 0)
+            os.fsync(descriptor)
+            with contextlib.suppress(Exception):
+                signal = os.open(
+                    os.environ["GITHUB_OUTPUT"],
+                    os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW,
+                )
+                with os.fdopen(signal, "a") as output:
+                    info = os.fstat(output.fileno())
+                    if (
+                        not stat.S_ISREG(info.st_mode)
+                        or info.st_uid != os.getuid()
+                        or info.st_nlink != 1
+                    ):
+                        raise AdapterError("Unsafe readiness output", "access")
+                    output.write("pacing_ready=false\n")
+                    output.flush()
+                    os.fsync(output.fileno())
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) == (current.st_dev, current.st_ino):
+                os.unlink(name, dir_fd=parent)
+                os.fsync(parent)
+            raise
+
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(parent)
+
+
+def export_family_artifact():
+    """Export healthy state; invalidate owned stale output on failure."""
+    path = os.environ.get("ARTSCOUNCILMALTA_PACING_ARTIFACT_PATH")
+    if not path or not (_STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
+        return
+    with artifact_output(path) as descriptor:
+        run_id, attempt = current_run_identity()
+        with locked_budget():
+            state = load_budget()
+        envelope = {
+            "schema": 1,
+            "repository": "YouthOpps/data-pipeline",
+            "run_id": run_id,
+            "run_attempt": attempt,
+            "source": SOURCE_ID,
+            "state": state,
+        }
+        with os.fdopen(os.dup(descriptor), "w") as file:
+            json.dump(envelope, file, separators=(",", ":"))
             file.flush()
             os.fsync(file.fileno())
-        os.replace(temporary, path)
         descriptor = os.open(
             os.environ["GITHUB_OUTPUT"],
             os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW,
@@ -1418,12 +1505,13 @@ def export_family_artifact():
             ):
                 raise AdapterError("Unsafe workflow output signal", "access")
             output.write("pacing_ready=true\n")
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+            output.flush()
+            os.fsync(output.fileno())
 
 
 def prepare_collection():
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher completion persistence failed", "access")
     global _COLLECTION_STARTED, _STATE_TRUSTED, _COLLECTION_LOCK_FD
     _COLLECTION_STARTED = time.time()
     budget_file()
@@ -2198,11 +2286,15 @@ SCRIPT_PATH = "/wp-content/themes/hello-elementor-child/assets/js/script.js"
 
 def request_bytes(url, **kwargs):
     """Retain a completion guard even after HTTP, TLS or body-read failure."""
+    global _PUBLISHER_GATE_FAILED
     publisher = kwargs.get("publisher", False)
+    if publisher and _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher completion persistence failed", "access")
     try:
         return transport_bytes(url, **kwargs)
     finally:
         if publisher:
+            _PUBLISHER_GATE_FAILED = True
             completed = time.time()
             with locked_budget():
                 state = load_budget()
@@ -2211,6 +2303,7 @@ def request_bytes(url, **kwargs):
                     state["inventory_completed_at"] = completed
                 state["observed_at"] = completed
                 save_budget(state)
+            _PUBLISHER_GATE_FAILED = False
             print(
                 json.dumps(
                     {

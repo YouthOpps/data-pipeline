@@ -45,6 +45,7 @@ CATEGORIES = (
 )
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
 _USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
+_PUBLISHER_GATE_FAILED = False
 _ROBOTS_CACHE = {}
 _ROBOTS_PURPOSE = object()
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
@@ -285,6 +286,8 @@ def budget_state(host=None):
 
 def pace(url, interval=12):
     """Preserve actual-start history and completion guards across local runs."""
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher completion persistence failed", "access")
     while True:
         with budget_state() as state:
             if state["blocked"]:
@@ -373,6 +376,7 @@ def request_bytes(
     _purpose=None,
 ):
     """Apply publisher-only physical-start and persistent response guards."""
+    global _PUBLISHER_GATE_FAILED
     if (urllib.parse.urlsplit(url).hostname or "").removeprefix(
         "www."
     ) != _PUBLISHER_HOST:
@@ -438,6 +442,7 @@ def request_bytes(
                 )
             return response.status, response.headers, body
     finally:
+        _PUBLISHER_GATE_FAILED = True
         completed = time.time()
         _RESPONSE_SECONDS.append(max(0, completed - started))
         with budget_state() as state:
@@ -451,6 +456,7 @@ def request_bytes(
                     state["page_interval"] if _INVENTORY_REQUEST else 0,
                 ),
             )
+        _PUBLISHER_GATE_FAILED = False
         print(
             json.dumps(
                 {"event": "request_complete", "url": url, "time": completed}
@@ -837,6 +843,8 @@ def validate_factual_records(records):
 @contextlib.contextmanager
 def collection_lock():
     """Hold one source lifecycle lock, including restore/snapshot/export."""
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher completion persistence failed", "access")
     global _COLLECTION_LOCK_HELD
     if _COLLECTION_LOCK_HELD:
         yield
@@ -2114,48 +2122,113 @@ def restore_family_artifact():
     _RESTORED, _STATE_TRUSTED = True, True
 
 
-def export_family_artifact():
-    """Publish only freshly written inert source state for the current attempt."""
-    target = os.environ.get("YO_PACING_ARTIFACT_PATH")
-    if not target or not _STATE_TRUSTED:
+def invalidate_artifact(parent, name):
+    """Invalidate only a safely owned artifact, before attempting unlink."""
+    try:
+        descriptor = os.open(
+            name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=parent
+        )
+    except FileNotFoundError:
         return
-    run_id, attempt = current_run_identity()
+    try:
+        info = os.fstat(descriptor)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (
+            info.st_uid != os.getuid()
+            or not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise AdapterError("Unsafe existing pacing artifact", "access")
+        os.ftruncate(descriptor, 0)
+        os.fsync(descriptor)
+        os.unlink(name, dir_fd=parent)
+        os.fsync(parent)
+    finally:
+        os.close(descriptor)
+
+
+@contextlib.contextmanager
+def artifact_output(path):
+    """Keep a pinned output descriptor until export and signaling succeed."""
+    global _PUBLISHER_GATE_FAILED
     configured = os.environ.get("RUNNER_TEMP", "")
     if not configured or not os.path.isabs(configured):
         raise AdapterError("Runner temporary directory required", "access")
     root = os.path.realpath(configured)
     if (
-        os.path.dirname(os.path.abspath(target)) != root
-        or os.path.basename(target) != "pacing-state.json"
+        os.path.dirname(os.path.abspath(path)) != root
+        or os.path.basename(path) != "pacing-state.json"
     ):
         raise AdapterError("Unsafe pacing artifact path", "access")
-    info = os.stat(root, follow_symlinks=False)
-    if (
-        not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != os.getuid()
-        or info.st_mode & 0o022
-    ):
-        raise AdapterError("Unsafe pacing artifact directory", "access")
-    with budget_state() as local:
-        state = dict(local)
-    envelope = {
-        "schema": 1,
-        "repository": "YouthOpps/data-pipeline",
-        "run_id": run_id,
-        "run_attempt": attempt,
-        "source": SOURCE_ID,
-        "state": state,
-    }
-    fd, temporary = tempfile.mkstemp(prefix=".yo-pacing-", dir=root)
+    parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    descriptor = None
+    name = os.path.basename(path)
     try:
-        with os.fdopen(fd, "w") as file:
+        info = os.fstat(parent)
+        if (
+            info.st_uid != os.getuid()
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_mode & 0o022
+            or info.st_mode & 0o700 != 0o700
+        ):
+            raise AdapterError("Unsafe pacing artifact directory", "access")
+        invalidate_artifact(parent, name)
+        if _PUBLISHER_GATE_FAILED:
+            raise AdapterError(
+                "Publisher completion cannot be exported", "access"
+            )
+        descriptor = os.open(
+            name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent,
+        )
+        try:
+            yield descriptor
+            os.fsync(descriptor)
+            os.fsync(parent)
+        except BaseException:
+            _PUBLISHER_GATE_FAILED = True
+            # Keep the exact owned descriptor open until failure cleanup.
+            # Truncate before unlink: failed unlink still leaves invalid JSON.
+            os.ftruncate(descriptor, 0)
+            os.fsync(descriptor)
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) == (current.st_dev, current.st_ino):
+                os.unlink(name, dir_fd=parent)
+                os.fsync(parent)
+            raise
+
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(parent)
+
+
+def export_family_artifact():
+    """Export healthy state; invalidate owned stale output on failure."""
+    path = os.environ.get("YO_PACING_ARTIFACT_PATH")
+    if not path or not (_STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
+        return
+    with artifact_output(path) as descriptor:
+        run_id, attempt = current_run_identity()
+        with budget_state() as local:
+            state = dict(local)
+        envelope = {
+            "schema": 1,
+            "repository": "YouthOpps/data-pipeline",
+            "run_id": run_id,
+            "run_attempt": attempt,
+            "source": SOURCE_ID,
+            "state": state,
+        }
+        with os.fdopen(os.dup(descriptor), "w") as file:
             json.dump(envelope, file, separators=(",", ":"))
             file.flush()
             os.fsync(file.fileno())
-        os.replace(temporary, target)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
 
 
 def github(method, path, payload=None, missing_ok=False):
