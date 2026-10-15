@@ -5,6 +5,7 @@ import base64
 import contextlib
 import datetime
 import email.utils
+import errno
 import fcntl
 import hashlib
 import html
@@ -15,6 +16,8 @@ import json
 import math
 import os
 import re
+import socket
+import ssl
 import stat
 import sys
 import tempfile
@@ -173,7 +176,15 @@ def validate_budget(state):
         state = {**state, "legacy_rate_history_unknown": True}
     if (
         not isinstance(state, dict)
-        or set(state) != set(empty_budget(0))
+        or set(state)
+        not in (
+            set(empty_budget(0)),
+            set(empty_budget(0)) | {"unassessed_response_failure"},
+        )
+        or (
+            "unassessed_response_failure" in state
+            and state["unassessed_response_failure"] is not True
+        )
         or type(state["schema"]) is not int
         or state["schema"] != 1
         or state["family"] != FAMILY
@@ -290,6 +301,11 @@ def pace(url, interval=12):
         raise AdapterError("Publisher completion persistence failed", "access")
     while True:
         with budget_state() as state:
+            if state.get("unassessed_response_failure"):
+                raise AdapterError(
+                    "Unassessed publisher response requires reviewed recovery",
+                    "access",
+                )
             if state["blocked"]:
                 raise AdapterError(
                     "Publisher refusal requires reviewed recovery", "access"
@@ -366,6 +382,29 @@ def retry_after_instant(value, now):
     return until
 
 
+def retryable_connection_error(error):
+    """Recognize ordinary pre-response network faults without storage/TLS."""
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, (ssl.SSLError, FileNotFoundError, PermissionError)):
+        return False
+    if isinstance(reason, socket.gaierror):
+        return reason.errno == socket.EAI_AGAIN
+    return isinstance(reason, (ConnectionError, TimeoutError)) or (
+        isinstance(reason, OSError)
+        and reason.errno
+        in {
+            errno.ECONNABORTED,
+            errno.ECONNREFUSED,
+            errno.ECONNRESET,
+            errno.ENETDOWN,
+            errno.ENETRESET,
+            errno.ENETUNREACH,
+            errno.EHOSTUNREACH,
+            errno.ETIMEDOUT,
+        }
+    )
+
+
 def request_bytes(
     url,
     *,
@@ -401,11 +440,13 @@ def request_bytes(
         flush=True,
     )
     started = time.time()
+    received = assessed = unresolved = False
     try:
         try:
             response = _OPENER.open(request, timeout=90)
         except urllib.error.HTTPError as error:
             response = error
+        received = True
         with response:
             with budget_state() as state:
                 now = time.time()
@@ -416,9 +457,7 @@ def request_bytes(
                         now + 1800 * 2 ** (state["rate_failures"] - 1),
                     )
                     state["interval"] = max(24, state["interval"] * 2)
-                    state["page_interval"] = max(
-                        60, state["page_interval"] * 2
-                    )
+                    state["page_interval"] = max(60, state["page_interval"] * 2)
                 if (
                     response.status in (401, 403, 451)
                     and _purpose is not _ROBOTS_PURPOSE
@@ -436,16 +475,36 @@ def request_bytes(
             if len(body) > 5_000_000:
                 raise AdapterError("Response exceeds byte limit", "fetch")
             if _purpose is not _ROBOTS_PURPOSE:
-                check_content_challenge(
-                    body.decode("utf-8", errors="replace"),
-                    status=response.status,
-                )
+                try:
+                    check_content_challenge(
+                        body.decode("utf-8", errors="replace"),
+                        status=response.status,
+                    )
+                except AdapterError:
+                    # Only a durably retained challenge is fully assessed.
+                    with budget_state() as state:
+                        assessed = state["blocked"]
+                    raise
+            assessed = True
             return response.status, response.headers, body
+    except Exception as error:
+        if (
+            received and not (assessed and isinstance(error, AdapterError))
+        ) or (not received and not retryable_connection_error(error)):
+            unresolved = True
+            raise AdapterError(
+                "Publisher response assessment failed; "
+                "reviewed recovery required",
+                "access",
+            ) from error
+        raise
     finally:
         _PUBLISHER_GATE_FAILED = True
         completed = time.time()
         _RESPONSE_SECONDS.append(max(0, completed - started))
         with budget_state() as state:
+            if unresolved:
+                state["unassessed_response_failure"] = True
             state["until"] = max(
                 state["until"],
                 completed
@@ -456,7 +515,8 @@ def request_bytes(
                     state["page_interval"] if _INVENTORY_REQUEST else 0,
                 ),
             )
-        _PUBLISHER_GATE_FAILED = False
+        if not unresolved:
+            _PUBLISHER_GATE_FAILED = False
         print(
             json.dumps(
                 {"event": "request_complete", "url": url, "time": completed}
@@ -1965,6 +2025,10 @@ def merge_budget(local, incoming, now):
         or incoming["legacy_rate_history_unknown"]
     )
     merged["blocked"] = local["blocked"] or incoming["blocked"]
+    if local.get("unassessed_response_failure") or incoming.get(
+        "unassessed_response_failure"
+    ):
+        merged["unassessed_response_failure"] = True
     merged["starts"] = sorted(set(local["starts"] + incoming["starts"]))[-5:]
     return validate_budget(merged)
 
@@ -2741,9 +2805,7 @@ def read_handoff():
         baseline = payload["baseline"]
         if set(baseline) != {"data.json", "metadata.json"} or any(
             v is not None
-            and (
-                not isinstance(v, str) or not re.fullmatch(r"[a-f0-9]{64}", v)
-            )
+            and (not isinstance(v, str) or not re.fullmatch(r"[a-f0-9]{64}", v))
             for v in baseline.values()
         ):
             raise ValueError()
@@ -2753,6 +2815,8 @@ def read_handoff():
         ):
             raise ValueError()
         if payload["result"] == "success":
+            if payload["state"].get("unassessed_response_failure"):
+                raise ValueError()
             if (
                 payload["complete"] is not True
                 or payload["error"] is not None
@@ -2924,6 +2988,13 @@ def publish_phase():
         raise AdapterError(
             "Source pair changed after collection baseline; no files written",
             "publish",
+        )
+    if (
+        merged.get("unassessed_response_failure")
+        and payload["result"] == "success"
+    ):
+        raise AdapterError(
+            "Unassessed publisher response prevents publication", "access"
         )
     failure = (
         AdapterError(payload["error"], payload["failure_stage"])

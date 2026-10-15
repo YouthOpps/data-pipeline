@@ -84,3 +84,38 @@ consumer replay, or certification of other legacy pacing/rate-limit behavior.
 Historical native proof is reused only for unchanged normal collection, facts,
 normalization, validation, expiry and publication functions; retained record
 and dependency limits are documented in the linked maintenance issue.
+
+### Unassessed response failures (#285)
+
+A received response whose body or assessment fails stops this collection. A
+certificate/TLS error or local file/permission failure also stops it rather than
+being retried as an ordinary connection fault. Ordinary typed pre-response
+connection failures retain the previous bounded retry behavior: at most two
+actual attempts. A fully assessed ordinary HTTP 429 remains a timed backoff;
+its counter, doubled current physical/page spacing and stronger Retry-After
+are saved before reading its body.
+
+Only these unresolved failures add the optional v1 field
+`unassessed_response_failure: true`. This is a technical recovery requirement,
+not evidence that the publisher denied access. False or malformed values are
+invalid. Local state, owned artifacts and prepared outcomes retain the marker
+by OR/presence during MAX merging; an older unmarked state cannot clear it.
+The request gate refuses marked state even after a timed embargo ends. A
+marked success handoff cannot publish new records; a genuine prepared failure
+can still report failure metadata while preserving last-good data. A process
+with a failed assessment cannot resume collection or export an older apparently
+healthy artifact. A later trusted export preserves the marker explicitly.
+
+Healthy v1 state keeps its existing shape and serialization. An older state
+without this optional field does not prove that no earlier unassessed failure
+occurred. This narrow repair does not supply a crash-safe pre-wire transaction
+protocol, recover unknown historic responses, or solve all restart and failed
+storage cases tracked in #273. No reviewed access hold or known timing/history
+constraint is cleared.
+
+Validation uses private actual-function response, persistence, handoff and
+inert ZIP controls with no publisher requests or real journal changes. The
+prior genuine complete 420-record native evidence is reused only for unchanged
+normal inventory, source facts, normalization, expiry, snapshot and publication
+functions. This maintenance does not claim a fresh native collection or a new
+complete current-consumer replay.
