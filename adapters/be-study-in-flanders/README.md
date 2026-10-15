@@ -6,7 +6,7 @@ Official assigned source: https://www.studyinflanders.be/scholarships/master-min
 
 Reviewed 10 October 2026: official robots excludes `/cpresources/`, `/vendor/` and `/.env`; all required public routes are permitted. The actual footer links [Privacy Policy](https://www.studyinflanders.be/privacy) and [Cookie Policy](https://www.studyinflanders.be/cookie-policy). These govern personal data/cookies and do not establish a prior-permission requirement or automation ban for factual summaries. Copyright is retained: this is not an open-licence claim. Publish original concise factual summaries, attribution and canonical publisher links, without images, protected full prose or applicant data. No form submission, login, contact or external catalogue access.
 
-Every run retrieves fresh robots and ten exact public HTML inputs: scholarship hub, MasterMind main/eligibility/application/host/payment pages, US funding overview, privacy, cookies and the linked Russian-mobility policy notice. Only one `main` article and its complete substantive text/links are fingerprinted; site navigation, footer copyright year and opaque client chrome are not opportunities. Exact canonical URLs and complete HTML are checked. A material change to facts, policy or the finite inventory stops the whole collection before publication; no partial stale subset is emitted. Unexpected publisher redirects are rejected before body reads or destination access.
+Every run retrieves fresh robots and ten exact public HTML inputs: scholarship hub, MasterMind main/eligibility/application/host/payment pages, US funding overview, privacy, cookies and the linked Russian-mobility policy notice. Only one `main` article and its complete substantive text/links are fingerprinted; site navigation, footer copyright year and opaque client chrome are not opportunities. Exact canonical URLs and complete HTML are checked. A material change to facts, policy or the finite inventory stops the whole collection before publication; no partial stale subset is emitted. Unexpected publisher redirects are rejected before destination access, after bounded denial-body inspection.
 
 ## Complete inventory and identifiers
 
@@ -40,11 +40,66 @@ The sole test retrieves nonempty real complete records without publishing and em
 
 ## Pacing, deadlines and publication
 
-Family `youthopps-studyinflanders-publisher-v1` shares persistent local starts, embargo and refusal state across research/test/production. At most ten upstream starts per rolling minute and six seconds between all starts, including robots, retries and redirects. Honour Retry-After before reading bodies; explicit 401/403/429 persists refusal state and stops before denial-body consumption. No credential/proxy/TLS bypass or alternate-source recovery. Fresh family preparation waits sixty seconds; eleven physical starts have a minimum 120-second floor, not a completion guarantee.
+Family `youthopps-studyinflanders-publisher-v1` shares persistent starts,
+embargoes and refusals across research, tests and production. Each physical
+publisher attempt waits at least 12.2 seconds after the previous attempt
+completes; at most five starts may occur in a rolling minute. The three
+inventory inputs are the Master Mind overview, US funding overview and
+scholarship hub. Each physical inventory attempt waits at least 30 seconds
+after the preceding inventory attempt completes, including a failed attempt
+or the existing single bounded 503 retry. The other seven detail/policy pages
+and literal robots use ordinary physical spacing. Unreviewed redirects remain
+rejected; no new route is followed.
+
+A 429 stops the current run without another publisher request. Before reading
+its body, save doubled CURRENT physical and inventory gaps, a new-strike
+counter and at least 1800 seconds of exponentially increasing embargo; any
+longer valid Retry-After or retained MAX remains effective. Invalid, stale,
+negative, nonfinite or unsupported Retry-After alone adds no access hold.
+Ordinary rate-warning body text remains timed; a genuine primary human
+challenge or unsuppressed HEAD refusal title also retains a hold. Actual content 401/403/451 and explicit robots
+Disallow retain a durable hold. Literal robots 4xx except 429 means unavailable
+REP rules; robots 429/5xx/TLS failures stop. Body guards run before redirect
+handling and ignore hidden/script/footer/navigation content, including the
+reviewed implicit paragraph-close case. Attribute/inline visibility is not a
+full stylesheet renderer. Exact bot identity, normal TLS and existing access
+restrictions remain required.
+
+Legacy schema-one state preserves every known start, embargo and hold and
+upgrades to typed schema two. Missing legacy rate history is durably marked
+unknown; a zero new-strike counter is not evidence of lifetime zero 429s.
+Restoration merges every known event without truncation (bounded union of
+512; overflow fails), numeric MAX and hold/unknown OR. The actual initial
+owned artifact contributes ten retained starts and local state contributes
+two older starts. Preparation imposes a fresh sixty-second quiet period;
+stronger retained pacing can make the fixed collection budget infeasible,
+which fails closed without raising caps, resetting state or cutting inventory.
 
 Collection and both prepublication gates are 900 seconds. Original whole-run cap is 1290 seconds: nonexport operational cap1260, publication180, nonrecursive failure180 and trusted state export30. All phase/read/sleep/parse/output deadlines clip the original absolute alarm; expired phases are not renewed. Source socket timeout60/API15 additionally clip phase time. The Action has a 30-minute job timeout and mints the source-scoped one-hour GitHub App token immediately before its sole application command. Export holds the local collector lock through cleanup.
 
-Production restores the newest completed real family workflow attempt from complete stable bounded repository history, including failed/cancelled/rerun attempts. Validate inert pacing artifact size/hash/envelope/repository/source/attempt/schema; missing newest state fails closed without older fallback or reset. First-family bootstrap requires a separately reviewed public evidence binding, not an author-invented default. Preserve refusal/backoff state; an explicit denial requires reviewed recovery before another publisher request.
+Production and local tests both require the newest exact completed family
+attempt's owned artifact from complete stable bounded history. Exact-attempt
+jobs bind immutable head, branch, repository and actual completion chronology;
+a queued old-ID rerun retains its preceding completed attempt. The current
+hosted run must appear with its exact head and attempt. Validate signed-hop
+transport, ZIP digest, envelope, source and state; qualify the actual legacy
+six-key envelope with immutable API owner metadata, and export new head-bound
+envelopes. Missing newest state fails closed without an older fallback or
+first-family bootstrap. Restore and trust state before reading the published
+snapshot, and attempt finally-export even after later snapshot/auth failure.
+Upload only a freshly finalized, owned state artifact signalled by the sole
+application step. Keep the stable local collector lock through export/cleanup.
+
+The exact full-native-MAX maintenance state is
+[maintainer-approved](https://github.com/YouthOpps/data-pipeline/issues/225#issuecomment-6199351980)
+and bound in the workflow. It supplements, never replaces, mandatory newest
+mature artifact/local restoration. All 34 known starts remain: twelve earlier
+retained events plus eleven native reservations and eleven measured wire
+starts, without coalescing. Numeric MAX, hold/unknown OR and native completion
+plus sixty seconds are preserved; runtime additionally waits a fresh sixty
+seconds. Root owns re-enabling before merge and the sole automatic production
+run; production remains unverified here. The daily UTC cron remains
+`21 10 * * *` (10:21 UTC); no extra schedules or manual runs are introduced.
 
 The single main-push/manual/daily workflow publishes only `datas/be-study-in-flanders/{data,metadata}.json`. Success atomically creates/replaces both files through source-scoped non-force compare-and-swap, preserving all sibling sources. Validate prior complete own pair before changes. Initial failures create no folder; later failures preserve last-good data and last-success time, updating only safe failure metadata when possible. Uncertain commits are reconciled against exact desired bytes; newer own pairs are never overwritten. Logs distinguish unconfirmed durable outcome from saved failure. Source metadata is the durable status record after first success; pacing artifacts contain infrastructure state only.
 
@@ -117,3 +172,51 @@ Published metadata uses `display_name` = **VLUHR** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Pacing migration validation
+
+Issue [225](https://github.com/YouthOpps/data-pipeline/issues/225) changes only
+source-local transport, durable pacing/artifact handoff and documentation.
+The ten exact input URLs/fingerprints/order, four profiles, output facts,
+normalization, validation, expiry and atomic publication remain unchanged.
+Complete retrieval is necessary because no verified publisher change cursor
+or delta-removal semantics exists for these separately fingerprinted pages.
+
+Historical full-native evidence reports four genuine records and all eleven
+requests, but its full bodies/stdout are no longer retained. The pre-access
+review also consumed the actual current four-record pair through the current
+website consumer. Neither historical evidence nor timing estimates certify
+this new pacing. Independent inert controls and real read-only newest-owned
+artifact/local MAX qualification precede a separately authorized sole complete
+native run. That run must retain all actual response headers, complete and
+partial bodies, stdout, records, budget snapshots and wire timings in private
+RAM, followed by independent all-input/all-record/current-consumer review.
+No publication credential or production Action is a test harness.
+
+## Measured validation on 15 October 2026
+
+One genuine complete nonpublishing test passed on the unchanged final source:
+fresh robots and all ten reviewed HTML documents, four raw records, four after
+supported deadline cleanup and zero in the derived all-expired case. All eleven
+actual responses were HTTP 200. Independent review checked every original
+fingerprint and all four non-temporal record projections. Actual current
+website consumer replay accepted 4 raw, 4 filtered and 0 valid-empty records
+with exact IDs, including the freshly changed consumer after the test.
+
+The complete test took 224.608 seconds within the unchanged 900-second cap.
+Minimum measured physical completion spacing was 12.36189 seconds, inventory
+completion spacing 30.44577 seconds, and at most five starts occurred in any
+rolling minute. Three actual inventory hubs and all seven details/policies
+used their separately reviewed purpose. The 152 inert access/history/lifecycle
+checks, original-reader callable integration and independent extra controls
+passed before access; none substituted for the genuine test.
+
+All actual response headers (including duplicate fields), complete bodies,
+available incomplete-read partial bytes, full stdout and records remain in
+private RAM for review. Twenty-four actual budget saves plus six other state
+inputs supply the thirty MAX inputs; this is not thirty actual saves. Initial
+local state, before-first-GET raw hashes/inodes and stable locks prove mature
+restoration and startup quiet. Missing historical rate counts remain unknown.
+No publisher request followed the sole test, no cap was raised and no
+production Action was used for validation. Source/test bytes remain unchanged;
+only the approved workflow marker and this README changed afterward.

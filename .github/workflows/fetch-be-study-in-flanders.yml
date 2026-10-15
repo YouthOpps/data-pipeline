@@ -41,14 +41,70 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish reviewed source
+        id: collect
         run: python -B adapters/be-study-in-flanders/adapter.py --publish
         env:
-          STUDYINFLANDERS_PACING_BOOTSTRAP: '{"schema":1,"family":"youthopps-studyinflanders-publisher-v1","not_before":1791615039.6179962,"evidence":"https://github.com/YouthOpps/data-pipeline/issues/48#issuecomment-6094817816"}'
           DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
+          STUDYINFLANDERS_PACING_MAINTENANCE: |-
+            {
+              "schema": 1,
+              "family": "youthopps-studyinflanders-publisher-v1",
+              "evidence": "https://github.com/YouthOpps/data-pipeline/issues/225#issuecomment-6199351980",
+              "state": {
+                "schema": 2,
+                "family": "youthopps-studyinflanders-publisher-v1",
+                "observed_at": 1792087685.4465885,
+                "not_before": 1792087714.1079507,
+                "starts": [
+                  1792060841.575044,
+                  1792060847.5801392,
+                  1792079585.5971465,
+                  1792079591.597304,
+                  1792079597.5974576,
+                  1792079603.5976138,
+                  1792079609.597772,
+                  1792079615.597927,
+                  1792079621.598087,
+                  1792079627.5982153,
+                  1792079633.5983734,
+                  1792079639.5985377,
+                  1792087498.3252697,
+                  1792087498.6321661,
+                  1792087512.6072905,
+                  1792087512.9720867,
+                  1792087526.114545,
+                  1792087526.48912,
+                  1792087539.989266,
+                  1792087540.4743102,
+                  1792087553.582748,
+                  1792087553.8987663,
+                  1792087566.9615843,
+                  1792087567.1591048,
+                  1792087579.9926555,
+                  1792087580.189888,
+                  1792087593.5562077,
+                  1792087593.8825963,
+                  1792087606.6752496,
+                  1792087606.8366635,
+                  1792087638.3934221,
+                  1792087638.8374798,
+                  1792087652.4798443,
+                  1792087653.0955164
+                ],
+                "blocked": false,
+                "interval": 12.2,
+                "completed": 1792087653.8792238,
+                "page_interval": 30,
+                "last_inventory_completed": 1792087640.276918,
+                "rate_limit_strikes": 0,
+                "rate_limit_until": 0,
+                "legacy_rate_history_unknown": true
+              }
+            }
           STUDYINFLANDERS_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
       - name: Preserve inert publisher pacing state
-        if: always()
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: studyinflanders-pacing-state-${{ github.run_attempt }}
