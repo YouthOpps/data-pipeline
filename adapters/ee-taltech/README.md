@@ -265,3 +265,38 @@ normalizer `89f69f9c` was checked offline against the complete actual input, all
 81 awards and the actual 80 current awards, with UTC closing-day boundaries.
 Only the reviewed production-state literal is added afterward. This evidence
 does not claim another live collection, hosted publication or site delivery.
+
+## Owned-state export failure guards
+
+The source-local exporter invalidates safely owned stale JSON through a
+validated descriptor before attempting any readiness signal. Signal open,
+write or sync errors do not prevent independent cleanup attempts. A failed
+export also applies this cleanup when state, run identity, implementation
+validation or envelope construction fails, including a failure after a new
+envelope replaces the old one. A failed signal together with failed unlink
+cannot leave valid owned JSON eligible under a prior ready signal when
+truncation succeeds; a failed truncation still attempts the false signal and
+unlink. Every cleanup failure remains an error rather than an export success.
+
+Artifact operations use the verified original parent descriptor and current
+file identity. Replaced parents, symlinks, hard links, unsafe ownership or
+permissions are refused without changing unrelated objects. Nonblocking opens
+reject FIFO paths before any read can hang. Implementation hashing likewise
+requires a safely owned regular file and does not follow symlinks.
+
+[Issue #282](https://github.com/YouthOpps/data-pipeline/issues/282) verifies
+these conditional paths with actual-function controls over private inert files.
+Existing complete genuine native evidence qualifies only for the unchanged
+ordinary collection and data flow; these controls are neither a new publisher
+collection nor production execution. Parser, inventory, identifiers, dates,
+publication payloads, tests and scheduled workflow remain unchanged. No retained
+publisher hold, cooldown or source journal is reset by this maintenance.
+
+A received publisher response remains pending until the bounded body and
+applicable policy have been assessed. Partial or failed bodies stop with their
+known cooldown and pending state intact, including after a 429 embargo expires.
+TLS, local-storage and unclassified opener failures also stop without being
+relabeled as healthy connection retries. The original bounded retry remains
+for typed ordinary connection or timeout failures before any response. These
+conditional transport corrections preserve healthy responses, the complete
+frontier and default GitHub transport pacing.

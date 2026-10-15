@@ -367,3 +367,29 @@ artifact from run 38781817984 and the retained complete native evidence describe
 above. It makes no new publisher crawl or native-test claim. Source facts,
 identifiers, filtering, atomic publication, daily schedule and runtime caps stay
 unchanged. Hosted successful requests keep their existing behavior.
+
+## Owned-state export failure guards
+
+The source-local exporter invalidates safely owned stale JSON through a
+validated descriptor before attempting any readiness signal. Signal open,
+write or sync errors do not prevent independent cleanup attempts. A failed
+export also applies this cleanup when state, run identity, implementation
+validation or envelope construction fails, including a failure after a new
+envelope replaces the old one. A failed signal together with failed unlink
+cannot leave valid owned JSON eligible under a prior ready signal when
+truncation succeeds; a failed truncation still attempts the false signal and
+unlink. Every cleanup failure remains an error rather than an export success.
+
+Artifact operations use the verified original parent descriptor and current
+file identity. Replaced parents, symlinks, hard links, unsafe ownership or
+permissions are refused without changing unrelated objects. Nonblocking opens
+reject FIFO paths before any read can hang. Implementation hashing likewise
+requires a safely owned regular file and does not follow symlinks.
+
+[Issue #282](https://github.com/YouthOpps/data-pipeline/issues/282) verifies
+these conditional paths with actual-function controls over private inert files.
+Existing complete genuine native evidence qualifies only for the unchanged
+ordinary collection and data flow; these controls are neither a new publisher
+collection nor production execution. Parser, inventory, identifiers, dates,
+publication payloads, tests and scheduled workflow remain unchanged. No retained
+publisher hold, cooldown or source journal is reset by this maintenance.
