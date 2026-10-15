@@ -1090,6 +1090,20 @@ def pace():
 
 
 def record_retry_after(value, status=None):
+    """Keep unassessed 429 policy failures pending across process restarts."""
+    global _PUBLISHER_GATE_FAILED, _STATE_TRUSTED
+    try:
+        apply_retry_after(value, status)
+    except BaseException:
+        if status == 429:
+            # The pre-wire durable pending barrier must not become settled
+            # when the newly observed response cannot be safely assessed.
+            _PUBLISHER_GATE_FAILED = True
+            _STATE_TRUSTED = False
+        raise
+
+
+def apply_retry_after(value, status=None):
     """Persist timed slowdown before body reads; invalid headers add no hold."""
     now = time.time()
     until = retry_after_until(value, now)
