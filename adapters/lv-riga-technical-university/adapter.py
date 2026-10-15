@@ -992,6 +992,25 @@ def trusted_run(run):
     return run
 
 
+def previous_attempt(run):
+    """Keep completed state hidden by a current or queued rerun attempt."""
+    if run["run_attempt"] == 1:
+        return None
+    prior = trusted_run(
+        workflow_api(
+            f"/actions/runs/{run['id']}/attempts/{run['run_attempt'] - 1}"
+        )
+    )
+    if (
+        prior["id"] != run["id"]
+        or prior["run_attempt"] != run["run_attempt"] - 1
+        or prior["head_sha"] != run["head_sha"]
+        or prior.get("status") != "completed"
+    ):
+        raise AdapterError("Untrusted prior completed rerun attempt", "access")
+    return prior
+
+
 def workflow_history():
     """Read complete unfiltered source history, including older-ID reruns."""
     current_id, current_attempt = workflow_identity()
@@ -1024,11 +1043,9 @@ def workflow_history():
                     raise AdapterError(
                         "Current workflow attempt changed", "access"
                     )
-                if current_attempt > 1:
-                    prior = workflow_api(
-                        f"/actions/runs/{current_id}/attempts/{current_attempt - 1}"
-                    )
-                    runs.append(trusted_run(prior))
+                prior = previous_attempt(run)
+                if prior is not None:
+                    runs.append(prior)
                 continue
             if run.get("status") in (
                 "queued",
@@ -1036,6 +1053,9 @@ def workflow_history():
                 "pending",
                 "requested",
             ):
+                prior = previous_attempt(run)
+                if prior is not None:
+                    runs.append(prior)
                 continue
             if run.get("status") != "completed":
                 raise AdapterError(
@@ -2034,6 +2054,8 @@ def run():
         ),
     )
     args = parser.parse_args()
+    if args.publish:
+        prepare_pacing()
     snapshot = read_snapshot() if args.publish else None
     old = (
         json.loads(snapshot["files"]["data.json"])
