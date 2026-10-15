@@ -2,21 +2,29 @@
 
 import argparse
 import base64
+import contextlib
+import copy
 from datetime import datetime, timedelta, timezone
+import email.utils
 from email.utils import parsedate_to_datetime
 import fcntl
 import hashlib
 from html.parser import HTMLParser
+import io
 import ipaddress
 import json
+import math
 import os
 import re
+import signal
+import stat
 import sys
 import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 
 SOURCE_ID = "de-stipendiumplus"
 SOURCE_URL = "https://stipendiumplus.de/"
@@ -117,7 +125,11 @@ def one(values, description):
 
 def page(url):
     delay = check_robots(url)
-    document = fetch_source(url, min_interval=delay)
+    document = (
+        fetch_inventory_page(fetch_source, url, min_interval=delay)
+        if url in _INVENTORY_URLS
+        else fetch_source(url, min_interval=delay)
+    )
     if not re.search(
         r"</body\s*>\s*(?:</html\s*>\s*)?$", document, re.IGNORECASE
     ):
@@ -147,6 +159,122 @@ def reviewed_url(value):
     )
 
 
+def academy_2027_facts(root):
+    """Cover the complete edition body, excluding verified contact fields."""
+    content = article(root)
+
+    def elements(node):
+        if any(isinstance(c, str) and c.strip() for c in node.children):
+            raise AdapterError("Unexpected edition boundary text", "parse")
+        return [c for c in node.children if isinstance(c, Node)]
+
+    blocks = elements(content)
+    expected = [
+        "block block--bm-medium textteaser clip-lr",
+        "block block--bm-medium",
+        "block block--bm-medium",
+        "block block--tm-larger block--bm-larger block--bp-larger",
+    ]
+    if len(blocks) != 4 or any(
+        n.tag != "div" or n.attrs.get("class") != cls
+        for n, cls in zip(blocks, expected)
+    ):
+        raise AdapterError("Edition article boundaries changed", "parse")
+    core = one(
+        nodes(content, "div", "block__content--corewrapper"),
+        "complete academy programme",
+    )
+    if elements(blocks[2]) != [core]:
+        raise AdapterError("Uncovered academy programme container", "parse")
+    hero = one(nodes(blocks[0], "h1"), "edition title")
+    if hero.text() != blocks[0].text() or nodes(blocks[0], "a"):
+        raise AdapterError("Uncovered edition title content", "parse")
+    if [n.text() for n in nodes(blocks[1], "div", "breadcrumb")] != [
+        blocks[1].text()
+    ]:
+        raise AdapterError("Edition breadcrumb boundaries changed", "parse")
+    related = one(
+        nodes(blocks[3], "div", "othertopics"), "separate related topics"
+    )
+    if elements(blocks[3]) != [related] or [
+        n.text() for n in nodes(related, "h2")
+    ] != ["Weitere Themen"]:
+        raise AdapterError("Edition related topics changed", "parse")
+    children = elements(core)
+    tags = [
+        "h2",
+        "p",
+        "p",
+        "div",
+        "h3",
+        "p",
+        "p",
+        "p",
+        "ul",
+        "h3",
+        "p",
+        "ul",
+        "div",
+        "h3",
+        "p",
+        "p",
+        "h3",
+        "p",
+        "p",
+        "h4",
+        "p",
+        "p",
+    ]
+    if [n.tag for n in children] != tags or children[-3].text() != "Kontakt":
+        raise AdapterError(
+            "Edition material/contact boundaries changed", "parse"
+        )
+    labels = [
+        "Hauptansprechpartner",
+        "Ansprechpartnerin für die Organisation im Bildungszentrum Kloster Banz",
+    ]
+    roles = [
+        "– Teamleitung Bildungsprogramm, Studienförderwerk Klaus Murmann "
+        "der Stiftung der Deutschen Wirtschaft",
+        "– Leiterin Hochschulförderung, Institut der Begabtenförderung "
+        "der Hanns-Seidel-Stiftung e.V.",
+    ]
+    for paragraph, label, role in zip(children[-2:], labels, roles):
+        inline = [n for n in paragraph.children if isinstance(n, Node)]
+        raw = [
+            " ".join(n.split())
+            for n in paragraph.children
+            if isinstance(n, str) and n.strip()
+        ]
+        if (
+            [n.tag for n in inline] != ["strong", "br", "strong", "br", "a"]
+            or inline[0].text() != label
+            or raw != [role, "E-Mail:"]
+            or any(n.children for n in (inline[1], inline[3]))
+            or any(
+                isinstance(c, Node) for n in inline[:3:2] for c in n.children
+            )
+            or not re.fullmatch(
+                r"[^\W\d_][\w .’'–-]{1,100}", inline[2].text(), re.UNICODE
+            )
+            or not inline[4].attrs.get("href", "").startswith("mailto:")
+            or not re.fullmatch(r"[^\s@]+@[^\s@]+", inline[4].text())
+            or any(isinstance(c, Node) for c in inline[4].children)
+        ):
+            raise AdapterError("Unverified edition contact-only tail", "parse")
+    material = children[:-3]
+    text = hero.text() + " " + " ".join(n.text() for n in material)
+    routes = sorted(
+        {
+            urllib.parse.urljoin(PAGES["academy-2027"], n.attrs["href"])
+            for section in material
+            for n in nodes(section, "a")
+            if n.attrs.get("href")
+        }
+    )
+    return text, routes
+
+
 def source_facts(key, root):
     """Retain complete substantive facts and finite own-route inventory."""
     canonical = one(
@@ -171,11 +299,7 @@ def source_facts(key, root):
             raise AdapterError("Publisher attribution missing", "access")
         text = publisher[1] + " " + text[text.index(marker) :]
     elif key == "academy-2027":
-        text = re.sub(
-            r"Kontakt Hauptansprechpartner .*?Weitere Themen",
-            "Weitere Themen",
-            text,
-        )
+        text, edition_routes = academy_2027_facts(root)
     elif key == "academy-2025":
         text = re.sub(
             r"Ansprechpartner:innen bei der Studienstiftung .*?"
@@ -198,6 +322,8 @@ def source_facts(key, root):
                 # Media/PDFs are not copied or fetched as award identities.
                 continue
             links.add(reviewed_url(url))
+    if key == "academy-2027":
+        links = set(edition_routes)
     policies = set()
     for anchor in nodes(root, "a"):
         label = anchor.text().lower().replace("\xad", "")
@@ -288,10 +414,10 @@ CONDITIONS = {
         "93fe77c950f7b6dd5d15092f9757f90d1343c6fe991e69fc1c9809d846354214"
     ),
     "academy-2027": (
-        "8f932e84420cf4e4da35d5e248c10fbeae98e0cfe0699d738c7b375d99da0281"
+        "92f851910a2a8cd5350bcfcc00df2b31ad88d9f998df15a6f1c5b01b384555aa"
     ),
     "academy": (
-        "b1236f3650396235ec8bde6e84ce697536c2a631ef021aaa65c8ba51754cadea"
+        "21f28c4dfe00b844471cc76e75caba98059d51e093a3bdf1b032744fbf61349e"
     ),
     "chin-kobe": (
         "0fcd20063ce7f5c9904c137aa01514243c0850064a05de5392ed52719a7b56ff"
@@ -462,18 +588,24 @@ PROFILES = [
             "Training in Bad Staffelstein, Germany, on 5–10 September "
             "2027 explores coexistence, individuality and common good "
             "through interdisciplinary dialogue. For funded members of "
-            "the 13 works and SBB; ten per organization, 140 places. "
-            "These are event dates; an application opening or deadline "
-            "is not published."
+            "the 13 works and SBB; ten funded scholars per Werk. "
+            "Programme and registration are expected from mid-February "
+            "2027 through each foundation or SBB. No exact opening day "
+            "or application deadline is stated; September dates are "
+            "the event dates."
         ),
         "evidence": (
             "Actual distinct 2027 edition, not an evergreen duplicate "
             "or invented annual call. Bad Staffelstein near Bamberg "
             "establishes DE host. Event dates 5–10 September2027 are "
             "not application dates; no time-of-day/zone or "
-            "registration state proved. Existing funded scholars of 13 "
-            "works plus SBB, ten each equals 140 capacity, not 140 "
-            "grants/provider clones. sdw and Hanns-Seidel organize "
+            "precise opening day proved. Programme and registration "
+            "are announced for mid-February 2027 through each foundation "
+            "or SBB; framework programme follows in July 2027. "
+            "Existing funded scholars of 13 "
+            "works plus SBB; ten funded scholars per Werk is stated, "
+            "without a stated SBB allocation. "
+            "sdw and Hanns-Seidel organize "
             "with other works/SBB. Scientific and personal "
             "perspectives, interdisciplinary working groups, "
             "democratic responsibility and plural coexistence. No "
@@ -506,7 +638,8 @@ PROFILES = [
             "event17–22August2025, explicitly historical; no invented "
             "closed application state or deadline from past event "
             "dates. Studienstiftung organized with 13 works/SBB, ten "
-            "funded members per organization. Eleven concrete "
+            "funded members per Werk; the SBB allocation is not stated. "
+            "Eleven concrete "
             "participant working groups span democratic "
             "debate/ambiguity, extremism prevention, remembrance, "
             "media/digital change, social partnership/tariff "
@@ -684,7 +817,7 @@ def parse_inventory(pages):
     return records
 
 
-def collect():
+def collect_inventory():
     return parse_inventory(read_pages())
 
 
@@ -750,117 +883,10 @@ def safe_error(error):
     return " ".join(text.split())[:500]
 
 
-def pace(url, interval=6):
-    """Lock shared publisher pacing state across overlapping local processes.
-
-    State lives outside the checkout. The advisory lock stays held until the
-    response and any Retry-After are recorded, so parallel runs cannot race.
-    Production uses a serialized Action; separate machines must not overlap.
-    """
-    host = (
-        (urllib.parse.urlsplit(url).hostname or "").lower().removeprefix("www.")
-    )
-    directory = os.path.join(
-        tempfile.gettempdir(), "de-stipendiumplus-pacing-" + str(os.getuid())
-    )
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    information = os.lstat(directory)
-    if (
-        not os.path.isdir(directory)
-        or os.path.islink(directory)
-        or information.st_uid != os.getuid()
-        or information.st_mode & 0o077
-    ):
-        raise AdapterError("Unsafe publisher pacing directory", "access")
-    publisher = "stipendiumplus.de" if host == "stipendiumplus.de" else host
-    key = hashlib.sha256(publisher.encode()).hexdigest()
-    descriptor = os.open(
-        os.path.join(directory, key),
-        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-        0o600,
-    )
-    state = os.fdopen(descriptor, "r+", encoding="utf-8")
-    try:
-        fcntl.flock(state.fileno(), fcntl.LOCK_EX)
-        raw = state.read()
-        budget = (
-            json.loads(raw)
-            if raw
-            else {"starts": [], "interval": 6, "until": 0}
-        )
-        budget["interval"] = max(budget["interval"], interval, 6)
-        while True:
-            now = time.time()
-            budget["starts"] = [
-                start for start in budget["starts"] if now - start < 60
-            ]
-            ready = max(
-                budget["until"],
-                (
-                    budget["starts"][-1] + budget["interval"]
-                    if budget["starts"]
-                    else now
-                ),
-                (
-                    budget["starts"][0] + 60
-                    if len(budget["starts"]) >= 10
-                    else now
-                ),
-            )
-            if ready <= now:
-                budget["starts"].append(now)
-                save_budget(state, budget)
-                return state, budget
-            time.sleep(min(ready - now, 60))
-    except Exception:
-        state.close()
-        raise
 
 
-def save_budget(state, budget):
-    state.seek(0)
-    json.dump(budget, state)
-    state.truncate()
-    state.flush()
-    os.fsync(state.fileno())
 
 
-def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
-    state, budget = pace(url, interval)
-    request_headers = {"User-Agent": _USER_AGENT, **(headers or {})}
-    try:
-        request = urllib.request.Request(
-            url,
-            data=payload,
-            method=method,
-            headers=request_headers,
-        )
-        try:
-            response = _OPENER.open(request, timeout=30)
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            retry = response.headers.get("Retry-After")
-            if retry:
-                try:
-                    seconds = (
-                        float(retry)
-                        if re.fullmatch(r"\d+(?:\.\d+)?", retry)
-                        else parsedate_to_datetime(retry).timestamp()
-                        - time.time()
-                    )
-                    budget["until"] = max(
-                        budget["until"], time.time() + max(0, seconds)
-                    )
-                    save_budget(state, budget)
-                except (ValueError, TypeError, OverflowError):
-                    pass
-            body = response.read(5_000_001)
-            if len(body) > 5_000_000:
-                raise AdapterError("Response exceeds 5 MB", "fetch")
-            return response.status, response.headers, body
-    finally:
-        state.close()
 
 
 def fetch_source(url, min_interval=6):
@@ -893,7 +919,9 @@ def fetch_source(url, min_interval=6):
             for hop in range(4):
                 checked(current)
                 status, headers, body = request_bytes(
-                    current, interval=min_interval
+                    current,
+                    interval=min_interval,
+                    robots=original.path == "/robots.txt",
                 )
                 if status in (301, 302, 303, 307, 308):
                     if hop == 3 or not headers.get("Location"):
@@ -901,10 +929,23 @@ def fetch_source(url, min_interval=6):
                             "Invalid or excessive source redirects", "fetch"
                         )
                     current = urllib.parse.urljoin(current, headers["Location"])
+                    if (
+                        original.path == "/robots.txt"
+                        and urllib.parse.urlsplit(current).path != "/robots.txt"
+                    ):
+                        raise AdapterError(
+                            "Robots redirect leaves literal path", "access"
+                        )
                     checked(current)
                     if original.path != "/robots.txt":
                         min_interval = max(min_interval, check_robots(current))
                     continue
+                if (
+                    original.path == "/robots.txt"
+                    and 400 <= status < 500
+                    and status != 429
+                ):
+                    return ""
                 if status != 200:
                     raise AdapterError(
                         f"Publisher returned HTTP {status} for "
@@ -924,7 +965,8 @@ def fetch_source(url, min_interval=6):
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             if attempt:
                 raise AdapterError(
-                    "Publisher connection failed: " + safe_error(error), "fetch"
+                    "Publisher connection failed: " + safe_error(error),
+                    "fetch",
                 ) from error
     raise AdapterError("Publisher could not be read", "fetch")
 
@@ -941,16 +983,16 @@ def check_robots(url):
             else:
                 raise
     text = _ROBOTS[origin]
-    groups, group = [], {"agents": [], "rules": [], "delay": 0}
+    groups, group = [], {"agents": [], "rules": [], "delay": 0, "rate": 0}
     for line in text.splitlines():
         key, separator, value = line.split("#", 1)[0].strip().partition(":")
         if not separator:
             continue
         key, value = key.lower().strip(), value.strip()
         if key == "user-agent":
-            if group["rules"] or group["delay"]:
+            if group["rules"] or group["delay"] or group["rate"]:
                 groups.append(group)
-                group = {"agents": [], "rules": [], "delay": 0}
+                group = {"agents": [], "rules": [], "delay": 0, "rate": 0}
             group["agents"].append(value.lower())
         elif key in ("allow", "disallow"):
             group["rules"].append((key, value))
@@ -961,6 +1003,17 @@ def check_robots(url):
                     raise ValueError()
             except ValueError:
                 raise AdapterError("Unsupported robots crawl delay", "access")
+        elif key == "request-rate":
+            match = re.fullmatch(r"([1-9]\d*)\s*/\s*([1-9]\d*)", value)
+            try:
+                if not match:
+                    raise ValueError()
+                spacing = int(match[2]) / int(match[1]) + 0.01
+                if not math.isfinite(spacing) or spacing > 60:
+                    raise ValueError()
+                group["rate"] = max(group["rate"], spacing)
+            except (ValueError, OverflowError):
+                raise AdapterError("Unsupported robots request rate", "access")
     groups.append(group)
     directives = [
         line.split("#", 1)[0].strip().lower()
@@ -1006,7 +1059,9 @@ def check_robots(url):
                 "Robots policy disallows this source endpoint", "access"
             )
     return max(
-        [6] + [g["delay"] for policy in policies for g in policy]
+        [12.2]
+        + [g["delay"] for policy in policies for g in policy]
+        + [g["rate"] for policy in policies for g in policy]
     )
 
 
@@ -1255,7 +1310,7 @@ def github(method, path, payload=None, missing_ok=False):
     return json.loads(body)
 
 
-def read_snapshot():
+def read_snapshot_body():
     head = github("GET", "/git/ref/heads/main")["object"]["sha"]
     tree = github("GET", "/git/commits/" + head)["tree"]["sha"]
     files = {}
@@ -1281,7 +1336,7 @@ def read_snapshot():
     return {"head": head, "tree": tree, "files": files}
 
 
-def publish_files(snapshot, files):
+def publish_files_body(snapshot, files):
     expected = snapshot["files"].copy()
     desired = {**expected, **files}
     for attempt in range(3):
@@ -1394,7 +1449,7 @@ def metadata(attempt, previous, records, error=None, checked_at=None):
     return result
 
 
-def main():
+def run():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--publish",
@@ -1405,6 +1460,9 @@ def main():
         ),
     )
     args = parser.parse_args()
+    if args.publish:
+        with phase("restore", 180):
+            prepare_collection()
     snapshot = read_snapshot() if args.publish else None
     old = (
         json.loads(snapshot["files"]["data.json"])
@@ -1519,6 +1577,1900 @@ def main():
         )
     print(json.dumps(outcome, ensure_ascii=False))
     return 1 if failure else 0
+
+
+FAMILY = "youthopps-de-stipendiumplus-publisher-v1"
+FAMILY_SOURCES = {SOURCE_ID}
+_WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
+_WORKFLOW_ID = 378390314
+_ARTIFACT_NAME = "stipendium-pacing-state"
+COLLECTION_TIMEOUT = 1260
+RUN_TIMEOUT = 1740
+EXPORT_TIMEOUT = 30
+_STATE_PATH = _STATE_LOCK = None
+_JOURNAL_NEW = False
+_COLLECTION_LOCK_FD = None
+_RESTORED = _STATE_TRUSTED = False
+_PUBLISHER_GATE_FAILED = False
+_RUN_END = _PHASE_END = _PHASE_NAME = None
+_SCANNED_HISTORY = {}
+_SCANNED_JOB_DIGESTS = {}
+_ATTEMPT_HEADS = {}
+_INVENTORY_ACTIVE = False
+_LOCAL_FIRST_ACCESS_CHECKED = False
+_RESTORED_LATEST = None
+_RESTORED_HISTORY = None
+_LOCAL_RESEARCH_MIGRATION = {
+    "source": "de-stipendiumplus",
+    "sha256": "f589dad03a40c20357ec0326817aec70d18ee979ede62fdab109e184286f3b30",
+    "evidence": "https://github.com/YouthOpps/data-pipeline/issues/216#issuecomment-6198500856",
+}
+_REVIEWED_NATIVE_MIGRATION = {
+    "schema": 1,
+    "source": "de-stipendiumplus",
+    "evidence": "https://github.com/YouthOpps/data-pipeline/issues/216#issuecomment-6200363489",
+    "state": {
+        "schema": 1,
+        "family": "youthopps-de-stipendiumplus-publisher-v1",
+        "legacy_hold_history": "unlogged_fields_unknown",
+        "research_provenance": {
+            "completed": 1792082528.8075395,
+            "interval": 12.2,
+            "inventory_completed": 1792082528.8075395,
+            "known_blocked": False,
+            "legacy_429_history": "unknown",
+            "legacy_hold_history": "unlogged_fields_unknown",
+            "observed_429_since_research": 0,
+            "observed_at": 1792081867.0291288,
+            "page_gap": 30,
+            "public_approval": "https://github.com/YouthOpps/data-pipeline/issues/216#issuecomment-6197156025",
+            "rate_limit_until": 0,
+            "research_approval_at": 1792082126.5447962,
+            "research_routes_limit": 2,
+            "scope": "Exactly two fixed research "
+            "GETs: literal robots then the "
+            "named content URL; not native "
+            "or runtime/production clearance",
+            "starts": [
+                1791514759.0,
+                1791514925.0,
+                1791560087.0,
+                1791591605.0,
+                1791622904.0,
+                1791653762.0,
+                1791658301.0,
+                1791676219.0,
+                1791710278.0,
+                1791745893.0,
+                1791763079.0,
+                1791798261.0,
+                1791843507.0,
+                1791884716.0,
+                1791923137.0,
+                1791935639.0,
+                1791964882.0,
+                1791967877.0,
+                1791986503.0,
+                1792004005.0,
+                1792020414.0,
+                1792046542.0,
+                1792050666.0,
+                1792060886.0,
+                1792061816.0,
+                1792079456.0,
+                1792082496.5014098,
+                1792082527.5133653,
+            ],
+            "until": 1792082496.5006566,
+        },
+        "starts": [
+            1791514759,
+            1791514925,
+            1791560087,
+            1791591605,
+            1791622904,
+            1791653762,
+            1791658301,
+            1791676219,
+            1791710278,
+            1791745893,
+            1791763079,
+            1791798261,
+            1791843507,
+            1791884716,
+            1791923137,
+            1791935639,
+            1791964882,
+            1791967877,
+            1791986503,
+            1792004005,
+            1792020414,
+            1792046542,
+            1792050666,
+            1792060886,
+            1792061816,
+            1792079456,
+            1792082496.5014098,
+            1792082527.5133653,
+            1792086993.2399786,
+            1792086993.496219,
+            1792087006.5118136,
+            1792087006.6920593,
+            1792087020.3238657,
+            1792087020.5342987,
+            1792089843.1857624,
+            1792089856.4928813,
+            1792089869.6885421,
+            1792089869.7400453,
+            1792089883.1124878,
+            1792089883.155881,
+            1792089896.3897212,
+            1792089896.5967638,
+            1792089910.0584393,
+            1792089910.2175121,
+            1792089926.4943104,
+            1792089926.6102955,
+            1792089939.8077438,
+            1792089939.8474839,
+            1792089952.7233448,
+            1792089952.8450143,
+            1792089966.0831516,
+            1792089966.27119,
+            1792089979.6387126,
+            1792089979.8276992,
+            1792089992.832247,
+            1792089993.021899,
+            1792090023.9668984,
+            1792090024.0071468,
+            1792090037.3066807,
+            1792090037.34857,
+            1792090050.3226926,
+            1792090050.3446527,
+            1792090063.2736957,
+            1792090063.3211658,
+            1792090076.2996578,
+            1792090076.3715873,
+            1792090089.4386885,
+            1792090089.5153067,
+            1792090102.6971388,
+            1792090102.8943481,
+            1792090116.0470374,
+            1792090116.0937877,
+            1792090128.9284863,
+            1792090128.9742432,
+            1792090159.9517882,
+            1792090160.0214148,
+            1792090191.0388677,
+            1792090191.236112,
+            1792091425.689836,
+            1792091439.9647868,
+            1792091452.9694278,
+            1792091453.1504903,
+            1792091466.5554798,
+            1792091466.7465131,
+            1792091479.756487,
+            1792091479.9525201,
+            1792091493.0583029,
+            1792091493.1319532,
+            1792091506.270597,
+            1792091506.544834,
+            1792091519.2279506,
+            1792091519.2695887,
+            1792091532.1193244,
+            1792091532.308803,
+            1792091545.4445724,
+            1792091545.4824023,
+            1792091558.3299117,
+            1792091558.4023988,
+            1792091571.280499,
+            1792091571.2989247,
+            1792091601.7627087,
+            1792091601.802433,
+            1792091614.9695187,
+            1792091614.9884703,
+            1792091627.8896677,
+            1792091627.9187925,
+            1792091641.058172,
+            1792091641.1839824,
+            1792091654.5237896,
+            1792091655.240606,
+            1792091668.4803452,
+            1792091668.8749545,
+            1792091683.3765395,
+            1792091683.922027,
+            1792091697.8570952,
+            1792091697.9542644,
+            1792091710.9402978,
+            1792091711.0828295,
+            1792091741.6748395,
+            1792091741.8222334,
+            1792091773.4411523,
+            1792091774.065331,
+        ],
+        "interval": 12.2,
+        "until": 1792091425.6895905,
+        "page_gap": 30,
+        "completed": 1792091775.5285249,
+        "inventory_completed": 1792091775.5285249,
+        "blocked": False,
+        "legacy_429_history": "unknown",
+        "observed_429_since_transition": 0,
+        "rate_limit_until": 0,
+        "observed_at": 1792091775.5285249,
+    },
+    "state_sha256": "633cd86e7f449db6263ae663e72b814deb92972ab67bf65d0ceb80b3daa9c9da",
+}
+_LEGACY_HEADS = {
+    38763419441: "f77eed642c4544bbeed009440c406064a4f5c6ad",
+    38721259482: "cb14a94366e7c9f3a518a6bd9f8a3da5331da39f",
+    38720083793: "a62a88f5cad62f4fb1ef5230358557d37d2b2bba",
+    38700510893: "9b97e13c2e2a56ee77700e40202eb6acd2212cf5",
+    38684236085: "9b97e13c2e2a56ee77700e40202eb6acd2212cf5",
+    38653837611: "e1a68725fe923582b5640481e29c7166eb77397c",
+    38618605220: "92235b48ad33b9fa377e0736b689010173d7bfab",
+    38576438250: "92235b48ad33b9fa377e0736b689010173d7bfab",
+    38534756461: "5ab9b0237b7fa2b043fe276ec43f29e493c685ab",
+    38531894521: "02792bda730b08eeb1eda86a2cd71af80af3cef7",
+    38486627081: "5dff04768f0e558b4d301d5677c5a2c433c3a64b",
+    38461968437: "5dff04768f0e558b4d301d5677c5a2c433c3a64b",
+    38378235161: "5dff04768f0e558b4d301d5677c5a2c433c3a64b",
+    38315360853: "5dff04768f0e558b4d301d5677c5a2c433c3a64b",
+    38231517230: "5dff04768f0e558b4d301d5677c5a2c433c3a64b",
+    38186063569: "10d99f8ef021c092851bf189ff67307865b8760c",
+    38166770863: "10d99f8ef021c092851bf189ff67307865b8760c",
+    38127705412: "10d99f8ef021c092851bf189ff67307865b8760c",
+    38096238126: "10d99f8ef021c092851bf189ff67307865b8760c",
+    38077251090: "a97e28475634b9ff61489a11cd6378c9dafc67ae",
+    38071840293: "9b155b179283c8fa08cf56c1a83a54bd19d51814",
+    38039511417: "c55b8d99378274467f2d9a290967dbe10bc25031",
+    38008389254: "029a500dbf22c1d44ae592c667f26f33d9d364c8",
+    37952434991: "a889a0d2d31ab5dc0dacd3c4d37ff32b341cb5aa",
+    37876969199: "2949f02832f81f132d9e802f0aa2b673b7d1680b",
+    37876948677: "2949f02832f81f132d9e802f0aa2b673b7d1680b",
+}
+_LEGACY_JOB_DIGESTS = {
+    38763419441: "e43a1bc4eeffe8cb89e461eb6344cbf112fe3e2c9687803d0202e2fa903d13cb",
+    38721259482: "7ceec010c8413bf8e41280eca50c9e5eebad0363c15af092eae5eb085f0c1b56",
+    38720083793: "c925eb8630d0635e806c5f340bd35d282ad00b79064e29847ea8bea0fa5f0d69",
+    38700510893: "8a6911ee8d0152dd2e05677fa8b78d61b02ae7a04268899ea40cbcdeada798ad",
+    38684236085: "76abbfa0533ff14394049a9d6895b278d5ded510de287fad10095c9e13225c9e",
+    38653837611: "fd8db11948230a1133ce225dd5387ec34c91bbb2b6664da5fae990eee8810c9b",
+    38618605220: "7ba06d301d40614096e35435dcec9b55699c64a1dc68bc6e6843caacc38d6849",
+    38576438250: "271579ca0a897e94ba05f816dea4afe1b30e8620d883c7b8965a831d99304cc9",
+    38534756461: "5207b40d5f622f7756e75acd4055f143bd1e55e5b57bf2bb6d35e8ca9a826794",
+    38531894521: "33fe944d5fa8f58838adceb092f8dd34a78565b0224361755963df35941e3bf2",
+    38486627081: "b1d90b016fd5e5d937e1c688f1132daca59527e1b758f32883ce34d2a1fcd621",
+    38461968437: "53793b145f9e6673a5ce8bdeda8ad809341094eaf95755e55d6f7fabb19ff721",
+    38378235161: "bfe2a0ab7889996192cbe457edc0ffb7ba145c166fe08652117168b458c6f376",
+    38315360853: "5d776446022f3ef44a8c92f090a9f8d68a000130aadbe1ae37d827498eeabfc6",
+    38231517230: "fe8a555b43e0de44ff7a6efb850340f83043bfe3c06c2aa11e3dbf5fdd2d3e22",
+    38186063569: "77b5bba16dbd4cf7b332e5cbbc409af25615dab4955916848a48601ed1edeb71",
+    38166770863: "6eddefaba8006b97881efed1bb4541edec994d1260c485e2a52ff2aeef19cf9d",
+    38127705412: "7b497a528352b67b34a19b47224d53c2b36c37b1a7afc41074813c24017e46ca",
+    38096238126: "6057a23013bfbe2ae0ecb4849933eb5cc12ae40d6ff5a77dbb5fb227d2003e55",
+    38077251090: "5ad420b9142e0a39e0032ccd55a3237bb4c0cb01ff5d270edaccd18e7fb0102b",
+    38071840293: "7bba0b5de90054629a542ea4a2d3bd7df68b4480d0da500f28a4e67c76c06c67",
+    38039511417: "072c70a765d76c7e87c71e10233ba81c2016fa8c44f6edd21e19a6b323198105",
+    38008389254: "231db7c5ffeb9f9c4947613edf078fb54ed8b5dd9de5eea8867efc36596638ba",
+    37952434991: "588353b57d28b81d2257a1a02b75061425c81d8c41326c184db466046174be0d",
+    37876969199: "d83f48cc7fe77b8c1ca4c479639908561fcd7b6272f46bd69f85bf12925e1d4b",
+    37876948677: "be07e68e77eb3fd88a69d9c6e18993ac747dd0da39919a8798493253f046180b",
+}
+_INVENTORY_URLS = {
+    PAGES[key]
+    for key in ("academy", "doctoral", "home", "students", "trainees", "works")
+}
+
+
+class PrimaryText(HTMLParser):
+    """Inspect primary visible text and genuine head titles."""
+
+    def __init__(self, document):
+        super().__init__(convert_charrefs=True)
+        self.parts, self.stack, self.head_title_parts = [], [], []
+        self.head_seen = self.head_allowed = False
+        self.title_depth = None
+        self.feed(document)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        # HTML block starts close a paragraph in button scope, including its
+        # inline descendants. Keep suppression inherited from outer elements.
+        if tag in {
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "center",
+            "details",
+            "dialog",
+            "dir",
+            "div",
+            "dl",
+            "fieldset",
+            "figcaption",
+            "figure",
+            "footer",
+            "header",
+            "hgroup",
+            "main",
+            "menu",
+            "nav",
+            "ol",
+            "p",
+            "search",
+            "section",
+            "summary",
+            "ul",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "pre",
+            "listing",
+            "hr",
+        }:
+            for index in range(len(self.stack) - 1, -1, -1):
+                ancestor = self.stack[index][0]
+                if ancestor == "p":
+                    del self.stack[index:]
+                    break
+                if ancestor in {
+                    "applet",
+                    "button",
+                    "caption",
+                    "html",
+                    "marquee",
+                    "object",
+                    "table",
+                    "td",
+                    "template",
+                    "th",
+                }:
+                    break
+        values = {}
+        for name, value in attrs:
+            values.setdefault(name, value)
+        style = re.sub(
+            r"/\*.*?\*/", "", values.get("style") or "", flags=re.S
+        ).lower()
+        declarations, priorities = {}, {}
+        for declaration in style.split(";"):
+            name, separator, value = declaration.partition(":")
+            if separator:
+                name = name.strip()
+                important = bool(re.search(r"!\s*important\s*$", value))
+                if priorities.get(name) and not important:
+                    continue
+                declarations[name] = re.sub(
+                    r"\s*!\s*important\s*$", "", value
+                ).strip()
+                priorities[name] = important
+        explicit_suppressed = (
+            "hidden" in values
+            or (values.get("aria-hidden") or "").strip().lower() == "true"
+            or declarations.get("display") == "none"
+            or declarations.get("visibility") == "hidden"
+        )
+        if (
+            tag == "head"
+            and not self.head_seen
+            and all(
+                name == "html" and not suppressed and not visibility
+                for name, suppressed, visibility in self.stack
+            )
+        ):
+            self.head_seen = True
+            self.head_allowed = not explicit_suppressed
+        if (
+            tag == "title"
+            and self.head_allowed
+            and self.stack
+            and self.stack[-1][0] == "head"
+            and not explicit_suppressed
+        ):
+            self.title_depth = len(self.stack) + 1
+        suppressed = (
+            tag
+            in {
+                "head",
+                "title",
+                "script",
+                "style",
+                "template",
+                "noscript",
+                "footer",
+                "nav",
+                "aside",
+            }
+            or "hidden" in values
+            or (values.get("aria-hidden") or "").strip().lower() == "true"
+            or declarations.get("display") == "none"
+        )
+        inherited = self.stack[-1][1] if self.stack else False
+        visibility = self.stack[-1][2] if self.stack else False
+        if declarations.get("visibility") == "hidden":
+            visibility = True
+        elif declarations.get("visibility") == "visible":
+            visibility = False
+        if tag not in {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        }:
+            self.stack.append((tag, inherited or suppressed, visibility))
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self.title_depth = None
+        if tag == "head":
+            self.head_allowed = False
+        for position in range(len(self.stack) - 1, -1, -1):
+            if self.stack[position][0] == tag:
+                del self.stack[position:]
+                break
+
+    def handle_data(self, value):
+        if (
+            self.title_depth is not None
+            and len(self.stack) == self.title_depth
+            and self.stack[-1][0] == "title"
+        ):
+            self.head_title_parts.append(value)
+        if not self.stack or not any(self.stack[-1][1:]):
+            self.parts.append(value)
+
+
+def visible_access_challenge(body, challenge_only=False):
+    """Recognize primary HTML refusals, not arbitrary JS/JSON/PDF strings."""
+    document = body.decode("utf-8-sig", "replace")
+    if not document.lstrip().startswith("<"):
+        return False
+
+    class RefusalText(PrimaryText):
+        """Retain already-visible headlines as independent refusal evidence."""
+
+        def __init__(self, value):
+            self.headlines = []
+            self.heading = None
+            super().__init__(value)
+
+        def handle_starttag(self, tag, attrs):
+            super().handle_starttag(tag, attrs)
+            if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                self.headlines.append([])
+                self.heading = (tag, len(self.headlines) - 1)
+
+        def handle_endtag(self, tag):
+            super().handle_endtag(tag)
+            if self.heading is not None and self.heading[0] == tag:
+                self.heading = None
+
+        def handle_data(self, value):
+            before = len(self.parts)
+            super().handle_data(value)
+            if self.heading is not None and len(self.parts) > before:
+                self.headlines[self.heading[1]].append(value)
+
+    parser = RefusalText(document)
+
+    # This support instruction describes a possible error, not a refusal.
+    # Remove only its own mention; adjacent denials and real HEAD titles stay.
+    def without_instruction(parts):
+        text = " ".join(" ".join(parts).lower().split())
+        return re.sub(
+            r"\bif you see access denied\s*,?\s*(?:please\s+)?contact support\b",
+            " ",
+            text,
+        )
+
+    units = [parser.parts, parser.head_title_parts] + parser.headlines
+    text = " ".join(without_instruction(parts) for parts in units)
+    phrases = (
+        "verify you are human",
+        "verify that you are human",
+        "human verification",
+        "complete the captcha",
+        "enable javascript and cookies to continue",
+        "checking your browser",
+    )
+    if not challenge_only:
+        phrases += (
+            "access denied",
+            "permission denied",
+            "request rejected",
+            "request denied",
+            "request blocked",
+            "unusual traffic",
+        )
+    explicit_title = without_instruction(parser.head_title_parts)
+    return (
+        any(phrase in text for phrase in phrases)
+        or bool(
+            re.search(
+                r"just a moment|attention required|access denied|captcha",
+                explicit_title,
+            )
+        )
+    )
+
+
+def migrate_local_research(value, raw):
+    marker = _LOCAL_RESEARCH_MIGRATION
+    if (
+        not isinstance(marker, dict)
+        or marker.get("source") != SOURCE_ID
+        or marker.get("sha256") != hashlib.sha256(raw).hexdigest()
+        or not re.fullmatch(
+            (
+                r"https://github\.com/YouthOpps/data-pipeline/"
+                r"issues/216#issuecomment-[0-9]+"
+            ),
+            marker.get("evidence", ""),
+        )
+    ):
+        raise AdapterError(
+            "Reviewed native research transition required", "access"
+        )
+    if (
+        value.get("known_blocked", True) is not False
+        or value.get("observed_429_since_research") != 0
+        or value.get("legacy_hold_history") != "unlogged_fields_unknown"
+        or value.get("legacy_429_history") != "unknown"
+    ):
+        raise AdapterError(
+            "Research refusal/backoff needs independent review", "access"
+        )
+    result = empty_budget(time.time())
+    result["research_provenance"] = copy.deepcopy(value)
+    for key in (
+        "starts",
+        "until",
+        "completed",
+        "inventory_completed",
+        "interval",
+        "page_gap",
+        "rate_limit_until",
+    ):
+        result[key] = copy.deepcopy(value[key])
+    result["interval"] = max(result["interval"], 12.2)
+    result["page_gap"] = max(result["page_gap"], 30)
+    result["until"] = max(result["until"], time.time() + 60)
+    return validate_budget(result)
+
+
+class PhaseExpired(BaseException):
+    """A nonrenewable phase deadline; publisher traffic cannot extend it."""
+
+
+def numeric(value):
+    try:
+        return (
+            type(value) in (int, float) and math.isfinite(value) and value >= 0
+        )
+    except OverflowError:
+        return False
+
+
+def empty_budget(now):
+    return {
+        "schema": 1,
+        "family": FAMILY,
+        "legacy_hold_history": "unlogged_fields_unknown",
+        "research_provenance": {},
+        "starts": [],
+        "interval": 12.2,
+        "until": now + 60,
+        "page_gap": 30,
+        "completed": 0,
+        "inventory_completed": 0,
+        "blocked": False,
+        "legacy_429_history": "unknown",
+        "observed_429_since_transition": 0,
+        "rate_limit_until": 0,
+        "observed_at": now,
+    }
+
+
+def validate_budget(state):
+    """Validate retained constraints without resetting unknown history."""
+    if not isinstance(state, dict):
+        raise AdapterError("Invalid publisher state", "access")
+    expected = set(empty_budget(0))
+    if (
+        set(state) != expected
+        or type(state["schema"]) is not int
+        or state["schema"] != 1
+        or state["family"] != FAMILY
+        or any(
+            not numeric(state[k])
+            for k in (
+                "interval",
+                "until",
+                "page_gap",
+                "completed",
+                "inventory_completed",
+                "rate_limit_until",
+                "observed_at",
+            )
+        )
+        or state["interval"] < 12.2
+        or state["page_gap"] < 30
+        or state["legacy_429_history"] != "unknown"
+        or state["legacy_hold_history"] != "unlogged_fields_unknown"
+        or not isinstance(state["research_provenance"], dict)
+        or type(state["blocked"]) is not bool
+        or type(state["observed_429_since_transition"]) is not int
+        or not 0 <= state["observed_429_since_transition"] <= 100
+        or not isinstance(state["starts"], list)
+        or len(state["starts"]) > 1000
+        or any(
+            not numeric(t) or t > state["observed_at"] for t in state["starts"]
+        )
+        or state["starts"] != sorted(set(state["starts"]))
+        or state["completed"] > state["observed_at"]
+        or state["inventory_completed"] > state["observed_at"]
+        or state["observed_at"] > time.time() + 1
+    ):
+        raise AdapterError("Invalid retained publisher constraints", "access")
+    return state
+
+
+def budget_file():
+    global _STATE_PATH, _STATE_LOCK
+    directory = os.path.join(
+        tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
+    )
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    info = os.stat(directory, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_mode & 0o077
+    ):
+        raise AdapterError("Unsafe publisher state directory", "access")
+    _STATE_PATH = _STATE_LOCK = os.path.join(
+        directory, hashlib.sha256(b"stipendiumplus.de").hexdigest()
+    )
+
+
+
+def locked_budget():
+    global _JOURNAL_NEW
+    budget_file()
+    flags = os.O_RDWR | os.O_NOFOLLOW
+    if os.environ.get("GITHUB_ACTIONS") == "true" and not _RESTORED:
+        try:
+            fd = os.open(_STATE_PATH, flags | os.O_CREAT | os.O_EXCL, 0o600)
+            _JOURNAL_NEW = True
+        except FileExistsError:
+            fd = os.open(_STATE_PATH, flags)
+            _JOURNAL_NEW = False
+    else:
+        fd = os.open(_STATE_PATH, flags)
+    info = os.fstat(fd)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_nlink != 1
+    ):
+        os.close(fd)
+        raise AdapterError("Unsafe publisher journal", "access")
+    file = os.fdopen(fd, "r+")
+    fcntl.flock(file, fcntl.LOCK_EX)
+    return file
+
+
+def load_budget():
+    with open(_STATE_PATH, "rb") as file:
+        raw = file.read(16385)
+    if len(raw) > 16384:
+        raise AdapterError("Oversized publisher journal", "access")
+    if (
+        not raw
+        and _JOURNAL_NEW
+        and os.environ.get("GITHUB_ACTIONS") == "true"
+        and not _RESTORED
+    ):
+        return empty_budget(time.time())
+    try:
+        value = json.loads(raw)
+        if isinstance(value, dict) and "schema" not in value:
+            value = migrate_local_research(value, raw)
+        return validate_budget(value)
+    except (ValueError, TypeError):
+        raise AdapterError("Corrupt publisher journal", "access") from None
+
+
+def write_budget(state):
+    """Retain the existing legacy journal inode under its original flock."""
+    state = validate_budget(state)
+    fd = os.open(_STATE_PATH, os.O_WRONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "w") as file:
+        file.seek(0)
+        json.dump(state, file, separators=(",", ":"))
+        file.truncate()
+        file.flush()
+        os.fsync(file.fileno())
+
+
+def merge_budget(left, right):
+    left, right = validate_budget(left), validate_budget(right)
+    result = empty_budget(time.time())
+    for key in (
+        "until",
+        "interval",
+        "page_gap",
+        "completed",
+        "inventory_completed",
+        "observed_429_since_transition",
+        "rate_limit_until",
+    ):
+        result[key] = max(left[key], right[key])
+    if (
+        left["research_provenance"]
+        and right["research_provenance"]
+        and left["research_provenance"] != right["research_provenance"]
+    ):
+        raise AdapterError("Research provenance differs across state", "access")
+    result["research_provenance"] = (
+        left["research_provenance"] or right["research_provenance"]
+    )
+    result["starts"] = sorted(set(left["starts"] + right["starts"]))
+    result["blocked"] = left["blocked"] or right["blocked"]
+    return validate_budget(result)
+
+
+def remaining():
+    check_deadline()
+    return min(_RUN_END - EXPORT_TIMEOUT, _PHASE_END) - time.monotonic()
+
+
+def pace(interval=12.2):
+    """Hold the physical journal lock through the response completion."""
+    lock = locked_budget()
+    try:
+        state = load_budget()
+        if state["blocked"]:
+            raise AdapterError("Retained actual publisher refusal", "access")
+        if state["observed_429_since_transition"] >= 100:
+            raise AdapterError(
+                "Unsupported retained429 history; no traffic", "access"
+            )
+        state["interval"] = max(state["interval"], interval, 12.2)
+        if state["rate_limit_until"] > time.time():
+            raise AdapterError(
+                "Retained publisher rate-limit embargo", "access", 429
+            )
+        while True:
+            now = time.time()
+            recent = [t for t in state["starts"] if now - t < 60]
+            ready = max(
+                state["until"],
+                state["completed"] + state["interval"],
+                recent[-1] + state["interval"] if recent else now,
+                recent[-5] + 60 if len(recent) >= 5 else now,
+            )
+            if ready - now + 30 >= remaining():
+                raise AdapterError(
+                    "Retained pacing exceeds remaining collection budget",
+                    "access",
+                )
+            if ready <= now:
+                state["starts"] = recent + [now]
+                state["observed_at"] = now
+                write_budget(state)
+                return lock, state
+            time.sleep(min(ready - now, 30))
+    except BaseException:
+        lock.close()
+        raise
+
+
+def retain_refusal():
+    with locked_budget():
+        state = load_budget()
+        state["blocked"] = True
+        state["observed_at"] = time.time()
+        write_budget(state)
+
+
+def retry_embargo(value):
+    """Return finite future timing without mutating malformed input."""
+    if value is None:
+        return 0
+    try:
+        value = value.strip()
+        if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value):
+            until = time.time() + float(value)
+        else:
+            date = email.utils.parsedate_to_datetime(value)
+            if date.utcoffset() is None:
+                return 0
+            until = date.timestamp()
+        if not numeric(until) or until <= time.time():
+            return 0
+        datetime.fromtimestamp(until, timezone.utc)
+        return until
+    except (ValueError, TypeError, OverflowError, OSError, AttributeError):
+        return 0
+
+
+def request_bytes(
+    url,
+    *,
+    interval=12.2,
+    method="GET",
+    headers=None,
+    payload=None,
+    robots=False,
+    byte_limit=5_000_000,
+):
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+    if type(byte_limit) is not int or not 0 < byte_limit <= 5_000_000:
+        raise AdapterError("Invalid response byte bound", "fetch")
+    if robots and urllib.parse.urlsplit(url).path != "/robots.txt":
+        raise AdapterError(
+            "Robots purpose requires literal robots.txt", "access"
+        )
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    publisher = host == "stipendiumplus.de" or host.endswith(
+        ".stipendiumplus.de"
+    )
+    if publisher and (not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
+        raise AdapterError(
+            "Trusted publisher state required before access", "access"
+        )
+    if publisher and _INVENTORY_ACTIVE and not robots:
+        inventory_guard()
+    lock, state = pace(interval) if publisher else (None, None)
+    try:
+        if publisher:
+            verify_local_publisher_start()
+        request = urllib.request.Request(
+            url,
+            data=payload,
+            method=method,
+            headers={**(headers or {}), "User-Agent": _USER_AGENT},
+        )
+        if publisher:
+            print(
+                json.dumps(
+                    {
+                        "event": "request_start",
+                        "url": url,
+                        "time": time.time(),
+                        "user_agent": request.get_header("User-agent"),
+                    }
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+        try:
+            response = _OPENER.open(request, timeout=request_timeout(publisher))
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            status = response.status
+            if publisher:
+                state["until"] = max(
+                    state["until"],
+                    retry_embargo(response.headers.get("Retry-After")),
+                )
+                if status == 429:
+                    strikes = state["observed_429_since_transition"] + 1
+                    state["observed_429_since_transition"] = strikes
+                    state["interval"] = max(
+                        state["interval"] * 2, 12.2 * 2**strikes
+                    )
+                    state["page_gap"] = max(
+                        state["page_gap"] * 2, 30 * 2**strikes
+                    )
+                    state["until"] = max(
+                        state["until"], time.time() + 1800 * 2 ** (strikes - 1)
+                    )
+                    state["rate_limit_until"] = max(
+                        state["rate_limit_until"], state["until"]
+                    )
+                if status in (401, 403, 451) and not robots:
+                    state["blocked"] = True
+                state["observed_at"] = time.time()
+                write_budget(state)
+            try:
+                body = response.read(byte_limit + 1)
+            except (OSError, urllib.error.URLError) as error:
+                if publisher and (
+                    status == 429 or status in (401, 403, 451) and not robots
+                ):
+                    raise AdapterError(
+                        (
+                            "Publisher refusal/rate-limit body failed; "
+                            "retained state"
+                        ),
+                        "access",
+                        status,
+                    ) from error
+                raise
+            if len(body) > byte_limit:
+                raise AdapterError("Response exceeds5MB", "fetch")
+            if (
+                publisher
+                and not (robots and 400 <= status < 500 and status != 429)
+                and visible_access_challenge(body, status == 429)
+            ):
+                if not robots or status == 429:
+                    state["blocked"] = True
+                raise AdapterError(
+                    "Visible publisher verification or refusal", "access"
+                )
+            if publisher and status == 429:
+                raise AdapterError(
+                    "Publisher429; durable adaptive cooldown retained",
+                    "access",
+                    429,
+                )
+            return status, response.headers, body
+    finally:
+        if lock is not None:
+            try:
+                state["completed"] = state["observed_at"] = time.time()
+                if _INVENTORY_ACTIVE and not robots:
+                    state["inventory_completed"] = state["completed"]
+                try:
+                    write_budget(state)
+                except BaseException:
+                    _STATE_TRUSTED = False
+                    _PUBLISHER_GATE_FAILED = True
+                    raise
+                print(
+                    json.dumps(
+                        {
+                            "event": "request_complete",
+                            "url": url,
+                            "time": time.time(),
+                        }
+                    ),
+                    file=sys.stderr,
+                    flush=True,
+                )
+            finally:
+                lock.close()
+
+
+def inventory_guard():
+    """Each physical inventory retry/redirect retains the completion gap."""
+    with locked_budget():
+        state = load_budget()
+    while True:
+        wait = state["inventory_completed"] + state["page_gap"] - time.time()
+        if wait <= 0:
+            return
+        if wait + 30 >= remaining():
+            raise AdapterError(
+                "Page guard exceeds remaining collection budget", "access"
+            )
+        time.sleep(min(wait, 30))
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    global _INVENTORY_ACTIVE
+    previous = _INVENTORY_ACTIVE
+    _INVENTORY_ACTIVE = True
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _INVENTORY_ACTIVE = previous
+
+
+def prepare_collection():
+    global _COLLECTION_LOCK_FD, _STATE_TRUSTED, _LOCAL_FIRST_ACCESS_CHECKED
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher completion persistence failed", "access")
+    if _COLLECTION_LOCK_FD is None:
+        path = os.path.join(tempfile.gettempdir(), SOURCE_ID + ".lock")
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            os.close(fd)
+            raise AdapterError("Unsafe lifecycle lock", "access")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            raise AdapterError(
+                "Another publisher collector is active", "access"
+            ) from None
+        _COLLECTION_LOCK_FD = fd
+    if _STATE_TRUSTED and os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    _LOCAL_FIRST_ACCESS_CHECKED = False
+    budget_file()
+    restore_family_artifact()
+    _STATE_TRUSTED = True
+
+
+def collect():
+    """One complete actual native collection with bounded exclusive access."""
+    if _RUN_END is None:
+        with execution():
+            return collect()
+    with phase("collection", COLLECTION_TIMEOUT):
+        prepare_collection()
+        return collect_inventory()
+
+
+def read_snapshot():
+    if _PHASE_END is not None:
+        return read_snapshot_body()
+    with phase("snapshot", 180):
+        return read_snapshot_body()
+
+
+def publish_files(snapshot, files):
+    if _PHASE_END is not None:
+        return publish_files_body(snapshot, files)
+    with phase("publication", 180):
+        return publish_files_body(snapshot, files)
+
+
+def main():
+    with execution():
+        try:
+            return run()
+        except PhaseExpired:
+            print(
+                json.dumps(
+                    {
+                        "source": SOURCE_ID,
+                        "status": "fail",
+                        "error": "Nonrenewable runtime phase deadline expired",
+                        "failure_stage": "runtime",
+                        "last_attempt_at": utc_now(),
+                    }
+                )
+            )
+            return 1
+        finally:
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                with phase("export", EXPORT_TIMEOUT):
+                    export_family_artifact()
+
+
+def check_deadline():
+    if _PHASE_END is None or _RUN_END is None:
+        raise AdapterError("Bounded execution context required", "access")
+    if time.monotonic() >= min(_PHASE_END, _RUN_END):
+        raise PhaseExpired()
+
+
+def request_timeout(publisher=False):
+    check_deadline()
+    remaining = min(_PHASE_END, _RUN_END) - time.monotonic()
+    if remaining <= 0:
+        raise PhaseExpired()
+    return min(30, remaining)
+
+
+def alarm_expired(signum, frame):
+    raise PhaseExpired()
+
+
+def arm_alarm(deadline):
+    """Keep the absolute alarm armed even outside named phases."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise PhaseExpired()
+    signal.setitimer(signal.ITIMER_REAL, remaining)
+
+
+@contextlib.contextmanager
+def execution():
+    global _RUN_END, _COLLECTION_LOCK_FD
+    if _RUN_END is not None:
+        raise AdapterError("Nested execution context refused", "access")
+    previous = signal.getsignal(signal.SIGALRM)
+    if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
+        raise AdapterError("Existing process alarm refused", "access")
+    signal.signal(signal.SIGALRM, alarm_expired)
+    _RUN_END = time.monotonic() + RUN_TIMEOUT
+    arm_alarm(_RUN_END - EXPORT_TIMEOUT)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+        _RUN_END = None
+        if _COLLECTION_LOCK_FD is not None:
+            try:
+                os.close(_COLLECTION_LOCK_FD)
+            except OSError:
+                pass
+            _COLLECTION_LOCK_FD = None
+
+
+@contextlib.contextmanager
+def phase(name, seconds):
+    global _PHASE_END, _PHASE_NAME
+    if _PHASE_END is not None or _RUN_END is None:
+        raise AdapterError("Invalid phase transition", "access")
+    _PHASE_NAME = name
+    limit = _RUN_END if name == "export" else _RUN_END - EXPORT_TIMEOUT
+    _PHASE_END = min(time.monotonic() + seconds, limit)
+    try:
+        check_deadline()
+        arm_alarm(_PHASE_END)
+        yield
+        check_deadline()
+    finally:
+        _PHASE_END = _PHASE_NAME = None
+        arm_alarm(limit)
+
+
+def local_workflow_definition():
+    """Require the exact publisher workflow paused during local collection."""
+    definition = workflow_api(f"/actions/workflows/{_WORKFLOW_ID}")
+    if (
+        definition.get("id") != _WORKFLOW_ID
+        or definition.get("path") != f".github/workflows/fetch-{SOURCE_ID}.yml"
+        or definition.get("state") != "disabled_manually"
+    ):
+        raise AdapterError(
+            "Local collection requires its paused publisher workflow", "access"
+        )
+
+
+def reviewed_local_legacy_state():
+    """Authenticate the existing reviewed research origin, never reset state."""
+    marker = _LOCAL_RESEARCH_MIGRATION
+    if (
+        not isinstance(marker, dict)
+        or set(marker) != {"source", "sha256", "evidence"}
+        or marker.get("source") != SOURCE_ID
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/216#issuecomment-[0-9]+",
+            marker.get("evidence", ""),
+        )
+    ):
+        raise AdapterError("Reviewed local legacy transition missing", "access")
+    with locked_budget():
+        current = load_budget()
+        original = json.dumps(
+            current["research_provenance"], sort_keys=True
+        ).encode()
+        if hashlib.sha256(original).hexdigest() != marker["sha256"]:
+            raise AdapterError("Local legacy research origin changed", "access")
+        return current
+
+
+def verify_local_publisher_start():
+    """Recheck remote continuity after the local startup quiet guard."""
+    global _LOCAL_FIRST_ACCESS_CHECKED
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        or _LOCAL_FIRST_ACCESS_CHECKED
+    ):
+        return
+    latest = latest_family_run()
+    current = (_SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS)
+    if latest != _RESTORED_LATEST or current != _RESTORED_HISTORY:
+        raise AdapterError(
+            "Family history changed before local publisher access", "access"
+        )
+    local_workflow_definition()
+    _LOCAL_FIRST_ACCESS_CHECKED = True
+
+
+def workflow_api(path):
+    """Read authenticated workflow metadata without publication permissions."""
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise AdapterError("Workflow state credentials missing", "access")
+    nonce = urllib.parse.urlencode({"state_read": time.time_ns()})
+    path += ("&" if "?" in path else "?") + nonce
+    try:
+        status, _, body = request_bytes(
+            _WORKFLOW_GITHUB + path,
+            headers={
+                "Authorization": "Bearer " + token,
+                "Accept": "application/vnd.github+json",
+                "Cache-Control": "no-cache, no-store",
+                "Pragma": "no-cache",
+            },
+        )
+        if status != 200:
+            raise ValueError("Workflow API status")
+        return json.loads(body)
+    except Exception:
+        raise AdapterError(
+            ("Workflow pacing state unavailable"), ("access")
+        ) from None
+
+
+def current_run_identity():
+    if (
+        os.environ.get("GITHUB_REPOSITORY") != "YouthOpps/data-pipeline"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+    ):
+        raise AdapterError("Unexpected workflow repository", "access")
+    values = [
+        os.environ.get(key, "")
+        for key in (("GITHUB_RUN_ID"), ("GITHUB_RUN_ATTEMPT"))
+    ]
+    if any(not re.fullmatch(r"[1-9][0-9]*", value) for value in values):
+        raise AdapterError("Invalid workflow run identity", "access")
+    return tuple(map(int, values))
+
+
+def family_source(run):
+    path = run.get("path", "")
+    for source in FAMILY_SOURCES:
+        if path == ".github/workflows/fetch-" + source + ".yml":
+            return source
+    return None
+
+
+def attempt_completion(identity, attempt, head):
+    """Use exact-attempt job completion rather than mutable run updates."""
+    total, jobs_seen = None, set()
+    finished = []
+    for page in range(1, 101):
+        result = workflow_api(
+            f"/actions/runs/{identity}/attempts/{attempt}/jobs"
+            f"?per_page=100&page={page}"
+        )
+        _SCANNED_JOB_DIGESTS[(identity, attempt, page)] = hashlib.sha256(
+            json.dumps(result, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        count, jobs = result.get("total_count"), result.get("jobs")
+        if (
+            type(count) is not int
+            or count <= 0
+            or not isinstance(jobs, list)
+            or len(jobs) > 100
+            or total is not None
+            and total != count
+        ):
+            raise ValueError("Incomplete exact-attempt job inventory")
+        total = count
+        for job in jobs:
+            if (
+                not isinstance(job, dict)
+                or type(job.get("id")) is not int
+                or job["id"] <= 0
+                or job["id"] in jobs_seen
+                or type(job.get("run_id")) is not int
+                or job["run_id"] != identity
+                or type(job.get("run_attempt")) is not int
+                or job["run_attempt"] != attempt
+                or job.get("head_sha") != head
+                or job.get("head_branch") != "main"
+                or job.get("status") != "completed"
+            ):
+                raise ValueError("Untrusted exact-attempt job")
+            jobs_seen.add(job["id"])
+            value = datetime.fromisoformat(
+                job["completed_at"].replace("Z", "+00:00")
+            )
+            if value.utcoffset() is None:
+                raise ValueError("Missing job completion timezone")
+            finished.append(value.timestamp())
+        if len(jobs_seen) == total:
+            return max(finished)
+        if len(jobs_seen) > total or len(jobs) != 100:
+            raise ValueError("Truncated exact-attempt job inventory")
+    raise ValueError("Exact-attempt job inventory exceeds bound")
+
+
+def completed_identity(run, expected=None, revision=None):
+    """Bind a completed attempt and its chronological publisher interval."""
+    try:
+        source = family_source(run)
+        identity, attempt = run["id"], run["run_attempt"]
+        if (
+            not source
+            or type(identity) is not int
+            or identity <= 0
+            or type(attempt) is not int
+            or attempt <= 0
+            or run["status"] != "completed"
+            or run["repository"]["full_name"] != "YouthOpps/data-pipeline"
+            or run[("head_repository")][("full_name")]
+            != ("YouthOpps/data-pipeline")
+            or run["head_branch"] != "main"
+            or not re.fullmatch(r"[0-9a-f]{40}", run.get("head_sha", ""))
+            or type(run.get("workflow_id")) is not int
+            or run["workflow_id"] != _WORKFLOW_ID
+            or revision is not None
+            and (run["head_sha"], run["workflow_id"]) != revision
+            or expected
+            and (identity, attempt, source) != expected
+        ):
+            raise ValueError("Untrusted completed attempt")
+        value = datetime.fromisoformat(
+            run["run_started_at"].replace("Z", "+00:00")
+        )
+        if value.utcoffset() is None:
+            raise ValueError("Missing attempt timezone")
+        began = value.timestamp()
+        finished = attempt_completion(identity, attempt, run["head_sha"])
+        if not 0 <= began <= finished <= time.time() + 1:
+            raise ValueError("Invalid attempt chronology")
+        _ATTEMPT_HEADS[(identity, attempt)] = run["head_sha"]
+        return finished, began, identity, attempt, source
+    except Exception:
+        raise AdapterError(
+            ("Untrusted completed family attempt"), ("access")
+        ) from None
+
+
+def latest_family_run():
+    """Restart only count-drift races, without reusing partial candidates."""
+    for attempt in range(3):
+        try:
+            return scan_family_history()
+        except InventoryRace:
+            if attempt == 2:
+                raise AdapterError(
+                    "Workflow inventory remained unstable", "access"
+                ) from None
+
+
+def scan_family_history():
+    """Select completed chronology, including older-ID rerun attempts."""
+    global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
+    _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    current_id, current_attempt = (
+        current_run_identity() if hosted else (None, None)
+    )
+    if not hosted:
+        local_workflow_definition()
+    current_seen = False
+    candidates = []
+    total, scanned = None, 0
+    seen_ids = set()
+    for page in range(1, 101):
+        route = (
+            "/actions/workflows/fetch-de-stipendiumplus.yml/runs"
+            if hosted
+            else f"/actions/workflows/{_WORKFLOW_ID}/runs"
+        )
+        result = workflow_api(route + f"?per_page=100&page={page}")
+        count, runs = result.get("total_count"), result.get("workflow_runs")
+        if (
+            type(count) is not int
+            or count < 0
+            or not isinstance(runs, list)
+            or len(runs) > 100
+        ):
+            raise AdapterError("Invalid workflow run inventory", "access")
+        if total is None:
+            total = count
+        elif total != count:
+            raise InventoryRace(
+                ("Workflow inventory changed during restore"), ("access")
+            )
+        scanned += len(runs)
+        for run in runs:
+            if not isinstance(run, dict):
+                raise AdapterError("Invalid workflow run entry", "access")
+            run_id = run.get("id")
+            if type(run_id) is not int or run_id <= 0 or run_id in seen_ids:
+                raise AdapterError(
+                    "Invalid or duplicate workflow run identity", "access"
+                )
+            seen_ids.add(run_id)
+            source = family_source(run)
+            if not source:
+                if not hosted:
+                    raise AdapterError(
+                        "Unexpected local family workflow", "access"
+                    )
+                continue
+            if not hosted and run.get("status") != "completed":
+                raise AdapterError(
+                    "Local collection requires terminal family history",
+                    "access",
+                )
+            if (
+                run.get(("repository"), {}).get(("full_name"))
+                != ("YouthOpps/data-pipeline")
+                or run.get("head_repository", {}).get("full_name")
+                != ("YouthOpps/data-pipeline")
+                or run.get(("head_branch")) != ("main")
+            ):
+                raise AdapterError(
+                    ("Workflow repository or branch mismatch"), ("access")
+                )
+            identity, attempt = run.get("id"), run.get("run_attempt")
+            if (
+                type(identity) is not int
+                or identity <= 0
+                or type(attempt) is not int
+                or attempt <= 0
+            ):
+                raise AdapterError("Invalid family run identity", "access")
+            if identity != current_id:
+                _SCANNED_HISTORY[(identity, attempt)] = (
+                    run.get("head_sha"),
+                    run.get("workflow_id"),
+                )
+            if identity == current_id:
+                if (
+                    run.get("head_sha") != os.environ.get("GITHUB_SHA")
+                    or run.get("workflow_id") != _WORKFLOW_ID
+                ):
+                    raise AdapterError(
+                        "Current workflow head or identity changed", "access"
+                    )
+                if attempt != current_attempt:
+                    raise AdapterError(
+                        ("Current workflow attempt mismatch"), ("access")
+                    )
+                current_seen = True
+                if current_attempt > 1:
+                    prior = workflow_api(
+                        (
+                            f"/actions/runs/{identity}/attempts/"
+                            f"{current_attempt - 1}"
+                        )
+                    )
+                    candidates.append(
+                        completed_identity(
+                            prior,
+                            (identity, current_attempt - 1, source),
+                            (run.get("head_sha"), run.get("workflow_id")),
+                        )
+                    )
+                continue
+            if run.get(("status")) in (
+                ("queued"),
+                ("waiting"),
+                ("pending"),
+                ("requested"),
+            ):
+                if attempt > 1:
+                    prior = workflow_api(
+                        f"/actions/runs/{identity}/attempts/{attempt - 1}"
+                    )
+                    candidates.append(
+                        completed_identity(
+                            prior,
+                            (identity, attempt - 1, source),
+                            (run.get("head_sha"), run.get("workflow_id")),
+                        )
+                    )
+                continue
+            if run.get("status") != "completed":
+                raise AdapterError("Another family run is active", "access")
+            candidates.append(completed_identity(run))
+        if scanned >= total:
+            if scanned != total:
+                raise AdapterError(
+                    ("Workflow inventory count mismatch"), ("access")
+                )
+            if hosted and not current_seen:
+                raise AdapterError(
+                    "Current workflow absent from complete history", "access"
+                )
+            if not candidates:
+                return None
+            ordered = sorted(candidates)
+            if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
+                raise AdapterError(
+                    ("Ambiguous family attempt chronology"), ("access")
+                )
+            return ordered[-1][2:]
+        if len(runs) != 100:
+            raise AdapterError("Incomplete workflow inventory", "access")
+    raise AdapterError("Workflow inventory exceeds reviewed bound", "access")
+
+
+class InventoryRace(AdapterError):
+    """The advertised complete workflow inventory changed during reading."""
+
+
+def source_revision_digest(head):
+    """Bind an artifact code digest to its authenticated source revision."""
+    if not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+        raise ValueError("Invalid source revision")
+    path = "adapters/" + SOURCE_ID + "/adapter.py"
+    result = workflow_api("/contents/" + path + "?ref=" + head)
+    if result.get("path") != path or result.get("encoding") != "base64":
+        raise ValueError("Unexpected source revision response")
+    content = base64.b64decode(result["content"], validate=False)
+    if len(content) != result.get("size") or len(content) > 5_000_000:
+        raise ValueError("Invalid source revision size")
+    blob = b"blob " + str(len(content)).encode() + b"\0" + content
+    if hashlib.sha1(blob).hexdigest() != result.get("sha"):
+        raise ValueError("Source revision blob mismatch")
+    return hashlib.sha256(content).hexdigest()
+
+
+def download_inert_artifact(identity, artifact_id, digest=None):
+    (
+        "Download a bounded authenticated artifact, stripping "
+        "cross-origin auth."
+    )
+    token = os.environ.get("GITHUB_TOKEN", "")
+    url = _WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": "Bearer " + token,
+            "User-Agent": _USER_AGENT,
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        try:
+            response = _OPENER.open(request, timeout=request_timeout())
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            if response.status != 302:
+                raise ValueError("Expected artifact redirect")
+            destination = response.headers.get("Location", "")
+            response.read(1001)
+        parsed = urllib.parse.urlsplit(destination)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.port
+        ):
+            raise ValueError("Unsafe artifact URL")
+        if "." not in parsed.hostname or parsed.hostname.endswith(
+            ((".local"), (".internal"), (".localhost"))
+        ):
+            raise ValueError("Private artifact hostname")
+        try:
+            ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("Literal artifact address")
+        # Signed URL is never stored or included in exceptions; no auth header.
+        status, _, body = request_bytes(destination, byte_limit=32768)
+        if status != 200 or len(body) > 32768:
+            raise ValueError("Invalid artifact response")
+        if digest is not None:
+            if (
+                not isinstance(digest, str)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+                or digest[7:] != hashlib.sha256(body).hexdigest()
+            ):
+                raise ValueError("Artifact digest mismatch")
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            entries = archive.infolist()
+            if len(entries) != 1 or entries[0].filename != "pacing-state.json":
+                raise ValueError("Unexpected artifact members")
+            entry = entries[0]
+            if entry.file_size > 16384 or entry.flag_bits & 1:
+                raise ValueError("Oversized or encrypted state")
+            if entry.external_attr >> 16 & 0o170000 == 0o120000:
+                raise ValueError("State symlink")
+            raw = archive.read(entry)
+        envelope = json.loads(raw)
+        if not isinstance(envelope, dict) or set(envelope) != {
+            "schema",
+            "repository",
+            "run_id",
+            "run_attempt",
+            "source",
+            "head_sha",
+            "adapter_sha256",
+            "state_sha256",
+            "state",
+        }:
+            raise ValueError("Invalid artifact envelope")
+        run_id, attempt, source = identity
+        if (
+            type(envelope["schema"]) is not int
+            or envelope["schema"] != 1
+            or envelope["repository"] != "YouthOpps/data-pipeline"
+            or type(envelope["run_id"]) is not int
+            or type(envelope["run_attempt"]) is not int
+            or envelope["run_id"] != run_id
+            or envelope["run_attempt"] != attempt
+            or envelope["source"] != source
+            or envelope["head_sha"] != _ATTEMPT_HEADS.get((run_id, attempt))
+            or envelope["adapter_sha256"]
+            != source_revision_digest(envelope["head_sha"])
+            or envelope["state_sha256"]
+            != hashlib.sha256(
+                json.dumps(
+                    envelope["state"], sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+        ):
+            raise ValueError("Artifact ownership mismatch")
+        return validate_budget(envelope["state"])
+    except Exception:
+        raise AdapterError(
+            ("Invalid or unavailable family pacing artifact"), ("access")
+        ) from None
+
+
+def source_file_digest():
+    """Hash this standalone implementation without retaining its contents."""
+    with open(__file__, "rb") as stream:
+        content = stream.read(5_000_001)
+    if len(content) > 5_000_000:
+        raise AdapterError(
+            "Source implementation exceeds reviewed bound", "access"
+        )
+    return hashlib.sha256(content).hexdigest()
+
+
+def invalidate_family_artifact():
+    """Remove only an owned stale output after publisher persistence failed."""
+    path = os.environ.get("STIPENDIUM_PACING_ARTIFACT_PATH")
+    if not path:
+        return
+    configured = os.environ.get("RUNNER_TEMP", "")
+    if not os.path.isabs(configured):
+        raise AdapterError("Runner temporary directory required", "access")
+    root = os.path.realpath(configured)
+    if (
+        os.path.dirname(os.path.abspath(path)) != root
+        or os.path.basename(path) != "pacing-state.json"
+    ):
+        raise AdapterError("Unsafe artifact output path", "access")
+    info = os.stat(root, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_mode & 0o022
+    ):
+        raise AdapterError("Unsafe artifact output directory", "access")
+    stale = False
+    try:
+        info = os.stat(path, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    else:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+        ):
+            raise AdapterError("Unsafe stale artifact output", "access")
+        stale = True
+    descriptor = os.open(
+        os.environ["GITHUB_OUTPUT"], os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW
+    )
+    with os.fdopen(descriptor, "a") as output:
+        info = os.fstat(output.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+        ):
+            raise AdapterError("Unsafe workflow output signal", "access")
+        stale_descriptor = None
+        if stale:
+            stale_descriptor = os.open(path, os.O_WRONLY | os.O_NOFOLLOW)
+            stale_info = os.fstat(stale_descriptor)
+            if (
+                not stat.S_ISREG(stale_info.st_mode)
+                or stale_info.st_uid != os.getuid()
+                or stale_info.st_nlink != 1
+            ):
+                os.close(stale_descriptor)
+                raise AdapterError("Unsafe stale artifact output", "access")
+        try:
+            if stale_descriptor is not None:
+                os.ftruncate(stale_descriptor, 0)
+                os.fsync(stale_descriptor)
+            output.write("pacing_ready=false\n")
+            output.flush()
+            os.fsync(output.fileno())
+        finally:
+            if stale_descriptor is not None:
+                os.close(stale_descriptor)
+                os.unlink(path)
+
+
+def export_family_artifact():
+    """Atomically export trusted state and signal its availability."""
+    path = os.environ.get("STIPENDIUM_PACING_ARTIFACT_PATH")
+    if not path:
+        return
+    if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED:
+        invalidate_family_artifact()
+        return
+    run_id, attempt = current_run_identity()
+    configured = os.environ.get("RUNNER_TEMP", "")
+    if not os.path.isabs(configured):
+        raise AdapterError("Runner temporary directory required", "access")
+    root = os.path.realpath(configured)
+    if (
+        os.path.dirname(os.path.abspath(path)) != root
+        or os.path.basename(path) != "pacing-state.json"
+    ):
+        raise AdapterError("Unsafe artifact output path", "access")
+    info = os.stat(root, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_mode & 0o022
+    ):
+        raise AdapterError("Unsafe artifact output directory", "access")
+    with locked_budget():
+        state = load_budget()
+    envelope = {
+        "schema": 1,
+        "repository": "YouthOpps/data-pipeline",
+        "run_id": run_id,
+        "run_attempt": attempt,
+        "source": SOURCE_ID,
+        "head_sha": os.environ.get("GITHUB_SHA"),
+        "adapter_sha256": source_file_digest(),
+        "state_sha256": hashlib.sha256(
+            json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "state": state,
+    }
+    if not re.fullmatch(r"[0-9a-f]{40}", envelope["head_sha"] or ""):
+        raise AdapterError("Invalid artifact source revision", "access")
+    fd, temporary = tempfile.mkstemp(prefix=".stipendium-pacing-", dir=root)
+    try:
+        with os.fdopen(fd, "w") as file:
+            json.dump(envelope, file)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+        descriptor = os.open(
+            os.environ["GITHUB_OUTPUT"],
+            os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW,
+        )
+        with os.fdopen(descriptor, "a") as output:
+            info = os.fstat(output.fileno())
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+            ):
+                raise AdapterError("Unsafe workflow output signal", "access")
+            output.write("pacing_ready=true\n")
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def restore_family_artifact():
+    """Require exact history for the reviewed legacy state handoff."""
+    global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
+    if _RESTORED and os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    _STATE_TRUSTED = False
+    latest = latest_family_run()
+    if latest is None:
+        raise AdapterError(
+            "Existing source history missing; no empty bootstrap", "access"
+        )
+    run_id, attempt, source = latest
+    if run_id in _LEGACY_HEADS:
+        expected = {
+            (identity, 1): (head, _WORKFLOW_ID)
+            for identity, head in _LEGACY_HEADS.items()
+        }
+        if (
+            latest != (38763419441, 1, SOURCE_ID)
+            or _SCANNED_HISTORY != expected
+        ):
+            raise AdapterError(
+                "Reviewed complete legacy chronology changed", "access"
+            )
+        for identity in _LEGACY_HEADS:
+            if (
+                _SCANNED_JOB_DIGESTS.get((identity, 1, 1))
+                != _LEGACY_JOB_DIGESTS[identity]
+            ):
+                raise AdapterError(
+                    "Reviewed exact legacy jobs changed", "access"
+                )
+            artifacts = workflow_api(
+                f"/actions/runs/{identity}/artifacts?per_page=100"
+            )
+            if (
+                artifacts.get("total_count") != 0
+                or artifacts.get("artifacts") != []
+            ):
+                raise AdapterError(
+                    "Reviewed legacy artifact inventory changed", "access"
+                )
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            incoming = reviewed_local_legacy_state()
+        else:
+            marker = _REVIEWED_NATIVE_MIGRATION
+            if (
+                not isinstance(marker, dict)
+                or set(marker)
+                != {"schema", "source", "evidence", "state", "state_sha256"}
+                or marker["schema"] != 1
+                or marker["source"] != SOURCE_ID
+                or not re.fullmatch(
+                    (
+                        r"https://github\.com/YouthOpps/data-pipeline/"
+                        r"issues/216#issuecomment-[0-9]+"
+                    ),
+                    marker.get("evidence", ""),
+                )
+                or hashlib.sha256(
+                    json.dumps(
+                        marker["state"], sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+                != marker["state_sha256"]
+            ):
+                raise AdapterError(
+                    "Reviewed full native/local migration state required",
+                    "access",
+                )
+            incoming = validate_budget(marker["state"])
+    else:
+        result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        artifacts = result.get("artifacts")
+        if (
+            not isinstance(artifacts, list)
+            or result.get("total_count") != len(artifacts)
+            or len(artifacts) > 100
+        ):
+            raise AdapterError("Incomplete newest artifact inventory", "access")
+        matches = [
+            a
+            for a in artifacts
+            if a.get("name") == f"{_ARTIFACT_NAME}-{attempt}"
+        ]
+        if (
+            len(matches) != 1
+            or matches[0].get("expired") is not False
+            or type(matches[0].get("id")) is not int
+            or matches[0]["id"] <= 0
+            or matches[0].get("workflow_run", {}).get("id") != run_id
+            or matches[0].get("workflow_run", {}).get("head_sha")
+            != _ATTEMPT_HEADS.get((run_id, attempt))
+            or type(matches[0].get("size_in_bytes")) is not int
+            or not 0 < matches[0]["size_in_bytes"] <= 32768
+            or not re.fullmatch(
+                r"sha256:[0-9a-f]{64}", matches[0].get("digest", "")
+            )
+        ):
+            raise AdapterError(
+                "Newest mature attempt lacks exact trusted state", "access"
+            )
+        incoming = download_inert_artifact(
+            latest, matches[0]["id"], matches[0]["digest"]
+        )
+    with locked_budget():
+        local = load_budget()
+        combined = merge_budget(local, incoming)
+        combined["until"] = max(combined["until"], time.time() + 60)
+        write_budget(combined)
+    _RESTORED_LATEST = latest
+    _RESTORED_HISTORY = (
+        copy.deepcopy(_SCANNED_HISTORY),
+        copy.deepcopy(_SCANNED_JOB_DIGESTS),
+        copy.deepcopy(_ATTEMPT_HEADS),
+    )
+    _RESTORED = _STATE_TRUSTED = True
+
 
 
 if __name__ == "__main__":
