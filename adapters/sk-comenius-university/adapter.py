@@ -1985,6 +1985,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "Comenius University",
         "source": SOURCE_ID,
         "name": "FMFI public funding and opportunities — Comenius University",
         "source_url": SOURCE_URL,

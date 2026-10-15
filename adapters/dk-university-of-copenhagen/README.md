@@ -299,3 +299,10 @@ not include credentials, headers, response bodies or signed URLs. The existing
 three-attempt limit, current-head and source-pair conflict checks, atomic writes
 and successful collection/publication behavior are unchanged. This diagnostic
 maintenance does not establish the underlying cause of older generic failures.
+
+## Source display name
+
+Published metadata uses `display_name` = **University of Copenhagen** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

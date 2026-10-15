@@ -198,3 +198,10 @@ challenge continues through the existing host, TLS, pacing and retry guards.
 Existing refusal holds, retained rate limits and source publication behavior
 remain in force. This conditional-path correction does not clear an access hold
 or certify a new publisher collection.
+
+## Source display name
+
+Published metadata uses `display_name` = **Fulbright Belgium and Luxembourg** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

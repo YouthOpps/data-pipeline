@@ -1355,6 +1355,7 @@ def publish_files(snapshot, files):
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     result = {
+        "display_name": "StipendiumPlus",
         "source": SOURCE_ID,
         "source_url": SOURCE_URL,
         "website_url": WEBSITE_URL,

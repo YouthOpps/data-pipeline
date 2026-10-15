@@ -2256,6 +2256,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "IBM",
         "source": SOURCE_ID,
         "name": "IBM — advertised early-career programme information",
         "source_url": SOURCE_URL,

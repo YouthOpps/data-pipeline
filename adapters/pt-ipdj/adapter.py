@@ -2615,6 +2615,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "IPDJ",
         "source": SOURCE_ID,
         "name": "IPDJ — bounded public programmes, calls and educational sessions",
         "source_url": SOURCE_URL,

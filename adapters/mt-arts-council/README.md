@@ -62,3 +62,10 @@ python -B adapters/mt-arts-council/adapter.py
 ```
 
 The single native test performs a complete genuine nonpublishing collection, validates all records and prints one complete JSON array on stdout. Diagnostics go to stderr; it does not save datasets or use publication credentials. The workflow's sole application command is `python -B adapters/mt-arts-council/adapter.py --publish`. DATA_SOURCE_TOKEN is used only for source publication, and GITHUB_TOKEN reads trusted workflow artifacts. The complete native test on 15 October 2026 passed in 340.404 seconds: 47 funding cards and 84 opportunity cards yielded 120 raw records after 10 explicit exclusions and one Artivisti crosspost merge; final explicit-closure/deadline cleanup of the complete retained actual source yields 74. These are observed counts, not acceptance caps. Eleven actual source requests had a minimum physical start gap of 12.931 seconds, at most three starts per rolling minute, and a minimum inventory completion gap of 30.001 seconds. The actual current website consumer accepted all 120 raw, 74 filtered and a valid derived-empty result in memory. Conditional state/access guards were subsequently checked against every retained actual source response without new publisher requests; every non-temporal record field remained identical. Independent QA is required before PR delivery. No production enable, dispatch, source publication or website success is certified by local collection; a separate maintainer owns those gates.
+
+## Source display name
+
+Published metadata uses `display_name` = **Arts Council Malta** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

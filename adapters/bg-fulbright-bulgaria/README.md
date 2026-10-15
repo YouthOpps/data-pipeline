@@ -87,3 +87,10 @@ cancelled (`cancel-in-progress: false`). Unrelated publisher families may
 collect and publish in parallel. Existing source-only atomic publication rebases
 on unrelated repository updates, uses up to three publication attempts, and
 never force-overwrites newer data.
+
+## Source display name
+
+Published metadata uses `display_name` = **Fulbright Bulgaria** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

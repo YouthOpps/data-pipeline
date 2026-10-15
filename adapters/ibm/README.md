@@ -102,3 +102,10 @@ across retries, redirects and detail requests, with stricter publisher limits
 and retained backoff taking precedence. The page guard does not raise the
 durable request interval for subsequent detail requests or reset budget/refusal
 state. Inventory scope, validation and atomic publication are unchanged.
+
+## Source display name
+
+Published metadata uses `display_name` = **IBM** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

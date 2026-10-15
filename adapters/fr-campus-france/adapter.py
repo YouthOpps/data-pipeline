@@ -668,6 +668,7 @@ def publish_files(snapshot, files):
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     result = {
+        "display_name": "Campus France",
         "source": SOURCE_ID,
         "name": "CampusBourses / Campus France",
         "source_url": SOURCE_URL,

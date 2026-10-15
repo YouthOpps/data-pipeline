@@ -1881,6 +1881,7 @@ def publish_files(snapshot, files):
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "Arts Council Malta",
         "source": SOURCE_ID,
         "name": "Arts Council Malta — official funding, training, jobs and programme overviews",
         "source_url": SOURCE_URL,

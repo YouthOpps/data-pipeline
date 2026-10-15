@@ -1987,6 +1987,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "Youth Board of Cyprus",
         "source": SOURCE_ID,
         "name": "ONEK — youth funding rounds and information session",
         "source_url": SOURCE_URL,

@@ -2548,6 +2548,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "FRSE",
         "source": SOURCE_ID,
         "name": "FRSE — funding, training, jobs and awards",
         "source_url": SOURCE_URL,

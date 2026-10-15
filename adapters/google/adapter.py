@@ -1639,6 +1639,7 @@ def publish_files(snapshot, files):
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "Google",
         "source": SOURCE_ID,
         "name": SOURCE_NAME,
         "source_url": SOURCE_URL,

@@ -1178,6 +1178,7 @@ def publish_files(snapshot, files):
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     result = {
+        "display_name": "Fulbright Austria",
         "source": SOURCE_ID,
         "name": "Fulbright Austria",
         "source_url": SOURCE_URL,
