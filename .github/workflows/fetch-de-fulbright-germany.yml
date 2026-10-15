@@ -35,7 +35,17 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish this source
+        id: adapter
         env:
+          GERMANY_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
           GITHUB_TOKEN: ${{ github.token }}
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
         run: python -B adapters/de-fulbright-germany/adapter.py --publish
+      - name: Preserve trusted publisher timing
+        if: always() && steps.adapter.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: de-fulbright-germany-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
