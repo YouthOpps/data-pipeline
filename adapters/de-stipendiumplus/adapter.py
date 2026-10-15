@@ -3208,8 +3208,22 @@ def download_inert_artifact(identity, artifact_id, digest=None):
 
 def source_file_digest():
     """Hash this standalone implementation without retaining its contents."""
-    with open(__file__, "rb") as stream:
+    descriptor = os.open(__file__, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        current = os.stat(__file__, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+            or info.st_mode & 0o022
+            or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise AdapterError("Unsafe implementation file", "access")
         content = stream.read(5_000_001)
+        current = os.stat(__file__, follow_symlinks=False)
+        if (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
+            raise AdapterError("Implementation file changed", "access")
     if len(content) > 5_000_000:
         raise AdapterError(
             "Source implementation exceeds reviewed bound", "access"
@@ -3217,11 +3231,8 @@ def source_file_digest():
     return hashlib.sha256(content).hexdigest()
 
 
-def invalidate_family_artifact():
-    """Remove only an owned stale output after publisher persistence failed."""
-    path = os.environ.get("STIPENDIUM_PACING_ARTIFACT_PATH")
-    if not path:
-        return
+def checked_artifact_path(path):
+    """Validate this attempt's private output directory and basename."""
     configured = os.environ.get("RUNNER_TEMP", "")
     if not os.path.isabs(configured):
         raise AdapterError("Runner temporary directory required", "access")
@@ -3238,21 +3249,82 @@ def invalidate_family_artifact():
         or info.st_mode & 0o022
     ):
         raise AdapterError("Unsafe artifact output directory", "access")
-    stale = False
-    try:
-        info = os.stat(path, follow_symlinks=False)
-    except FileNotFoundError:
-        pass
-    else:
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_nlink != 1
-        ):
-            raise AdapterError("Unsafe stale artifact output", "access")
-        stale = True
+    return root, info
+
+
+@contextlib.contextmanager
+def owned_artifact_directory(path):
+    """Pin the verified directory for all relative artifact operations."""
+    root, before = checked_artifact_path(path)
     descriptor = os.open(
-        os.environ["GITHUB_OUTPUT"], os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW
+        root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+    )
+    try:
+        held = os.fstat(descriptor)
+        if (held.st_dev, held.st_ino) != (before.st_dev, before.st_ino):
+            raise AdapterError("Artifact directory changed", "access")
+        verify_artifact_directory(root, descriptor)
+        yield root, descriptor
+    finally:
+        os.close(descriptor)
+
+
+def verify_artifact_directory(root, descriptor):
+    """Reject replacement parents without following their contents."""
+    held = os.fstat(descriptor)
+    current = os.stat(root, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(current.st_mode)
+        or current.st_uid != os.getuid()
+        or current.st_mode & 0o022
+        or (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino)
+    ):
+        raise AdapterError("Artifact directory changed", "access")
+
+
+def validate_owned_output(info):
+    """Refuse unsafe output before reading or modifying it."""
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_nlink != 1
+        or info.st_mode & 0o077
+    ):
+        raise AdapterError("Unsafe owned artifact output", "access")
+
+
+def owned_artifact_info(root, directory):
+    """Inspect only the current safely owned artifact in the pinned parent."""
+    verify_artifact_directory(root, directory)
+    try:
+        info = os.stat(
+            "pacing-state.json", dir_fd=directory, follow_symlinks=False
+        )
+    except FileNotFoundError:
+        return None
+    validate_owned_output(info)
+    return info
+
+
+def same_owned_artifact(root, directory, expected):
+    """Prevent replacing or unlinking an independently replaced file."""
+    current = owned_artifact_info(root, directory)
+    if current is None or expected is None:
+        same = current is None and expected is None
+    else:
+        same = (current.st_dev, current.st_ino) == (
+            expected.st_dev,
+            expected.st_ino,
+        )
+    if not same:
+        raise AdapterError("Owned artifact identity changed", "access")
+
+
+def workflow_output_signal(value):
+    """Append readiness only to a nonblocking, verified regular signal."""
+    descriptor = os.open(
+        os.environ["GITHUB_OUTPUT"],
+        os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
     )
     with os.fdopen(descriptor, "a") as output:
         info = os.fstat(output.fileno())
@@ -3260,97 +3332,142 @@ def invalidate_family_artifact():
             not stat.S_ISREG(info.st_mode)
             or info.st_uid != os.getuid()
             or info.st_nlink != 1
+            or info.st_mode & 0o022
         ):
             raise AdapterError("Unsafe workflow output signal", "access")
-        stale_descriptor = None
-        if stale:
-            stale_descriptor = os.open(path, os.O_WRONLY | os.O_NOFOLLOW)
-            stale_info = os.fstat(stale_descriptor)
-            if (
-                not stat.S_ISREG(stale_info.st_mode)
-                or stale_info.st_uid != os.getuid()
-                or stale_info.st_nlink != 1
-            ):
-                os.close(stale_descriptor)
-                raise AdapterError("Unsafe stale artifact output", "access")
+        output.write(f"pacing_ready={value}\n")
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def invalidate_owned_artifact(root, directory):
+    """Invalidate safe JSON before fallible signal and unlink operations."""
+    stale = owned_artifact_info(root, directory)
+    descriptor = None
+    if stale is not None:
+        descriptor = os.open(
+            "pacing-state.json",
+            os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=directory,
+        )
         try:
-            if stale_descriptor is not None:
-                os.ftruncate(stale_descriptor, 0)
-                os.fsync(stale_descriptor)
-            output.write("pacing_ready=false\n")
-            output.flush()
-            os.fsync(output.fileno())
-        finally:
-            if stale_descriptor is not None:
-                os.close(stale_descriptor)
-                os.unlink(path)
+            held = os.fstat(descriptor)
+            validate_owned_output(held)
+            if (held.st_dev, held.st_ino) != (stale.st_dev, stale.st_ino):
+                raise AdapterError("Owned artifact identity changed", "access")
+            same_owned_artifact(root, directory, stale)
+        except BaseException:
+            os.close(descriptor)
+            raise
+    errors = []
+    try:
+        if descriptor is not None:
+            try:
+                os.ftruncate(descriptor, 0)
+                os.fsync(descriptor)
+            except BaseException as error:
+                errors.append(error)
+        try:
+            workflow_output_signal("false")
+        except BaseException as error:
+            errors.append(error)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+            try:
+                same_owned_artifact(root, directory, stale)
+                os.unlink("pacing-state.json", dir_fd=directory)
+            except BaseException as error:
+                errors.append(error)
+    if errors:
+        raise AdapterError("Owned state invalidation failed closed", "access")
+
+
+def invalidate_family_artifact():
+    """Invalidate safely owned stale state before readiness signal IO."""
+    path = os.environ.get("STIPENDIUM_PACING_ARTIFACT_PATH")
+    if not path:
+        return
+    with owned_artifact_directory(path) as (root, directory):
+        invalidate_owned_artifact(root, directory)
 
 
 def export_family_artifact():
-    """Atomically export trusted state and signal its availability."""
+    """Atomically export trusted state; invalidate owned output on failure."""
     path = os.environ.get("STIPENDIUM_PACING_ARTIFACT_PATH")
     if not path:
         return
     if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED:
         invalidate_family_artifact()
         return
-    run_id, attempt = current_run_identity()
-    configured = os.environ.get("RUNNER_TEMP", "")
-    if not os.path.isabs(configured):
-        raise AdapterError("Runner temporary directory required", "access")
-    root = os.path.realpath(configured)
-    if (
-        os.path.dirname(os.path.abspath(path)) != root
-        or os.path.basename(path) != "pacing-state.json"
-    ):
-        raise AdapterError("Unsafe artifact output path", "access")
-    info = os.stat(root, follow_symlinks=False)
-    if (
-        not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != os.getuid()
-        or info.st_mode & 0o022
-    ):
-        raise AdapterError("Unsafe artifact output directory", "access")
-    with locked_budget():
-        state = load_budget()
-    envelope = {
-        "schema": 1,
-        "repository": "YouthOpps/data-pipeline",
-        "run_id": run_id,
-        "run_attempt": attempt,
-        "source": SOURCE_ID,
-        "head_sha": os.environ.get("GITHUB_SHA"),
-        "adapter_sha256": source_file_digest(),
-        "state_sha256": hashlib.sha256(
-            json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest(),
-        "state": state,
-    }
-    if not re.fullmatch(r"[0-9a-f]{40}", envelope["head_sha"] or ""):
-        raise AdapterError("Invalid artifact source revision", "access")
-    fd, temporary = tempfile.mkstemp(prefix=".stipendium-pacing-", dir=root)
-    try:
-        with os.fdopen(fd, "w") as file:
-            json.dump(envelope, file)
-            file.flush()
-            os.fsync(file.fileno())
-        os.replace(temporary, path)
-        descriptor = os.open(
-            os.environ["GITHUB_OUTPUT"],
-            os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW,
-        )
-        with os.fdopen(descriptor, "a") as output:
-            info = os.fstat(output.fileno())
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_uid != os.getuid()
-                or info.st_nlink != 1
-            ):
-                raise AdapterError("Unsafe workflow output signal", "access")
-            output.write("pacing_ready=true\n")
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    with owned_artifact_directory(path) as (root, directory):
+        prior = owned_artifact_info(root, directory)
+        temporary = None
+        temporary_info = None
+        try:
+            run_id, attempt = current_run_identity()
+            with locked_budget():
+                state = load_budget()
+            envelope = {
+                "schema": 1,
+                "repository": "YouthOpps/data-pipeline",
+                "run_id": run_id,
+                "run_attempt": attempt,
+                "source": SOURCE_ID,
+                "head_sha": os.environ.get("GITHUB_SHA"),
+                "adapter_sha256": source_file_digest(),
+                "state_sha256": hashlib.sha256(
+                    json.dumps(
+                        state, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest(),
+                "state": state,
+            }
+            if not re.fullmatch(r"[0-9a-f]{40}", envelope["head_sha"] or ""):
+                raise AdapterError("Invalid artifact source revision", "access")
+            temporary = ".owned-pacing-" + os.urandom(16).hex()
+            verify_artifact_directory(root, directory)
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | os.O_NOFOLLOW
+                | os.O_NONBLOCK,
+                0o600,
+                dir_fd=directory,
+            )
+            temporary_info = os.fstat(descriptor)
+            with os.fdopen(descriptor, "w") as stream:
+                json.dump(envelope, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            same_owned_artifact(root, directory, prior)
+            os.replace(
+                temporary,
+                "pacing-state.json",
+                src_dir_fd=directory,
+                dst_dir_fd=directory,
+            )
+            temporary = None
+            same_owned_artifact(root, directory, temporary_info)
+            workflow_output_signal("true")
+        except BaseException:
+            invalidate_owned_artifact(root, directory)
+            raise
+        finally:
+            if temporary is not None and temporary_info is not None:
+                verify_artifact_directory(root, directory)
+                current = os.stat(
+                    temporary, dir_fd=directory, follow_symlinks=False
+                )
+                validate_owned_output(current)
+                if (current.st_dev, current.st_ino) != (
+                    temporary_info.st_dev,
+                    temporary_info.st_ino,
+                ):
+                    raise AdapterError("Temporary artifact changed", "access")
+                os.unlink(temporary, dir_fd=directory)
 
 
 def restore_family_artifact():
