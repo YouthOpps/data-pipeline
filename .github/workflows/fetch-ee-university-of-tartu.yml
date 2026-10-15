@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: youthopps-source-publishing
+  group: youthopps-ee-university-of-tartu-publisher-v1
   queue: max
   cancel-in-progress: false
 jobs:

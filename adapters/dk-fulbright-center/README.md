@@ -62,7 +62,7 @@ files. Counts may change with the publisher's inventory.
 
 The unchanged source workflow runs on filtered main-branch pushes, its schedule
 and manual dispatch. Its sole application command is `adapter.py --publish`.
-Source-scoped GitHub App credentials and global publication serialization are
+Source-scoped GitHub App credentials and source-family publication serialization are
 preserved. Publication atomically updates only this source's records/metadata;
 failures preserve last-good data, and same-source conflicts reject overwrite.
 Local live tests do not certify production publication.
@@ -109,3 +109,12 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Workflow concurrency
+
+`youthopps-dk-fulbright-center-publisher-v1` serializes runs of this source. Up
+to 100 pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

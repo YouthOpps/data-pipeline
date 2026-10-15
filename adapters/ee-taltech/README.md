@@ -8,7 +8,7 @@ On 8 October 2026 the official seasonal page and [robots policy](https://taltech
 
 The linked [privacy policy](https://taltech.ee/en/privacy-policy) describes the university's processing of personal data and does not prohibit this reviewed public award collection route. No separate public reuse license or automated-collection prohibition was found in the reviewed official navigation, footer and policy. This does not assert unrestricted redistribution rights. Records retain the source ID, original statute URL and all supporting publisher anchors; metadata supplies the human-readable attribution.
 
-Requests identify YouthOpp, respect robots on fetched pages and redirects, and honor Retry-After. Publisher starts are at least six seconds apart and at most ten per rolling minute. Local overlapping runs use locked pacing state outside the checkout. Production runs share serialized publication concurrency; do not overlap a local run with production on another machine.
+Requests identify YouthOpp, respect robots on fetched pages and redirects, and honor Retry-After. Publisher starts are at least six seconds apart and at most ten per rolling minute. Local overlapping runs use locked pacing state outside the checkout. Production runs for this source are serialized; do not overlap a local run with production on another machine.
 
 ## Complete inventory and deduplication
 
@@ -39,7 +39,7 @@ The folder also works independently outside the repository. Its sole live test r
 
 ## Publication
 
-The matching `fetch-ee-taltech.yml` Action runs automatically on main pushes affecting this adapter folder or its own workflow, including maintainer merges. Manual dispatch and a six-hour schedule (`37 0/6 * * *`, UTC) are available. The repository/main guard, global publication serialization, read-only pipeline permissions and the existing GitHub App's data-source-only contents-write token scope are retained. The sole application command is:
+The matching `fetch-ee-taltech.yml` Action runs automatically on main pushes affecting this adapter folder or its own workflow, including maintainer merges. Manual dispatch and a six-hour schedule (`37 0/6 * * *`, UTC) are available. The repository/main guard, source-family publication serialization, read-only pipeline permissions and the existing GitHub App's data-source-only contents-write token scope are retained. The sole application command is:
 
 ```sh
 python -B adapters/ee-taltech/adapter.py --publish
@@ -83,3 +83,12 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Workflow concurrency
+
+`youthopps-ee-taltech-publisher-v1` serializes runs of this source. Up to 100
+pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

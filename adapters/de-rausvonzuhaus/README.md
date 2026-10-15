@@ -12,7 +12,7 @@ The publisher's [imprint](https://www.rausvonzuhaus.de/impressum) states:
 
 It prohibits commercial distribution without prior written IJAB permission. YouthOpps' intended noncommercial youth information use matches the stated purpose. Records provide attributed partial factual metadata and our own concise summary; they do not reproduce photographs, image credits or full third-party descriptions. Every record and source metadata attribute `rausvonzuhaus.de / Eurodesk Deutschland (IJAB)`. The official contact for questions is `rausvonzuhaus@eurodesk.eu`, with IJAB contact `info@ijab.de` on the imprint.
 
-One robots request and one listing request normally provide the entire inventory. Requests, retries and redirects are separated by at least six seconds and limited to ten starts per rolling minute. The publisher's stricter robots delay and Retry-After are honored. A lock and durable pacing state in the operating system's temporary directory serialize overlapping local processes. Production Actions share serialized publication concurrency; separate machines must not run this source simultaneously.
+One robots request and one listing request normally provide the entire inventory. Requests, retries and redirects are separated by at least six seconds and limited to ten starts per rolling minute. The publisher's stricter robots delay and Retry-After are honored. A lock and durable pacing state in the operating system's temporary directory serialize overlapping local processes. Production Actions serialize this source; separate machines must not run this source simultaneously.
 
 ## Inventory and fields
 
@@ -50,7 +50,7 @@ python -B adapters/de-rausvonzuhaus/test_adapter.py
 
 The single live test collects actual nonempty records, validates them, and emits the complete JSON document on stdout. Diagnostics go to stderr. It has no publication credentials and writes no output files. The folder operates independently using Python's standard library; its test imports only its own adapter in addition to standard modules.
 
-The matching `fetch-de-rausvonzuhaus.yml` runs after changes to its own adapter/workflow are merged to `main`, supports manual dispatch and runs every six hours at minute 41. A repository/main guard, minimal permissions, data-source-only GitHub App token and global publication concurrency constrain the Action. Its sole application command uses `adapter.py --publish`; tests and formatting never run in production.
+The matching `fetch-de-rausvonzuhaus.yml` runs after changes to its own adapter/workflow are merged to `main`, supports manual dispatch and runs every six hours at minute 41. A repository/main guard, minimal permissions, data-source-only GitHub App token and source-family publication concurrency constrain the Action. Its sole application command uses `adapter.py --publish`; tests and formatting never run in production.
 
 Production starts after maintainer merge. It atomically publishes only `datas/de-rausvonzuhaus/data.json` and `metadata.json` using a conflict-safe Git commit. First-run failure creates no source folder. After a successful publication, later failure preserves last-good data and the last successful timestamp and records sanitized failure metadata when possible. The success timestamp advances only after a validated nonempty retrieval and its filtered result are successfully published. Failed metadata publication is reported rather than claimed to have been saved. This adapter does not alter any other source or create a catalog.
 
@@ -93,3 +93,12 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Workflow concurrency
+
+`youthopps-de-rausvonzuhaus-publisher-v1` serializes runs of this source. Up to
+100 pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

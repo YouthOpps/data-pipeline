@@ -160,8 +160,8 @@ publishing. Publishing uses `--publish` and the source-scoped Action token.
 
 The matching `fetch-cz-charles-university` workflow runs at minute49 every six
 hours, manually, and automatically after a main push touching this adapter folder
-or its own workflow. Repository/main guards and global publication concurrency
-prevent branch publication and overlapping data-source commits. The App token
+or its own workflow. Repository/main guards and source-family publication concurrency
+prevent branch publication and overlapping runs of this source. The App token
 permits contents-write only for `YouthOpps/data-source`.
 
 After validated nonempty retrieval, filtered results and source metadata are committed atomically only to
@@ -226,3 +226,12 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Workflow concurrency
+
+`youthopps-cz-charles-university-publisher-v1` serializes runs of this source.
+Up to 100 pending runs are retained (`queue: max`); active runs are not
+cancelled (`cancel-in-progress: false`). Unrelated publisher families may
+collect and publish in parallel. Existing source-only atomic publication rebases
+on unrelated repository updates, uses up to three publication attempts, and
+never force-overwrites newer data.

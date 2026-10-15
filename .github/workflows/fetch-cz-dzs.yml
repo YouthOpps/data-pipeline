@@ -15,6 +15,7 @@ permissions:
   actions: read
 
 concurrency:
+  queue: max
   group: youthopps-dzs-publisher-v1
   cancel-in-progress: false
 

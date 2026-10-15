@@ -15,7 +15,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: youthopps-source-publishing
+  group: youthopps-saia-publisher-v1
   queue: max
   cancel-in-progress: false
 
