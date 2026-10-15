@@ -9,6 +9,7 @@ on:
   schedule:
     - cron: '56 2 * * *'
 permissions:
+  actions: read
   contents: read
 concurrency:
   group: youthopps-bg-fulbright-bulgaria-publisher-v1
@@ -35,5 +36,6 @@ jobs:
           permission-contents: write
       - name: Collect and publish this source
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
         run: python -B adapters/bg-fulbright-bulgaria/adapter.py --publish

@@ -9,6 +9,7 @@ on:
   schedule:
     - cron: '56 17 * * *'
 permissions:
+  actions: read
   contents: read
 concurrency:
   group: youthopps-dk-dm-and-ma-travel-grant-publisher-v1
@@ -35,5 +36,6 @@ jobs:
           permission-contents: write
       - name: Collect and publish this source
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
         run: python -B adapters/dk-dm-and-ma-travel-grant/adapter.py --publish

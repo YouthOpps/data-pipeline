@@ -177,5 +177,38 @@ not establish a conflict. Malformed, ambiguous or unknown errors remain
 unclassified. These diagnostics do not prove the cause of historical failures.
 
 Collection, source fields, access holds, pacing, the existing three publication
-attempts, source-pair checks and non-forced atomic writes are unchanged. This
-change adds no retry delay, workflow activation or publication test.
+attempts, source-pair checks and non-forced atomic writes are unchanged by those
+diagnostic categories. Those categories alone add no retry delay, workflow
+activation or publication test.
+
+## Bounded publication-conflict retries
+
+Hosted publication proves the exact current job, run attempt, source workflow,
+matching head/workflow SHA, main branch, assigned runner and UTC start before
+data-source access. A fresh GitHub Date maps the existing 30-minute job bound
+to one conservative monotonic deadline; retries cannot renew it. The pinned
+App token is minted after job start and expires after one hour, so no token
+renewal is needed. Missing or inconsistent proof fails closed.
+
+Every guarded publication call and the current-job proof call on the reviewed
+Ubuntu/Python path has a total alarm guard of at most 30 seconds, plus a
+remaining-time socket timeout, including its bounded body read. Existing or
+unsupported timers stop before transport. Writes and retry waits stop 60
+seconds before the job deadline, final outcome reads stop 30 seconds before
+it, leaving a cleanup/export allowance. These publication reserves do not
+guarantee export after an overlong collection, runner death or an
+uninterruptible native call; the existing job timeout remains the outer bound.
+No API call receives a fresh deadline.
+
+Only an actual, classified non-fast-forward reference response can retry,
+after checking that the desired outcome has not landed and this source pair is
+still unchanged. The first two retries add 1–2 and 2–4 seconds after the
+ordinary GitHub pacing gate, before reserving the actual request start, within
+the existing three attempts and original write deadline. Authentication,
+non-CAS and unclassified failures stop without another write attempt. Terminal
+publication errors latch a per-process write stop, including later
+failure-metadata fallback; bounded read-only outcome checks remain available.
+Source-pair changes stay protected; reference writes keep force:false. Source
+collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
+Validation uses inert external controls; no source fetch, GitHub test write or
+production invocation is claimed.
