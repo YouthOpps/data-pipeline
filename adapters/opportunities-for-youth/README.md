@@ -78,19 +78,96 @@ python -B adapters/opportunities-for-youth/adapter.py
 python -B adapters/opportunities-for-youth/test_adapter.py
 ```
 
-The sole test retrieves real nonempty records, validates every record and prints
-one complete JSON array to stdout. Diagnostics go to stderr. Tests do not
+The sole live test is unchanged: when source access is permitted, it retrieves
+real nonempty records, validates every record and prints one complete JSON array
+to stdout. With the current unresolved hold, it fails before publisher access;
+it has not been run for this safety-only change. Diagnostics go to stderr. Tests do not
 publish, require credentials or create data output files. The folder can be
 copied and run independently with Python 3.12 or later.
 
-Publisher API requests start at least 12 seconds apart, with a shared process
-budget and collection lock coordinating local overlapping runs. All source
-endpoints, robots requests, retries and redirects obey at most ten starts per
-rolling minute and at least six-second spacing; stricter robots directives and
-Retry-After are honored. HTTP 429/503 retries add at least two minutes of
-backoff and are bounded. The initial six-second traversal received HTTP 429;
-the stricter API interval reflects that observed publisher limit. Exhaustive
-collection normally takes at least eleven minutes.
+### Held safety state
+
+Publisher access is **held**. The latest executed hosted job was
+[38720084089/1](https://github.com/YouthOpps/data-pipeline/actions/runs/38720084089/attempts/1),
+completed on 15 October 2026 at 12:24:38 UTC with HTTP 403. Its log does not
+identify the request URL or purpose; robots-only and content refusal cannot be
+distinguished. The higher-ID
+[successful job 38721259441/1](https://github.com/YouthOpps/data-pipeline/actions/runs/38721259441/attempts/1)
+completed earlier, at 10:59:23 UTC. Both used the same declared bot identity
+and identical source bytes. This change does not reinterpret or clear that hold.
+The workflow remains administratively disabled; code changes never enable it.
+
+The original private publisher journal and collection-lock paths are preserved.
+A discovered 30-second physical interval remains the minimum, with stronger
+local/artifact values conserved. A private lifecycle lock covers restoration,
+collection and final state export. Starts, response/page completion timestamps,
+physical and page intervals, embargoes and rate-limit counters merge by MAX or
+set union; actual holds and the explicit historical-unknown marker merge by OR.
+Response completion also guards the next physical start, even after a request
+falls outside the rolling-minute window. At most five starts fit a rolling
+minute, although the retained 30-second floor is stricter.
+
+HTTP 429 stops the attempt without retrying. Before stopping it durably doubles
+the current physical interval and inventory-page gap (the latter at least
+60 seconds on the first rate limit), and retains at least 30 minutes of
+exponentially increasing cooldown. Finite, positive, representable numeric or
+zoned HTTP-date Retry-After values extend stronger embargoes. Unusable timing
+supplies no timing evidence and never manufactures a permanent hold. The
+429 timer and increased gaps are saved before a bounded response-body read;
+a visible human-verification challenge also retains a hard hold. An unreadable
+429 body leaves the timer saved and stops without retrying.
+Actual content 401/403, primary visible access challenges and robots Disallow
+remain held. Clear HTML challenges are checked before following redirects;
+scripts, hidden content, navigation, footers and ordinary CAPTCHA decoration
+do not establish a refusal. Robots-purpose classification requires both the
+original request and current redirect target to remain `/robots.txt`; a
+redirected content refusal is not reclassified as unavailable robots. Verified
+robots-only 400–499 responses other than 429 mean unavailable policy, without
+clearing the unrelated historical hold. The existing bounded
+503 retry retains its separate 120-second fallback; it cannot retry a 429.
+
+The first hosted transition validates all seven pinned historical attempts,
+exact immutable heads, conclusions, completed jobs and absence of artifacts.
+It seeds a **blocked** state retaining the known 30-second interval, original
+local start/embargo and conservative historical job-completion upper bounds.
+These upper bounds are not reconstructed physical starts. Historical unlogged
+headers and recovered rate-limit counters remain unknown; the zero counter
+means only no new observed 429 since this safety transition. There is no
+unblocked bootstrap or source-access approval. A separate reviewed change with
+new evidence is required to resolve the historical hold.
+
+Every later executed attempt requires the newest trusted owned pacing artifact,
+selected by exact-attempt job completion rather than run ID. Queued older-ID
+reruns retain their prior completed attempt with the same immutable head.
+Missing, mismatched, ambiguous or expired newest state fails closed; older
+artifacts and the first transition cannot substitute. Restoration precedes
+snapshot/authentication work and trusted state is exported in finally while the
+same lifecycle lock is held, including on snapshot failures. New local journals
+also seed the held state; mature missing journals fail closed.
+
+### Validation and budget limits
+
+This is held error-path maintenance: no new publisher requests or live test
+were run. Prior complete native success is retained as historical evidence,
+not proof of current accessibility or compliance of a new normal crawl.
+The last successful job covered 5,366 posts over 54 post pages and retained
+5,266 records in 17 minutes 22 seconds including publication. Seven complete
+historical logs and exact job metadata were inspected; none exported pacing
+artifacts or actual request/header ledgers.
+
+The normal inventory page floor remains 12 seconds; this change does **not**
+claim the complete normal 12-second physical/five-per-minute/30-second-page
+migration fits existing caps. One robots request, one category page, 54 post
+pages and one canonical empty-body fallback nominally require 57 physical
+requests. At the known 30-second interval, 56 gaps alone consume 28 minutes;
+startup quiet, response times and publication require additional headroom.
+Blindly raising every normal page gap to 30 seconds also projects beyond the
+existing 30-minute job. No job/token cap is raised, archive truncated, known
+restriction lowered or identity rotated. A separately evidenced complete,
+budget-feasible design and resolution of the later 403 are prerequisites to
+resuming source access. Existing complete traversal and factual fields remain
+unchanged. Safe incremental refresh cannot be assumed from a known post ID:
+older edits, removals and full reconciliation still require proven coverage.
 
 ## Expiry cleanup
 
@@ -146,8 +223,8 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
+access; restrictive rate and delay directives remain effective. The original durable budget identity is retained; the held safety state above
+adds durable adaptive rate-limit handling. Existing
 disabled workflows remain disabled.
 
 ## Daily automation
@@ -162,8 +239,10 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
+Inventory page continuations and partitions retain the existing 12-second floor
+after the previous page completes, with stronger durable page intervals and
+completion timestamps surviving restarts. After 429 the gap is at least
+60 seconds and increases on later throttles. Publisher access remains held.
 This includes taxonomy/listing pages where applicable. The existing native
 transport still enforces its physical-request allowance across retries, redirects
 and detail requests, with stricter publisher limits and retained backoff taking
