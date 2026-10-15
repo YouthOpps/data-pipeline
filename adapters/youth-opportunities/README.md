@@ -197,3 +197,12 @@ adds time to the listing scan and leaves limited publication-token headroom.
 Larger inventories or slower responses can still exhaust that existing token
 lifetime; the three-hour job timeout does not extend it. No token-renewal
 behavior or timeout increase is claimed by this scheduling/pagination change.
+
+## Workflow concurrency
+
+`youthopps-youth-opportunities-publisher-v1` serializes runs of this source. Up
+to 100 pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

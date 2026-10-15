@@ -185,7 +185,7 @@ acceptance includes the actual unmodified website `loadData` consumer.
 The matching workflow runs on main pushes touching its own folder/workflow,
 manual dispatch and once daily at 23:05 UTC. It preserves the repository/
 main guard, minimal permissions, App token scoped to `YouthOpps/data-source` and
-global publication concurrency. Its only application command runs this
+source-family publication concurrency. Its only application command runs this
 standalone adapter with `--publish`.
 
 Publication writes only
@@ -271,3 +271,13 @@ disabled until their access hold is separately resolved.
 The current collector has no paginated inventory to delay. Its existing request
 pacing and publisher restrictions remain in force; this source changes only its
 daily automation schedule.
+
+## Workflow concurrency
+
+`youthopps-saia-publisher-v1` serializes runs of this source and
+`sk-study-in-slovakia`. Up to 100 pending runs are retained (`queue: max`);
+active runs are not cancelled (`cancel-in-progress: false`). Unrelated publisher
+families may collect and publish in parallel. Existing source-only atomic
+publication rebases on unrelated repository updates, uses up to three
+publication attempts, and never force-overwrites newer data.
+This grouping does not enable the disabled legacy scholarship workflow.

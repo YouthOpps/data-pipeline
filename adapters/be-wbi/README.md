@@ -95,7 +95,7 @@ share one cross-process lock and rolling allowance: at least six seconds between
 starts and at most ten starts per rolling 60 seconds, including retries and
 redirects. Retry-After is honored. The identifying user agent, normal TLS and
 session proxy remain enabled. Remote publishers must not overlap locally run
-WBI tests; the publication Action uses the global serialized source group.
+WBI tests; the publication Action uses this source's serialized group.
 
 Atomic, non-forced commits update only this source's data/metadata pair. First
 failure creates no source folder. Later failure preserves the last good data and
@@ -160,3 +160,12 @@ and detail requests, with stricter publisher limits and retained backoff taking
 precedence. The page guard does not raise the durable request interval for all
 subsequent article/detail requests or reset existing budget/refusal state.
 Inventory scope, parsing, validation and atomic publication are unchanged.
+
+## Workflow concurrency
+
+`youthopps-be-wbi-publisher-v1` serializes runs of this source. Up to 100
+pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

@@ -110,7 +110,7 @@ seconds between starts and at most ten starts in any rolling minute. A local
 file lock serializes collections across processes, and a separate locked
 standard-library temporary budget persists starts and `Retry-After` backoff
 across processes. Budget state contains no credentials or collected records.
-The matching Action serializes publication with other source Actions; overlapping
+The matching Action serializes publication with other runs of this source; overlapping
 remote/local research runs must still be coordinated under the publisher allowance.
 
 A successful publication atomically replaces only
@@ -162,3 +162,12 @@ disabled until their access hold is separately resolved.
 The current collector has no paginated inventory to delay. Its existing request
 pacing and publisher restrictions remain in force; this source changes only its
 daily automation schedule.
+
+## Workflow concurrency
+
+`youthopps-opportunitydesk-publisher-v1` serializes runs of this source. Up to
+100 pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

@@ -84,7 +84,7 @@ endpoint. Normal identifying User-Agent, inherited proxy and verified TLS remain
 in use. Shared publisher-family locks enforce starts at least six seconds apart
 and at most ten in a rolling minute across endpoints, redirects, retries and
 concurrent local runs, including `www` aliases. Retry-After is honored. Production
-runs are also serialized by the common publication Action group; separate machines
+runs are also serialized by the source-specific publication Action group; separate machines
 must not overlap outside that scheduling arrangement.
 
 The imprint protects copyrighted works and requires written consent for uses
@@ -173,3 +173,12 @@ disabled until their access hold is separately resolved.
 The current collector has no paginated inventory to delay. Its existing request
 pacing and publisher restrictions remain in force; this source changes only its
 daily automation schedule.
+
+## Workflow concurrency
+
+`youthopps-de-stipendiumplus-publisher-v1` serializes runs of this source. Up to
+100 pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

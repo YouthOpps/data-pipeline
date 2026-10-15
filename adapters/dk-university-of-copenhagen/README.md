@@ -203,7 +203,7 @@ redirects and retries. Backoff is honored. Pacing state is outside the checkout.
 The matching workflow runs once daily at 06:37 UTC, on manual dispatch
 and pushes to main touching this source folder or its workflow. It uses the
 repository/main guard, a token restricted to `YouthOpps/data-source`, minimum
-workflow permissions and the global publication concurrency group. Its only
+workflow permissions and the source-family publication concurrency group. Its only
 application command is `adapter.py --publish`.
 
 Publication atomically updates only
@@ -280,3 +280,12 @@ and detail requests, with stricter publisher limits and retained backoff taking
 precedence. The page guard does not raise the durable request interval for all
 subsequent article/detail requests or reset existing budget/refusal state.
 Inventory scope, parsing, validation and atomic publication are unchanged.
+
+## Workflow concurrency
+
+`youthopps-dk-university-of-copenhagen-publisher-v1` serializes runs of this
+source. Up to 100 pending runs are retained (`queue: max`); active runs are not
+cancelled (`cancel-in-progress: false`). Unrelated publisher families may
+collect and publish in parallel. Existing source-only atomic publication rebases
+on unrelated repository updates, uses up to three publication attempts, and
+never force-overwrites newer data.

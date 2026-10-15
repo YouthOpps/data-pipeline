@@ -61,7 +61,7 @@ On 8 October 2026, author and independent live tests validated all ten records i
 
 ## Publication
 
-The matching `fetch-hu-fulbright-hungary.yml` workflow runs automatically on pushes to `main` affecting this adapter folder or its own workflow, including maintainer merges. Manual dispatch and a daily schedule (17:12 UTC) remain available. Repository/main guards, shared publication concurrency and the existing GitHub App's data-source-only contents-write token scope remain enforced.
+The matching `fetch-hu-fulbright-hungary.yml` workflow runs automatically on pushes to `main` affecting this adapter folder or its own workflow, including maintainer merges. Manual dispatch and a daily schedule (17:12 UTC) remain available. Repository/main guards, source-family publication concurrency and the existing GitHub App's data-source-only contents-write token scope remain enforced.
 
 The production command is exclusively:
 
@@ -138,3 +138,12 @@ disabled until their access hold is separately resolved.
 The current collector has no paginated inventory to delay. Its existing request
 pacing and publisher restrictions remain in force; this source changes only its
 daily automation schedule.
+
+## Workflow concurrency
+
+`youthopps-hu-fulbright-hungary-publisher-v1` serializes runs of this source. Up
+to 100 pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

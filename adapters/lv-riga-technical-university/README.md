@@ -91,7 +91,7 @@ files. The adapter's ordinary command also collects without publication.
 
 The matching workflow runs only in the upstream repository on main, after
 changes to this adapter or its workflow, by manual dispatch, and once daily at 12:59 UTC. Its narrowly scoped GitHub App token targets only `data-source`.
-Publication uses the adapter's `--publish` command and shared publication
+Publication uses the adapter's `--publish` command and source-family publication
 concurrency. A single atomic commit updates only this source's data and metadata.
 A first failed collection creates no source folder; later failures preserve
 last good data and its durable success timestamp while recording failure
@@ -168,3 +168,12 @@ disabled until their access hold is separately resolved.
 The current collector has no paginated inventory to delay. Its existing request
 pacing and publisher restrictions remain in force; this source changes only its
 daily automation schedule.
+
+## Workflow concurrency
+
+`youthopps-lv-riga-technical-university-publisher-v1` serializes runs of this
+source. Up to 100 pending runs are retained (`queue: max`); active runs are not
+cancelled (`cancel-in-progress: false`). Unrelated publisher families may
+collect and publish in parallel. Existing source-only atomic publication rebases
+on unrelated repository updates, uses up to three publication attempts, and
+never force-overwrites newer data.

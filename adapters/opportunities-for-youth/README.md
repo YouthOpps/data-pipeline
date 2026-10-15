@@ -111,7 +111,7 @@ success timestamp, including unchanged legacy IDs until migration succeeds.
 
 The matching workflow runs on scoped pushes to main, manual dispatch and a
 daily schedule, guarded to the owning repository/main and serialized with
-other source publications. Its sole application command runs this adapter
+other runs of this source. Its sole application command runs this adapter
 with `--publish` using the source publication token. Publication updates only
 `datas/opportunities-for-youth/{data,metadata}.json` atomically through a Git
 commit with non-force, conflict-safe reference updates. Collection failure
@@ -170,3 +170,12 @@ and detail requests, with stricter publisher limits and retained backoff taking
 precedence. The page guard does not raise the durable request interval for all
 subsequent article/detail requests or reset existing budget/refusal state.
 Inventory scope, parsing, validation and atomic publication are unchanged.
+
+## Workflow concurrency
+
+`youthopps-opportunities-for-youth-publisher-v1` serializes runs of this source.
+Up to 100 pending runs are retained (`queue: max`); active runs are not
+cancelled (`cancel-in-progress: false`). Unrelated publisher families may
+collect and publish in parallel. Existing source-only atomic publication rebases
+on unrelated repository updates, uses up to three publication attempts, and
+never force-overwrites newer data.

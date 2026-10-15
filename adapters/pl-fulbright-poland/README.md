@@ -147,7 +147,7 @@ Robots, pages, redirects and retries share at least six seconds between request
 starts, at most ten starts per rolling minute, and persistent `Retry-After`
 backoff. File locks serialize overlapping local collections and pacing state
 across processes. Separate machines/production runs must still coordinate the
-publisher allowance; Actions serialize publication globally.
+publisher allowance; Actions serialize publication for this source.
 
 Success atomically replaces only
 `datas/pl-fulbright-poland/{data,metadata}.json`. Later failures preserve last-good
@@ -206,3 +206,12 @@ disabled until their access hold is separately resolved.
 The current collector has no paginated inventory to delay. Its existing request
 pacing and publisher restrictions remain in force; this source changes only its
 daily automation schedule.
+
+## Workflow concurrency
+
+`youthopps-pl-fulbright-poland-publisher-v1` serializes runs of this source. Up
+to 100 pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

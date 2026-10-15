@@ -12,7 +12,7 @@ All required SAIA origins share the existing `saia-publisher-pacing-<uid>` budge
 
 The nominal physical frontier is 415 publisher requests; the hard ceiling is 500. Collection has 270 minutes within a 300-minute whole lifecycle, reserving 30 minutes for validation, publication and state preservation. Hard POSIX alarms cover the complete collection, parsing, credential renewal, compare-and-swap publication, output and state-export phases; socket inactivity timeouts do not extend those limits. Each network operation has at most 60 seconds and must fit its remaining budget. Export has a reserved, bounded two-minute phase within the same absolute lifecycle. The job timeout is 360 minutes. Publication renews the existing repository-scoped GitHub App token before expiry rather than assuming a one-hour token lasts through collection.
 
-The workflow retains global `youthopps-source-publishing` serialization. Legacy source 17 stays disabled after its own scholarships.sk robots refusal; this adapter does not retry that origin. A reviewed one-time migration pins legacy run 37866043357/attempt 1, commit 08df07fee129bbe1c416e0f417df2c727ea423b3, and job completion 2026-10-09T00:41:52Z. It requires a fresh disabled/no-active-run check and more than 24 hours quiet. Legacy arbitrary Retry-After was not exported, so this migration explicitly acknowledges the missing history. Once any source 18 attempt completes, its latest exact run/attempt state artifact is mandatory, including failed or cancelled attempts; missing/corrupt state never falls back to the legacy seed or an older successful run.
+The workflow shares `youthopps-saia-publisher-v1` serialization with `sk-national-scholarship-programme`. Legacy source 17 stays disabled after its own scholarships.sk robots refusal; this adapter does not retry that origin. A reviewed one-time migration pins legacy run 37866043357/attempt 1, commit 08df07fee129bbe1c416e0f417df2c727ea423b3, and job completion 2026-10-09T00:41:52Z. It requires a fresh disabled/no-active-run check and more than 24 hours quiet. Legacy arbitrary Retry-After was not exported, so this migration explicitly acknowledges the missing history. Once any source 18 attempt completes, its latest exact run/attempt state artifact is mandatory, including failed or cancelled attempts; missing/corrupt state never falls back to the legacy seed or an older successful run.
 
 The source 18 NSP entries are SAIA's actual permitted database tracks. They do not demonstrate recovery of source 17; reactivating 17 later requires an explicit cross-source deduplication review.
 
@@ -66,3 +66,13 @@ and detail requests, with stricter publisher limits and retained backoff taking
 precedence. The page guard does not raise the durable request interval for all
 subsequent article/detail requests or reset existing budget/refusal state.
 Inventory scope, parsing, validation and atomic publication are unchanged.
+
+## Workflow concurrency
+
+`youthopps-saia-publisher-v1` serializes runs of this source and
+`sk-national-scholarship-programme`. Up to 100 pending runs are retained
+(`queue: max`); active runs are not cancelled (`cancel-in-progress: false`).
+Unrelated publisher families may collect and publish in parallel. Existing
+source-only atomic publication rebases on unrelated repository updates, uses up
+to three publication attempts, and never force-overwrites newer data.
+This grouping does not enable the disabled legacy scholarship workflow.

@@ -94,7 +94,7 @@ All source requests share a locked publisher-family allowance: at least six
 seconds between starts, at most ten in a rolling 60 seconds, including redirects,
 retries and overlapping local processes. Robots and Retry-After are honored;
 normal identifying user agent, TLS and session proxy are preserved. Publication
-runs are globally serialized; do not overlap a local source test with remote runs.
+runs for this source are serialized; do not overlap a local source test with remote runs.
 
 First failure creates no source folder. After success, fetch/parse/validation
 failure preserves last-good data and the success timestamp, recording sanitized
@@ -163,3 +163,12 @@ and detail requests, with stricter publisher limits and retained backoff taking
 precedence. The page guard does not raise the durable request interval for all
 subsequent article/detail requests or reset existing budget/refusal state.
 Inventory scope, parsing, validation and atomic publication are unchanged.
+
+## Workflow concurrency
+
+`youthopps-dk-study-in-denmark-publisher-v1` serializes runs of this source. Up
+to 100 pending runs are retained (`queue: max`); active runs are not cancelled
+(`cancel-in-progress: false`). Unrelated publisher families may collect and
+publish in parallel. Existing source-only atomic publication rebases on
+unrelated repository updates, uses up to three publication attempts, and never
+force-overwrites newer data.

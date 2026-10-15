@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: youthopps-source-publishing
+  group: youthopps-dk-dm-and-ma-travel-grant-publisher-v1
   queue: max
   cancel-in-progress: false
 jobs:
