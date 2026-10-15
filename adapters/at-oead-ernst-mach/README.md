@@ -40,9 +40,8 @@ GitHub can delay scheduled events; the existing publication concurrency
 serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
-The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+The collector has one reviewed programme detail and no paginated inventory.
+The daily schedule is unchanged by the durable publisher-pacing migration below.
 
 ## Workflow concurrency
 
@@ -59,3 +58,109 @@ Published metadata uses `display_name` = **OeAD** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+
+## Durable publisher pacing
+
+All physical publisher requests, including REP retrieval, redirects and the
+existing two connection attempts, share a source-local serialized budget. The
+minimum gap is 12.2 seconds after a response attempt completes, with at most
+five starts per rolling 60 seconds. Stronger declared or retained limits remain
+in force. Inventory-purpose transport also has a separate 30-second completion
+guard; this adapter currently retrieves only a programme detail, so it does not
+add an artificial page delay to that detail. Publisher requests retain the bot
+identity above, verified TLS and the reviewed HTTPS host. Same-host redirect
+paths remain available; the existing four-hop bound is unchanged.
+
+HTTP 429 durably doubles the current physical and inventory gaps and increases
+the strike count before reading any response body. It ends that collection
+without another publisher request. The cooldown is at least 30 minutes,
+increases exponentially for repeated responses, and retains any longer valid
+Retry-After or known embargo. An ordinary 429 creates a timed restriction;
+a genuine visible access challenge also retains an access hold. Invalid or
+stale Retry-After values alone do not create holds. Actual content refusals
+remain retained. Literal robots.txt 4xx responses other than 429 are unavailable
+REP rules, while unreachable policies fail closed. A robots redirect cannot
+relabel a content request. Current and legacy bot product rules both apply.
+
+Owned restoration validates the current workflow/run/attempt/head and orders
+completed attempts by their actual exact-job completion times. It restores the
+newest exact owned artifact, with digest and source/head binding; a missing or
+invalid newer artifact cannot fall back to an older attempt. Local collection
+requires the exact workflow to be manually disabled before history/state
+initialization and again after the startup quiet period, immediately before
+its first physical request. Local and hosted collection share the same budget
+family. Healthy process re-entry repeats restoration and these entry checks;
+a persistence-failure latch cannot be reset by re-entry.
+
+The 27 reviewed pre-artifact attempts have authentic completed-job records and
+currently empty artifact inventories. Their old process-local RAM allowance
+cannot be recovered: historical rate-limit/refusal knowledge remains explicitly
+unknown, never a claim of zero prior requests or strikes. The code rejects
+initial access until an exact independently reviewed issue-linked transition is
+installed. That exception covers only those pinned attempts, preserves their
+completion upper bounds and all known stronger constraints, and requires a
+fresh 60-second quiet period. Any unrecognized newer attempt requires its owned
+state. The first hosted transition additionally requires maintainer approval
+of the full known genuine-native MAX; it cannot use an empty generic bootstrap.
+
+The new durable schema records an `in_flight` barrier before every physical
+request. It remains true through response restrictions and becomes false only
+when all known constraints and the actual completion are durably saved. REP body
+parsing and applicable delay/Disallow persistence happen inside that boundary;
+cached policy enforcement occurs after reservation and before the next opener.
+A fresh
+process or owned restoration rejects an unsettled barrier. Merging competing
+local/owned states uses OR, so an older completed state cannot clear a newer
+unsettled request. A failed write invalidates only the current safely owned
+journal inode and retains the stronger attempted constraints in RAM. If journal
+invalidation also fails, the pre-request durable barrier still prevents a fresh
+process from trusting the older journal.
+
+For native evidence, retain every reservation, response-constraint and completion
+save. A final settled barrier requires independent proof matching all actual
+requests to their successful durable completions; do not OR every intermediate
+healthy in-flight value into the final lifecycle state. Numerical/rate/hold MAX
+constraints and all original observations remain preserved. Unsettled current
+states cannot be cleared by older completed snapshots. The explicit unknown
+27-attempt legacy transition is separate from this observed settlement proof.
+
+Publisher reservation/completion or restrictive-state persistence failures
+latch further source access closed for that process. Stale valid pacing state
+cannot be exported as healthy. Owned artifact failure cleanup validates and
+pins the file descriptor, truncates and syncs it before fallible signalling or
+unlink, and preserves unsafe filesystem objects. Failure-signalling or unlink
+errors do not make stale state trustworthy.
+
+The existing 30-minute Action cap and 18:51 UTC daily cron remain unchanged.
+A single absolute 1,290-second process deadline includes restoration,
+collection, publication/failure reporting and a final 30-second export window.
+Restoration is bounded by 180 seconds; collection is bounded by 900 seconds and
+must stop before the final 180-second publication/failure-reporting reserve and
+export window. The original default GitHub publication transport and atomic
+publication behavior are retained. These bounds fail closed with last-good
+preservation; they do not prove that a complete native collection has passed.
+
+
+## Reviewed migration evidence (15 October 2026)
+
+The original sole nonpublishing live test passed in 140.55 seconds with two
+actual publisher requests, one complete raw programme and one expiry-filtered
+record. Independent review checked both full response bodies and headers, all
+record facts, nine actual journal persistence events, and the matching durable
+pending-to-completed transitions for both requests. The current website
+consumer at `80264d7386f5c031196b9ffc5998109c9f969a6f` accepted the complete
+raw, actual filtered and derived-empty envelopes (1/1/0). The derived empty case
+is a consumer envelope, not evidence of an empty upstream collection.
+
+The [initial local transition approval](https://github.com/YouthOpps/data-pipeline/issues/272#issuecomment-6201692246)
+covers only the exact 27 reviewed legacy attempts. The separate
+[full native MAX approval](https://github.com/YouthOpps/data-pipeline/issues/272#issuecomment-6201889163)
+authorizes the first hosted bridge to retain all 27 legacy completion bounds,
+the two actual native requests and every known stronger pacing constraint.
+Its 35 timing observations include multiple reservation/wire/completion bounds
+for the same requests; they are not 35 physical requests. The settled pending
+value is supported by the complete native ledger, while historical rate/refusal
+knowledge remains unknown. A new unowned attempt cannot reuse the legacy
+exception. The workflow carries the exact approved MAX mapping; production
+publication and live-site verification remain separate maintainer checks.

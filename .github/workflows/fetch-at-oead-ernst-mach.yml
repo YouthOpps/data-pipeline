@@ -9,6 +9,7 @@ on:
   schedule:
     - cron: '51 18 * * *'
 permissions:
+  actions: read
   contents: read
 concurrency:
   group: youthopps-at-oead-ernst-mach-publisher-v1
@@ -34,6 +35,75 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish this source
+        id: collect
         env:
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          OEAD_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+          OEAD_PACING_MAINTENANCE: >-
+            {
+              "schema": 1,
+              "family": "youthopps-at-oead-ernst-mach-publisher-v1",
+              "evidence": "https://github.com/YouthOpps/data-pipeline/issues/272#issuecomment-6201889163",
+              "state": {
+                "schema": 3,
+                "family": "youthopps-at-oead-ernst-mach-publisher-v1",
+                "observed_at": 1792096738.314525,
+                "not_before": 1792096713.980381,
+                "starts": [
+                  1791460673,
+                  1791473308,
+                  1791485297,
+                  1791525433,
+                  1791551188,
+                  1791585253,
+                  1791610771,
+                  1791634933,
+                  1791668009,
+                  1791696920,
+                  1791722331,
+                  1791755308,
+                  1791783929,
+                  1791817945,
+                  1791851568,
+                  1791900239,
+                  1791931046,
+                  1791952980,
+                  1791969393,
+                  1791978087,
+                  1791997375,
+                  1792013705,
+                  1792038317,
+                  1792047060,
+                  1792060616,
+                  1792067127,
+                  1792079337,
+                  1792096636.2924721,
+                  1792096636.6956575,
+                  1792096637.809126,
+                  1792096639.048105,
+                  1792096651.2482772,
+                  1792096651.2508156,
+                  1792096652.026452,
+                  1792096653.8841426
+                ],
+                "blocked": false,
+                "in_flight": false,
+                "interval": 12.2,
+                "completed": 1792096653.8841486,
+                "page_interval": 30,
+                "last_inventory_completed": 1792079337,
+                "rate_limit_strikes": 0,
+                "rate_limit_until": 0,
+                "legacy_rate_history_unknown": true
+              }
+            }
         run: python -B adapters/at-oead-ernst-mach/adapter.py --publish
+      - name: Preserve owned publisher pacing state
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: at-oead-ernst-mach-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
