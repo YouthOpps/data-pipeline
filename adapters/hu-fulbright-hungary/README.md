@@ -6,12 +6,15 @@ Source: `hu-fulbright-hungary`, published by the Hungarian-American Fulbright Co
 
 Collection reads the public [award homepage](https://fulbright.hu/), [short-term grants](https://fulbright.hu/special-short-term-grants/) and [U.S. awards](https://fulbright.hu/fulbright-awards/for-us-citizens/), plus linked current Hungarian and joint university award pages. The [robots policy](https://fulbright.hu/robots.txt) reviewed on 8 October 2026 permits access with an empty `Disallow` rule. The official navigation and footer expose no separate terms or reuse policy; ordinary copyright is present. This supports the reviewed public collection route, not a claim of unrestricted redistribution rights. Records preserve publisher attribution, original links and classification evidence. Application forms and external award websites are linked, never crawled or submitted.
 
-The adapter identifies itself as YouthOpp, honors robots and Retry-After, and starts at most ten requests per rolling minute with at least six seconds between requests. Redirect destinations are checked against robots. Local overlapping runs share locked pacing state outside the checkout; production publication is serialized by the workflow. Do not overlap local collection with a production run on another machine.
+The adapter sends `YouthOppsBot/1.0 (+https://youthopps.org/bot/)` on every publisher request. It retains at least 12.2 seconds from physical response completion to the next physical attempt and at most five starts per rolling minute. Each physical inventory request additionally waits at least 30 seconds after the preceding inventory attempt completes, including redirects and failed attempts. The three root catalogue pages are inventory; linked individual award and joint-award pages are details. Literal robots reads use the normal physical guard, including when interposed between inventory redirects. Stronger retained publisher constraints always win. GitHub publication keeps its separate existing six-second pacing and valid Retry-After handling.
+
+An actual publisher 429 ends collection immediately without a same-run retry. Before reading its body, the journal doubles both CURRENT retained physical and inventory gaps and retains at least 1,800 seconds of exponentially increasing cooldown, any longer valid Retry-After, and all older stronger constraints. Missing, malformed, stale, nonfinite or unsupported Retry-After alone creates no permanent refusal. Content 401/403/451, clear visible human-verification challenges and applicable robots Disallow remain durable stops. Literal robots 4xx other than 429 are unavailable REP; a stricter policy already observed in the run is retained. TLS failures, unread or partial responses, unassessed policy errors and failed state writes stop collection with an unsettled transaction.
+
+Do not overlap local and hosted collection. LOCAL preparation requires the real workflow disabled and no active family jobs, restores actual history before creating local state, waits at least 60 seconds, and rechecks the disabled definition immediately before the first physical request. Production uses the existing source-family concurrency and immutable current-run/job/head checks.
 
 ## Opportunity inventory and exclusions
 
-The latest live inventory contains ten genuine records; this is evidence, not
-a required count:
+The previously published inventory contains ten genuine records; this is historical evidence, not a required count or a new migration test:
 
 - Three active Hungarian calls: lecturer, researcher and Foreign Language Teaching Assistant (FLTA).
 - Two joint lecturer awards at the University of Texas at Austin and Indiana University, explicitly matching the current parent call's academic cycle and application route.
@@ -37,14 +40,7 @@ Identifiers derive from source ID and original URL; dated calls also include the
 
 Hungarian citizenship is recorded only when the official current award detail explicitly requires it. Joint lecturer eligibility and deadline come from their verified shared parent application route. Institutional grants do not imply individual nationality eligibility. Host countries distinguish U.S. study/travel from institutional hosting in Hungary.
 
-Hungarian deadlines retain the existing end-of-Budapest-day normalization in
-UTC. English short-term dates without a clock remain date-only; those calls
-remain visible throughout their Budapest closing day with unknown status.
-Joint award deadlines inherit the current lecturer call's deadline. Rolling
-applications have no invented deadline. The U.S. Student Program's approximate
-April-to-mid-October window remains in its summary; its exact deadline is null,
-boundary-month status is unknown, and it is excluded outside the published
-months. Publication and modification times are not inferred from unrelated dates.
+Hungarian and English deadlines without a verified UTC offset retain their calendar date. A published clock such as the actual FLTA `23:59` is preserved in a short factual summary note when its time zone is not stated; no Budapest zone or end-of-minute seconds are invented. Explicit numeric-offset or UTC timestamps retain their exact instant and stated minute/second precision. Date-only calls remain eligible through their UTC closing date, with unknown status on that day, and expire on the following UTC day. Homepage/detail selection, rolling-call selection and final cleanup use this same rule. Joint awards inherit the verified parent deadline and its closing-day status, including the parent's published-clock note where applicable. Rolling applications have no invented deadline. The U.S. Student Program's approximate April-to-mid-October window remains in its summary; its exact deadline stays null, boundary-month status stays unknown, and month selection uses UTC consistently. Publication and modification times are not inferred from unrelated dates.
 
 ## Run and test
 
@@ -93,7 +89,7 @@ A refresh first retrieves and validates the complete nonempty publisher inventor
 Only then are records with a verified past `deadline` removed from the next
 source snapshot, including expired identities from the previous publication.
 The existing full replacement does not merge old records back into the result.
-Date-only deadlines remain eligible through their closing date in Europe/Budapest.
+Date-only deadlines remain eligible through their UTC closing date.
 Explicit timezone-aware timestamps expire strictly after the stated instant;
 missing deadlines remain eligible; unresolved publisher dates stay null.
 Invalid normalized deadlines fail validation and preserve last-good data. Status, record age and
@@ -122,8 +118,7 @@ and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+publisher restrictions remain effective. The durable migration below does not clear retained refusals. Existing disabled workflows remain disabled until a maintainer separately authorizes recovery.
 
 ## Daily automation
 
@@ -135,9 +130,7 @@ GitHub can delay scheduled events; the existing publication concurrency
 serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
-The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+The collector has three root inventory pages and follows their original dynamic award and joint-award traversal. The inventory guard also applies to each physical redirect or retry of those roots. Individual detail pages retain ordinary physical pacing.
 
 ## Workflow concurrency
 
@@ -164,3 +157,82 @@ Published metadata uses `display_name` = **Fulbright Hungary** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Durable pacing migration (issue 278)
+
+The original live test is unchanged. The first separately approved nonpublishing native test passed once on source `da3842b4`, yielding six raw records from eight complete HTTP 200 responses. Its external controller then failed after the test because a derived expiry check passed an ISO string where the existing helper expects an aware datetime. That original FAIL receipt remains preserved. An offline supplement from the same retained full responses/stdout used the correct fixture type and passed current-consumer raw 6 / filtered 6 / valid empty 0, all eight request/owner settlements and all 56 saved-state witnesses. No source collection was repeated to repair that fixture.
+
+That old-code native does not certify the corrected date-domain frontier. It ran on UTC 15 October after local Budapest midnight and incorrectly skipped the lecturer/researcher closing-day cards before fetching their details. The actual retained homepage proves those two additional current detail routes must now be traversed. Their first-run detail bodies, and any joint pages linked from them, were not fetched and are not represented as actual evidence. Offline boundary/parser controls use explicitly synthetic missing-detail fixtures. A separately approved complete original native on the corrected code remains required; no production recovery or readiness is claimed.
+
+The legacy implementation used host-keyed numeric journals under `/tmp/hu-fulbright-hungary-pacing-<uid>` and no owned Actions artifact. Read-only recovery of the two exact code-derived `fulbright.hu`/`www.fulbright.hu` entries found that directory absent. Absence does not prove zero restrictions or zero 429 history. The proposed one-off transition pins all 32 exact historical attempts: 31 executed jobs contribute conservative actual-job completion upper bounds, while one cancelled attempt had no jobs and contributes no invented timestamp. All 32 artifact inventories were empty. Lost old starts, response headers and rate counters remain explicitly unknown; a new counter zero means no newly observed modern 429 only.
+
+No generic bootstrap or old-schema default exists. The maintainer approved the initial typed unknown-history LOCAL transition, then publicly approved the exact first-native full-state bridge at https://github.com/YouthOpps/data-pipeline/issues/278#issuecomment-6203785465. `_LEGACY_TRANSITION` contains only that six-key, exact-history bridge. Production needs its separate full-state approval; the LOCAL bridge does not authorize production. Any newly appearing old publisher entry requires fresh provenance review, rather than being ignored or reset. Once modern runs exist, the newest actual completed attempt is mandatory: exact jobs and head/branch identity establish chronology, including completed prior attempts of queued reruns. Missing, expired, malformed, unowned or digest-mismatched newest artifacts fail closed without older fallback. Local state is merged with the exact owned state using stronger numeric constraints, event union and refusal/unknown OR. An unsettled local or owned transaction cannot be cleared by an older settled artifact.
+
+The modern family is `youthopps-hu-fulbright-hungary-publisher-v1`, with owner-only local directory `/tmp/youthopps-hu-fulbright-hungary-publisher-v1-<uid>`, stable `state.lock`/`collection.lock` and atomic `state.json`. Schema 3 records a durable pending policy owner before any physical request, then distinct physical request identities. The owner spans original healthy no-response retries, redirects, new/cached REP assessment and all response constraints. Physical completion alone cannot settle that owner. Settlement requires the same healthy owner after every applicable assessment and write succeeds. Cached policy-only transactions are distinguishable from physical requests.
+
+Any failed reservation, restriction, calculation or completion save latches a process failure; later request, lifecycle reentry and valid artifact export are refused. Safe invalidation addresses only the CURRENT regular, singly linked, owner-only journal inside the verified original directory; a substituted parent or unsafe object is preserved. Even if invalidation also fails, the pre-wire fsynced pending record makes a fresh process reject the old path and older artifact. Artifact failure handling truncates a safely owned descriptor before best-effort readiness signaling/unlinking; unsafe files, symlinks and hardlinks are not altered. Export never substitutes a fabricated fresh state.
+
+The workflow adds read-only Actions access and attempt-specific owned state upload only after `pacing_ready=true`; its one application command, daily 17:12 UTC schedule, publication token scope and 30-minute job cap remain unchanged. Internal bounds are 900 seconds collection, 1,290 seconds whole adapter execution and 30 seconds export, with restoration before source snapshot reads and export in `finally`. GitHub setup/token time still consumes the original job budget. Exhaustion fails closed and preserves last-good data, without increasing a cap or truncating coverage.
+
+Nominal physical requests are `2 * (3 + A + J)`, where `A` is the number of current homepage award detail fetches and `J` includes every original joint-detail fetch, including repeated or later rejected links. Each page retains its fresh REP read. The original two ordinary connection attempts and four-hop traversal remain bounded locally, but there is no new hard cap on dynamic award membership. The historical 134- and 218-second collect/publish steps are not new-paced wire measurements or a fit guarantee. A genuine complete native run is required before any readiness claim; stronger future backoff may prevent completion under the unchanged caps.
+
+The date-domain correction is based on actual retained publisher evidence: the FLTA detail states `Pályázat beadási határidő: 2026. október 31. 23:59` without a verified zone, while the old helper emitted a precise Budapest-derived UTC timestamp. The corrected representation is calendar-only with the factual clock/zone-unknown note above. It also changes UTC closing-day membership, so the first native's six records are old-code evidence only. All transport, durable-state, historical identity, publication and original-test code remains unchanged by this date correction; the six affected date-domain functions and three small date helpers are independently reviewed separately.
+
+
+## Complete native evidence and owned export guard
+
+The corrected date selection completed the unchanged original native test with
+10 raw and 10 filtered records from 18 actual HTTP responses. The full current
+consumer accepted 10 raw, 10 filtered and zero derived valid-empty records. All
+actual response headers, bodies, stdout and 126 journal saves remain in private
+RAM for independent review. This complete run includes both eligible October 15
+programme details, every advertised joint detail and the reviewed Pittsburgh
+exclusion. The earlier six-record original test also passed; its external
+controller failed afterward on a datetime fixture. That original failure receipt
+and its separate offline supplement remain preserved.
+
+After the complete corrected native run, a private I/O reproduction found that
+replacing the upload directory could leave readiness true for an unrelated
+current-path file. Only the owned export helpers changed afterward: they bind
+the checked directory inode before pinning, verify the current output inode
+before and after readiness and on healthy completion, and invalidate the pinned
+safe output before fallible failure signaling or unlink. Untrusted early exits
+also remove safely owned stale output. Unsafe files, symlinks, hardlinks, FIFOs
+and unrelated replacement directories remain untouched. Artifact and workflow
+signal opens are nonblocking. Actual response and record replay qualifies the
+unchanged collection, date interpretation and publication path; no second crawl
+was used to qualify this conditional export correction.
+
+The combined production-state proposal retains 161 conservative timing
+observations and 372 constraint witnesses across both native attempts and the
+legacy evidence. These are observations, not 161 publisher requests: the two
+actual tests made eight and eighteen physical requests. Unknown historical rate
+state remains explicit. First production still requires maintainer approval of
+the exact full-state maintenance envelope and independent final configuration
+review; this evidence does not authorize an extra publisher run.
+
+The job's private `RUNNER_TEMP` and execution context are trusted against an
+independent process running as the same user and forging replacement envelopes.
+A retained negative compound test replaces the directory after a successful
+`pacing_ready=true`, supplies an unrelated valid weaker envelope, and makes every
+subsequent false-signal write fail. Export correctly raises, the pinned original
+is zero bytes and the unrelated replacement remains untouched, but the last
+signal stays true. This compound case is not reported as a passing upload-safety
+guarantee. An independent same-user writer can replace data after any final
+in-process check; the guard does not authenticate that writer. No workflow gate
+was weakened to hide this limit or discard legitimate 429 failure-state
+artifacts. Ordinary parent/inode changes fail closed, with pinned safe-output
+invalidation preceding independent best-effort false signaling and cleanup.
+
+
+## First production maintenance approval
+
+The maintainer separately approved the complete combined state at
+https://github.com/YouthOpps/data-pipeline/issues/278#issuecomment-6204168955.
+The workflow carries that exact four-key maintenance envelope, preserving the
+full state with canonical SHA-256 `133cd4f0e855106a61d3a7dec8ebcc7f137d554bdbea943b239cc86aa409feac`.
+The runtime still restores exact family history, merges stronger local/owned
+constraints and applies fresh startup quiet. This approval does not erase the
+explicit export trust-boundary negative above. The maintainer owns enable-before-
+merge and the single automatic production run; production and site delivery are
+unverified until their actual receipts are checked.
