@@ -108,8 +108,8 @@ remains held through response completion and the following gap. Stronger robots
 limits and Retry-After are honored. Required-page 401/403 refusals persist.
 A 429 stops the current job and durably records its Retry-After embargo; absent
 a valid header, the pause starts at 30 minutes and doubles on subsequent 429s.
-Each 429 also doubles the minimum physical and page gaps and the no-header
-fallback cooldown; already stricter publisher limits are never reduced.
+Each 429 also doubles the currently retained physical and page gaps, including
+already stricter publisher limits, and doubles the no-header fallback cooldown.
 Longer Retry-After is retained.
 A later job can retry after the embargo with the slower retained spacing;
 there is no immediate same-job retry or identity change.
