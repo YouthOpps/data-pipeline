@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-be-wbi.yml'
   workflow_dispatch:
   schedule:
-    - cron: '23 2/6 * * *'
+    - cron: '11 7 * * *'
 permissions:
   contents: read
 concurrency:

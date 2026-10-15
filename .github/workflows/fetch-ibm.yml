@@ -7,7 +7,7 @@ on:
       - adapters/ibm/**
       - .github/workflows/fetch-ibm.yml
   schedule:
-    - cron: '13 8 * * 2'
+    - cron: '39 13 * * *'
   workflow_dispatch:
 
 permissions:

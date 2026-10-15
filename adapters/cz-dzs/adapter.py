@@ -59,6 +59,24 @@ _ROBOTS = {}
 _RUN_END = _PHASE_END = None
 _PHASE_NAME = None
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -1447,7 +1465,9 @@ def read_pages():
             continue
         if len(pages["hubs"]) >= 40:
             raise AdapterError("Programme discovery limit exceeded", "parse")
-        root = read_html(url)
+        root = (fetch_inventory_page(read_html, url)
+                if urllib.parse.urlsplit(url).path == "/networking-activities"
+                else read_html(url))
         pages["hubs"][url] = root
         for _, target in links(root, url):
             parsed = urllib.parse.urlsplit(target)

@@ -5,6 +5,8 @@ on:
     paths:
       - 'adapters/ee-university-of-tartu/**'
       - '.github/workflows/fetch-ee-university-of-tartu.yml'
+  schedule:
+    - cron: '2 12 * * *'
   workflow_dispatch:
 permissions:
   contents: read

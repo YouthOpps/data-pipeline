@@ -7,7 +7,7 @@ on:
       - adapters/sk-comenius-university/**
       - .github/workflows/fetch-sk-comenius-university.yml
   schedule:
-    - cron: '45 4 * * 1'
+    - cron: '13 1 * * *'
   workflow_dispatch:
 
 permissions:

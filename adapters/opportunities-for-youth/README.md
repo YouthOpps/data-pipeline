@@ -110,7 +110,7 @@ success timestamp, including unchanged legacy IDs until migration succeeds.
 ## Publication
 
 The matching workflow runs on scoped pushes to main, manual dispatch and a
-six-hour schedule, guarded to the owning repository/main and serialized with
+daily schedule, guarded to the owning repository/main and serialized with
 other runs of this source. Its sole application command runs this adapter
 with `--publish` using the source publication token. Publication updates only
 `datas/opportunities-for-youth/{data,metadata}.json` atomically through a Git
@@ -149,6 +149,27 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **15:13 UTC** (`13 15 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+### Pagination spacing
+
+Inventory page continuations and partitions wait at least 12 seconds after the
+previous inventory page finishes before fetching the next page in this process.
+This includes taxonomy/listing pages where applicable. The existing native
+transport still enforces its physical-request allowance across retries, redirects
+and detail requests, with stricter publisher limits and retained backoff taking
+precedence. The page guard does not raise the durable request interval for all
+subsequent article/detail requests or reset existing budget/refusal state.
+Inventory scope, parsing, validation and atomic publication are unchanged.
 
 ## Workflow concurrency
 

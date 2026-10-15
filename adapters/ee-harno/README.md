@@ -117,7 +117,7 @@ with diagnostics on stderr. It receives no publication token and writes no
 datasets. Development retries reused genuine responses only in process RAM;
 the delivered test has no temporary cache hooks or fixtures.
 
-The unchanged workflow runs on source-filtered main pushes, its six-hour
+The matching workflow runs on source-filtered main pushes, its daily
 schedule and manual dispatch. Its only application command is this adapter's
 `--publish`. The repository/main guard, scoped App token and serialized
 publication remain unchanged. Publication atomically writes only
@@ -175,6 +175,27 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **04:56 UTC** (`56 4 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+### Pagination spacing
+
+Inventory page continuations and partitions wait at least 12 seconds after the
+previous inventory page finishes before fetching the next page in this process.
+This includes taxonomy/listing pages where applicable. The existing native
+transport still enforces its physical-request allowance across retries, redirects
+and detail requests, with stricter publisher limits and retained backoff taking
+precedence. The page guard does not raise the durable request interval for all
+subsequent article/detail requests or reset existing budget/refusal state.
+Inventory scope, parsing, validation and atomic publication are unchanged.
 
 ## Workflow concurrency
 

@@ -71,6 +71,24 @@ _RUN_END = _PHASE_END = None
 _PHASE_NAME = None
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -1814,7 +1832,7 @@ def discover_programmes(read):
         if url in visited:
             continue
         visited.add(url)
-        root = read(url)
+        root = fetch_inventory_page(read, url)
         for card in programme_cards(root):
             targets = {
                 linked_url(url, node.attrs["href"])

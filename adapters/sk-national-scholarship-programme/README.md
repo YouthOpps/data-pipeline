@@ -183,7 +183,7 @@ strictly capped at 600 UTF-16 code units for both fresh and prior records, and
 acceptance includes the actual unmodified website `loadData` consumer.
 
 The matching workflow runs on main pushes touching its own folder/workflow,
-manual dispatch and every six hours (`7 1/6 * * *`). It preserves the repository/
+manual dispatch and once daily at 23:05 UTC. It preserves the repository/
 main guard, minimal permissions, App token scoped to `YouthOpps/data-source` and
 source-family publication concurrency. Its only application command runs this
 standalone adapter with `--publish`.
@@ -257,6 +257,20 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **23:05 UTC** (`5 23 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+The current collector has no paginated inventory to delay. Its existing request
+pacing and publisher restrictions remain in force; this source changes only its
+daily automation schedule.
 
 ## Workflow concurrency
 

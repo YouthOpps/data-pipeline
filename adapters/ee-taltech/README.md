@@ -39,7 +39,7 @@ The folder also works independently outside the repository. Its sole live test r
 
 ## Publication
 
-The matching `fetch-ee-taltech.yml` Action runs automatically on main pushes affecting this adapter folder or its own workflow, including maintainer merges. Manual dispatch and a six-hour schedule (`37 0/6 * * *`, UTC) are available. The repository/main guard, source-family publication serialization, read-only pipeline permissions and the existing GitHub App's data-source-only contents-write token scope are retained. The sole application command is:
+The matching `fetch-ee-taltech.yml` Action runs automatically on main pushes affecting this adapter folder or its own workflow, including maintainer merges. Manual dispatch and a daily schedule (18:28 UTC) are available. The repository/main guard, source-family publication serialization, read-only pipeline permissions and the existing GitHub App's data-source-only contents-write token scope are retained. The sole application command is:
 
 ```sh
 python -B adapters/ee-taltech/adapter.py --publish
@@ -83,6 +83,20 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **18:28 UTC** (`28 18 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+The current collector has no paginated inventory to delay. Its existing request
+pacing and publisher restrictions remain in force; this source changes only its
+daily automation schedule.
 
 ## Workflow concurrency
 

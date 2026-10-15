@@ -7,7 +7,7 @@ on:
       - adapters/hr-study-in-croatia/**
       - .github/workflows/fetch-hr-study-in-croatia.yml
   schedule:
-    - cron: '45 5 * * 3'
+    - cron: '45 16 * * *'
   workflow_dispatch:
 
 permissions:

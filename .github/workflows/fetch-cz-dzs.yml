@@ -7,7 +7,7 @@ on:
       - adapters/cz-dzs/**
       - .github/workflows/fetch-cz-dzs.yml
   schedule:
-    - cron: '30 4 * * 1'
+    - cron: '59 20 * * *'
   workflow_dispatch:
 
 permissions:

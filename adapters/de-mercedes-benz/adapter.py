@@ -87,6 +87,24 @@ _RUN_END = _PHASE_END = None
 _PHASE_NAME = None
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -1946,7 +1964,8 @@ def read_frontier():
     """Discover all current variants; incomplete or unstable runs fail."""
     seen, total, first = {}, None, 1
     while total is None or first <= total:
-        status, headers, body = fetch_public(search_url(first))
+        status, headers, body = fetch_inventory_page(
+            fetch_public, search_url(first))
         content_type = headers.get("Content-Type", "").split(";", 1)[0].lower()
         if status != 200 or content_type.strip() not in {
             "application/json",

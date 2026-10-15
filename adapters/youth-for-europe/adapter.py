@@ -44,6 +44,24 @@ _USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 _ROBOTS_CACHE = {}
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 def _feed_text(value):
     return " ".join(html.unescape(re.sub(r"<[^>]*>", " ", value or "")).split())
 
@@ -545,7 +563,7 @@ def explore_page(kind="general", page=1):
     """Read a native server-rendered browse page and its inventory counts."""
     query = urllib.parse.urlencode({"type": kind, "sort": "latest", "pg": page})
     url = WEBSITE_URL + "explore/?" + query
-    tree = PublicHtml(source_text(url)).root
+    tree = PublicHtml(fetch_inventory_page(source_text, url)).root
     scripts = tree.find(
         lambda node: node.tag == "script" and
         node.attrs.get("id") == "case27-explore-configuration")

@@ -1,5 +1,7 @@
 name: fetch-at-university-of-vienna
 on:
+  schedule:
+    - cron: '48 15 * * *'
   workflow_dispatch:
   push:
     branches: [main]

@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-dk-fulbright-center.yml'
   workflow_dispatch:
   schedule:
-    - cron: '53 2/6 * * *'
+    - cron: '31 11 * * *'
 permissions:
   contents: read
 concurrency:

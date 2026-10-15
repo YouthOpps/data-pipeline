@@ -7,7 +7,7 @@ on:
       - adapters/sk-study-in-slovakia/**
       - .github/workflows/fetch-sk-study-in-slovakia.yml
   schedule:
-    - cron: '35 4 * * 2'
+    - cron: '52 9 * * *'
   workflow_dispatch:
 
 permissions:

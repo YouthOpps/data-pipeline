@@ -7,7 +7,7 @@ on:
       - adapters/hr-university-of-zagreb/**
       - .github/workflows/fetch-hr-university-of-zagreb.yml
   schedule:
-    - cron: '30 4 * * 2'
+    - cron: '18 9 * * *'
   workflow_dispatch:
 
 permissions:

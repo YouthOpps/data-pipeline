@@ -139,7 +139,7 @@ The only test performs real non-publishing collection, validates all records,
 and prints the complete JSON list to stdout; diagnostics go to stderr. It uses
 no mocks, fixtures, output files or publication credentials. The matching
 workflow publishes on its own adapter/workflow changes merged to `main`, manual
-dispatch, and every six hours (UTC), with repository/main guards and a source
+dispatch, and once daily at 21:30 UTC, with repository/main guards and a source
 App token. Its sole application command executes this adapter with `--publish`.
 Production Actions are not implementation tests.
 
@@ -192,6 +192,20 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **21:30 UTC** (`30 21 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+The current collector has no paginated inventory to delay. Its existing request
+pacing and publisher restrictions remain in force; this source changes only its
+daily automation schedule.
 
 ## Workflow concurrency
 

@@ -24,6 +24,24 @@ _CATEGORIES = (
 )
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 def title_deadline(title):
     """Read only explicit application-closing dates from current call titles."""
     application_context = re.search(
@@ -55,7 +73,8 @@ def collect():
     records = {}
     for page in range(1, 26):
         query = urllib.parse.urlencode({"per_page": 100, "page": page, "_fields": "id,date_gmt,link,title,content"})
-        posts = json.loads(fetch_source(_API_URL + "?" + query, min_interval=delay))
+        posts = json.loads(fetch_inventory_page(
+            fetch_source, _API_URL + "?" + query, min_interval=delay))
         if not isinstance(posts, list):
             raise ValueError("Unexpected FEBA API payload")
         for post in posts:

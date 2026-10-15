@@ -32,6 +32,24 @@ PUBLISHER_TYPE = "university"
 ATTRIBUTION = "University of Copenhagen"
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -945,7 +963,7 @@ def vacancy_catalog():
         if url in seen:
             continue
         seen.add(url)
-        root = page(url)
+        root = fetch_inventory_page(page, url)
         for row in vacancy_rows(root, url):
             if row[0] in urls:
                 raise AdapterError("Repeated vacancy across listing pages")
