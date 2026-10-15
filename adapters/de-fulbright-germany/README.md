@@ -26,8 +26,8 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
+access; restrictive rate and delay directives remain effective. The identifying header remains unchanged; current durable pacing and
+backoff follow the migration section below. Existing
 disabled workflows remain disabled.
 
 ## Daily automation
@@ -40,9 +40,9 @@ GitHub can delay scheduled events; the existing publication concurrency
 serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
-The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+The collector has no paginated inventory. Its exact two logical roots remain
+one robots document and the assigned programme detail; linked awards are not
+collected. The daily schedule is unchanged by the pacing migration.
 
 ## Workflow concurrency
 
@@ -102,7 +102,131 @@ the existing three attempts and original write deadline. Authentication,
 non-CAS and unclassified failures stop without another write attempt. Terminal
 publication errors latch a per-process write stop, including later
 failure-metadata fallback; bounded read-only outcome checks remain available.
-Source-pair changes stay protected; reference writes keep force:false. Source
-collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
+Source-pair changes stay protected; reference writes keep force:false. These publication safeguards preserve factual source collection, fields, the
+daily schedule and the 30-minute job cap. Publisher pacing follows the migration
+section below.
 Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
+
+
+## Durable publisher pacing migration
+
+Every physical publisher request, including robots, redirects and the existing
+bounded connection retry, uses at least 12.2 seconds after the previous response
+completes and at most five starts per rolling 60 seconds. Stronger retained
+limits remain effective. Inventory-purpose requests have a separate retained
+30-second completion guard; this assigned programme detail is not pagination.
+The two roots and their existing two-attempt/four-hop bounds remain unchanged.
+Two logical roots do not guarantee two physical requests.
+
+HTTP 429 stops the collection without retrying that request. Before reading
+bounded error evidence, persist an embargo of at least 1,800 seconds, increasing
+exponentially with newly observed strikes, any stronger valid Retry-After, and
+doubled **current** physical/page gaps. Ordinary rate-limit text stays timed;
+genuine visible human-verification or genuine challenge HEAD-title evidence
+also retains a hard hold. Malformed or unusable timing alone never creates a
+hold. Actual content 401/403/451 and visible refusals remain held. Restrictive
+state persists even when the body read fails.
+
+Bounded HTML inspection occurs before redirect follow, including obvious HTML
+with missing or incorrect MIME. Hidden, script, footer/navigation and narrowly
+identified informational text do not alone create a hold. Literal robots
+purpose is checked at each physical hop. A robots redirect cannot relabel
+content; robots-only 4xx except 429 mean unavailable REP without clearing prior
+holds or inventing Disallow. The original product/legacy robots matching and strict Disallow interpretation
+remain. Applicable Request-rate groups use the standard-library REP parser and
+retain seconds/requests plus a 0.01-second margin. Current and retained legacy
+product-specific constraints, repeated rate directives and crawl delays combine
+by their most restrictive effective gap. Physical and page gaps are persisted
+while pending; unsupported applicable rates fail closed instead of granting a
+weaker allowance.
+
+The old pacing state existed only in process RAM. All 26 reviewed legacy
+attempts have exact authenticated job completion history and zero artifacts.
+Their completion times are conservative reservations, not measured source
+starts. The previous native corpus is unavailable, and the latest final
+publication error does not reveal its underlying source retrieval outcome.
+New-event count zero means only no strikes observed since this migration;
+`legacy_rate_history_unknown` remains true, not a claim of clean lifetime
+history. No lost header or refusal is declared absent.
+
+The first transition requires a public maintainer approval bound to the exact
+26 run/attempt/head/completion frontier and full typed known-MAX state. Its
+initial scope permits only the separately reviewed local native test. An
+unknown/newer attempt, changed frontier or unexpected artifact fails closed.
+Production requires separate post-native approval of all then-known restrictive
+state. Once a modern attempt exists, exact newest owned restoration is mandatory
+and a missing newest artifact cannot fall back to the legacy bridge. Modern
+artifacts require explicit source/run/attempt/head/digest binding.
+
+Every local collection requires this exact workflow to be manually paused before
+history or journal/lock initialization. The fixed ID/path/paused state is checked
+again immediately before the first source GET after startup quiet, not per
+page. Keep the workflow paused throughout local collection. Local and hosted
+state restoration MAX merges intervals, counters and embargoes, bounded unions
+the last ten pending starts, and OR merges holds and historical unknown.
+Nothing resets the original journal or grants a fresh allowance. A missing
+journal in an existing pacing directory is a failure, even with an older owned
+artifact. Only a directory created by this process may start an untrusted empty
+merge base before its first save; it cannot grant source access. Corrupt,
+missing-mature or old-schema state requires reviewed recovery.
+
+Local read-only workflow metadata uses the inherited configured GitHub route;
+an explicit token is optional locally and never fabricated. Hosted execution
+still requires its workflow token. Signed artifact downloads strip authorization
+before the bounded cross-origin read.
+
+A new source **IO and wait** guard is at most 1,500 seconds. Hosted execution
+also freezes it below the existing proved publication-write boundary with a
+120-second reserve. It is not a parser-wide alarm or a claim that a dedicated
+collection phase existed previously. Each source/metadata transport has a
+whole-call Unix/Python timer of at most the existing 30 seconds; unsupported or
+active timers fail closed. No outer alarm replaces the publication repair.
+The 30-minute job, one-hour publication token and existing bounded three-attempt
+CAS/own-pair/deadline behavior remain unchanged.
+
+Trusted pacing restores under the collection lock before snapshot/deadline-proof
+errors can occur. Main exits always attempt bounded export and release the lock.
+State schema 3 requires an explicit `in_flight` flag. A synced pending
+reservation precedes every physical request. Response restrictions and REP
+assessment (including a stricter crawl delay or Disallow) remain pending until
+all restrictions are durably saved; pending state OR merges and blocks new
+requests across processes. Only the exact reviewed legacy transition may seed
+an explicit false flag. Missing flags and older schemas cannot grant access.
+A failed write remains fatal even if failure-marker creation and safe journal
+invalidation both fail: the already-synced pending reservation remains. A
+completion may clear pending only after saving all response constraints.
+
+The verified journal directory identity stays pinned across the process.
+Journal reads, locks, temporary files, atomic replacement and failure cleanup
+use descriptors relative to that verified parent. A renamed/replaced parent
+closes access and cannot authorize writing or truncating an unrelated owned
+file at the new path. A legitimate atomic state-file replacement within the
+same parent remains valid; failure cleanup checks its current inode.
+
+Any reservation, response restriction or completion persistence failure latches
+source access closed, including initialization re-entry. Safely owned stale
+artifacts are truncated and synced through validated descriptors before output
+signals or unlink. Unsafe owners, permissions, symlinks and hard links are
+refused without modification. Failed signals or cleanup cannot make stale state
+a healthy handoff. The unchanged native test never receives a publication token
+or performs data-source writes; full genuine collection and independent review
+remain prerequisites to delivery.
+
+The original nonpublishing native test passed on 15 October 2026: two physical
+publisher requests (robots and the complete configured programme page), one raw
+record and one current record; the current website consumer also accepted the
+valid derived empty envelope. Both complete response bodies and all eight real
+state-save chains were retained in private RAM and independently checked.
+The original parser, native test, publication safeguards and daily schedule are
+unchanged. This is native validation, not a claim of hosted delivery.
+
+[Maintainer production transition approval](https://github.com/YouthOpps/data-pipeline/issues/270#issuecomment-6202857572)
+binds the full known restrictive state, including 26 legacy job-completion
+upper bounds and eight native reservation/opener/wire/completion observations.
+These are 34 observations, not 34 publisher requests. The bounded last-ten
+window and all numeric/unknown/hold constraints are retained; the handoff guard
+is at least native receipt completion plus 60 seconds, with runtime startup
+quiet still enforced. The explicit settled false flag follows successful REP
+and response persistence. Modern newest-artifact restoration remains mandatory
+after the first owned hosted handoff; no missing-artifact fallback is added.
