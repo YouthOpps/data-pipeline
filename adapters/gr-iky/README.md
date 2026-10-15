@@ -133,3 +133,27 @@ the source ID remains `gr-iky`. The current website consumer replay accepts all
 29 actual native records, filtered/empty cases and last-good failure metadata.
 This replay is not another publisher collection. The maintainer owns merge and
 first-production verification.
+
+## HTTP 429 HEAD refusal handling
+
+On HTTP 429 only, a genuine initial, unsuppressed HEAD title containing
+`Access denied`, `Just a moment`, `Attention required` or `CAPTCHA` retains
+an access hold alongside the existing adaptive cooldown. Ordinary rate-limit
+warnings remain timed restrictions. Hidden, footer/navigation, nested, second
+or post-body HEAD titles do not supply this additional refusal evidence.
+A bounded obvious-HTML prefix also qualifies this 429-only check when the
+response MIME is absent or wrong; ordinary successful-response handling is
+unchanged. Existing access holds, stronger embargoes, retained state and request/page
+spacing remain preserved.
+
+This conditional maintenance uses actual-function inert transport controls
+and qualified prior complete native evidence; it does not claim a new live
+collection or alter source facts, identifiers, expiry, publication, caps or
+schedules. No publisher request or production Action validates this fix.
+
+For publisher rate/denial errors, the existing adaptive 429 state and actual
+content 401/403/451 holds are saved before the bounded response read; a failed
+save stops the request path. Thus a body-read failure cannot defer the first
+durable cooldown save. Literal robots 451 remains unavailable REP, while
+robots 429 keeps its timed backoff. Existing scoped refusal distinctions,
+including any reviewed API-only annotation, are retained.
