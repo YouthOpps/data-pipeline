@@ -333,7 +333,9 @@ def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
                 raise AdapterError("Response exceeds 5 MB", "fetch")
             if (
                 parsed.hostname in {"www.fulbright.be", "fulbright.be"}
-                and response.status == 200
+                and (
+                    response.status == 200 or parsed.path != "/robots.txt"
+                )
                 and (
                     re.search(
                         rb"<title[^>]*>\s*(?:access denied|forbidden|"

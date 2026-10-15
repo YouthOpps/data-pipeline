@@ -51,3 +51,15 @@ python -B adapters/de-bmw-group/adapter.py --publish
 ```
 
 Only this source's `datas/de-bmw-group/data.json` and `metadata.json` are atomically updated. A complete successful refresh replaces the whole source snapshot, preserving stable creation/first-seen timestamps for existing IDs. Explicit expired deadlines are removed before publication; date-only unknown-zone deadlines remain through the latest civil timezone's end of date, while unknown deadlines imply no expiry. All-expired validated raw data may publish an atomic empty success envelope. A failed/incomplete retrieval preserves last-good data and success time; a first failure creates no placeholder source pair. Large snapshots use digest-verified Git blobs, and compare-and-swap branch updates protect concurrent publications. Native tests do not prove production publication; maintainer merge and actual immutable pair/artifact verification remain separate.
+
+## Redirect access checks
+
+A visible publisher verification or denial body is checked before following a
+content redirect, including HTTP 3xx responses. An ordinary redirect without a
+challenge continues through the existing host, TLS, pacing and retry guards.
+Robots-only handling is limited to the literal `/robots.txt` route on every
+hop. A robots redirect to a content route stops before requesting that target;
+its response is never treated as unavailable REP or a replacement robots policy.
+Existing refusal holds, retained rate limits and source publication behavior
+remain in force. This conditional-path correction does not clear an access hold
+or certify a new publisher collection.

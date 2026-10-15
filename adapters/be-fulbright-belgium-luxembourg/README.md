@@ -189,3 +189,12 @@ source's prior pair is unchanged; another source is never modified. Fetch,
 parse, validation or publication failure preserves last-good data and the last
 success timestamp; a first failure creates no published source folder. Tests and
 implementation review never invoke production publication.
+
+## Redirect access checks
+
+A visible publisher verification or denial body is checked before following a
+content redirect, including HTTP 3xx responses. An ordinary redirect without a
+challenge continues through the existing host, TLS, pacing and retry guards.
+Existing refusal holds, retained rate limits and source publication behavior
+remain in force. This conditional-path correction does not clear an access hold
+or certify a new publisher collection.
