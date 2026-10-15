@@ -1,7 +1,11 @@
 """Run one complete live collection without publishing or saving its records."""
 
 import json
+import os
 import unittest
+
+if os.environ.get("DATA_SOURCE_TOKEN"):
+    raise SystemExit("Non-publishing test refuses publication credentials")
 
 import adapter
 
