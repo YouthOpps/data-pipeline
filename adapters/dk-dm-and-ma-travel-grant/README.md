@@ -148,3 +148,13 @@ cancelled (`cancel-in-progress: false`). Unrelated publisher families may
 collect and publish in parallel. Existing source-only atomic publication rebases
 on unrelated repository updates, uses up to three publication attempts, and
 never force-overwrites newer data.
+
+## Publication error diagnostics
+
+Failed GitHub publication reports retain the HTTP method, a recognized API
+route without its query, status and bounded attempt count. If checking the
+remote outcome also fails, both failure contexts are retained. Diagnostics do
+not include credentials, headers, response bodies or signed URLs. The existing
+three-attempt limit, current-head and source-pair conflict checks, atomic writes
+and successful collection/publication behavior are unchanged. This diagnostic
+maintenance does not establish the underlying cause of older generic failures.
