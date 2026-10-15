@@ -2709,6 +2709,92 @@ def validate_records(records, published=False):
             raise AdapterError("Invalid classification evidence", "validate")
 
 
+def github_error_context(method, path):
+    """Describe only known API routes, without credentials or URL queries."""
+    verb = method if method in {"GET", "POST", "PATCH"} else "REQUEST"
+    try:
+        route = urllib.parse.urlsplit(path).path
+    except (TypeError, ValueError):
+        route = ""
+    if not re.fullmatch(
+        r"/(?:git/(?:trees|commits(?:/[0-9a-f]{40})?|ref/heads/main|"
+        r"refs/heads/main)|contents/datas/[A-Za-z0-9-]+/"
+        r"(?:data|metadata)\.json)",
+        route,
+    ):
+        route = "[unrecognized API route]"
+    return f"GitHub {verb} {route}"
+
+
+def github_error_details(method, path, status, body):
+    """Return fixed labels from a bounded, unambiguous GitHub error body."""
+    label = "unclassified"
+    codes = set()
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Ambiguous GitHub error object")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("Invalid GitHub JSON constant")
+
+    try:
+        if not isinstance(body, bytes) or len(body) > 16384:
+            raise ValueError("Unusable GitHub error body")
+        decoded = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=invalid_constant,
+        )
+        if not isinstance(decoded, dict):
+            raise ValueError("Expected GitHub error object")
+        message = decoded.get("message")
+        labels = {
+            "Bad credentials": "bad-credentials",
+            "Resource not accessible by integration": "integration-permission",
+            (
+                "Resource not accessible by personal " "access token"
+            ): "token-permission",
+            "Validation Failed": "validation-failed",
+            "Reference update failed": "reference-update-failed",
+            "Reference does not exist": "reference-missing",
+            "Not Found": "not-found",
+        }
+        if isinstance(message, str):
+            label = labels.get(message, label)
+            if (
+                method == "PATCH"
+                and urllib.parse.urlsplit(path).path == "/git/refs/heads/main"
+                and status == 422
+                and message == "Update is not a fast forward"
+            ):
+                label = "non-fast-forward"
+        errors = decoded.get("errors")
+        if isinstance(errors, list) and len(errors) <= 10:
+            allowed = {
+                "missing",
+                "missing_field",
+                "invalid",
+                "already_exists",
+                "unprocessable",
+                "custom",
+            }
+            for error in errors:
+                code = error.get("code") if isinstance(error, dict) else None
+                if isinstance(code, str) and code in allowed:
+                    codes.add(code)
+    except (UnicodeError, ValueError, TypeError, RecursionError):
+        label, codes = "unclassified", set()
+    detail = "; GitHub error: " + label
+    if codes:
+        detail += "; codes=" + ",".join(sorted(codes)[:3])
+    return detail
+
+
 def github(method, path, payload=None, missing_ok=False):
     token = os.environ.get("DATA_SOURCE_TOKEN")
     if not token:
@@ -2733,13 +2819,18 @@ def github(method, path, payload=None, missing_ok=False):
         )
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         raise AdapterError(
-            "GitHub connection failed; publication is unconfirmed", "publish"
+            github_error_context(method, path)
+            + " connection failed; publication is unconfirmed",
+            "publish",
         ) from error
     if status == 404 and missing_ok:
         return None
     if status not in (200, 201):
         raise AdapterError(
-            f"GitHub publication API returned HTTP {status}", "publish", status
+            f"{github_error_context(method, path)} returned HTTP {status}"
+            + github_error_details(method, path, status, body),
+            "publish",
+            status,
         )
     return json.loads(body)
 
@@ -2807,25 +2898,40 @@ def publish_files(snapshot, files):
                 {"sha": candidate, "force": False},
             )
             return
-        except AdapterError:
-            latest = read_snapshot()
+        except AdapterError as error:
+            try:
+                latest = read_snapshot()
+            except Exception as verification:
+                detail = (
+                    safe_error(verification)
+                    if isinstance(verification, AdapterError)
+                    else type(verification).__name__
+                )
+                raise AdapterError(
+                    f"Publication attempt {attempt + 1}/3 failed: "
+                    f"{safe_error(error)}; outcome verification "
+                    f"failed: {detail}",
+                    "publish",
+                    getattr(verification, "status", None),
+                ) from verification
             if candidate and (
                 latest["head"] == candidate or latest["files"] == desired
             ):
                 return
             if latest["files"] != expected:
                 raise AdapterError(
-                    "Source changed concurrently; "
-                    "newer remote data was not overwritten",
+                    "Source changed concurrently; newer remote data "
+                    "was not overwritten",
                     "publish",
                 )
             snapshot = latest
             if attempt == 2:
                 raise AdapterError(
-                    "Publication failed; "
-                    "durable remote outcome could not be updated",
+                    f"Publication failed after {attempt + 1} attempts; "
+                    f"last failure: {safe_error(error)}",
                     "publish",
-                )
+                    error.status,
+                ) from error
 
 
 def metadata(attempt, previous, records, error=None, checked_at=None):

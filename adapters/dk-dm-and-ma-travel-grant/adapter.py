@@ -1143,6 +1143,75 @@ def validate_records(records, *, allow_empty=False):
             raise AdapterError("Invalid classification evidence", "validate")
 
 
+def github_error_details(method, path, status, body):
+    """Return fixed labels from a bounded, unambiguous GitHub error body."""
+    label = "unclassified"
+    codes = set()
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Ambiguous GitHub error object")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("Invalid GitHub JSON constant")
+
+    try:
+        if not isinstance(body, bytes) or len(body) > 16384:
+            raise ValueError("Unusable GitHub error body")
+        decoded = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=invalid_constant,
+        )
+        if not isinstance(decoded, dict):
+            raise ValueError("Expected GitHub error object")
+        message = decoded.get("message")
+        labels = {
+            "Bad credentials": "bad-credentials",
+            "Resource not accessible by integration": "integration-permission",
+            (
+                "Resource not accessible by personal " "access token"
+            ): "token-permission",
+            "Validation Failed": "validation-failed",
+            "Reference update failed": "reference-update-failed",
+            "Reference does not exist": "reference-missing",
+            "Not Found": "not-found",
+        }
+        if isinstance(message, str):
+            label = labels.get(message, label)
+            if (
+                method == "PATCH"
+                and urllib.parse.urlsplit(path).path == "/git/refs/heads/main"
+                and status == 422
+                and message == "Update is not a fast forward"
+            ):
+                label = "non-fast-forward"
+        errors = decoded.get("errors")
+        if isinstance(errors, list) and len(errors) <= 10:
+            allowed = {
+                "missing",
+                "missing_field",
+                "invalid",
+                "already_exists",
+                "unprocessable",
+                "custom",
+            }
+            for error in errors:
+                code = error.get("code") if isinstance(error, dict) else None
+                if isinstance(code, str) and code in allowed:
+                    codes.add(code)
+    except (UnicodeError, ValueError, TypeError, RecursionError):
+        label, codes = "unclassified", set()
+    detail = "; GitHub error: " + label
+    if codes:
+        detail += "; codes=" + ",".join(sorted(codes)[:3])
+    return detail
+
+
 def github_error_context(method, path):
     """Describe only known API routes, without credentials or URL queries."""
     verb = method if method in {"GET", "POST", "PATCH"} else "REQUEST"
@@ -1192,7 +1261,8 @@ def github(method, path, payload=None, missing_ok=False):
         return None
     if status not in (200, 201):
         raise AdapterError(
-            f"{github_error_context(method, path)} returned HTTP {status}",
+            f"{github_error_context(method, path)} returned HTTP {status}"
+            + github_error_details(method, path, status, body),
             "publish",
             status,
         )

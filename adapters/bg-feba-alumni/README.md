@@ -144,3 +144,17 @@ Published metadata uses `display_name` = **FEBA Alumni** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Bounded publication error categories
+
+GitHub publication failures retain the known route, HTTP status and bounded
+attempt count. A bounded JSON error view emits only fixed known message/code
+labels; arbitrary bodies, headers, credentials, URLs and query values are never
+copied into diagnostics. The non-fast-forward label requires the exact known
+GitHub message on an HTTP 422 PATCH of the main reference; HTTP 422 alone does
+not establish a conflict. Malformed, ambiguous or unknown errors remain
+unclassified. These diagnostics do not prove the cause of historical failures.
+
+Collection, source fields, access holds, pacing, the existing three publication
+attempts, source-pair checks and non-forced atomic writes are unchanged. This
+change adds no retry delay, workflow activation or publication test.
