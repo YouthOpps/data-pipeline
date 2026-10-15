@@ -67,3 +67,10 @@ The response-completion guard retains the current physical interval even when
 it exceeds the rolling-minute history window. Pruning old start timestamps
 never shortens a stronger retained interval; an attempt that cannot fit its
 wait budget stops before publisher access.
+
+## Source display name
+
+Published metadata uses `display_name` = **Luxembourg Development Cooperation** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

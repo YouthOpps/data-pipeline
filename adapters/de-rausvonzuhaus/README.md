@@ -186,3 +186,10 @@ were 13.13 seconds apart, with at most two in a rolling minute. The complete
 website consumer in RAM. These observed counts are evidence, not collection
 caps. This native success does not assert hosted publication; production
 requires separate approval of the complete retained native pacing MAX state.
+
+## Source display name
+
+Published metadata uses `display_name` = **Eurodesk Deutschland** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

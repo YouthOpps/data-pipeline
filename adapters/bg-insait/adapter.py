@@ -1979,6 +1979,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "INSAIT",
         "source": SOURCE_ID,
         "name": "INSAIT — reviewed public research, recruitment and EXPLORER programmes",
         "source_url": SOURCE_URL,

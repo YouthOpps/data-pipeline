@@ -181,3 +181,10 @@ User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
 
 The [bot information page](https://youthopps.org/bot/) provides project information
 and indexing-removal contact details. Changing this identity never clears holds.
+
+## Source display name
+
+Published metadata uses `display_name` = **Mercedes-Benz** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

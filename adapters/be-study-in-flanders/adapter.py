@@ -1540,6 +1540,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "VLUHR",
         "source": SOURCE_ID,
         "name": "Study in Flanders — official scholarship calls and programme overviews",
         "source_url": SOURCE_URL,

@@ -2614,6 +2614,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "Volkswagen",
         "source": SOURCE_ID,
         "name": SOURCE_NAME,
         "description": DESCRIPTION,

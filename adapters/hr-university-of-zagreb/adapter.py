@@ -2354,6 +2354,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "University of Zagreb",
         "source": SOURCE_ID,
         "name": "University of Zagreb — bounded public calls and educational catalogue",
         "source_url": SOURCE_URL,

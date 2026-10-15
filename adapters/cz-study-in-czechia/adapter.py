@@ -2201,6 +2201,7 @@ def publish_files(snapshot, files):
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     result = {
+        "display_name": "DZS",
         "source": SOURCE_ID,
         "name": "Study in Czechia",
         "source_url": SOURCE_URL,

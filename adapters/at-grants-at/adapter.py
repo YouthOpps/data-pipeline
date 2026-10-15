@@ -642,6 +642,7 @@ def publish_files(snapshot, files):
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     result = {
+        "display_name": "OeAD",
         "source": SOURCE_ID,
         "name": "grants.at / OeAD",
         "source_url": SOURCE_URL,

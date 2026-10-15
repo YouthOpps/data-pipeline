@@ -1611,6 +1611,7 @@ def collect():
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
     outcome = {
+        "display_name": "Agency for Mobility and EU Programmes",
         "source": SOURCE_ID,
         "name": "Study in Croatia — bounded scholarships and training programmes",
         "source_url": SOURCE_URL,

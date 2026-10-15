@@ -91,3 +91,10 @@ Inventory scope, parsing, validation and atomic publication are unchanged.
 publish in parallel. Existing source-only atomic publication rebases on
 unrelated repository updates, uses up to three publication attempts, and never
 force-overwrites newer data.
+
+## Source display name
+
+Published metadata uses `display_name` = **Agency for Mobility and EU Programmes** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

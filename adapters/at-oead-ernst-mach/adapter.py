@@ -378,7 +378,7 @@ def publish_files(snapshot, files):
 
 
 def metadata(attempt, previous, records, error=None):
-    result = {'source': SOURCE_ID, 'source_url': SOURCE_URL, 'website_url': WEBSITE_URL,
+    result = {"display_name": "OeAD", 'source': SOURCE_ID, 'source_url': SOURCE_URL, 'website_url': WEBSITE_URL,
               'language': LANGUAGE, 'publisher_country': PUBLISHER_COUNTRY, 'publisher_type': PUBLISHER_TYPE,
               'status': 'fail' if error else 'success', 'last_attempt_at': attempt,
               'last_success_at': previous.get('last_success_at') if error else attempt,

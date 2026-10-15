@@ -170,3 +170,10 @@ disabled until their access hold is separately resolved.
 The current collector has no paginated inventory to delay. Its existing request
 pacing and publisher restrictions remain in force; this source changes only its
 daily automation schedule.
+
+## Source display name
+
+Published metadata uses `display_name` = **Google** for the visible
+institution label. Existing source identifiers, legacy names and attribution
+notices remain unchanged. Both success and failure metadata emit this label;
+older snapshots without it remain valid.

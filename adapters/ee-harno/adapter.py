@@ -2407,6 +2407,7 @@ def wait_publisher_cooldown(previous):
 
 def metadata(attempt, previous, records, error=None):
     result = {
+        "display_name": "Harno",
         "source": SOURCE_ID,
         "source_url": SOURCE_URL,
         "website_url": WEBSITE_URL,
