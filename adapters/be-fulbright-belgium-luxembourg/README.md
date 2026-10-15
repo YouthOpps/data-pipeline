@@ -110,7 +110,10 @@ A 429 stops the current job and durably records its Retry-After embargo; absent
 a valid header, the pause starts at 30 minutes and doubles on subsequent 429s.
 Each 429 also doubles the currently retained physical and page gaps, including
 already stricter publisher limits, and doubles the no-header fallback cooldown.
-Longer Retry-After is retained.
+Longer valid Retry-After is retained. Malformed, nonpositive, nonfinite or
+unrepresentable timing is ignored before budget mutation; a 429 uses its
+existing exponential fallback. Existing content holds and stronger embargoes
+are never cleared.
 A later job can retry after the embargo with the slower retained spacing;
 there is no immediate same-job retry or identity change.
 Robots-only unavailable 4xx does not become a general content-access refusal.

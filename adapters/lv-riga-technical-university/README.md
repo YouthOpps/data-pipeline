@@ -119,7 +119,11 @@ immediate unchanged retry and records at least 30 minutes of backoff, doubled
 for subsequent rate failures (with a bounded exponent); physical request
 spacing also doubles durably. Stricter Retry-After wins. A later attempt fails
 fast during the retained embargo, and can try normally afterwards with the
-slower interval; a timed 429 alone is not a permanent access ban. Invalid backoff fails closed. Tests and production use the same original
+slower interval; a timed 429 alone is not a permanent access ban. Unusable
+429 Retry-After (malformed, nonpositive, nonfinite or outside the supported date
+range) uses that timed fallback without creating or clearing an access hold.
+Invalid backoff on other responses retains protective failure behavior. Tests
+and production use the same original
 host budget path, MAX interval/embargo/completion history and OR refusal merge.
 A process collection lock serializes local collectors; the existing Action
 concurrency serializes hosted runs. State is never cleared to recover access.

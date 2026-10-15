@@ -119,11 +119,14 @@ the unchanged 42-start cap including redirects/retries. There are at most two
 attempts for typed transient failures/HTTP 503, with retained 30-second backoff.
 Content HTTP 429 stops the current run without creating a permanent access
 block. It durably doubles both the physical interval and inventory page gap.
-Without Retry-After it saves an embargo of at least 30 minutes, doubled for each
+Without a usable Retry-After it saves an embargo of at least 30 minutes, doubled for each
 subsequent recorded 429; counters, both gaps and embargo survive local/artifact
 merges by MAX. A later bounded run may resume only after that embargo at the
 retained slower pacing. Explicit Retry-After and stronger restrictions remain
-authoritative. Existing unknown/mixed hard holds are never cleared this way.
+authoritative. Malformed, nonpositive, nonfinite or unrepresentable 429 timing
+is unusable: it uses the exponential fallback without creating or clearing a
+hard hold. Invalid backoff on other responses retains protective failure
+behavior. Existing unknown/mixed hard holds are never cleared this way.
 Responses remain bounded to 8 MiB each and 64 MiB total.
 
 Prepublication remains bounded to 1,800 seconds, publication 240, failure metadata
