@@ -368,7 +368,7 @@ def request_bytes(
         completed = time.time()
         with budget_state() as state:
             state["until"] = max(
-                state["until"], completed + max(12.1, interval)
+                state["until"], completed + max(12.1, interval, state["interval"])
             )
         print(
             json.dumps(

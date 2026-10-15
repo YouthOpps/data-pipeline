@@ -62,3 +62,8 @@ python -B adapters/lu-luxembourg-cooperation/adapter.py --publish
 ```
 
 `DATA_SOURCE_TOKEN` is required only for publication. `GITHUB_TOKEN` reads trusted source-run/artifact metadata; first-run bootstrap and runner artifact paths are infrastructure configuration in the source workflow. Offline in-memory scenario evidence stays outside the delivered tree and does not substitute for the sole native collection test or current website-consumer checks.
+
+The response-completion guard retains the current physical interval even when
+it exceeds the rolling-minute history window. Pruning old start timestamps
+never shortens a stronger retained interval; an attempt that cannot fit its
+wait budget stops before publisher access.
