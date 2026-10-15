@@ -1027,7 +1027,6 @@ def request_bytes(
             if (
                 publisher_host(url)
                 and not robots
-                and response.status == 200
                 and visible_access_challenge(body)
             ):
                 budget["blocked"] = True
@@ -1076,15 +1075,29 @@ def fetch_source(url, min_interval=6, *, robots=False):
             for hop in range(4):
                 checked(current)
                 status, headers, body = request_bytes(
-                    current, interval=min_interval, robots=robots
+                    current,
+                    interval=min_interval,
+                    robots=(
+                        robots
+                        and urllib.parse.urlsplit(current).path
+                        == "/robots.txt"
+                    ),
                 )
                 if status in (301, 302, 303, 307, 308):
                     if hop == 3 or not headers.get("Location"):
                         raise AdapterError(
                             "Invalid or excessive source redirects", "fetch"
                         )
-                    current = urllib.parse.urljoin(current, headers["Location"])
+                    current = urllib.parse.urljoin(
+                        current, headers["Location"]
+                    )
                     checked(current)
+                    if robots and (
+                        urllib.parse.urlsplit(current).path != "/robots.txt"
+                    ):
+                        raise AdapterError(
+                            "Robots redirect leaves the policy route", "access"
+                        )
                     if not robots:
                         min_interval = max(min_interval, check_robots(current))
                     continue
@@ -1109,7 +1122,8 @@ def fetch_source(url, min_interval=6, *, robots=False):
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             if attempt:
                 raise AdapterError(
-                    "Publisher connection failed: " + safe_error(error), "fetch"
+                    "Publisher connection failed: " + safe_error(error),
+                    "fetch",
                 ) from error
     raise AdapterError("Publisher could not be read", "fetch")
 

@@ -181,3 +181,15 @@ IDs, changed types, full-state MAX restoration, redirects, retained denial,
 recoverable/adaptive 429, exact-attempt chronology, expiry boundaries, atomic
 empty success, first/later failure preservation and finally-export exit status.
 These controls do not constitute production publication evidence.
+
+## Redirect access checks
+
+A visible publisher verification or denial body is checked before following a
+content redirect, including HTTP 3xx responses. An ordinary redirect without a
+challenge continues through the existing host, TLS, pacing and retry guards.
+Robots-only handling is limited to the literal `/robots.txt` route on every
+hop. A robots redirect to a content route stops before requesting that target;
+its response is never treated as unavailable REP or a replacement robots policy.
+Existing refusal holds, retained rate limits and source publication behavior
+remain in force. This conditional-path correction does not clear an access hold
+or certify a new publisher collection.

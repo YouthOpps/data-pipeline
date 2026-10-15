@@ -340,3 +340,15 @@ publication rebases on unrelated repository updates, uses up to three
 publication attempts, and never force-overwrites newer data.
 This grouping does not enable a disabled workflow; re-enablement belongs to
 the separate maintainer handoff after independent QA.
+
+## Redirect access checks
+
+A visible publisher verification or denial body is checked before following a
+content redirect, including HTTP 3xx responses. An ordinary redirect without a
+challenge continues through the existing host, TLS, pacing and retry guards.
+Robots-only handling is limited to the literal `/robots.txt` route on every
+hop. A robots redirect to a content route stops before requesting that target;
+its response is never treated as unavailable REP or a replacement robots policy.
+Existing refusal holds, retained rate limits and source publication behavior
+remain in force. This conditional-path correction does not clear an access hold
+or certify a new publisher collection.

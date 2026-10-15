@@ -226,3 +226,12 @@ cancelled (`cancel-in-progress: false`). Unrelated publisher families may
 collect and publish in parallel. Existing source-only atomic publication rebases
 on unrelated repository updates, uses up to three publication attempts, and
 never force-overwrites newer data.
+
+## Redirect access checks
+
+Robots-only handling is limited to the literal `/robots.txt` route on every
+hop. A robots redirect to a content route stops before requesting that target;
+its response is never treated as unavailable REP or a replacement robots policy.
+Existing refusal holds, retained rate limits and source publication behavior
+remain in force. This conditional-path correction does not clear an access hold
+or certify a new publisher collection.

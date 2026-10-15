@@ -1521,7 +1521,11 @@ def fetch_source(url, min_interval=12):
                 status, headers, body = request_bytes(
                     current,
                     interval=min_interval,
-                    robots=original.path == "/robots.txt",
+                    robots=(
+                        original.path == "/robots.txt"
+                        and urllib.parse.urlsplit(current).path
+                        == "/robots.txt"
+                    ),
                     headers={
                         "Accept": (
                             "text/plain,*/*;q=0.8"
@@ -1543,6 +1547,12 @@ def fetch_source(url, min_interval=12):
                         current, headers["Location"]
                     )
                     checked(current)
+                    if original.path == "/robots.txt" and (
+                        urllib.parse.urlsplit(current).path != "/robots.txt"
+                    ):
+                        raise AdapterError(
+                            "Robots redirect leaves the policy route", "access"
+                        )
                     if original.path != "/robots.txt":
                         min_interval = max(min_interval, check_robots(current))
                     continue

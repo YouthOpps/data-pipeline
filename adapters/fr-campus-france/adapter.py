@@ -1473,6 +1473,10 @@ def source_request(
                 else None
             ),
         )
+        if not robots:
+            reject_visible_challenge(
+                body, headers, challenge_only=status == 429
+            )
         if status in {301, 302, 303, 307, 308}:
             if not headers.get("Location") or hop == 3:
                 raise AdapterError("Invalid source redirect", "fetch")
@@ -1481,14 +1485,14 @@ def source_request(
                 raise AdapterError(
                     "Redirect changes reviewed source host", "access"
                 )
+            if robots and urllib.parse.urlsplit(target).path != "/robots.txt":
+                raise AdapterError(
+                    "Robots redirect leaves the policy route", "access"
+                )
             if method != "GET" and status not in {307, 308}:
                 raise AdapterError("Unexpected public POST redirect", "fetch")
             current = target
             continue
-        if not robots:
-            reject_visible_challenge(
-                body, headers, challenge_only=status == 429
-            )
         if status != 200 and not robots:
             raise AdapterError(
                 "Publisher content returned HTTP " + str(status),
