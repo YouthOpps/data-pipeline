@@ -89,7 +89,7 @@ CATEGORIES = (
     "other",
 )
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
-_USER_AGENT = "YouthOpp/1.0 (+https://github.com/YouthOpps/data-pipeline)"
+_USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 _BUDGETS = {}
 
 
@@ -255,6 +255,32 @@ def fetch_source(url, min_interval=6):
     raise AdapterError("Publisher could not be read", "fetch")
 
 
+def robots_directive(parser, directive, url=None):
+    """Retain native policy and every applicable product group's restriction."""
+    import copy
+
+    policies = [parser]
+    for entry in parser.entries:
+        if entry.applies_to(_USER_AGENT):
+            policy = copy.copy(parser)
+            policy.entries = [entry]
+            policy.default_entry = None
+            policies.append(policy)
+    if directive == "can_fetch":
+        return all(policy.can_fetch(_USER_AGENT, url) for policy in policies)
+    values = [
+        getattr(policy, directive)(_USER_AGENT) for policy in policies
+    ]
+    values = [value for value in values if value is not None]
+    if not values:
+        return None
+    if directive == "crawl_delay":
+        return max(values)
+    if any(rate.requests <= 0 for rate in values):
+        raise AdapterError("Invalid robots request rate", "access")
+    return max(values, key=lambda rate: rate.seconds / rate.requests)
+
+
 def check_robots(url):
     parsed = urllib.parse.urlsplit(url)
     robots_url = urllib.parse.urlunsplit(
@@ -268,10 +294,10 @@ def check_robots(url):
         raise
     policy = robotparser.RobotFileParser()
     policy.parse(text.splitlines())
-    if not policy.can_fetch(_USER_AGENT, url):
+    if not robots_directive(policy, "can_fetch", url):
         raise AdapterError("Robots policy disallows source endpoint", "access")
-    delay = policy.crawl_delay(_USER_AGENT) or 6
-    rate = policy.request_rate(_USER_AGENT)
+    delay = robots_directive(policy, "crawl_delay") or 6
+    rate = robots_directive(policy, "request_rate")
     if rate:
         delay = max(delay, rate.seconds / rate.requests)
     return max(6, delay)

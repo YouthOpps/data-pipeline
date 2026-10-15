@@ -47,10 +47,7 @@ DESCRIPTION = (
 )
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
-_USER_AGENT = (
-    "YouthOpps/1.0 (+https://github.com/YouthOpps/data-pipeline; public "
-    "opportunity metadata)"
-)
+_USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 CATEGORIES = {
     "scholarships",
     "internships",
@@ -1797,6 +1794,32 @@ def html_fingerprint(body):
     ).hexdigest()
 
 
+def robots_directive(parser, directive, url=None):
+    """Retain native policy and every applicable product group's restriction."""
+    import copy
+
+    policies = [parser]
+    for entry in parser.entries:
+        if entry.applies_to(_USER_AGENT):
+            policy = copy.copy(parser)
+            policy.entries = [entry]
+            policy.default_entry = None
+            policies.append(policy)
+    if directive == "can_fetch":
+        return all(policy.can_fetch(_USER_AGENT, url) for policy in policies)
+    values = [
+        getattr(policy, directive)(_USER_AGENT) for policy in policies
+    ]
+    values = [value for value in values if value is not None]
+    if not values:
+        return None
+    if directive == "crawl_delay":
+        return max(values)
+    if any(rate.requests <= 0 for rate in values):
+        raise AdapterError("Invalid robots request rate", "access")
+    return max(values, key=lambda rate: rate.seconds / rate.requests)
+
+
 def check_robots(url):
     import urllib.robotparser
 
@@ -1817,7 +1840,7 @@ def check_robots(url):
             raise AdapterError("Unreviewed robots origin", "access")
         read_input(key)
     parser = _ROBOTS[origin]
-    if not parser.can_fetch(_USER_AGENT, url):
+    if not robots_directive(parser, "can_fetch", url):
         raise AdapterError("Publisher robots excludes required input", "access")
 
 
@@ -1864,8 +1887,8 @@ def read_input(key):
         parser = urllib.robotparser.RobotFileParser()
         parser.parse(text.splitlines())
         origin = urllib.parse.urlsplit(info["url"])
-        delay = parser.crawl_delay(_USER_AGENT)
-        rate = parser.request_rate(_USER_AGENT)
+        delay = robots_directive(parser, "crawl_delay")
+        rate = robots_directive(parser, "request_rate")
         if rate and rate.seconds / rate.requests > 6:
             raise AdapterError(
                 "Stricter request rate requires reviewed budget", "access"

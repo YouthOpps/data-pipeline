@@ -48,7 +48,7 @@ DESCRIPTION = (
 )
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
-_USER_AGENT = "YouthOpps/1.0 (+https://github.com/YouthOpps/data-pipeline; public opportunity metadata)"
+_USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 CATEGORIES = {
     "scholarships",
     "internships",
@@ -2053,6 +2053,32 @@ def html_fingerprint(body):
     ).hexdigest()
 
 
+def robots_directive(parser, directive, url=None):
+    """Retain native policy and every applicable product group's restriction."""
+    import copy
+
+    policies = [parser]
+    for entry in parser.entries:
+        if entry.applies_to(_USER_AGENT):
+            policy = copy.copy(parser)
+            policy.entries = [entry]
+            policy.default_entry = None
+            policies.append(policy)
+    if directive == "can_fetch":
+        return all(policy.can_fetch(_USER_AGENT, url) for policy in policies)
+    values = [
+        getattr(policy, directive)(_USER_AGENT) for policy in policies
+    ]
+    values = [value for value in values if value is not None]
+    if not values:
+        return None
+    if directive == "crawl_delay":
+        return max(values)
+    if any(rate.requests <= 0 for rate in values):
+        raise AdapterError("Invalid robots request rate", "access")
+    return max(values, key=lambda rate: rate.seconds / rate.requests)
+
+
 def check_robots(url):
     import urllib.robotparser
 
@@ -2075,7 +2101,7 @@ def check_robots(url):
             )
         read_input(key)
     parser = _ROBOTS[origin]
-    if not parser.can_fetch(_USER_AGENT, url):
+    if not robots_directive(parser, "can_fetch", url):
         raise AdapterError(
             "Publisher robots excludes required Volkswagen AG input", "access"
         )
@@ -2130,7 +2156,7 @@ def read_input(key):
         origin = parsed.scheme + "://" + parsed.netloc
         parser = urllib.robotparser.RobotFileParser()
         parser.parse(body.decode("utf-8", "strict").splitlines())
-        delay = parser.crawl_delay(_USER_AGENT)
+        delay = robots_directive(parser, "crawl_delay")
         if delay is not None and delay > 6:
             with locked_budget():
                 state = load_budget()
@@ -2141,7 +2167,7 @@ def read_input(key):
                     )
                 state["observed_at"] = time.time()
                 save_budget(state)
-        rate = parser.request_rate(_USER_AGENT)
+        rate = robots_directive(parser, "request_rate")
         if rate and rate.seconds / rate.requests > 6:
             raise AdapterError(
                 "Stricter publisher request rate requires review", "access"

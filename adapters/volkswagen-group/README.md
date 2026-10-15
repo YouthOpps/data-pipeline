@@ -31,3 +31,19 @@ python -B adapters/volkswagen-group/test_adapter.py
 It retrieves and validates the entire nonempty current collection, emits its complete JSON on stdout and sends diagnostics to stderr. It needs no publication credentials or third-party packages. A copied adapter folder runs independently with the Python standard library. Live evidence must be consumed and validated in memory without writing dataset files. Publication behavior is reviewed without invoking production.
 
 Issue: [#161](https://github.com/YouthOpps/data-pipeline/issues/161). Historical source and durable-state decisions: [#117](https://github.com/YouthOpps/data-pipeline/issues/117). Independent acceptance and maintainer post-merge publication/site validation remain required; research and nonpublishing tests do not claim production publication.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.

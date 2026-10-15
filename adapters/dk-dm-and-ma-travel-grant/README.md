@@ -57,7 +57,7 @@ file, not a licence. Access challenges, explicit collection prohibitions,
 incomplete documents, unsafe redirects and failed required pages abort the run.
 Policy wording changes alone do not invalidate programme facts.
 
-Normal verified HTTPS and the identifying YouthOpp User-Agent remain enabled.
+Normal verified HTTPS and the identifying YouthOppsBot User-Agent remain enabled.
 Publisher requests, robots, redirects and retries share locked local pacing:
 at least six seconds between starts and at most ten starts in any rolling
 60 seconds, honoring longer Retry-After and robots delays. Separate machines
@@ -109,3 +109,19 @@ pair; failures preserve it and its last-success timestamp, updating only safe
 failure metadata. No cleanup write precedes successful collection, and no
 other source's files are touched. The live test remains a complete raw
 nonpublishing collection; production publication is reviewed statically.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.

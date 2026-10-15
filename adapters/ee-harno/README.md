@@ -90,7 +90,7 @@ remain scoped to the international scheme. PDF-only rates stay unverified.
 Current robots and linked official privacy/cookie policies are checked. The
 reviewed policies concern personal information and browser services; no general
 factual-collection prohibition was found. This is not an open licence to reproduce
-protected works. Normal TLS, the identifying YouthOpp User-Agent, refusal handling,
+protected works. Normal TLS, the identifying YouthOppsBot User-Agent, refusal handling,
 same-publisher redirects and complete-document checks remain enabled.
 
 Requests, redirects, retries and robots share a locked local allowance of at
@@ -159,3 +159,19 @@ calls independently publish the same autumn window. All three changed
 substantive fingerprints and the three affected call recipes were updated
 together; the earlier spring edition is replaced by this actual current call.
 No hour or publisher timezone is stated for this cutoff.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.

@@ -45,3 +45,19 @@ A successful refresh validates the complete nonempty collected inventory, then e
 Explicit timezone-aware deadlines expire strictly after their instant. For date-only deadlines without a documented publisher timezone, cleanup waits until the closing day has ended in every legal timezone: the current date in UTC-12 must be later than the closing date. This conservative boundary retains the full closing day without inventing a publisher timezone; deletion can be delayed up to 26 hours relative to the earliest civil closing-day boundary. Unsupported or ambiguous source clocks remain null deadlines; invalid timestamp fields fail validation before cleanup. If every collected record is expired, the valid nonempty retrieval publishes an empty successful replacement. A later empty upstream retrieval still fails and preserves that last-good pair.
 
 Fetch, parse, validation and publication failures preserve last-good data and success timestamps. Cleanup performs no separate deletion or remote write; publication updates only this source's data/metadata atomically, with the existing concurrent-update protection. The live test collects real inventory without publication; offline boundary checks and static publication review verify cleanup.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.

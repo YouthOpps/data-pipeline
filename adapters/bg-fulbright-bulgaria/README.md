@@ -41,3 +41,19 @@ The complete fresh nonempty collection is validated before filtering. Successful
 Offset-aware deadlines expire only after their instant. A date-only closing with no documented publisher timezone stays eligible through that date in every civil timezone; cleanup uses the conservative UTC-12 calendar boundary. Missing or ambiguous dates, record age, absence and an expired status alone do not justify expiry.
 
 All expired records from a valid nonempty refresh may leave an empty dataset. That empty result and success metadata are published atomically, and subsequent snapshot reads accept it. Empty upstream retrieval remains a failure. Fetch, parsing, validation and publication failure preserve the last-good dataset and success timestamp, including a previous empty success. First-run failure creates no published source folder. Failure metadata is source-scoped and does not claim durable success when metadata publication failed.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.

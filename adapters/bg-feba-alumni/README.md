@@ -81,3 +81,19 @@ closing-call language; a genuine titled call is retained even if its body also
 includes an interview. This uses current source context, never the 2023 date
 or any invented expiry. The live API content field is required and validated
 for candidate posts so missing body evidence cannot silently bypass this check.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.

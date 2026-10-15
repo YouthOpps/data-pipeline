@@ -133,3 +133,19 @@ refresh preserves last-good data and records failure metadata when possible;
 an oversized first publication creates no source folder. Invalid, truncated or
 oversized snapshots fail without overwriting last-good data. The original source-scoped atomic commit, conflict detection
 and failure-metadata behavior remain in place.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.
