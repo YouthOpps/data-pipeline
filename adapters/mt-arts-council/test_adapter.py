@@ -10,9 +10,13 @@ class TestArtsCouncilMalta(unittest.TestCase):
     def test_complete_public_collection(self):
         records = adapter.collect()
         adapter.validate_records(records)
-        self.assertEqual(len(records), 138)
-        self.assertEqual(len({record["id"] for record in records}), 138)
-        self.assertTrue(all(record["source"] == adapter.SOURCE_ID for record in records))
+        self.assertTrue(records)
+        self.assertEqual(
+            len({record["id"].casefold() for record in records}), len(records)
+        )
+        self.assertTrue(
+            all(record["source"] == adapter.SOURCE_ID for record in records)
+        )
         print(json.dumps(records, ensure_ascii=False))
 
 

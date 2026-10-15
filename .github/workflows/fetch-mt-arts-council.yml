@@ -41,15 +41,14 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish reviewed source
+        id: collect
         run: python -B adapters/mt-arts-council/adapter.py --publish
         env:
           DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          ARTSCOUNCILMALTA_PACING_BOOTSTRAP: >-
-            {"schema":1,"family":"youthopps-artscouncilmalta-publisher-v1","not_before":1791654089.0215094,"evidence":"https://github.com/YouthOpps/data-pipeline/issues/25#issuecomment-6100373626"}
           ARTSCOUNCILMALTA_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
       - name: Preserve inert publisher pacing state
-        if: always()
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: artscouncilmalta-pacing-state-${{ github.run_attempt }}
