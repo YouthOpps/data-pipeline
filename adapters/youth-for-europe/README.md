@@ -6,7 +6,7 @@ Standalone factual discovery from [Youth for Europe](https://youthforeurope.eu/)
 
 Reviewed on 14 October 2026: [robots.txt](https://youthforeurope.eu/robots.txt) has only MSNBot/bingbot five-second crawl delays, no rules excluding this adapter. The linked [privacy policy](https://youthforeurope.eu/privacy-policy/) concerns personal data, accounts and cookies; it contains no automated-access prohibition. Homepage, browse and account navigation disclosed no separate general reuse terms. No open content license is claimed. The adapter publishes attributed titles, original publisher links, native IDs/types, and explicitly labeled factual dates/locations/eligibility; summaries stay empty, and descriptions, images, personal contact details and downloadable documents are not republished. It does not submit forms, register accounts, load tracking assets or retrieve third-party resources.
 
-The advertised [REST index](https://youthforeurope.eu/wp-json/) exposes no public project collection. The advertised [RSS feed](https://youthforeurope.eu/feed/) contains blog articles and testimonials, not the opportunity inventory. Collection therefore uses the public native global browse and public project details. Robots are checked before every endpoint; denials, HTTP errors, broken native markup and incomplete pagination fail closed. Requests, redirects and retries share persistent source/host pacing and process serialization: at least 6.1 seconds between starts and at most ten starts per rolling minute; Retry-After and stricter robots delays are honored. The temporary pacing state survives separate local invocations and is never reset by collection.
+The advertised [REST index](https://youthforeurope.eu/wp-json/) exposes no public project collection. The advertised [RSS feed](https://youthforeurope.eu/feed/) contains blog articles and testimonials, not the opportunity inventory. Collection therefore uses the public native global browse and public project details. Robots are checked before every endpoint; denials, HTTP errors, broken native markup and incomplete pagination fail closed. Requests, redirects and retries share persistent source/host pacing and process serialization: at least 12.2 seconds between actual physical starts and at most five starts per rolling minute. Retry-After and stricter robots delays remain binding. The original publisher journal path/inode and lifecycle lock remain in use; state is extended, never discarded to obtain a fresh allowance.
 
 ## Inventory and provenance
 
@@ -52,7 +52,7 @@ and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
+pacing and backoff use the current stricter limits documented below; the durable budget identity is preserved. Existing
 disabled workflows remain disabled.
 
 ## Daily automation
@@ -67,7 +67,7 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
+Inventory page continuations and partitions wait at least 30 seconds after the
 previous inventory page finishes before fetching the next page in this process.
 This includes taxonomy/listing pages where applicable. The existing native
 transport still enforces its physical-request allowance across retries, redirects
@@ -101,3 +101,102 @@ Published metadata uses `display_name` = **Associazione Joint** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Durable pacing migration and bounded runtime
+
+This issue preserves the complete global browse and every individual detail,
+with all existing labeled factual fields, stable IDs, expiry rules and atomic
+source publication. After collecting details, a second complete browse must
+match the first exact native IDs, titles, URLs and types. Count/page consistency,
+duplicates or changed closing coverage fail rather than publish a partial index.
+No safe incremental cursor is established, so every run reconciles the full scope.
+
+The approved bounded research on 15 October 2026 fetched only current robots and
+one global browse page (both 200), confirming one page with six distinct projects
+and a native page size of 20. These are observations, never hardcoded limits.
+The complete current path is approximately nine base requests: robots, both
+browse frontiers and all six details. Future counts and pages are read from the
+publisher; stronger retained timing and complete remaining traversal must fit
+the phase budget before proceeding.
+
+The nonrenewable whole runtime is 45 minutes, collection 25 minutes, each publication
+phase 180 seconds and final trusted-state export 30 seconds. Normal publisher calls
+retain the existing 90 second timeout within the remaining phase; GitHub reads
+are bounded separately. The unchanged 180 minute job is an outer infrastructure
+cap, not a token lifetime. These internal deadlines keep the current measured
+frontier comfortably within the pre-minted one-hour App token; no late-token
+staging, scope reduction or job-cap increase is introduced. Slow/repeated-failure
+or enlarged frontiers fail safely when full work cannot fit. Daily 05:40 UTC is
+unchanged. Local and hosted publisher work must be serialized across machines.
+
+Every 429 stops the current collection after persisting at least 30 minutes of
+cooldown, exponentially increasing for new repeated observations, with any
+longer valid Retry-After or known embargo retained. Both the current physical
+interval and current inventory gap double, including already stricter values.
+Malformed, negative, nonfinite or stale timing cannot poison state; fallback
+still applies. An active retained 429 embargo fast-fails without new traffic;
+after expiry a bounded retry retains the slower gaps. A 429 alone is timed,
+not a permanent content refusal. Supported 503/transport retry policy remains
+bounded by the same nonrenewable phase. Every physical inventory retry or
+redirect also waits the retained page gap after the preceding response/error
+completes; detail requests retain their separate physical budget. Bounded body
+inspection precedes content redirects and the 429 error: a clear human-verification
+429 retains both timer and hard hold, while ordinary rate text remains timed.
+Body-read failure cannot erase an already retained 429 timer. Robots purpose is
+limited to literal `/robots.txt` at every hop, including redirects. Actual content 401/403/451, clear primary
+human-verification/refusal and valid robots Disallow retain a hard hold.
+Robots-only 4xx except 429 is unavailable REP rather than a content refusal;
+robots 5xx/network/TLS failure does not become unrestricted permission. Normal
+TLS, final advertised User-Agent, proxy and authentication headers are preserved.
+
+The original local journal had only starts, interval and until. Its known eight
+starts remain preserved through the approved two-request research extension,
+which retained inode 1097 and added both actual new starts. The richer state
+records completions, inventory timing, actual hard holds and newly observed 429
+strikes; `legacy_429_history: unknown` explicitly distinguishes unlogged past
+state from the new counter. Missing old fields do not establish that past
+Retry-After, strikes or refusals were absent. No old headers are claimed restored.
+
+Five original hosted attempts have no artifacts. Their complete exact run/head,
+job and log history is reviewed. Actual exact-job completion makes
+[run 38720083972](https://github.com/YouthOpps/data-pipeline/actions/runs/38720083972)
+the latest successful legacy attempt, after the higher-ID
+[run 38721259339](https://github.com/YouthOpps/data-pipeline/actions/runs/38721259339)
+failed earlier during publication. Run IDs and mutable update times do not
+establish chronology. The first hosted transition requires all five exact
+legacy identities and job inventories, zero original artifacts, and a separate
+maintainer-approved full actual native/local state marker. The [maintainer-approved full-state marker](https://github.com/YouthOpps/data-pipeline/issues/201#issuecomment-6195962246)
+carries canonical state SHA-256
+`d283961f45b0736dfcb6277acf41ddfd292a85548d61bd47c12279c1b22da224`.
+Its 24 conservative old/research/reservation/wire events represent nine native
+physical requests plus known prior history, not 24 native requests. The original
+native journal SHA-256 is
+`9410451e53ea7c957d482cb5a8efd1f2c263b671ff353ef31157d233d17c18f3`;
+the carried absolute completion/page guard is 1792078256.588203. Runtime adds
+fresh startup quiet and preserves all stronger constraints. This state-only
+approval does not enable or dispatch production.
+Unknown/changed history or missing marker is not a fresh bootstrap allowance.
+
+After the migration, the newest completed exact attempt must have its own
+trusted owned artifact; missing/corrupt/expired latest state never falls back to
+an older attempt or the legacy marker. Queued/current older-ID reruns retain
+exact prior-attempt source/head/workflow binding and actual job chronology.
+Restore occurs under the original lifecycle lock before source-snapshot reads
+or publisher access. Full numeric restrictions merge by MAX, starts by union
+and actual refusals by OR, with at least 60 seconds of startup quiet. Trusted
+state exports atomically in finally, including snapshot/auth/collection failure,
+while preserving failure exit status. Artifacts contain no records or secrets.
+
+The sole complete nonpublishing native test on 15 October 2026 passed at
+source revision SHA-256 `05428dde79bad163f5dff22708b5ac5f6c58fb133a55cf7ea7ac936eb0404496`:
+six actual raw records, five retained after expiry, and a controlled valid empty
+envelope all passed the actual current website consumer in RAM. Nine physical
+requests had a measured minimum gap of about 12.671 seconds, at most five starts per rolling minute,
+and a 94.731-second first-to-closing inventory completion guard. All actual
+source bodies and complete stdout were retained in private RAM, without datasets
+or publication credentials in files. The original journal inode 1097 survived.
+A subsequent artifact-only transport parameter correction, import ordering and
+prose spacing do not change the default publisher path; complete actual-response
+replay and independent owned-ZIP transport controls qualify that evidence reuse.
+Independent final code acceptance remains required; maintainer state approval
+and local success do not certify hosted publication.

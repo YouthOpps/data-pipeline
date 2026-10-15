@@ -1,7 +1,13 @@
 """One live, non-publishing collection test with complete JSON stdout."""
 
 import json
+import os
 import unittest
+
+if os.environ.get("DATA_SOURCE_TOKEN"):
+    raise RuntimeError(
+        "Live collection must not receive publication credentials"
+    )
 
 import adapter
 
