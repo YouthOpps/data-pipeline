@@ -70,3 +70,17 @@ Published metadata uses `display_name` = **BMW Group** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Hidden page content
+
+Challenge detection reads visible content and preserves nested suppression.
+Hidden attributes, `aria-hidden="true"`, inline display/visibility declarations and
+script/footer/navigation decorations do not create an access hold. Block starts
+close an open paragraph in HTML button scope, without losing suppression from
+an outer hidden ancestor. This is a bounded text inspector, not a full HTML5
+renderer or external stylesheet engine. Explicit
+visible child visibility and void elements retain their DOM behavior. Genuine
+primary verification or denial text still stops content access before a redirect,
+including HTTP 200, 302 and human-verification 429 responses. Existing holds and
+rate-limit budgets remain retained; this correction does not clear old state or
+certify a new publisher collection.
