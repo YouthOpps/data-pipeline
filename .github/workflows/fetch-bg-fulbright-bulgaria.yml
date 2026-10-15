@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-bg-fulbright-bulgaria.yml'
   workflow_dispatch:
   schedule:
-    - cron: '47 2/6 * * *'
+    - cron: '56 2 * * *'
 permissions:
   contents: read
 concurrency:

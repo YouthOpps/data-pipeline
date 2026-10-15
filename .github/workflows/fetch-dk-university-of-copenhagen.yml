@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-dk-university-of-copenhagen.yml'
   workflow_dispatch:
   schedule:
-    - cron: '43 0/6 * * *'
+    - cron: '37 6 * * *'
 permissions:
   contents: read
 concurrency:

@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-at-fulbright-austria.yml'
   workflow_dispatch:
   schedule:
-    - cron: '43 3/6 * * *'
+    - cron: '17 8 * * *'
 permissions:
   contents: read
 concurrency:

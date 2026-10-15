@@ -139,10 +139,19 @@ without inferring expiry from age, status or absence.
 Collection, parsing, validation and publication failures preserve last-good
 data and its success timestamp, and save sanitized failure metadata when safe.
 First-run failure creates no source folder. Failure to record durable metadata
-is explicitly reported. The matching workflow runs every six hours UTC, on
+is explicitly reported. The matching workflow runs once daily at 12:35 UTC, on
 changes to this adapter or its own workflow merged to main, and on manual
 dispatch. It preserves the repository/main guard, source-scoped credentials and
 serialized publication. Production Actions are not used for implementation QA.
+
+The daily schedule reduces repeated full-inventory retrieval from four scheduled
+runs to one per day. GitHub may delay scheduled runs, and a source-scoped merge
+or manual dispatch can still start an additional run. Each request retains the
+existing pacing and stricter publisher limits. This schedule change does not
+make collection incremental: known IDs alone do not prove that older calls are
+unchanged or that browse ordering is strictly newest-first. A future incremental
+implementation needs verified ordering/change coverage and periodic complete
+browse reconciliation before it can replace this full-inventory refresh.
 
 ## Bot identity
 
@@ -159,3 +168,32 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **12:35 UTC** (`35 12 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+### Pagination spacing
+
+Inventory page continuations and partitions wait at least 12 seconds after the
+previous inventory page finishes before fetching the next page in this process.
+This includes taxonomy/listing pages where applicable. The existing native
+transport still enforces its physical-request allowance across retries, redirects
+and detail requests, with stricter publisher limits and retained backoff taking
+precedence. The page guard does not raise the durable request interval for all
+subsequent article/detail requests or reset existing budget/refusal state.
+Inventory scope, parsing, validation and atomic publication are unchanged.
+
+The workflow currently creates its installation token before collection; that
+token has a one-hour lifetime. The prior successful 417-record run took about
+53 minutes. Page-only spacing avoids doubling the 417 detail-request waits, but
+adds time to the listing scan and leaves limited publication-token headroom.
+Larger inventories or slower responses can still exhaust that existing token
+lifetime; the three-hour job timeout does not extend it. No token-renewal
+behavior or timeout increase is claimed by this scheduling/pagination change.

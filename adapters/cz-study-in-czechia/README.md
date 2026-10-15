@@ -123,7 +123,7 @@ retry of a 503 waits at least thirty seconds and honors a longer `Retry-After`.
 and URL query strings.
 
 The workflow preserves its main/repository guard, source-specific push paths,
-manual dispatch, weekly schedule and family concurrency with cancellation
+manual dispatch, daily schedule and family concurrency with cancellation
 disabled. Its application command is solely `adapter.py --publish`; it does
 not run tests. Production execution is not used for implementation validation.
 
@@ -192,3 +192,24 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **02:17 UTC** (`17 2 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+### Pagination spacing
+
+Inventory page continuations and partitions wait at least 12 seconds after the
+previous inventory page finishes before fetching the next page in this process.
+This includes taxonomy/listing pages where applicable. The existing native
+transport still enforces its physical-request allowance across retries, redirects
+and detail requests, with stricter publisher limits and retained backoff taking
+precedence. The page guard does not raise the durable request interval for all
+subsequent article/detail requests or reset existing budget/refusal state.
+Inventory scope, parsing, validation and atomic publication are unchanged.

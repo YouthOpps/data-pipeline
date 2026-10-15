@@ -64,6 +64,24 @@ _APP_EXPIRY = 0
 _APP_CONFIGURATION = None
 INPUTS = {}
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -1928,15 +1946,17 @@ def navigate(root, url, replacements):
     _, action, fields = public_form(root, url)
     fields = [(key, value) for key, value in fields if key not in replacements]
     fields.extend(replacements.items())
-    body, completed, headers = fetch_public(
-        action, method="POST", payload=urllib.parse.urlencode(fields).encode(),
+    body, completed, headers = fetch_inventory_page(
+        fetch_public, action, method="POST",
+        payload=urllib.parse.urlencode(fields).encode(),
         headers={"Content-Type": "application/x-www-form-urlencoded", "Referer": url})
     return action, body, completed, headers
 
 
 def read_inventory(lang, initial=None):
     url = EN_LIST_URL if lang == "en" else SK_LIST_URL
-    body, completed, headers = initial if initial is not None else fetch_public(url)
+    body, completed, headers = (initial if initial is not None else
+                                fetch_inventory_page(fetch_public, url))
     root, first, pager = listing_page(body, url, headers)
     if lang == "en":
         if not any(n.attrs.get("href") == SK_LIST_URL for n in nodes(root, "a")):
@@ -2098,7 +2118,7 @@ def collect():
                             if urllib.parse.urljoin(base, n.attrs.get("href", ""))
                             == SOURCE_URL + "/database"})
     database_url = one(database_urls, "own database handoff")
-    initial_en = fetch_public(database_url)
+    initial_en = fetch_inventory_page(fetch_public, database_url)
     verify_current_terms()
     reconcile_own_study_pages()
     inventories = {"en": read_inventory("en", initial=initial_en),

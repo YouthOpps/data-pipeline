@@ -7,7 +7,7 @@ on:
       - '.github/workflows/fetch-ee-harno.yml'
   workflow_dispatch:
   schedule:
-    - cron: '53 0/6 * * *'
+    - cron: '56 4 * * *'
 permissions:
   contents: read
 concurrency:

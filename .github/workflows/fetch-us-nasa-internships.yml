@@ -1,5 +1,7 @@
 name: fetch-us-nasa-internships
 on:
+  schedule:
+    - cron: '11 6 * * *'
   workflow_dispatch:
   push:
     branches: [main]

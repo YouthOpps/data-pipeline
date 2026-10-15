@@ -90,8 +90,7 @@ diagnostics on stderr. It needs no publication credentials and writes no output
 files. The adapter's ordinary command also collects without publication.
 
 The matching workflow runs only in the upstream repository on main, after
-changes to this adapter or its workflow, by manual dispatch, and every six hours
-at minute 49. Its narrowly scoped GitHub App token targets only `data-source`.
+changes to this adapter or its workflow, by manual dispatch, and once daily at 12:59 UTC. Its narrowly scoped GitHub App token targets only `data-source`.
 Publication uses the adapter's `--publish` command and shared publication
 concurrency. A single atomic commit updates only this source's data and metadata.
 A first failed collection creates no source folder; later failures preserve
@@ -155,3 +154,17 @@ product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
 pacing, backoff and durable budget identities remain unchanged. Existing
 disabled workflows remain disabled.
+
+## Daily automation
+
+The scheduled refresh runs once daily at **12:59 UTC** (`59 12 * * *`).
+This fixed time was selected randomly within a staggered daily timetable; it
+is not randomized again on each run. Main-merge and manual triggers remain
+available, so this is one scheduled run per day, not a hard limit on all runs.
+GitHub can delay scheduled events; the existing publication concurrency
+serializes source jobs when they queue. Existing disabled workflows remain
+disabled until their access hold is separately resolved.
+
+The current collector has no paginated inventory to delay. Its existing request
+pacing and publisher restrictions remain in force; this source changes only its
+daily automation schedule.

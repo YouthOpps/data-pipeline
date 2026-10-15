@@ -7,7 +7,7 @@ on:
       - adapters/bg-insait/**
       - .github/workflows/fetch-bg-insait.yml
   schedule:
-    - cron: '30 4 * * 2'
+    - cron: '33 4 * * *'
   workflow_dispatch:
 
 permissions:

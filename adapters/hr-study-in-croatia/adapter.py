@@ -58,6 +58,24 @@ _RUN_END = _PHASE_END = None
 _PHASE_NAME = None
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -1512,7 +1530,11 @@ def html_fingerprint(body, key=None):
 def read_input(key):
     info = INPUTS[key]
     try:
-        status, headers, body = fetch_public(info["url"])
+        status, headers, body = (
+            fetch_inventory_page(fetch_public, info["url"])
+            if key == "news" or key.startswith("news-page")
+            else fetch_public(info["url"])
+        )
     except AdapterError as error:
         raise AdapterError(
             "Required publisher input " + key + ": " + safe_error(error),

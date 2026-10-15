@@ -43,6 +43,24 @@ FAMILY = "youthopps-dzs-publisher-v1"
 FAMILY_SOURCES = {"cz-study-in-czechia", "cz-dzs"}
 COLLECTION_TIMEOUT = 10800
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -1075,7 +1093,7 @@ def discover_programmes():
         url = SOURCE_URL + "?" + query
         page, total, seen = 1, None, set()
         while True:
-            root = read_public_page(url)
+            root = fetch_inventory_page(read_public_page, url)
             totals = re.findall(r"Results found:\s*(\d+)", root.text())
             empty = (
                 "No scholarships found for the given criteria" in root.text()

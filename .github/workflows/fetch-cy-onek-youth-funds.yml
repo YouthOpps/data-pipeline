@@ -7,7 +7,7 @@ on:
       - adapters/cy-onek-youth-funds/**
       - .github/workflows/fetch-cy-onek-youth-funds.yml
   schedule:
-    - cron: '30 4 * * 2'
+    - cron: '34 20 * * *'
   workflow_dispatch:
 
 permissions:

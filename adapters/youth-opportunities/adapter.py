@@ -44,6 +44,24 @@ _USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 _ROBOTS_CACHE = {}
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 def _feed_text(value):
     return " ".join(html.unescape(re.sub(r"<[^>]*>", " ", value or "")).split())
 
@@ -731,8 +749,8 @@ def collect_inventory():
     category_page = 1
     expected_categories = None
     while True:
-        entries, headers = read_json(
-            root + f"categories?per_page=100&page={category_page}")
+        entries, headers = fetch_inventory_page(
+            read_json, root + f"categories?per_page=100&page={category_page}")
         try:
             total, pages = int(headers["X-WP-Total"]), int(
                 headers["X-WP-TotalPages"])
@@ -759,7 +777,8 @@ def collect_inventory():
     expected_pages = expected_size = None
     while True:
         url = SOURCE_URL + (f"?sf_paged={page}" if page > 1 else "")
-        listing = BrowsePage(fetch_source(url, check_robots(url)))
+        listing = BrowsePage(fetch_inventory_page(
+            fetch_source, url, check_robots(url)))
         pages = max(listing.pages)
         advertisements += listing.advertisements
         if expected_pages is None:
@@ -781,7 +800,8 @@ def collect_inventory():
             break
         page += 1
     # Detect shifts while collecting the paginated index before detail retrieval.
-    first = BrowsePage(fetch_source(SOURCE_URL, check_robots(SOURCE_URL)))
+    first = BrowsePage(fetch_inventory_page(
+        fetch_source, SOURCE_URL, check_robots(SOURCE_URL)))
     if first.entries != cards[:expected_size] or max(
             first.pages) != expected_pages:
         raise AdapterError("Publisher browse index changed during pagination")

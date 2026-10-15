@@ -7,7 +7,7 @@ on:
       - adapters/de-mercedes-benz/**
       - .github/workflows/fetch-de-mercedes-benz.yml
   schedule:
-    - cron: '30 4 * * 2'
+    - cron: '59 19 * * *'
   workflow_dispatch:
 
 permissions:

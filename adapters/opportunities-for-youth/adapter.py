@@ -47,6 +47,24 @@ _MAX_SNAPSHOT_BYTES = 20 * 1024 * 1024
 _MAX_GITHUB_BLOB_BYTES = 32 * 1024 * 1024
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 def _feed_text(value):
     return " ".join(html.unescape(re.sub(r"<[^>]*>", " ", value or "")).split())
 
@@ -782,8 +800,8 @@ def collect_inventory():
     taxonomy = {}
     category_page = 1
     while True:
-        entries, total, pages = read_api(
-            root + f"categories?per_page=100&page={category_page}")
+        entries, total, pages = fetch_inventory_page(
+            read_api, root + f"categories?per_page=100&page={category_page}")
         for entry in entries:
             if entry["id"] in taxonomy:
                 raise AdapterError("Duplicate publisher category")
@@ -805,8 +823,8 @@ def collect_inventory():
     expected_total = expected_pages = None
     page = 1
     while True:
-        entries, total, pages = read_api(SOURCE_URL + "?" + query +
-                                         f"&page={page}")
+        entries, total, pages = fetch_inventory_page(
+            read_api, SOURCE_URL + "?" + query + f"&page={page}")
         if expected_total is None:
             expected_total, expected_pages = total, pages
         if (total, pages) != (expected_total, expected_pages):

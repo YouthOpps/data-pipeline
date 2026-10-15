@@ -60,6 +60,24 @@ _RUN_END = _PHASE_END = None
 _PHASE_NAME = None
 
 
+_PAGE_COMPLETED = None
+
+
+def fetch_inventory_page(fetch, *args, **kwargs):
+    """Space logical inventory pages without changing native detail pacing."""
+    global _PAGE_COMPLETED
+    if _PAGE_COMPLETED is not None:
+        while True:
+            wait = _PAGE_COMPLETED + 12 - time.monotonic()
+            if wait <= 0:
+                break
+            time.sleep(wait)
+    try:
+        return fetch(*args, **kwargs)
+    finally:
+        _PAGE_COMPLETED = time.monotonic()
+
+
 class Node:
     """Minimal HTML tree retaining official links and structural boundaries."""
 
@@ -1508,7 +1526,7 @@ def read_pages():
         if len(seen) >= 40:
             raise AdapterError("News pagination limit exceeded", "parse")
         seen.add(url)
-        root, _ = read_html(url)
+        root, _ = fetch_inventory_page(read_html, url)
         cards = nodes(root, "div", "blog-inner")
         if not cards:
             raise AdapterError("Missing news listing cards: " + url, "parse")
@@ -1533,8 +1551,8 @@ def read_pages():
     seen_events = set()
     for page in range(1, 101):
         check_robots(endpoint)
-        status, _, body = request_bytes(
-            endpoint, method="POST", publisher=True,
+        status, _, body = fetch_inventory_page(
+            request_bytes, endpoint, method="POST", publisher=True,
             payload=calendar_parameters(calendar_body, page),
             headers={"Content-Type": "application/x-www-form-urlencoded"})
         if status != 200:

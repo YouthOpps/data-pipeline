@@ -7,7 +7,7 @@ on:
       - adapters/pl-frse/**
       - .github/workflows/fetch-pl-frse.yml
   schedule:
-    - cron: '13 8 * * 2'
+    - cron: '45 7 * * *'
   workflow_dispatch:
 
 permissions:
