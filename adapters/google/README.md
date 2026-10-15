@@ -244,3 +244,20 @@ records only new observations; unknown earlier rate history remains explicit.
 No additional publisher requests or production Actions were used for
 validation. The maintainer-approved workflow seed and runtime quiet guard
 preserve this history before the automatic merge-push production attempt.
+
+## HTTP 429 HEAD refusal handling
+
+On HTTP 429 only, a genuine initial, unsuppressed HEAD title containing
+`Access denied`, `Just a moment`, `Attention required` or `CAPTCHA` retains
+an access hold alongside the existing adaptive cooldown. Ordinary rate-limit
+warnings remain timed restrictions. Hidden, footer/navigation, nested, second
+or post-body HEAD titles do not supply this additional refusal evidence.
+A bounded obvious-HTML prefix also qualifies this 429-only check when the
+response MIME is absent or wrong; ordinary successful-response handling is
+unchanged. Existing access holds, stronger embargoes, retained state and request/page
+spacing remain preserved.
+
+This conditional maintenance uses actual-function inert transport controls
+and qualified prior complete native evidence; it does not claim a new live
+collection or alter source facts, identifiers, expiry, publication, caps or
+schedules. No publisher request or production Action validates this fix.

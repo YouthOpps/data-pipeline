@@ -859,7 +859,82 @@ class VisibleText(HTMLParser):
         if not self.stack or not any(self.stack[-1][1:]):
             self.text.append(data)
 
+
+def has_429_head_refusal(body, headers):
+    """Recognize a qualified HEAD refusal only for the caller's 429 path."""
+    prefix = body[:512].decode("utf-8", "replace")
+    obvious_html = re.match(
+        r"^[\s\ufeff]*(?:<!doctype\s+html\b|"
+        r"<(?:html|head|title|body|main|article|section|div|p|form|h[1-6])"
+        r"(?:\s|>))", prefix, re.I,
+    )
+    if (
+        "html" not in headers.get("Content-Type", "").lower()
+        and not obvious_html
+    ):
+        return False
+
+    class HeadTitle(VisibleText):
+        """Read only the first unsuppressed HEAD's immediate TITLE."""
+
+        def __init__(self):
+            super().__init__()
+            self.title = []
+            self.head_seen = False
+            self.head_depth = None
+            self.body_started = False
+
+        def handle_starttag(self, tag, attrs):
+            if tag not in {
+                "html", "head", "title", "meta", "link", "base",
+                "style", "script", "noscript", "template",
+            }:
+                self.body_started = True
+            if (
+                tag == "head" and not self.head_seen
+                and not self.body_started
+                and [frame[0] for frame in self.stack] in ([], ["html"])
+            ):
+                self.head_seen = True
+                self.head_depth = len(self.stack) + 1
+            super().handle_starttag(tag, attrs)
+
+        def handle_endtag(self, tag):
+            super().handle_endtag(tag)
+            if tag == "head":
+                self.head_depth = None
+
+        def handle_data(self, data):
+            if (
+                data.strip() and self.head_depth is None
+                and (not self.stack or not any(self.stack[-1][1:]))
+                and not any(
+                    frame[0] in {"head", "title"} for frame in self.stack
+                )
+            ):
+                self.body_started = True
+            if (
+                self.head_depth is not None and not self.body_started
+                and len(self.stack) == self.head_depth + 1
+                and self.stack[-1][0] == "title"
+                and self.stack[-2][0] == "head"
+                and not any(self.stack[-1][1:])
+            ):
+                self.title.append(data)
+
+    parser = HeadTitle()
+    parser.feed(body.decode("utf-8", "replace"))
+    title = " ".join(" ".join(parser.title).lower().split())
+    return bool(re.search(
+        r"just a moment|attention required|access denied|captcha", title, re.I
+    ))
+
+
 def reject_visible_challenge(body, headers, *, challenge_only=False):
+    if challenge_only and has_429_head_refusal(body, headers):
+        retain_publisher_hold()
+        raise AdapterError("Visible publisher challenge or denial", "access")
+
     # A challenge redirect must not escape inspection through a wrong MIME.
     prefix = body[:512].decode("utf-8", "replace")
     obvious_html = re.match(
