@@ -164,3 +164,24 @@ value is supported by the complete native ledger, while historical rate/refusal
 knowledge remains unknown. A new unowned attempt cannot reuse the legacy
 exception. The workflow carries the exact approved MAX mapping; production
 publication and live-site verification remain separate maintainer checks.
+
+
+## Unassessed rate-limit policy failure (issue #275)
+
+A 429 response can exceed supported counter, timing or numeric limits before
+its increased restrictions are calculated or saved. Such an assessment failure
+now makes the publisher process permanently unhealthy and leaves the already
+durable pre-request `in_flight` barrier unsettled. Completion cannot replace it
+with settled older limits. Further requests, same-process collection reentry,
+owned export and fresh-process restoration with an older settled artifact must
+refuse this unresolved attempt. Ordinary supported 429 responses still retain
+their increased intervals, page spacing and cooldown before reading a body.
+
+Verification uses actual transport functions with an inert opener and private
+journals, including counter 99, overflowing valid page spacing, pre-request
+physical-spacing rejection, stronger supported limits, and fresh-process
+restoration against older settled state. No publisher request or new native
+collection is used for this conditional error-path repair. The complete earlier
+native result and production comparison from issue #272 remain evidence only
+for unchanged collection, parsing, facts, validation, expiry and publication;
+this maintenance does not independently certify a new source refresh.
