@@ -39,7 +39,7 @@ PUBLISHER_TYPE = "nonprofit"
 ATTRIBUTION = "SAIA, n. o. – www.saia.sk"
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
-_USER_AGENT = "YouthOpp/1.0 (+https://github.com/YouthOpps/data-pipeline)"
+_USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 CATEGORIES = {"scholarships", "internships", "volunteering", "training", "jobs", "competitions", "grants", "fellowships", "other"}
 FAMILY = "saia-publisher-pacing"
 COLLECTION_TIMEOUT = 270 * 60
@@ -1437,6 +1437,32 @@ def prepare_collection():
     _STATE_TRUSTED = True
 
 
+def robots_directive(parser, directive, url=None):
+    """Retain native policy and every applicable product group's restriction."""
+    import copy
+
+    policies = [parser]
+    for entry in parser.entries:
+        if entry.applies_to(_USER_AGENT):
+            policy = copy.copy(parser)
+            policy.entries = [entry]
+            policy.default_entry = None
+            policies.append(policy)
+    if directive == "can_fetch":
+        return all(policy.can_fetch(_USER_AGENT, url) for policy in policies)
+    values = [
+        getattr(policy, directive)(_USER_AGENT) for policy in policies
+    ]
+    values = [value for value in values if value is not None]
+    if not values:
+        return None
+    if directive == "crawl_delay":
+        return max(values)
+    if any(rate.requests <= 0 for rate in values):
+        raise AdapterError("Invalid robots request rate", "access")
+    return max(values, key=lambda rate: rate.seconds / rate.requests)
+
+
 def check_robots(url):
     import urllib.robotparser
     parsed = urllib.parse.urlsplit(public_url(url))
@@ -1456,11 +1482,11 @@ def check_robots(url):
     parser = _ROBOTS[origin]
     if parser is None:
         return
-    if not parser.can_fetch(_USER_AGENT, url):
+    if not robots_directive(parser, "can_fetch", url):
         block_publisher()
         raise AdapterError("Publisher robots excludes required route", "access")
-    delay = parser.crawl_delay(_USER_AGENT) or 6
-    rate = parser.request_rate(_USER_AGENT)
+    delay = robots_directive(parser, "crawl_delay") or 6
+    rate = robots_directive(parser, "request_rate")
     if rate:
         if rate.requests <= 0:
             raise AdapterError("Invalid robots rate", "access")

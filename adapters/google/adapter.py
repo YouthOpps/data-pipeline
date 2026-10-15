@@ -42,10 +42,7 @@ SOURCE_NAME = "Google — student and early-career programme information"
 
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
-_USER_AGENT = (
-    "YouthOpps/1.0 (+https://github.com/YouthOpps/data-pipeline; "
-    "public opportunity metadata)"
-)
+_USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 CATEGORIES = {
     "scholarships",
     "grants",
@@ -1980,7 +1977,9 @@ def groups(body):
     return result
 
 
-def rep_allowed(body, url, agent="YouthOpps"):
+def rep_allowed(body, url, agent=None):
+    if agent is None:
+        agent = _USER_AGENT.split("/", 1)[0]
     p = urllib.parse.urlsplit(url)
     if not (
         p.scheme == "https"
@@ -2047,7 +2046,9 @@ def check_robots(url):
     body = _ROBOTS[origin]
     if body is None:
         return
-    if not rep_allowed(body, url):
+    if not (
+        rep_allowed(body, url) and rep_allowed(body, url, agent="YouthOpps")
+    ):
         raise AdapterError("Publisher robots excludes required input", "access")
     # Unknown rate extensions never silently relax the six-second family limit.
     for raw in body.decode("utf-8-sig", "strict").splitlines():

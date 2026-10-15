@@ -41,7 +41,7 @@ CATEGORIES = (
     "other",
 )
 _GITHUB = "https://api.github.com/repos/YouthOpps/data-source"
-_USER_AGENT = "YouthOpp/1.0 (+https://github.com/YouthOpps/data-pipeline)"
+_USER_AGENT = "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
 _ROBOTS_CACHE = {}
 _MAX_SNAPSHOT_BYTES = 20 * 1024 * 1024
 _MAX_GITHUB_BLOB_BYTES = 32 * 1024 * 1024
@@ -280,27 +280,34 @@ def check_robots(url):
     if (directives and not any(g["agents"] for g in groups) and
             not all(line.startswith("sitemap:") for line in directives)):
         raise AdapterError("Robots policy is unavailable or invalid", "access")
-    specific = [g for g in groups if "youthopp" in g["agents"]]
-    selected = specific or [g for g in groups if "*" in g["agents"]]
+    agent = _USER_AGENT.split("/", 1)[0].lower()
+    specific = [g for g in groups if agent in g["agents"]]
+    legacy = [g for g in groups if "youthopp" in g["agents"]]
+    policies = [policy for policy in (specific, legacy) if policy]
+    if not policies:
+        policies = [[g for g in groups if "*" in g["agents"]]]
     path = parsed.path + ("?" + parsed.query if parsed.query else "")
-    matches = []
-    for g in selected:
-        for directive, pattern in g["rules"]:
-            if not pattern:
-                continue
-            expression = ("^" + ".*".join(
-                re.escape(part)
-                for part in pattern.removesuffix("$").split("*")) +
-                          ("$" if pattern.endswith("$") else ""))
-            if re.search(expression, path):
-                matches.append((
-                    len(pattern.replace("*", "").removesuffix("$")),
-                    directive == "allow",
-                ))
-    if matches and not max(matches)[1]:
-        raise AdapterError("Robots policy disallows this source endpoint",
-                           "access")
-    return max([6] + [g["delay"] for g in selected])
+    for selected in policies:
+        matches = []
+        for g in selected:
+            for directive, pattern in g["rules"]:
+                if not pattern:
+                    continue
+                expression = ("^" + ".*".join(
+                    re.escape(part)
+                    for part in pattern.removesuffix("$").split("*")) +
+                              ("$" if pattern.endswith("$") else ""))
+                if re.search(expression, path):
+                    matches.append((
+                        len(pattern.replace("*", "").removesuffix("$")),
+                        directive == "allow",
+                    ))
+        if matches and not max(matches)[1]:
+            raise AdapterError("Robots policy disallows this source endpoint",
+                               "access")
+    return max(
+        [6] + [g["delay"] for policy in policies for g in policy]
+    )
 
 
 def make_record(

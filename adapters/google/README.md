@@ -136,3 +136,23 @@ bounded standard-library gzip decoder now applies to every reviewed publisher
 route. Wire and decoded byte limits/accounting, fingerprints, robots checks and
 transport policy remain enforced; unsupported encodings still fail with the
 reviewed route in evidence.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.
+
+Google access also retains the previous YouthOpps policy result, including its
+wildcard fallback. A new YouthOppsBot Allow therefore does not override a
+previously applicable wildcard Disallow; this intentionally remains blocked.

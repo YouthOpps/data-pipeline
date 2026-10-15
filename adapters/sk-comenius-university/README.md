@@ -229,3 +229,19 @@ conflicting historic body years/dates still exclude them. Current sitemap
 routes retain the same bounded programme frontier. All 15 profile facts and
 required 39 routes remain unchanged; material PDF and other unmodified guards
 retain their existing exact fingerprints. No content or access refusal is skipped.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.

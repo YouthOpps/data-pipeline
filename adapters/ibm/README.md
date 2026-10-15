@@ -66,3 +66,19 @@ fails. A previously successful empty subset remains a valid last-good snapshot.
 Fetch, parse, validation and publication failures preserve last-good data and
 its success timestamp; only safe failure metadata may change. The sole live test
 continues to emit the complete unfiltered publisher collection without publishing.
+
+## Bot identity
+
+This adapter sends the following identifying HTTP header:
+
+```http
+User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
+```
+
+The [bot information page](https://youthopps.org/bot/) explains the project
+and provides contact and indexing-removal information. This identity does not
+grant source access or clear retained refusals. Robots checks use the advertised
+product token. Applicable current and legacy product groups must both permit
+access; restrictive rate and delay directives remain effective. Native
+pacing, backoff and durable budget identities remain unchanged. Existing
+disabled workflows remain disabled.
