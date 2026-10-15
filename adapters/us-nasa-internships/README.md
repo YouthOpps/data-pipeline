@@ -12,7 +12,9 @@ to this programme overview. No application deadline is currently extracted.
 Run `python -B adapter.py` for non-publishing collection metadata or
 `python -B test_adapter.py` for the complete validated live JSON collection.
 `python -B adapter.py --publish` is reserved for authorized production automation.
-Requests are paced at least six seconds apart and robots delays are honored.
+Requests retain at least 12.2 seconds from physical completion to the next
+physical start, at most five starts per rolling 60 seconds, and any stronger
+robots restriction or durable embargo.
 
 NASA's official [Images and Media Usage Guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/)
 distinguish NASA informational material from protected identifiers and third-party
@@ -57,8 +59,8 @@ and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+pacing and backoff restrictions are retained in the source family below.
+This migration does not clear refusals or enable a workflow.
 
 ## Daily automation
 
@@ -70,9 +72,10 @@ GitHub can delay scheduled events; the existing publication concurrency
 serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
-The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+The collector has no paginated inventory. The assigned programme page is a
+detail page, so its redirects retain ordinary physical spacing; literal robots
+requests do too. Any actual inventory attempt must use the separate 30-second
+completion guard, including every physical redirect. The schedule is unchanged.
 
 ## Workflow concurrency
 
@@ -89,3 +92,131 @@ Published metadata uses `display_name` = **NASA** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+
+## Durable pacing and interrupted requests
+
+The family is `youthopps-us-nasa-internships-publisher-v1`. Schema 3 records an
+immutable flight identifier and durably writes `in_flight: true` before any
+publisher transport. Response restrictions are saved while that flag remains
+true: Retry-After, 429 slowdown, content 401/403/451, visible challenges, and
+new or cached robots decisions. Only the matching healthy completion may write
+false. Every failed state save is sticky for this process; completion cleanup
+cannot overwrite it. The strongest failed constraints are retained in memory.
+A fresh process refuses an unsettled local journal or newest owned artifact;
+merging an older complete artifact cannot clear pending state.
+
+A state-write failure also attempts to invalidate only the safely owned current
+journal inode through its validated descriptor. Pending state remains the
+protection if cleanup itself fails. Existing unsafe owners, modes, symlinks or
+hardlinks are preserved and rejected. Artifact output holds its owned descriptor
+through serialization and readiness signaling, truncating before unlink or a
+false signal on failure. A failed unlink or readiness write cannot leave valid
+JSON on that descriptor. The workflow uploads only a successfully signaled
+owned artifact, and missing newest state never falls back to older state.
+
+A 429 ends this collection without an immediate retry. Both persisted physical
+and inventory intervals double from their current values, with at least an
+1800-second exponentially increasing cooldown and any longer valid Retry-After.
+An unrepresentable observed 429 slowdown leaves the flight unsettled and the
+process unusable; completion cannot discard that response constraint.
+Malformed, nonfinite, negative, stale or unsupported Retry-After alone adds no
+access hold. Ordinary rate-warning text remains timed; genuine visible human
+verification or a genuine unsuppressed refusal HEAD title retains a hold.
+Literal robots 4xx other than 429 means unavailable REP; content 401/403/451,
+robots Disallow, actual challenges and stronger native policy still stop.
+Current and legacy bot groups must both permit access. No identity switch,
+verification bypass or alternative source route is used.
+
+## Exact legacy transition and local serialization
+
+The old adapter kept monotonic pacing only in process memory. Its six recovered
+completed attempts have no owned state artifacts. Their exact job starts and
+completions are conservative historical bounds, not reconstructed HTTP starts
+or Retry-After. Schema 3 therefore retains
+`legacy_rate_history_unknown: true`; a new observed rate counter never claims
+lifetime zero. No authentic older durable schema is silently upgraded.
+
+The one-off legacy transition is disabled until an explicit maintainer approval
+binds the exact six run/head/job records and full conservative state. It is not
+a generic empty-family bootstrap. A new run, rerun, changed job or unexpected
+artifact invalidates that exception. After the first modern run, the newest
+exact owned artifact, digest, main head and attempt/job chronology are mandatory,
+including a previous completed attempt of an older queued rerun.
+
+Every local execution first requires the actual workflow to be paused and the
+fresh complete family history to contain no active or queued collector. History
+and reviewed state are read before creating a journal. Stable source locks
+serialize local callers. After startup quiet, local execution rechecks the
+actual disabled workflow immediately before its first publisher request.
+Production validates the exact executing main job and
+head, and restores state before the data-source snapshot. A first production
+handoff separately requires maintainer approval of the full native MAX; it may
+not omit the local test's requests, restrictions or unfinished flights.
+
+## Time limits and verification status
+
+The existing job limit remains 30 minutes. Stricter internal limits are 900
+seconds for collection, 1290 for the whole execution and 30 reserved for export;
+the actual hosted job start can only shorten them. The publication token is
+still created before the source command. The complete original reader has two
+assigned HTTP roots: robots and one programme HTML document. Redirects and the
+legacy bounded ordinary-network attempts may add physical requests; two roots
+is not a measured two-request claim. No 429, actual denial, challenge, TLS or
+state-write failure is retried. Stronger retained pacing can make a later run
+fail closed within these unchanged outer limits; scope is never truncated.
+
+The migration is not yet approved for publisher access or production. Offline
+controls use inert responses and private journals. Historical success timings
+are partial evidence only; they do not certify the new spacing or fresh current
+consumer behavior. A separately released sole original native test must retain
+all actual headers, bodies, available partial bytes, stdout, records and every
+saved state in private RAM, and pass independent current-consumer checks.
+Normal programme parsing, identifiers, expiry and publication error handling
+remain unchanged. No fresh source request or live journal write was used to
+prepare this implementation.
+
+## Native evidence and production approval: 15 October 2026
+
+The preceding verification status records the pre-access stage. The maintainer
+subsequently approved the exact local transition in
+[comment 6202384346](https://github.com/YouthOpps/data-pipeline/issues/269#issuecomment-6202384346)
+and released one original native test in
+[comment 6202421418](https://github.com/YouthOpps/data-pipeline/issues/269#issuecomment-6202421418).
+That unchanged test passed: one programme record from two complete HTTP 200
+responses. Its 85-second duration includes restoration and startup quiet.
+Physical starts were 12.558 seconds apart; response completion to the next
+physical start was 12.355 seconds, with two starts in the rolling minute.
+No inventory request was needed. All actual headers, bodies, stdout and nine
+saved budget snapshots were retained in private RAM.
+
+The external controller then exited with failure in its artificial expired
+fixture: a date-only deadline was rejected by the unchanged timestamp validator.
+That failed controller receipt remains preserved. An offline supplement replayed
+the same retained actual output with a valid expired timestamp on a derived
+copy, without another source request or native test. Every actual record field
+matched the original parser on the genuine HTML; the current website consumer
+accepted one raw record, one expiry-filtered record and an empty derived subset.
+All three consumer dependencies were bound. Independent review accepted the
+original test and qualified offline supplement; the controller itself was not
+relabeled successful.
+
+The maintainer separately approved the exact full-state first-production handoff
+in [comment 6202558732](https://github.com/YouthOpps/data-pipeline/issues/269#issuecomment-6202558732).
+Its 21 state witnesses preserve nine save arguments, nine persisted states,
+the original legacy state, the terminal state and the pre-wire state. The 14
+conservative timing observations comprise six historical job completion bounds,
+two reservations, two actual wire starts, two response-open observations and two
+response completions. These observations describe two physical requests. Four
+pending snapshots were settled only by their two matching actual requests,
+complete responses and durable completion writes. Legacy rate history remains
+unknown; no absent historical counter is interpreted as lifetime zero.
+
+The workflow carries only that approved full-state envelope. Runtime restoration
+keeps all stronger constraints and at least 60 seconds of fresh startup quiet.
+Production still requires the maintainer-controlled enable-before-merge and its
+single automatic source run, followed by owned-state and published-pair checks.
+The native evidence and configuration approval do not establish production or
+website delivery success. Normal parsing, identifiers, expiry and publication
+behavior remain unchanged; the supplement and state review made no additional
+publisher requests.
