@@ -1,0 +1,112 @@
+name: Fetch IKY factual programmes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - adapters/gr-iky/**
+      - .github/workflows/fetch-gr-iky.yml
+  schedule:
+    - cron: '11 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  queue: max
+  group: youthopps-iky-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: >-
+      github.repository == 'YouthOpps/data-pipeline' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate data-source publication
+        id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.WEBSITE_APP_ID }}
+          private-key: ${{ secrets.WEBSITE_APP_PRIVATE_KEY }}
+          owner: YouthOpps
+          repositories: data-source
+          permission-contents: write
+      - name: Collect and publish reviewed source
+        run: python -B adapters/gr-iky/adapter.py --publish
+        env:
+          DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          IKY_PACING_BOOTSTRAP: >-
+            {
+              "schema": 1,
+              "family": "youthopps-iky-publisher-v1",
+              "not_before": 1792078850.2557485,
+              "evidence": "https://github.com/YouthOpps/data-pipeline/issues/40#issuecomment-6196309193",
+              "state": {
+                "schema": 1,
+                "family": "youthopps-iky-publisher-v1",
+                "observed_at": 1792078790.2557485,
+                "not_before": 1792078850.2557485,
+                "starts": [
+                  1792077947.2367547,
+                  1792077961.01042,
+                  1792077974.5229838,
+                  1792077987.2474954,
+                  1792077999.8253832,
+                  1792078013.2042096,
+                  1792078026.8136208,
+                  1792078047.058642,
+                  1792078060.82024,
+                  1792078074.3758538
+                ],
+                "blocked": true,
+                "interval": 12.2,
+                "page_interval": 30,
+                "rate_limit_strikes": 0,
+                "rate_limit_until": 0,
+                "completed": 1792078074.9985216,
+                "html_global_hold": false,
+                "refusal_scope": {
+                  "migration": "iky-public-html-api401-v1",
+                  "policy_sha256": "8f51df44ea3ebbb4269f29f001bb8cdd209939b44ecda24bab92c6bc7e3ddb58",
+                  "legacy_state_sha256": "641e94aecb86781378bc26f15a14dc5f8afdcb5ee3e45969a6265c8320bf2183",
+                  "legacy_state": {
+                    "schema": 1,
+                    "family": "youthopps-iky-publisher-v1",
+                    "observed_at": 1792074891.7610598,
+                    "not_before": 1792074236.2626233,
+                    "starts": [
+                      1792074886.7592063
+                    ],
+                    "blocked": true,
+                    "interval": 12.2,
+                    "page_interval": 30,
+                    "rate_limit_strikes": 0,
+                    "rate_limit_until": 0,
+                    "completed": 1792074891.7610598
+                  },
+                  "legacy_raw_base64": "eyJzY2hlbWEiOjEsImZhbWlseSI6InlvdXRob3Bwcy1pa3ktcHVibGlzaGVyLXYxIiwib2JzZXJ2ZWRfYXQiOjE3OTIwNzQ4OTEuNzYxMDU5OCwibm90X2JlZm9yZSI6MTc5MjA3NDIzNi4yNjI2MjMzLCJzdGFydHMiOlsxNzkyMDc0ODg2Ljc1OTIwNjNdLCJibG9ja2VkIjp0cnVlLCJpbnRlcnZhbCI6MTIuMiwicGFnZV9pbnRlcnZhbCI6MzAsInJhdGVfbGltaXRfc3RyaWtlcyI6MCwicmF0ZV9saW1pdF91bnRpbCI6MCwiY29tcGxldGVkIjoxNzkyMDc0ODkxLjc2MTA1OTh9",
+                  "refused_url": "https://www.iky.gr/wp-json/wp/v2/pages?slug=didaktorikes-ypotrofies-espa-2014-2020%2Cdidaktorikes-ypotrofies-espa-2021-2027%2Cdidaktorikes-ypotrofies-i-k-y-sto-evro%2Cdorea-dionysiou-angelopoulou%2Cefpatheis-koinonikes-omades-eko-espa-2021-2027%2Ceis-mnimin-marias-zaousi%2Cekoiky%2Cellino-galliki-synergasia%2Cellino-vretaniki-synergasia%2Cellinovretanikis%2Cenischysi-symmetochis-se-diethneis-diag%2Cerevna-epi-florentias%2Cfani-sarigianni%2Ciky-daad%2Ciky-evdap%2Ciky-fulbright%2Cklilodotima-nxrisovergi%2Cklirodotimata-theodorideion%2Cklirodotimata-tsouridi-proptuxiaka%2Cklirodotimata-xatzopoulou-proptuxiaka%2Cprogramma-hubert-curien%2Cvraveia-diakrisis-se-diethneis-diagon%2Cypotrofies-espa-2021-2027%2Cypotrofies-gia-erevna-klirodotima-leonida-nikolaidi%2Cypotrofies-iky-fulbright-greece%2Cypotrofies-stin-mnimi-tou-kathigiti-konstantinou-d-kerameos%2Cypotrofies-synergasias-me-foreis-ellinikoy-politismoy%2C%CE%B2%CF%81%CE%B1%CE%B2%CE%B5%CE%AF%CE%B1-%CE%B1%CF%81%CE%B9%CF%83%CF%84%CE%B5%CE%AF%CE%B1%CF%82-%CE%B1%CF%80%CE%BF%CF%86%CE%BF%CE%AF%CF%84%CF%89%CE%BD-%CE%B1%CE%B5%CE%B9%2C%CE%B5%CF%81%CE%B5%CF%85%CE%BD%CE%B1-%CE%B5%CF%83%CF%80%CE%B1-2014-2020&per_page=100&orderby=id&order=asc&_fields=id%2Clink%2Ctitle%2Cdate_gmt%2Cslug&page=1",
+                  "refused_status": 401,
+                  "review": "https://github.com/YouthOpps/data-pipeline/issues/40#issuecomment-6195556550"
+                }
+              }
+            }
+          IKY_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+      - name: Preserve inert publisher pacing state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iky-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
