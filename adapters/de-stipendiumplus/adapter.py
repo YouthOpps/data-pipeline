@@ -1199,6 +1199,23 @@ def validate_records(records, *, allow_empty=False):
             raise AdapterError("Invalid classification evidence", "validate")
 
 
+def github_error_context(method, path):
+    """Describe only known API routes, without credentials or URL queries."""
+    verb = method if method in {"GET", "POST", "PATCH"} else "REQUEST"
+    try:
+        route = urllib.parse.urlsplit(path).path
+    except (TypeError, ValueError):
+        route = ""
+    if not re.fullmatch(
+        r"/(?:git/(?:trees|commits(?:/[0-9a-f]{40})?|ref/heads/main|"
+        r"refs/heads/main)|contents/datas/[A-Za-z0-9-]+/"
+        r"(?:data|metadata)\.json)",
+        route,
+    ):
+        route = "[unrecognized API route]"
+    return f"GitHub {verb} {route}"
+
+
 def github(method, path, payload=None, missing_ok=False):
     token = os.environ.get("DATA_SOURCE_TOKEN")
     if not token:
@@ -1223,13 +1240,17 @@ def github(method, path, payload=None, missing_ok=False):
         )
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         raise AdapterError(
-            "GitHub connection failed; publication is unconfirmed", "publish"
+            github_error_context(method, path)
+            + " connection failed; publication is unconfirmed",
+            "publish",
         ) from error
     if status == 404 and missing_ok:
         return None
     if status not in (200, 201):
         raise AdapterError(
-            f"GitHub publication API returned HTTP {status}", "publish", status
+            f"{github_error_context(method, path)} returned HTTP {status}",
+            "publish",
+            status,
         )
     return json.loads(body)
 
@@ -1297,8 +1318,21 @@ def publish_files(snapshot, files):
                 {"sha": candidate, "force": False},
             )
             return
-        except AdapterError:
-            latest = read_snapshot()
+        except AdapterError as error:
+            try:
+                latest = read_snapshot()
+            except Exception as verification:
+                detail = (
+                    safe_error(verification)
+                    if isinstance(verification, AdapterError)
+                    else type(verification).__name__
+                )
+                raise AdapterError(
+                    f"Publication attempt {attempt + 1}/3 failed: "
+                    f"{safe_error(error)}; outcome verification failed: {detail}",
+                    "publish",
+                    getattr(verification, "status", None),
+                ) from verification
             if candidate and (
                 latest["head"] == candidate or latest["files"] == desired
             ):
@@ -1312,10 +1346,11 @@ def publish_files(snapshot, files):
             snapshot = latest
             if attempt == 2:
                 raise AdapterError(
-                    "Publication failed; "
-                    "durable remote outcome could not be updated",
+                    f"Publication failed after {attempt + 1} attempts; "
+                    f"last failure: {safe_error(error)}",
                     "publish",
-                )
+                    error.status,
+                ) from error
 
 
 def metadata(attempt, previous, records, error=None, checked_at=None):
