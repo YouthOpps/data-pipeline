@@ -337,3 +337,33 @@ is not a claim that every intermediate budget snapshot was retained. Historical
 429 and hold fields remain explicitly unknown. The first hosted transition
 requires the exact reviewed legacy attempts; subsequent attempts require the
 latest owned inert artifact. Approval does not assert hosted publication success.
+
+## Local state continuity and failed completion writes
+
+Every local collection now reads fresh authenticated workflow history and
+restores the newest exact owned pacing artifact, including failed attempts.
+It never invents a hosted run identity. This source's exact workflow must remain
+manually paused while local collection runs, and every source run must be
+terminal. The pause and unchanged complete history are checked again after the
+startup quiet period immediately before the first publisher request. A second
+collection entry in the same process repeats these checks.
+
+Only the original exact 31 reviewed legacy attempts may use the authenticated
+research-provenance exception. It requires the existing journal, preserves its
+current restrictive fields and cannot override a newer mature attempt. Once a
+newer completed run exists, its exact owned artifact is mandatory; unavailable
+metadata or a missing newest artifact stops local access. Local tests need only
+GitHub read access through `GITHUB_TOKEN`, never `DATA_SOURCE_TOKEN`.
+
+If publisher completion cannot be persisted, that process cannot reopen its
+publisher gate by restoring an older state. Export safely invalidates an owned
+stale output before signaling `pacing_ready=false`; it attempts cleanup even if
+signaling fails. A failed deletion leaves invalid output rather than an older
+valid envelope. Unsafe paths, symlinks and hardlinks are rejected and preserved.
+The next run cannot fall back when its newest required owned state is missing.
+
+This maintenance uses inert actual-function controls, the genuine production
+artifact from run 38781817984 and the retained complete native evidence described
+above. It makes no new publisher crawl or native-test claim. Source facts,
+identifiers, filtering, atomic publication, daily schedule and runtime caps stay
+unchanged. Hosted successful requests keep their existing behavior.

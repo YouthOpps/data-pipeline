@@ -2450,11 +2450,15 @@ _STATE_PATH = _STATE_LOCK = None
 _JOURNAL_NEW = False
 _COLLECTION_LOCK_FD = None
 _RESTORED = _STATE_TRUSTED = False
+_PUBLISHER_GATE_FAILED = False
 _RUN_END = _PHASE_END = _PHASE_NAME = None
 _SCANNED_HISTORY = {}
 _SCANNED_JOB_DIGESTS = {}
 _ATTEMPT_HEADS = {}
 _INVENTORY_ACTIVE = False
+_LOCAL_FIRST_ACCESS_CHECKED = False
+_RESTORED_LATEST = None
+_RESTORED_HISTORY = None
 _LOCAL_RESEARCH_MIGRATION = {
     "source": "cz-charles-university",
     "sha256": (
@@ -3305,6 +3309,7 @@ def request_bytes(
     robots=False,
     byte_limit=5_000_000,
 ):
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
     if type(byte_limit) is not int or not 0 < byte_limit <= 5_000_000:
         raise AdapterError("Invalid response byte bound", "fetch")
     if robots and urllib.parse.urlsplit(url).path != "/robots.txt":
@@ -3313,7 +3318,7 @@ def request_bytes(
         )
     host = (urllib.parse.urlsplit(url).hostname or "").lower()
     publisher = host == "cuni.cz" or host.endswith(".cuni.cz")
-    if publisher and not _STATE_TRUSTED:
+    if publisher and (not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
         raise AdapterError(
             "Trusted publisher state required before access", "access"
         )
@@ -3321,6 +3326,8 @@ def request_bytes(
         inventory_guard()
     lock, state = pace(interval) if publisher else (None, None)
     try:
+        if publisher and os.environ.get("GITHUB_ACTIONS") != "true":
+            verify_local_publisher_start()
         request = urllib.request.Request(
             url,
             data=payload,
@@ -3341,9 +3348,7 @@ def request_bytes(
                 flush=True,
             )
         try:
-            response = _OPENER.open(
-                request, timeout=request_timeout(publisher)
-            )
+            response = _OPENER.open(request, timeout=request_timeout(publisher))
         except urllib.error.HTTPError as error:
             response = error
         with response:
@@ -3412,7 +3417,12 @@ def request_bytes(
                 state["completed"] = state["observed_at"] = time.time()
                 if _INVENTORY_ACTIVE and not robots:
                     state["inventory_completed"] = state["completed"]
-                write_budget(state)
+                try:
+                    write_budget(state)
+                except BaseException:
+                    _STATE_TRUSTED = False
+                    _PUBLISHER_GATE_FAILED = True
+                    raise
                 print(
                     json.dumps(
                         {
@@ -3454,7 +3464,9 @@ def fetch_inventory_page(fetch, *args, **kwargs):
 
 
 def prepare_collection():
-    global _COLLECTION_LOCK_FD, _STATE_TRUSTED
+    global _COLLECTION_LOCK_FD, _STATE_TRUSTED, _LOCAL_FIRST_ACCESS_CHECKED
+    if _PUBLISHER_GATE_FAILED:
+        raise AdapterError("Publisher completion persistence failed", "access")
     if _COLLECTION_LOCK_FD is None:
         path = os.path.join(tempfile.gettempdir(), SOURCE_ID + ".lock")
         fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
@@ -3470,16 +3482,12 @@ def prepare_collection():
                 "Another publisher collector is active", "access"
             ) from None
         _COLLECTION_LOCK_FD = fd
-    if _STATE_TRUSTED:
+    if _STATE_TRUSTED and os.environ.get("GITHUB_ACTIONS") == "true":
         return
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        _LOCAL_FIRST_ACCESS_CHECKED = False
     budget_file()
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        restore_family_artifact()
-    else:
-        with locked_budget():
-            state = load_budget()
-            state["until"] = max(state["until"], time.time() + 60)
-            write_budget(state)
+    restore_family_artifact()
     _STATE_TRUSTED = True
 
 
@@ -3600,8 +3608,90 @@ def phase(name, seconds):
         arm_alarm(limit)
 
 
+def local_workflow_definition():
+    """Require the exact publisher workflow paused during local collection."""
+    definition = workflow_api(f"/actions/workflows/{_WORKFLOW_ID}")
+    if (
+        definition.get("id") != _WORKFLOW_ID
+        or definition.get("path") != f".github/workflows/fetch-{SOURCE_ID}.yml"
+        or definition.get("state") != "disabled_manually"
+    ):
+        raise AdapterError(
+            "Local collection requires its paused publisher workflow", "access"
+        )
+
+
+def reviewed_local_legacy_state():
+    """Authenticate the existing reviewed research origin, never reset state."""
+    marker = _LOCAL_RESEARCH_MIGRATION
+    if (
+        not isinstance(marker, dict)
+        or set(marker) != {"source", "sha256", "evidence"}
+        or marker.get("source") != SOURCE_ID
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/215#issuecomment-[0-9]+",
+            marker.get("evidence", ""),
+        )
+    ):
+        raise AdapterError("Reviewed local legacy transition missing", "access")
+    with locked_budget():
+        current = load_budget()
+        original = json.dumps(
+            current["research_provenance"], sort_keys=True
+        ).encode()
+        if hashlib.sha256(original).hexdigest() != marker["sha256"]:
+            raise AdapterError("Local legacy research origin changed", "access")
+        return current
+
+
+def verify_local_publisher_start():
+    """Recheck remote continuity after the local startup quiet guard."""
+    global _LOCAL_FIRST_ACCESS_CHECKED
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        or _LOCAL_FIRST_ACCESS_CHECKED
+    ):
+        return
+    latest = latest_family_run()
+    current = (_SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS)
+    if latest != _RESTORED_LATEST or current != _RESTORED_HISTORY:
+        raise AdapterError(
+            "Family history changed before local publisher access", "access"
+        )
+    local_workflow_definition()
+    _LOCAL_FIRST_ACCESS_CHECKED = True
+
+
+def local_workflow_api(path):
+    """Read authenticated workflow metadata without publication permissions."""
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise AdapterError("Workflow state credentials missing", "access")
+    nonce = urllib.parse.urlencode({"state_read": time.time_ns()})
+    path += ("&" if "?" in path else "?") + nonce
+    try:
+        status, _, body = request_bytes(
+            _WORKFLOW_GITHUB + path,
+            headers={
+                "Authorization": "Bearer " + token,
+                "Accept": "application/vnd.github+json",
+                "Cache-Control": "no-cache, no-store",
+                "Pragma": "no-cache",
+            },
+        )
+        if status != 200:
+            raise ValueError("Workflow API status")
+        return json.loads(body)
+    except Exception:
+        raise AdapterError(
+            ("Workflow pacing state unavailable"), ("access")
+        ) from None
+
+
 def workflow_api(path):
     """Read authenticated workflow metadata without publication permissions."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return local_workflow_api(path)
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         raise AdapterError("Workflow state credentials missing", "access")
@@ -3755,16 +3845,23 @@ def scan_family_history():
     """Select completed chronology, including older-ID rerun attempts."""
     global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
     _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
-    current_id, current_attempt = current_run_identity()
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    current_id, current_attempt = (
+        current_run_identity() if hosted else (None, None)
+    )
+    if not hosted:
+        local_workflow_definition()
     current_seen = False
     candidates = []
     total, scanned = None, 0
     seen_ids = set()
     for page in range(1, 101):
-        result = workflow_api(
-            f"/actions/workflows/fetch-cz-charles-university.yml/runs"
-            f"?per_page=100&page={page}"
+        route = (
+            "/actions/workflows/fetch-cz-charles-university.yml/runs"
+            if hosted
+            else f"/actions/workflows/{_WORKFLOW_ID}/runs"
         )
+        result = workflow_api(route + f"?per_page=100&page={page}")
         count, runs = result.get("total_count"), result.get("workflow_runs")
         if (
             type(count) is not int
@@ -3791,7 +3888,16 @@ def scan_family_history():
             seen_ids.add(run_id)
             source = family_source(run)
             if not source:
+                if not hosted:
+                    raise AdapterError(
+                        "Unexpected local family workflow", "access"
+                    )
                 continue
+            if not hosted and run.get("status") != "completed":
+                raise AdapterError(
+                    "Local collection requires terminal family history",
+                    "access",
+                )
             if (
                 run.get(("repository"), {}).get(("full_name"))
                 != ("YouthOpps/data-pipeline")
@@ -3869,7 +3975,7 @@ def scan_family_history():
                 raise AdapterError(
                     ("Workflow inventory count mismatch"), ("access")
                 )
-            if not current_seen:
+            if hosted and not current_seen:
                 raise AdapterError(
                     "Current workflow absent from complete history", "access"
                 )
@@ -4024,10 +4130,82 @@ def source_file_digest():
     return hashlib.sha256(content).hexdigest()
 
 
+def invalidate_family_artifact():
+    """Remove only an owned stale output after publisher persistence failed."""
+    path = os.environ.get("CHARLES_PACING_ARTIFACT_PATH")
+    if not path:
+        return
+    configured = os.environ.get("RUNNER_TEMP", "")
+    if not os.path.isabs(configured):
+        raise AdapterError("Runner temporary directory required", "access")
+    root = os.path.realpath(configured)
+    if (
+        os.path.dirname(os.path.abspath(path)) != root
+        or os.path.basename(path) != "pacing-state.json"
+    ):
+        raise AdapterError("Unsafe artifact output path", "access")
+    info = os.stat(root, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_mode & 0o022
+    ):
+        raise AdapterError("Unsafe artifact output directory", "access")
+    stale = False
+    try:
+        info = os.stat(path, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    else:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+        ):
+            raise AdapterError("Unsafe stale artifact output", "access")
+        stale = True
+    descriptor = os.open(
+        os.environ["GITHUB_OUTPUT"], os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW
+    )
+    with os.fdopen(descriptor, "a") as output:
+        info = os.fstat(output.fileno())
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+        ):
+            raise AdapterError("Unsafe workflow output signal", "access")
+        stale_descriptor = None
+        if stale:
+            stale_descriptor = os.open(path, os.O_WRONLY | os.O_NOFOLLOW)
+            stale_info = os.fstat(stale_descriptor)
+            if (
+                not stat.S_ISREG(stale_info.st_mode)
+                or stale_info.st_uid != os.getuid()
+                or stale_info.st_nlink != 1
+            ):
+                os.close(stale_descriptor)
+                raise AdapterError("Unsafe stale artifact output", "access")
+        try:
+            if stale_descriptor is not None:
+                os.ftruncate(stale_descriptor, 0)
+                os.fsync(stale_descriptor)
+            output.write("pacing_ready=false\n")
+            output.flush()
+            os.fsync(output.fileno())
+        finally:
+            if stale_descriptor is not None:
+                os.close(stale_descriptor)
+                os.unlink(path)
+
+
 def export_family_artifact():
     """Atomically export trusted state and signal its availability."""
     path = os.environ.get("CHARLES_PACING_ARTIFACT_PATH")
-    if not path or not _STATE_TRUSTED:
+    if not path:
+        return
+    if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED:
+        invalidate_family_artifact()
         return
     run_id, attempt = current_run_identity()
     configured = os.environ.get("RUNNER_TEMP", "")
@@ -4090,8 +4268,8 @@ def export_family_artifact():
 
 def restore_family_artifact():
     """Require exact history for the reviewed legacy state handoff."""
-    global _RESTORED, _STATE_TRUSTED
-    if _RESTORED:
+    global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
+    if _RESTORED and os.environ.get("GITHUB_ACTIONS") == "true":
         return
     _STATE_TRUSTED = False
     latest = latest_family_run()
@@ -4130,31 +4308,35 @@ def restore_family_artifact():
                 raise AdapterError(
                     "Reviewed legacy artifact inventory changed", "access"
                 )
-        marker = _REVIEWED_NATIVE_MIGRATION
-        if (
-            not isinstance(marker, dict)
-            or set(marker)
-            != {"schema", "source", "evidence", "state", "state_sha256"}
-            or marker["schema"] != 1
-            or marker["source"] != SOURCE_ID
-            or not re.fullmatch(
-                (
-                    r"https://github\.com/YouthOpps/data-pipeline/"
-                    r"issues/215#issuecomment-[0-9]+"
-                ),
-                marker.get("evidence", ""),
-            )
-            or hashlib.sha256(
-                json.dumps(
-                    marker["state"], sort_keys=True, separators=(",", ":")
-                ).encode()
-            ).hexdigest()
-            != marker["state_sha256"]
-        ):
-            raise AdapterError(
-                "Reviewed full native/local migration state required", "access"
-            )
-        incoming = validate_budget(marker["state"])
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            incoming = reviewed_local_legacy_state()
+        else:
+            marker = _REVIEWED_NATIVE_MIGRATION
+            if (
+                not isinstance(marker, dict)
+                or set(marker)
+                != {"schema", "source", "evidence", "state", "state_sha256"}
+                or marker["schema"] != 1
+                or marker["source"] != SOURCE_ID
+                or not re.fullmatch(
+                    (
+                        r"https://github\.com/YouthOpps/data-pipeline/"
+                        r"issues/215#issuecomment-[0-9]+"
+                    ),
+                    marker.get("evidence", ""),
+                )
+                or hashlib.sha256(
+                    json.dumps(
+                        marker["state"], sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+                != marker["state_sha256"]
+            ):
+                raise AdapterError(
+                    "Reviewed full native/local migration state required",
+                    "access",
+                )
+            incoming = validate_budget(marker["state"])
     else:
         result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
         artifacts = result.get("artifacts")
@@ -4163,9 +4345,7 @@ def restore_family_artifact():
             or result.get("total_count") != len(artifacts)
             or len(artifacts) > 100
         ):
-            raise AdapterError(
-                "Incomplete newest artifact inventory", "access"
-            )
+            raise AdapterError("Incomplete newest artifact inventory", "access")
         matches = [
             a
             for a in artifacts
@@ -4196,6 +4376,13 @@ def restore_family_artifact():
         combined = merge_budget(local, incoming)
         combined["until"] = max(combined["until"], time.time() + 60)
         write_budget(combined)
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        _RESTORED_LATEST = latest
+        _RESTORED_HISTORY = (
+            copy.deepcopy(_SCANNED_HISTORY),
+            copy.deepcopy(_SCANNED_JOB_DIGESTS),
+            copy.deepcopy(_ATTEMPT_HEADS),
+        )
     _RESTORED = _STATE_TRUSTED = True
 
 
