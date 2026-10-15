@@ -282,9 +282,11 @@ def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
                 count = budget.get("rate_limit_count", 0) + 1
                 budget["rate_limit_count"] = count
                 multiplier = 2**count
-                budget["interval"] = max(budget["interval"], 12.1 * multiplier)
+                budget["interval"] = max(
+                    budget["interval"] * 2, 12.1 * multiplier
+                )
                 budget["page_gap"] = max(
-                    budget.get("page_gap", 30), 30 * multiplier
+                    budget.get("page_gap", 30) * 2, 30 * multiplier
                 )
                 pause = (
                     retry_seconds
