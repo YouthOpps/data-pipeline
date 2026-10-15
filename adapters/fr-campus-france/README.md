@@ -238,3 +238,22 @@ save stops the request path. Thus a body-read failure cannot defer the first
 durable cooldown save. Literal robots 451 remains unavailable REP, while
 robots 429 keeps its timed backoff. Existing scoped refusal distinctions,
 including any reviewed API-only annotation, are retained.
+
+
+### Completion persistence and artifact failure
+
+A failed publisher-completion state write makes this process unhealthy. It
+refuses further source requests and collection reentry, and cannot export an
+apparently valid pacing artifact containing older state. Export invalidates
+a safely owned prior artifact through its pinned descriptor before unlinking;
+unsafe files, symlinks and hardlinks are preserved and rejected. The new output
+descriptor remains open through serialization and any workflow readiness
+signal, so a later failure truncates it before attempting removal. No state
+history, actual access hold, collection scope or pacing limit is reset.
+
+This conditional safety repair is checked with offline actual-function failure
+controls. It does not claim a new publisher collection, fresh complete current
+consumer replay, or certification of other legacy pacing/rate-limit behavior.
+Historical native proof is reused only for unchanged normal collection, facts,
+normalization, validation, expiry and publication functions; retained record
+and dependency limits are documented in the linked maintenance issue.
