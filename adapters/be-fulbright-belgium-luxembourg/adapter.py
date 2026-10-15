@@ -265,12 +265,16 @@ def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
                         if instant.tzinfo is None:
                             raise ValueError("Retry-After requires a timezone")
                         seconds = instant.timestamp() - time.time()
-                    retry_seconds = max(0, seconds)
-                    budget["until"] = max(
-                        budget["until"], time.time() + retry_seconds
+                    until = time.time() + seconds
+                    if not math.isfinite(seconds) or seconds <= 0:
+                        raise ValueError("Unusable Retry-After")
+                    datetime.datetime.fromtimestamp(
+                        until, datetime.timezone.utc
                     )
+                    retry_seconds = seconds
+                    budget["until"] = max(budget["until"], until)
                     save_budget(state, budget)
-                except (ValueError, TypeError, OverflowError):
+                except (ValueError, TypeError, OverflowError, OSError):
                     pass
             parsed = urllib.parse.urlsplit(url)
             if (

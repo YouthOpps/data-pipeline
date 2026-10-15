@@ -521,10 +521,10 @@ def publisher_attempt(publisher):
         _PUBLISHER_GATE_FAILED = False
 
 
-def record_retry_after(value):
+def record_retry_after(value, *, rate_limited=False):
     """Persist the embargo before reporting any refusal or retrieval failure."""
     if value is None:
-        return
+        return False
     with locked_budget():
         state = load_budget()
         now = time.time()
@@ -536,13 +536,18 @@ def record_retry_after(value):
                 if parsed.utcoffset() is None:
                     raise ValueError("Missing timezone")
                 until = parsed.timestamp()
-            if not numeric(until):
+            if not numeric(until) or until <= now:
                 raise ValueError("Invalid embargo")
+            datetime.fromtimestamp(until, timezone.utc)
             state["not_before"] = max(state["not_before"], until)
+            usable = True
         except Exception:
-            state["blocked"] = True
+            usable = False
+            if not rate_limited:
+                state["blocked"] = True
         state["observed_at"] = now
         save_budget(state)
+        return usable
 
 
 class TransientPublisherError(AdapterError):
@@ -617,8 +622,11 @@ def request_bytes(
                 status = response.status
                 response_headers = response.headers
                 retry = response.headers.get("Retry-After")
+                retry_usable = False
                 if publisher:
-                    record_retry_after(retry)
+                    retry_usable = record_retry_after(
+                        retry, rate_limited=status == 429
+                    )
                 robots_unavailable = publisher and unavailable_robots(
                     current, status
                 )
@@ -640,7 +648,7 @@ def request_bytes(
                             state["page_interval"] = (
                                 max(30, state.get("page_interval", 30)) * 2
                             )
-                            if not retry:
+                            if not retry_usable:
                                 state["not_before"] = max(
                                     state["not_before"],
                                     time.time() + 1800 * 2 ** (count - 1),

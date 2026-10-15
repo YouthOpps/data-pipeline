@@ -1433,24 +1433,27 @@ def request_bytes(
             retry = response.headers.get("Retry-After")
             if publisher and retry:
                 try:
-                    seconds = (
-                        float(retry)
-                        if re.fullmatch(r"\d+(?:\.\d+)?", retry)
-                        else parsedate_to_datetime(retry).timestamp()
-                        - time.time()
-                    )
-                    if not math.isfinite(seconds):
-                        raise ValueError()
-                    budget["until"] = max(
-                        budget["until"], time.time() + max(0, seconds)
-                    )
+                    now = time.time()
+                    if re.fullmatch(r"\d+(?:\.\d+)?", retry):
+                        seconds = float(retry)
+                    else:
+                        instant = parsedate_to_datetime(retry)
+                        if instant.tzinfo is None:
+                            raise ValueError("Retry-After requires timezone")
+                        seconds = instant.timestamp() - now
+                    until = now + seconds
+                    if not math.isfinite(seconds) or seconds <= 0:
+                        raise ValueError("Unusable Retry-After")
+                    datetime.fromtimestamp(until, timezone.utc)
+                    budget["until"] = max(budget["until"], until)
                     save_budget(state, budget)
-                except (ValueError, TypeError, OverflowError):
-                    budget["blocked"] = True
-                    save_budget(state, budget)
-                    raise AdapterError(
-                        "Invalid publisher Retry-After", "access"
-                    )
+                except (ValueError, TypeError, OverflowError, OSError):
+                    if response.status != 429:
+                        budget["blocked"] = True
+                        save_budget(state, budget)
+                        raise AdapterError(
+                            "Invalid publisher Retry-After", "access"
+                        )
             if publisher and response.status == 429:
                 budget["rate_failures"] += 1
                 budget["interval"] = max(budget["interval"], 12) * 2
