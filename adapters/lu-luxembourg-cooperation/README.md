@@ -93,3 +93,156 @@ consumer replay, or certification of other legacy pacing/rate-limit behavior.
 Historical native proof is reused only for unchanged normal collection, facts,
 normalization, validation, expiry and publication functions; retained record
 and dependency limits are documented in the linked maintenance issue.
+
+
+## Durable persistence prototype (issue #273)
+
+The first implementation stage adds a source-local schema-3 pending transaction
+before physical publisher access and before cached REP assessment. Settlement
+follows the durable header/body/REP decisions. Policy-only transactions do not
+count as physical requests. Target-specific REP observations retain canonical
+target hashes, safe origins/paths, physical robots-body hashes, parser decisions
+and delays/rates; they do not fabricate a global publisher ban. Existing actual
+holds remain retained. State failures stay fatal, and safely owned current state
+and stale export files are invalidated where storage permits. An earlier durable
+pending record protects restart when cleanup storage is entirely unavailable.
+
+This is an offline protocol stage, not a production transition. The public
+prepare path refuses access until exact mature owned-state and local-state
+compatibility is implemented and independently approved. Missing old fields do
+not mean settled history. Legacy rate-limit uncertainty stays explicit; observed
+new counters do not reconstruct unavailable historical responses. No publisher
+crawl, fresh complete native pass, production action, or workflow change is
+claimed by this maintenance stage. Existing source facts, inventory, expiry,
+publication, timing floors and workflow schedule are preserved.
+
+The unchanged `fetch_source` loop retains its two effective attempts after an
+ordinary connection failure that occurred inside the opener before any response.
+Its outer pending owner spans those attempts; every original physical
+reservation and completion guard remains active. HTTPError counts as a
+received response.
+Post-response partial reads, policy/namespace/state failures, TLS failures and
+unassessed response calculations remain sticky and cannot trigger another wire
+attempt. This deliberately tightens the previous broad error retry in those
+classified cases; it does not claim identical behavior for all failed reads.
+Permitted www/bare robots redirects retain the final physical bytes' digest
+under the original policy-cache origin without changing the redirect frontier.
+
+Actual unavailable REP responses bind an explicit empty-policy digest.
+Successful responses retain their physical byte digest even when decoded policy
+is empty.
+Missing or empty local publisher state is refused rather than initialized from
+unreviewed defaults, including low-level state access.
+
+## Guarded legacy compatibility (issue #273)
+
+The LOCAL and HOSTED boundaries are separately bound to the maintainer review
+[6204933912](https://github.com/YouthOpps/data-pipeline/issues/273#issuecomment-6204933912).
+Their exact schema-4 seed includes the complete successful LOCAL native state.
+This is a Luxembourg-only pilot; issue #273 remains open for other sources.
+The finite bridge accepts only this source's exact reviewed schema-1 local and
+newest owned inputs; missing pending fields never prove historical settlement.
+The approved full MAX seed retains old holds and explicit legacy rate/policy
+history uncertainty. Missing historical fields do not prove clean history.
+A newer attempt, changed producing head/jobs/artifact or modern local state
+invalidates the old legacy fallback. A different owner with schema-1 data fails.
+Modern owned schema-4 states use strict validation and strongest/MAX merging.
+
+LOCAL retains the original parent (device 34, inode 82812) and in-place state
+inode 82813. The successful one-off absent-lock transition created collection
+lock (device 34, inode 339092); subsequent LOCAL use requires that exact mature
+lock, safe permissions and nonblocking lifecycle/state coordination. It never
+recreates a missing or interrupted mature namespace. A changed or competing
+object is preserved and requires review.
+
+HOSTED is separate: authenticated GitHub run/job metadata must match the current
+repository, main ref, source workflow and revision; an environment flag alone
+is insufficient. A fresh github-hosted namespace is created exclusively only
+after the exact newest owned ZIP has passed ownership/digest checks. LOCAL
+absence cannot use this route. Metadata binding does not claim credential scope
+or cryptographic runtime attestation. The first physical request follows at
+least sixty seconds of monotonic startup quiet and every stronger old guard,
+then repeats fresh coordination/history checks. Same-process reentry also
+rechecks coordination. No publisher requests are added by policy-only events.
+
+Private controls exercise the actual decoder using explicitly synthetic ZIPs
+containing the already root-decoded envelopes, with fixture-specific digests.
+They do not claim a second download of the genuine archives, a fresh full
+publisher collection, actual migration or production readiness. Original source
+facts, IDs, pagination, expiry, publication requests, publisher pacing and caps
+remain unchanged; the new coordination adds fail-closed prerequisites. The
+independently reviewed implementation and successful native evidence below are
+bound to the separate public full-state boundary before production.
+
+## Bounded policy history (issue #273)
+
+The adapter uses schema 4. Its exact finite schema-1 bridge uses the approved
+full native MAX seed with policy-history uncertainty retained. Schema 3 is not
+accepted through generic defaults or an inferred missing-field conversion.
+HOSTED authenticates the exact newest legacy owned attempt before its first
+conversion; a newer applicable attempt invalidates that old fallback. Later
+modern owned state follows strict validation and MAX joining.
+
+One whole, canonical-min historical allowed witness is retained per approved
+source origin. This is an arbitrary historical sample, never the latest policy,
+permission, an assessment owner or evidence that a pending event completed.
+Absence means unknown. All scoped denial witnesses remain lossless, separately
+from numeric MAX restrictions, holds and unknown/conflict flags. A new denial
+cannot replace another denial or silently disappear to satisfy a size bound.
+
+Every actual fresh or cached target assessment first persists a distinct
+`policy_pending` owner under its durable outer transaction. The unchanged REP
+parser still assesses that exact target. Its complete matching current
+decision and all restrictions are durably committed while the assessment is
+still pending, independently of which historical sample was selected. A
+separate commit clears the assessment; the outer transaction can settle only
+with its own matching current receipt. Physical and logical outer owners also
+retain the expected last nested assessment receipt and compare the whole
+durable record before settling. The pinned proposed seed is an independent
+MAX/OR input, including its unknown flags and lossless policy restrictions.
+Pending owners, divergent pending joins and observed conflicts require review.
+Policy-only events add no physical starts.
+
+Typed input is rejected when a retained allowed witness, scoped denial or
+current receipt records a physical delay/rate above its global interval. Such
+inconsistent evidence is not silently recomputed or converted into healthy
+input. Correct normal assessment commits already retain this MAX.
+
+Allowed target/body churn does not grow the historical sample list. Scoped
+denials remain bounded at 32; local JSON and the actual owned-state envelope
+remain limited to 16 KiB, and archive downloads to 32 KiB. Prospective writes
+and exports check those unchanged byte bounds. Exceptional denial growth or
+large IRIs can exceed them: the complete collection then fails with a
+pending/sticky gate and full attempted decision retained in RAM for review. No
+route, denial or target is truncated, and a fresh process cannot use an older
+owned ZIP to clear that unsettled state. There is no claim that unlimited
+denial history can fit a fixed-size artifact.
+
+Private actual-function controls cover fresh/cached/redirected and unavailable
+REP, exact raw-body provenance, current receipt ownership, persistence and
+cleanup faults, fresh-process older-state refusal, bounded churn and lossless
+joins. These are isolated journals and inert transport/metadata fixtures, not a
+publisher crawl, real state transition or production certification. Source
+facts, IDs, parser rules, collection frontier, pacing floors, retry bounds,
+publication requests and workflow schedules remain unchanged.
+
+## Successful native evidence for this pilot
+
+The original unchanged nonpublishing test completed once successfully: all four
+actual HTTP 200 responses (robots and the three complete source pages) produced
+eight raw records. Seven standing programmes retain unknown availability and
+null deadlines. The grouped UNV call has the actual date-only deadline
+2026-08-17 and is expired, leaving seven filtered records. The complete current
+website consumer accepted 8 raw, 7 filtered, 0 derived expiry-empty and 7
+last-good records after failure. The derived expiry fixture is not a claim
+that the seven standing programmes actually expired.
+
+All 33 attempted state saves have matching persisted bytes. The reviewed full
+MAX includes the prior seed and all captured constraints and explicit unknowns;
+14 retained start observations are not 14 physical requests. The actual minimum
+physical completion gap was 12.314 seconds, logical inventory completion gap
+30.190 seconds, and maximum rolling-minute starts three. Physical redirect
+requests retain the existing independent transport guard; the page metric is
+for original logical page completion. The new collection lock and complete
+state were independently checked before public approval. This native evidence
+is not a production or live website verification; those follow the merge.

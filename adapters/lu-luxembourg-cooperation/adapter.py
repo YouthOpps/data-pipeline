@@ -6,6 +6,7 @@ import contextlib
 import datetime
 import email.utils
 import fcntl
+import functools
 import hashlib
 import html
 import html.parser
@@ -13,6 +14,7 @@ import ipaddress
 import io
 import math
 import stat
+import ssl
 import zipfile
 import json
 import os
@@ -99,6 +101,1605 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(NoRedirect)
 
 
+
+
+def persist_budget(file, state):
+    if _PROTOCOL_FATAL:
+        raise AdapterError("Publisher persistence failure is sticky", "access")
+    path = _PROTOCOL_DESCRIPTOR_PATHS.get(file.fileno())
+    try:
+        validate_budget(state)
+        if path is None:
+            raise AdapterError("Unbound publisher state descriptor", "access")
+        pin_protocol_parent(path, file.fileno())
+        file.seek(0)
+        json.dump(state, file, separators=(",", ":"))
+        file.truncate()
+        file.flush()
+        os.fsync(file.fileno())
+    except BaseException:
+        protocol_failure(state, [path])
+        raise
+
+
+@contextlib.contextmanager
+def protocol_budget():
+    with budget_state() as state:
+        yield state
+
+
+def protocol_publisher(url, kwargs):
+    return (urllib.parse.urlsplit(url).hostname or "").removeprefix(
+        "www."
+    ) == _PUBLISHER_HOST
+
+
+def protocol_rate_count(state):
+    return state.get("rate_failures", 0)
+
+
+# Protocol state is source-local. Old schemas require an exact reviewed handoff.
+_PROTOCOL_ARTIFACT_ENV = "LU_COOPERATION_PACING_ARTIFACT_PATH"
+_PROTOCOL_ROBOTS_HASHES = {}
+_PROTOCOL_POLICY_FRAMES = []
+_PROTOCOL_POLICY_REVIEW = None
+_PROTOCOL_EXPECTED_POLICY_RECEIPT = None
+_PROTOCOL_POLICY_ORIGINS = (
+    "https://cooperation.gouvernement.lu",
+    "https://www.cooperation.gouvernement.lu",
+)
+_PROTOCOL_PARENT_IDS = {}
+_PROTOCOL_INODE_IDS = {}
+_PROTOCOL_DESCRIPTOR_PATHS = {}
+_PROTOCOL_ATOMIC = False
+_PROTOCOL_RESPONSES = []
+_PROTOCOL_OWNER = None
+_PROTOCOL_DEPTH = 0
+_PROTOCOL_FATAL = False
+_PROTOCOL_RAM = None
+_REVIEWED_PROTOCOL_TRANSITION = {
+    "purpose": "local",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/273#issuec"
+        "omment-6204933912"
+    ),
+    "pins_sha256": (
+        "3c31ecb1b83783c848c447a72fa9169672040cf4adbaba292b930ef8993e"
+        "f5f7"
+    ),
+    "seed_sha256": (
+        "e6d81cfc15913db7d70f91ef977de0c1c37fc89a612d7f84ce4f79fdcdf6"
+        "a701"
+    ),
+    "legacy_boundary_acknowledged": True,
+    "collection_lock": [34, 339092],
+}
+_LEGACY_PROTOCOL_PINS = json.loads(
+    '{"aged_starts_omitted":[1792067576.9975526],"artifact_digest'
+    '":"sha256:4d3e58e3913b7c89bce1c2aa3e725e13f357e85c5ebf2db0b4'
+    'e04f7b57b0beac","artifact_id":11986879298,"attempt":1,"head"'
+    ':"f77eed642c4544bbeed009440c406064a4f5c6ad","jobs_sha256":"5'
+    'd80ca9b562a0510f017b0b2741c4ee4a756da7d1f72c5e92b2407eb93d2f'
+    '6da","local_namespace":{"directory_device":34,"directory_ino'
+    'de":82812,"directory_mode":"0o700","entries":[{"device":34,"'
+    'inode":82813,"name":"state.json"}],"source":"lu-luxembourg-c'
+    'ooperation"},"local_raw_sha256":"c2093170a00f5bcbac4072e4269'
+    '15f5e45797bdce6c007d38c2b703eda4f1e66","local_state":{"block'
+    'ed":false,"family":"youthopps-lu-luxembourg-cooperation-publ'
+    'isher-v1","interval":12.1,"observed_at":1792067611.3803442,"'
+    'page_interval":30,"rate_failures":0,"schema":1,"starts":[179'
+    '2067576.9975526,1792067609.2846851],"until":1792067623.48008'
+    '87},"owned_state":{"blocked":false,"family":"youthopps-lu-lu'
+    'xembourg-cooperation-publisher-v1","interval":12.1,"observed'
+    '_at":1792079943.8632283,"page_interval":30,"rate_failures":0'
+    ',"schema":1,"starts":[1792079911.9027379,1792079942.9077017]'
+    ',"until":1792079955.9629714},"run_id":38763419391,"seed":{"b'
+    'locked":false,"current_policy_assessment":{"allowed":true,"d'
+    'elay":12,"id":"7a3bd1b47b3c877c7477a33fea260a53c00e5400c8b7e'
+    '4de2d778343b6675f1c","origin":"https://cooperation.gouvernem'
+    'ent.lu","path":"/en/s-engager/appels-a-candidature/UNV.html"'
+    ',"policy":"07291afcac02b104c6314f7846fb8052975552b218c8ea963'
+    'b17dd71f4931b8a","rate":null,"target":"2bbb8b98a25f232c4a1ba'
+    '43bb2f70b5dce2862d510933e0906a7480ecaca8cfb","transaction":"'
+    'da4468afb675b0a00b32f3b3017c7fdaff287e4a1ffddf96e18552d60cc6'
+    '8934"},"family":"youthopps-lu-luxembourg-cooperation-publish'
+    'er-v1","historical_allowed_witnesses":[{"allowed":true,"dela'
+    'y":12,"origin":"https://cooperation.gouvernement.lu","path":'
+    '"/en/s-engager.html","policy":"07291afcac02b104c6314f7846fb8'
+    '052975552b218c8ea963b17dd71f4931b8a","rate":null,"target":"a'
+    '9ae0f6955db693021ac9a4c680711463e3490d6fd60d8623a97723e58cd7'
+    '1d8"}],"in_flight":false,"interval":12.1,"legacy_policy_hist'
+    'ory_unknown":true,"legacy_rate_history_unknown":true,"observ'
+    'ed_at":1792108957.082905,"observed_policy_conflict":false,"p'
+    'age_interval":30,"pending":null,"policy_denials":[],"policy_'
+    'pending":null,"rate_failures":0,"schema":4,"starts":[1792108'
+    '891.8132899,1792108923.8077855,1792108924.10595,1792108955.2'
+    '681339,1792108955.4492805],"until":1792109029.2900872},"sour'
+    'ce":"lu-luxembourg-cooperation","source_sha256":"6d99dade0d8'
+    '57f517bba6ec72a91df9c6e7fe8b4ee655ce1a684ac673311260f","work'
+    'flow_file":"fetch-lu-luxembourg-cooperation.yml","workflow_i'
+    'd":378391272,"workflow_path":".github/workflows/fetch-lu-lux'
+    'embourg-cooperation.yml"}'
+)
+_REVIEWED_HOSTED_PROTOCOL_TRANSITION = {
+    "purpose": "hosted",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/273#issuec"
+        "omment-6204933912"
+    ),
+    "pins_sha256": (
+        "3c31ecb1b83783c848c447a72fa9169672040cf4adbaba292b930ef8993e"
+        "f5f7"
+    ),
+    "seed_sha256": (
+        "e6d81cfc15913db7d70f91ef977de0c1c37fc89a612d7f84ce4f79fdcdf6"
+        "a701"
+    ),
+    "legacy_boundary_acknowledged": True,
+    "collection_lock": None,
+}
+_PROTOCOL_LEGACY_SELECTED = None
+_PROTOCOL_BOUNDARY_WALL = 0
+_PROTOCOL_COMPAT_READY = False
+_PROTOCOL_FIRST_WIRE_VERIFIED = False
+_PROTOCOL_COMPAT_FDS = []
+_PROTOCOL_COMPAT_DIRECTORY = None
+_PROTOCOL_COMPAT_CONTEXT = None
+_PROTOCOL_QUIET_UNTIL = 0
+_PROTOCOL_LIFECYCLE_DEPTH = 0
+
+
+
+
+def policy_bytes(value):
+    """Canonical whole witnesses are samples, never access authority."""
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def policy_fields():
+    return {"target", "origin", "path", "policy", "allowed", "delay", "rate"}
+
+
+def policy_conflict(witnesses):
+    """A retained contradiction requires review, never an allowed override."""
+    seen = {}
+    for value in witnesses:
+        key = (value["target"], value["policy"])
+        raw = policy_bytes(value)
+        if key in seen and seen[key] != raw:
+            return True
+        seen[key] = raw
+    return False
+
+
+def validate_observation(value):
+    if (
+        not isinstance(value, dict)
+        or set(value) != policy_fields()
+        or type(value.get("allowed")) is not bool
+        or not isinstance(value.get("policy"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", value["policy"])
+        or not numeric(value.get("delay"))
+        or value.get("rate") is not None
+        and not numeric(value["rate"])
+    ):
+        raise AdapterError("Invalid scoped REP observation", "access")
+    validate_target(value)
+    return value
+
+
+def protocol_size(state, owner=None):
+    """Check actual compact JSON bounds without granting an access decision."""
+    if len(policy_bytes(state)) > 16384:
+        raise AdapterError("Publisher protocol exceeds state bound", "access")
+    if owner is not None or os.environ.get("GITHUB_ACTIONS") == "true":
+        run_id, attempt = owner or current_run_identity()
+        if (
+            type(run_id) is not int
+            or type(attempt) is not int
+            or min(run_id, attempt) <= 0
+        ):
+            raise AdapterError("Invalid protocol envelope owner", "access")
+        envelope = {
+            "schema": 1,
+            "repository": "YouthOpps/data-pipeline",
+            "source": SOURCE_ID,
+            "run_id": run_id,
+            "run_attempt": attempt,
+            "state": state,
+        }
+        if len(policy_bytes(envelope)) > 16384:
+            raise AdapterError("Publisher envelope exceeds bound", "access")
+
+
+def begin_policy_assessment(url):
+    """Persist a new exact target owner BEFORE fresh or cached REP learning."""
+    if _PROTOCOL_POLICY_FRAMES:
+        raise AdapterError("Overlapping REP assessment", "access")
+    target = protocol_target(url)
+    frame = {
+        "id": os.urandom(32).hex(),
+        "transaction": _PROTOCOL_OWNER,
+        **target,
+    }
+    with protocol_budget() as state:
+        protocol_healthy(state)
+        if state["policy_pending"] is not None or not state["in_flight"]:
+            raise AdapterError("Unsettled REP assessment", "access")
+        # Fold only a completed receipt; no pending owner can be compacted.
+        prior = dict(state)
+        prior.update(in_flight=False, pending=None)
+        state.update(merge_policy_observations(prior, prior))
+        state["policy_pending"] = frame.copy()
+    _PROTOCOL_POLICY_FRAMES.append({**frame, "complete": False})
+
+
+def merge_policy_observations(local, incoming):
+    """Join restrictions; an arbitrary old allowed witness grants nothing."""
+    for state in (local, incoming):
+        validate_protocol(state)
+        if state["in_flight"] or state["policy_pending"] is not None:
+            raise AdapterError("Pending policy cannot be merged", "access")
+    candidates = []
+    for state in (local, incoming):
+        candidates.extend(state["historical_allowed_witnesses"])
+        candidates.extend(state["policy_denials"])
+        receipt = state["current_policy_assessment"]
+        if receipt is not None:
+            candidates.append({key: receipt[key] for key in policy_fields()})
+    allowed, denials, seen = {}, {}, {}
+    conflict = any(
+        state["observed_policy_conflict"] for state in (local, incoming)
+    )
+    for witness in candidates:
+        validate_observation(witness)
+        raw = policy_bytes(witness)
+        key = (witness["target"], witness["policy"])
+        if key in seen and seen[key] != raw:
+            conflict = True
+        seen[key] = raw
+        if witness["allowed"]:
+            origin = witness["origin"]
+            if origin not in allowed or raw < policy_bytes(allowed[origin]):
+                allowed[origin] = witness
+        else:
+            denials[raw] = witness
+    if len(denials) > 32:
+        raise AdapterError("Scoped denials exceed retained bound", "access")
+    return {
+        "historical_allowed_witnesses": [allowed[k] for k in sorted(allowed)],
+        "policy_denials": [denials[k] for k in sorted(denials)],
+        "policy_pending": None,
+        "current_policy_assessment": None,
+        "legacy_policy_history_unknown": any(
+            state["legacy_policy_history_unknown"]
+            for state in (local, incoming)
+        ),
+        "observed_policy_conflict": conflict,
+    }
+
+
+def validate_protocol(state):
+    """Validate typed ownership independently of historical allowed samples."""
+    if (
+        type(state.get("legacy_rate_history_unknown")) is not bool
+        or type(state.get("legacy_policy_history_unknown")) is not bool
+        or type(state.get("observed_policy_conflict")) is not bool
+        or type(state.get("in_flight")) is not bool
+        or not {"pending", "policy_pending", "current_policy_assessment"}
+        <= set(state)
+    ):
+        raise AdapterError("Invalid durable publisher protocol", "access")
+    pending = state["pending"]
+    if state["in_flight"]:
+        if (
+            not isinstance(pending, dict)
+            or set(pending) != {"id", "kind", "target", "origin", "path"}
+            or not isinstance(pending.get("id"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", pending["id"])
+            or not isinstance(pending.get("kind"), str)
+            or pending.get("kind") not in {"physical", "policy"}
+        ):
+            raise AdapterError(
+                "Invalid pending publisher transaction", "access"
+            )
+        validate_target(pending)
+    elif pending is not None:
+        raise AdapterError("Unexpected settled transaction", "access")
+    allowed = state.get("historical_allowed_witnesses")
+    denials = state.get("policy_denials")
+    if (
+        not isinstance(allowed, list)
+        or not isinstance(denials, list)
+        or len(allowed) > len(_PROTOCOL_POLICY_ORIGINS)
+        or len(denials) > 32
+    ):
+        raise AdapterError("Invalid bounded REP history", "access")
+    for witness in allowed + denials:
+        validate_observation(witness)
+    if (
+        any(not p["allowed"] for p in allowed)
+        or any(p["allowed"] for p in denials)
+        or [p["origin"] for p in allowed]
+        != sorted(set(p["origin"] for p in allowed))
+        or [policy_bytes(p) for p in denials]
+        != sorted(set(policy_bytes(p) for p in denials))
+    ):
+        raise AdapterError("Noncanonical REP history", "access")
+    assessment = state["policy_pending"]
+    if assessment is not None:
+        if (
+            not isinstance(assessment, dict)
+            or set(assessment)
+            != {"id", "transaction", "target", "origin", "path"}
+            or not state["in_flight"]
+            or not isinstance(assessment.get("id"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", assessment["id"])
+            or assessment["transaction"] != pending["id"]
+        ):
+            raise AdapterError("Invalid pending REP ownership", "access")
+        validate_target(assessment)
+    receipt = state["current_policy_assessment"]
+    if receipt is not None:
+        if (
+            not isinstance(receipt, dict)
+            or set(receipt) != policy_fields() | {"id", "transaction"}
+            or any(
+                not isinstance(receipt.get(k), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", receipt[k])
+                for k in ("id", "transaction")
+            )
+        ):
+            raise AdapterError("Invalid current REP receipt", "access")
+        witness = {key: receipt[key] for key in policy_fields()}
+        validate_observation(witness)
+        if assessment is not None and any(
+            receipt[key] != assessment[key] for key in assessment
+        ):
+            raise AdapterError("REP receipt owner mismatch", "access")
+        if not receipt["allowed"] and witness not in denials:
+            raise AdapterError("REP denial is missing from history", "access")
+    known = allowed + denials
+    if receipt is not None:
+        known = known + [{key: receipt[key] for key in policy_fields()}]
+    if any(state["interval"] < max(p["delay"], p["rate"] or 0) for p in known):
+        raise AdapterError(
+            "REP restriction exceeds retained interval", "access"
+        )
+    if policy_conflict(known) and not state["observed_policy_conflict"]:
+        raise AdapterError("Unmarked conflicting REP evidence", "access")
+    protocol_size(state)
+    return state
+
+
+def protocol_target(url):
+    """Retain a bounded canonical target hash and a query-free safe path."""
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+        or parsed.port not in (None, 443)
+    ):
+        raise AdapterError("Unsafe protocol target", "access")
+    origin = "https://" + parsed.hostname.lower()
+    path = parsed.path or "/"
+    canonical = origin + path + ("?" + parsed.query if parsed.query else "")
+    value = {
+        "target": hashlib.sha256(canonical.encode()).hexdigest(),
+        "origin": origin,
+        "path": path,
+    }
+    validate_target(value)
+    return value
+
+
+def validate_target(value):
+    origin, path = value.get("origin"), value.get("path")
+    if (
+        not isinstance(origin, str)
+        or origin not in _PROTOCOL_POLICY_ORIGINS
+        or len(origin) > 255
+        or not re.fullmatch(r"https://[a-z0-9.-]+", origin)
+        or not isinstance(path, str)
+        or len(path) > 1024
+        or not path.startswith("/")
+        or "?" in path
+        or "#" in path
+        or any(ord(c) < 32 or ord(c) == 127 for c in path)
+        or not isinstance(value.get("target"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", value["target"])
+    ):
+        raise AdapterError("Invalid scoped publisher target", "access")
+
+
+def invalidate_protocol_export():
+    """Remove apparent readiness BEFORE new policy or publisher access."""
+    path = os.environ.get(_PROTOCOL_ARTIFACT_ENV)
+    if not path:
+        return
+    root = os.environ.get("RUNNER_TEMP", "")
+    if (
+        not root
+        or not os.path.isabs(root)
+        or os.path.dirname(os.path.abspath(path)) != os.path.realpath(root)
+        or os.path.basename(path) != "pacing-state.json"
+    ):
+        raise AdapterError("Unsafe prior pacing export path", "access")
+    parent = os.open(
+        os.path.realpath(root),
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    try:
+        directory = os.fstat(parent)
+        if (
+            directory.st_uid != os.getuid()
+            or directory.st_mode & 0o022
+            or directory.st_mode & 0o700 != 0o700
+        ):
+            raise AdapterError("Unsafe prior pacing export directory", "access")
+        try:
+            descriptor = os.open(
+                "pacing-state.json",
+                os.O_RDWR | os.O_NOFOLLOW,
+                dir_fd=parent,
+            )
+        except FileNotFoundError:
+            return
+        try:
+            info = os.fstat(descriptor)
+            current = os.stat(
+                "pacing-state.json",
+                dir_fd=parent,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_nlink != 1
+                or (info.st_dev, info.st_ino)
+                != (current.st_dev, current.st_ino)
+            ):
+                raise AdapterError("Unsafe prior pacing export inode", "access")
+            os.ftruncate(descriptor, 0)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(parent)
+
+
+def pin_protocol_parent(path, descriptor, expected=None):
+    """Bind cleanup to the actual verified namespace, not a replacement path."""
+    parent = os.open(
+        os.path.dirname(path),
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+    )
+    try:
+        directory = os.fstat(parent)
+        current = os.stat(
+            os.path.basename(path),
+            dir_fd=parent,
+            follow_symlinks=False,
+        )
+        file_info = os.fstat(descriptor)
+        identity = (directory.st_dev, directory.st_ino)
+        recorded_parent = _PROTOCOL_PARENT_IDS.get(path)
+        recorded_file = _PROTOCOL_INODE_IDS.get(path)
+        file_identity = (file_info.st_dev, file_info.st_ino)
+        if (
+            directory.st_uid != os.getuid()
+            or stat.S_IMODE(directory.st_mode) != 0o700
+            or not stat.S_ISREG(file_info.st_mode)
+            or file_info.st_uid != os.getuid()
+            or stat.S_IMODE(file_info.st_mode) != 0o600
+            or file_info.st_nlink != 1
+            or recorded_parent is not None
+            and identity != recorded_parent
+            or not _PROTOCOL_ATOMIC
+            and recorded_file is not None
+            and file_identity != recorded_file
+            or expected is not None
+            and identity != expected
+            or (file_info.st_dev, file_info.st_ino)
+            != (current.st_dev, current.st_ino)
+        ):
+            raise AdapterError("Publisher state namespace changed", "access")
+        _PROTOCOL_PARENT_IDS[path] = identity
+        if not _PROTOCOL_ATOMIC:
+            _PROTOCOL_INODE_IDS[path] = file_identity
+        _PROTOCOL_DESCRIPTOR_PATHS[descriptor] = path
+    finally:
+        os.close(parent)
+
+
+def protocol_failure(candidate, paths):
+    """Keep the strongest RAM candidate; poison only verified current files."""
+    global _PROTOCOL_FATAL, _PROTOCOL_RAM, _PUBLISHER_GATE_FAILED
+    global _STATE_TRUSTED
+    _PROTOCOL_FATAL = _PUBLISHER_GATE_FAILED = True
+    _STATE_TRUSTED = False
+    _PROTOCOL_RAM = json.loads(json.dumps(candidate))
+    for path in paths:
+        if not isinstance(path, str) or path not in _PROTOCOL_PARENT_IDS:
+            continue
+        try:
+            parent = os.open(
+                os.path.dirname(path),
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            )
+            try:
+                directory = os.fstat(parent)
+                if (
+                    directory.st_uid != os.getuid()
+                    or (directory.st_dev, directory.st_ino)
+                    != _PROTOCOL_PARENT_IDS[path]
+                    or stat.S_IMODE(directory.st_mode) != 0o700
+                ):
+                    continue
+                descriptor = os.open(
+                    os.path.basename(path),
+                    os.O_RDWR | os.O_NOFOLLOW,
+                    dir_fd=parent,
+                )
+                try:
+                    info = os.fstat(descriptor)
+                    current = os.stat(
+                        os.path.basename(path),
+                        dir_fd=parent,
+                        follow_symlinks=False,
+                    )
+                    if (
+                        not stat.S_ISREG(info.st_mode)
+                        or info.st_uid != os.getuid()
+                        or stat.S_IMODE(info.st_mode) != 0o600
+                        or info.st_nlink != 1
+                        or not _PROTOCOL_ATOMIC
+                        and (info.st_dev, info.st_ino)
+                        != _PROTOCOL_INODE_IDS.get(path)
+                        or (info.st_dev, info.st_ino)
+                        != (current.st_dev, current.st_ino)
+                    ):
+                        continue
+                    os.ftruncate(descriptor, 0)
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+            finally:
+                os.close(parent)
+        except OSError:
+            # Pre-wire durable pending survives even wholly read-only storage.
+            pass
+
+
+def protocol_healthy(state):
+    if (
+        _PROTOCOL_FATAL
+        or state["observed_policy_conflict"]
+        or (
+            state["in_flight"]
+            and (state["pending"] or {}).get("id") != _PROTOCOL_OWNER
+        )
+    ):
+        raise AdapterError(
+            "Unsettled publisher transaction requires review", "access"
+        )
+
+
+
+def protocol_transport_started():
+    """Mark an actual opener invocation, after all reservation/state checks."""
+    if not _PROTOCOL_RESPONSES:
+        raise AdapterError("Publisher transport has no transaction", "access")
+    protocol_before_wire()
+    _PROTOCOL_RESPONSES[-1].update(started=True, received=False)
+
+
+def protocol_response_received():
+    """An HTTPError is a response too; mark before entering its context."""
+    if not _PROTOCOL_RESPONSES:
+        raise AdapterError("Publisher response has no transaction", "access")
+    _PROTOCOL_RESPONSES[-1]["received"] = True
+
+
+def durable_transaction(kind):
+    """Keep response policy and cached REP decisions inside durable pending."""
+
+    def decorate(function):
+        @functools.wraps(function)
+        def invoke(url, *args, **kwargs):
+            global _PROTOCOL_OWNER, _PROTOCOL_DEPTH
+            global _PROTOCOL_EXPECTED_POLICY_RECEIPT
+            global _PROTOCOL_FATAL, _PUBLISHER_GATE_FAILED, _STATE_TRUSTED
+            if not protocol_publisher(url, kwargs):
+                return function(url, *args, **kwargs)
+            if _PROTOCOL_FATAL:
+                raise AdapterError(
+                    "Publisher persistence failure is sticky", "access"
+                )
+            if kind == "physical":
+                protocol_startup_quiet()
+            outer = _PROTOCOL_DEPTH == 0
+            if (
+                outer
+                and kind in {"physical", "policy"}
+                and urllib.parse.urlsplit(url).path == "/robots.txt"
+            ):
+                raise AdapterError(
+                    "REP retrieval requires its target policy transaction",
+                    "access",
+                )
+            if outer:
+                _PROTOCOL_EXPECTED_POLICY_RECEIPT = None
+                invalidate_protocol_export()
+                with protocol_budget() as state:
+                    protocol_healthy(state)
+                    owner = os.urandom(32).hex()
+                    state["in_flight"] = True
+                    state["pending"] = {
+                        "id": owner,
+                        "kind": "policy" if kind == "assessment" else kind,
+                        **protocol_target(url),
+                    }
+                _PROTOCOL_OWNER = owner
+            _PROTOCOL_DEPTH += 1
+            settled = False
+            retryable_no_response = False
+            physical = (
+                {"started": False, "received": False}
+                if kind == "physical"
+                else None
+            )
+            if physical is not None:
+                _PROTOCOL_RESPONSES.append(physical)
+            policy_frame = None
+            try:
+                if kind == "assessment":
+                    begin_policy_assessment(url)
+                    policy_frame = _PROTOCOL_POLICY_FRAMES[-1]
+                result = function(url, *args, **kwargs)
+                settled = True
+                return result
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                retryable_no_response = (
+                    not outer
+                    and physical is not None
+                    and physical["started"]
+                    and not physical["received"]
+                    and not _PROTOCOL_FATAL
+                    and not isinstance(error, urllib.error.HTTPError)
+                    and not isinstance(
+                        getattr(error, "reason", error), ssl.SSLError
+                    )
+                )
+                raise
+            except AdapterError as error:
+                if not _PROTOCOL_FATAL:
+                    with protocol_budget() as state:
+                        settled = (
+                            getattr(error, "policy_retained", False)
+                            or state.get("blocked", False)
+                            or error.status == 429
+                            and protocol_rate_count(state) > 0
+                        )
+                raise
+            finally:
+                if policy_frame is not None:
+                    if not policy_frame["complete"]:
+                        settled = False
+                    if (
+                        not _PROTOCOL_POLICY_FRAMES
+                        or _PROTOCOL_POLICY_FRAMES.pop() is not policy_frame
+                    ):
+                        settled = False
+                _PROTOCOL_DEPTH -= 1
+                if physical is not None:
+                    if (
+                        not _PROTOCOL_RESPONSES
+                        or _PROTOCOL_RESPONSES.pop() is not physical
+                    ):
+                        _PROTOCOL_FATAL = _PUBLISHER_GATE_FAILED = True
+                        _STATE_TRUSTED = False
+                if (
+                    not settled
+                    and not retryable_no_response
+                    and (outer or physical is not None)
+                ):
+                    _PROTOCOL_FATAL = _PUBLISHER_GATE_FAILED = True
+                    _STATE_TRUSTED = False
+                if settled and _PROTOCOL_FATAL:
+                    raise AdapterError(
+                        "Unhealthy publisher transaction cannot return data",
+                        "access",
+                    )
+                if outer:
+                    try:
+                        if settled and not _PROTOCOL_FATAL:
+                            with protocol_budget() as state:
+                                protocol_healthy(state)
+                                if state["policy_pending"] is not None:
+                                    raise AdapterError(
+                                        "REP assessment remains pending",
+                                        "access",
+                                    )
+                                if policy_frame is not None:
+                                    receipt = state["current_policy_assessment"]
+                                    if receipt is None or any(
+                                        receipt[k] != policy_frame[k]
+                                        for k in (
+                                            "id",
+                                            "transaction",
+                                            "target",
+                                            "origin",
+                                            "path",
+                                        )
+                                    ):
+                                        raise AdapterError(
+                                            "REP settlement receipt mismatch",
+                                            "access",
+                                        )
+                                if (
+                                    _PROTOCOL_EXPECTED_POLICY_RECEIPT
+                                    is not None
+                                    and state["current_policy_assessment"]
+                                    != _PROTOCOL_EXPECTED_POLICY_RECEIPT
+                                ):
+                                    raise AdapterError(
+                                        "Nested REP receipt mismatch", "access"
+                                    )
+                                state["in_flight"] = False
+                                state["pending"] = None
+                        else:
+                            _PROTOCOL_FATAL = _PUBLISHER_GATE_FAILED = True
+                            _STATE_TRUSTED = False
+                    except BaseException:
+                        _PROTOCOL_FATAL = _PUBLISHER_GATE_FAILED = True
+                        _STATE_TRUSTED = False
+                        raise
+                    finally:
+                        _PROTOCOL_OWNER = None
+                        _PROTOCOL_EXPECTED_POLICY_RECEIPT = None
+
+        return invoke
+
+    return decorate
+
+
+def unavailable_policy(url):
+    """Associate only an actual unavailable REP result with empty policy."""
+    _PROTOCOL_ROBOTS_HASHES[protocol_target(url)["origin"]] = hashlib.sha256(
+        b""
+    ).hexdigest()
+
+
+def retain_policy(url, text, allowed, delay=0, rate=None):
+    """Commit current exact receipt and all restrictions before settlement."""
+    global _PROTOCOL_POLICY_REVIEW, _PROTOCOL_EXPECTED_POLICY_RECEIPT
+    target = protocol_target(url)
+    if not _PROTOCOL_POLICY_FRAMES:
+        raise AdapterError("REP decision has no assessment owner", "access")
+    frame = _PROTOCOL_POLICY_FRAMES[-1]
+    if any(frame[key] != target[key] for key in target):
+        raise AdapterError("REP decision target mismatch", "access")
+    policy_hash = _PROTOCOL_ROBOTS_HASHES.get(target["origin"])
+    if policy_hash is None:
+        if text:
+            raise AdapterError(
+                "REP cache has no physical body digest", "access"
+            )
+        policy_hash = hashlib.sha256(b"").hexdigest()
+    witness = {
+        **target,
+        "policy": policy_hash,
+        "allowed": allowed,
+        "delay": delay,
+        "rate": rate,
+    }
+    validate_observation(witness)
+    receipt = {
+        **witness,
+        "id": frame["id"],
+        "transaction": frame["transaction"],
+    }
+    with protocol_budget() as state:
+        protocol_healthy(state)
+        pending = {
+            key: frame[key]
+            for key in ("id", "transaction", "target", "origin", "path")
+        }
+        if state["policy_pending"] != pending:
+            raise AdapterError("REP assessment ownership changed", "access")
+        history = dict(state)
+        history.update(
+            in_flight=False,
+            pending=None,
+            policy_pending=None,
+            current_policy_assessment=receipt,
+        )
+        if not allowed:
+            history["policy_denials"] = sorted(
+                {
+                    policy_bytes(p): p
+                    for p in state["policy_denials"] + [witness]
+                }.values(),
+                key=policy_bytes,
+            )
+        # Oversize or contradictory decisions remain full RAM review evidence.
+        history["interval"] = max(state["interval"], delay, rate or 0)
+        _PROTOCOL_POLICY_REVIEW = json.loads(
+            json.dumps(
+                dict(
+                    history,
+                    in_flight=True,
+                    pending=state["pending"],
+                    policy_pending=pending,
+                    interval=max(state["interval"], delay, rate or 0),
+                )
+            )
+        )
+        history["observed_policy_conflict"] = history[
+            "observed_policy_conflict"
+        ] or policy_conflict(
+            history["historical_allowed_witnesses"]
+            + history["policy_denials"]
+            + [witness]
+        )
+        merged = merge_policy_observations(history, history)
+        state.update(merged)
+        state["policy_pending"] = pending
+        state["current_policy_assessment"] = receipt
+        state["interval"] = max(state["interval"], delay, rate or 0)
+        # First durable commit retains pending AND exact matching receipt.
+    with protocol_budget() as state:
+        protocol_healthy(state)
+        if (
+            state["current_policy_assessment"] != receipt
+            or state["policy_pending"] != pending
+        ):
+            raise AdapterError("REP durable receipt mismatch", "access")
+        state["policy_pending"] = None
+    frame["complete"] = True
+    _PROTOCOL_EXPECTED_POLICY_RECEIPT = json.loads(json.dumps(receipt))
+    _PROTOCOL_POLICY_REVIEW = None
+    if state["observed_policy_conflict"]:
+        raise AdapterError(
+            "Conflicting REP observations require review", "access"
+        )
+    if not allowed:
+        error = AdapterError(
+            "Robots policy disallows this source endpoint", "access"
+        )
+        error.policy_retained = True
+        raise error
+
+
+def require_protocol_transition():
+    """Require the separate literal boundary before real access."""
+    protocol_approval(protocol_purpose())
+
+
+def protocol_approval(purpose):
+    """Require a separate literal public boundary for each execution purpose."""
+    marker = (
+        _REVIEWED_HOSTED_PROTOCOL_TRANSITION
+        if purpose == "hosted"
+        else _REVIEWED_PROTOCOL_TRANSITION
+    )
+    if (
+        purpose not in {"local", "hosted"}
+        or not isinstance(marker, dict)
+        or set(marker)
+        != {
+            "purpose",
+            "evidence",
+            "pins_sha256",
+            "seed_sha256",
+            "legacy_boundary_acknowledged",
+            "collection_lock",
+        }
+        or marker["purpose"] != purpose
+        or marker["legacy_boundary_acknowledged"] is not True
+        or marker["pins_sha256"] != protocol_digest(_LEGACY_PROTOCOL_PINS)
+        or marker["seed_sha256"]
+        != protocol_digest(_LEGACY_PROTOCOL_PINS["seed"])
+        or not isinstance(marker["evidence"], str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/273"
+            r"#issuecomment-[1-9][0-9]*",
+            marker["evidence"],
+        )
+    ):
+        raise AdapterError("Exact public protocol boundary required", "access")
+    return marker
+
+
+def protocol_digest(value):
+    """Hash canonical inert metadata without interpreting missing fields."""
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def protocol_purpose():
+    return "hosted" if os.environ.get("GITHUB_ACTIONS") == "true" else "local"
+
+
+def protocol_run_binding(run, identity, head=None):
+    """Bind authenticated attempt metadata; environment values alone do not."""
+    if (
+        not isinstance(run, dict)
+        or type(run.get("id")) is not int
+        or type(run.get("run_attempt")) is not int
+        or run["id"] <= 0
+        or run["run_attempt"] <= 0
+        or (run["id"], run["run_attempt"]) != tuple(identity)
+        or run.get("workflow_id") != _LEGACY_PROTOCOL_PINS["workflow_id"]
+        or run.get("path") != _LEGACY_PROTOCOL_PINS["workflow_path"]
+        or run.get("repository", {}).get("full_name")
+        != "YouthOpps/data-pipeline"
+        or run.get("head_repository", {}).get("full_name")
+        != "YouthOpps/data-pipeline"
+        or run.get("head_branch") != "main"
+        or not re.fullmatch(r"[0-9a-f]{40}", run.get("head_sha") or "")
+        or head is not None
+        and run["head_sha"] != head
+    ):
+        raise AdapterError("Untrusted protocol attempt identity", "access")
+    return run
+
+
+def protocol_exact_jobs(run, completed=True):
+    """Require a complete inventory with explicit identity on every job."""
+    identity, attempt = run["id"], run["run_attempt"]
+    result = workflow_api(
+        f"/actions/runs/{identity}/attempts/{attempt}/jobs?per_page=100"
+    )
+    jobs = result.get("jobs")
+    if (
+        not isinstance(jobs, list)
+        or not jobs
+        or len(jobs) > 100
+        or type(result.get("total_count")) is not int
+        or result["total_count"] != len(jobs)
+    ):
+        raise AdapterError("Incomplete protocol job inventory", "access")
+    ids, finished = set(), []
+    for job in jobs:
+        if (
+            not isinstance(job, dict)
+            or type(job.get("id")) is not int
+            or job["id"] <= 0
+            or job["id"] in ids
+            or type(job.get("run_id")) is not int
+            or type(job.get("run_attempt")) is not int
+            or job.get("run_id") != identity
+            or job.get("run_attempt") != attempt
+            or job.get("head_sha") != run["head_sha"]
+            or job.get("head_branch") != "main"
+            or job.get("status")
+            not in (
+                {"completed"}
+                if completed
+                else {"queued", "in_progress", "completed"}
+            )
+        ):
+            raise AdapterError("Untrusted protocol job binding", "access")
+        ids.add(job["id"])
+        if completed:
+            finished.append(protocol_timestamp(job.get("completed_at")))
+    if not completed and not any(j["status"] == "in_progress" for j in jobs):
+        raise AdapterError("No authenticated running publisher job", "access")
+    return jobs, max(finished) if finished else None
+
+
+def protocol_timestamp(value):
+    """Parse only bounded aware completion timestamps, never updated_at."""
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        result = parsed.timestamp()
+        if parsed.utcoffset() is None or not 0 <= result <= time.time() + 1:
+            raise ValueError()
+        return result
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        raise AdapterError(
+            "Invalid protocol completion timestamp", "access"
+        ) from None
+
+
+def protocol_fresh_history():
+    """Check current coordination and exact completion chronology."""
+    purpose = protocol_purpose()
+    protocol_approval(purpose)
+    pins = _LEGACY_PROTOCOL_PINS
+    definition = workflow_api("/actions/workflows/" + pins["workflow_file"])
+    if (
+        definition.get("id") != pins["workflow_id"]
+        or definition.get("path") != pins["workflow_path"]
+        or purpose == "local"
+        and definition.get("state") != "disabled_manually"
+    ):
+        raise AdapterError("Protocol workflow coordination required", "access")
+    current = None
+    if purpose == "hosted":
+        if not re.fullmatch(r"[0-9a-f]{40}", os.environ.get("GITHUB_SHA", "")):
+            raise AdapterError("Hosted source revision missing", "access")
+        current = current_run_identity()
+        run = workflow_api(f"/actions/runs/{current[0]}/attempts/{current[1]}")
+        protocol_run_binding(run, current, os.environ.get("GITHUB_SHA"))
+        if run.get("status") != "in_progress":
+            raise AdapterError("Current protocol run is not active", "access")
+        protocol_exact_jobs(run, completed=False)
+    candidates, total, seen, first = [], None, set(), None
+    for page in range(1, 101):
+        path = "/actions/workflows/" + pins["workflow_file"]
+        result = workflow_api(path + f"/runs?per_page=100&page={page}")
+        runs, count = result.get("workflow_runs"), result.get("total_count")
+        if (
+            not isinstance(runs, list)
+            or len(runs) > 100
+            or type(count) is not int
+            or count < 0
+            or total is not None
+            and total != count
+        ):
+            raise AdapterError("Unstable protocol history", "access")
+        if first is None:
+            first = result
+        total = count
+        for run in runs:
+            identity, attempt = run.get("id"), run.get("run_attempt")
+            protocol_run_binding(
+                run,
+                (identity, attempt),
+                (
+                    os.environ.get("GITHUB_SHA")
+                    if (identity, attempt) == current
+                    else None
+                ),
+            )
+            if identity in seen or attempt <= 0:
+                raise AdapterError("Duplicate protocol run", "access")
+            seen.add(identity)
+            if (identity, attempt) != current and run.get(
+                "status"
+            ) != "completed":
+                raise AdapterError(
+                    "Another publisher attempt is active", "access"
+                )
+            upper = attempt - 1 if (identity, attempt) == current else attempt
+            for number in range(1, upper + 1):
+                detail = workflow_api(
+                    f"/actions/runs/{identity}/attempts/{number}"
+                )
+                protocol_run_binding(
+                    detail, (identity, number), run["head_sha"]
+                )
+                if detail.get("status") != "completed":
+                    raise AdapterError(
+                        "Unfinished prior protocol attempt", "access"
+                    )
+                jobs, finished = protocol_exact_jobs(detail)
+                candidates.append((finished, identity, number, detail, jobs))
+        if len(seen) == total:
+            break
+        if len(runs) != 100 or len(seen) > total:
+            raise AdapterError("Truncated protocol history", "access")
+    else:
+        raise AdapterError("Protocol history exceeds bound", "access")
+    reread = workflow_api(path + "/runs?per_page=100&page=1")
+    if reread != first or not candidates:
+        raise AdapterError("Protocol history changed or is absent", "access")
+    candidates.sort(key=lambda row: row[:3])
+    if len(candidates) > 1 and candidates[-1][0] == candidates[-2][0]:
+        raise AdapterError("Ambiguous protocol completion chronology", "access")
+    latest = candidates[-1]
+    if (
+        workflow_api("/actions/workflows/" + pins["workflow_file"])
+        != definition
+    ):
+        raise AdapterError(
+            "Protocol workflow changed during coordination", "access"
+        )
+    result = workflow_api(f"/actions/runs/{latest[1]}/artifacts?per_page=100")
+    artifacts = result.get("artifacts")
+    if not isinstance(artifacts, list) or result.get("total_count") != len(
+        artifacts
+    ):
+        raise AdapterError("Incomplete protocol artifact inventory", "access")
+    matches = [
+        a
+        for a in artifacts
+        if a.get("name") == SOURCE_ID + "-pacing-state-" + str(latest[2])
+    ]
+    if len(matches) != 1:
+        raise AdapterError("Newest protocol artifact required", "access")
+    artifact = matches[0]
+    owner = artifact.get("workflow_run", {})
+    if (
+        artifact.get("expired") is not False
+        or type(artifact.get("id")) is not int
+        or not re.fullmatch(
+            r"sha256:[0-9a-f]{64}", artifact.get("digest") or ""
+        )
+        or owner.get("id") != latest[1]
+        or owner.get("head_sha") != latest[3]["head_sha"]
+        or owner.get("head_branch") != "main"
+        or owner.get("repository_id") != 1163601208
+        or owner.get("head_repository_id") != 1163601208
+    ):
+        raise AdapterError("Untrusted newest protocol artifact", "access")
+    return latest, artifact
+
+
+def protocol_legacy_selection(latest, artifact):
+    """Legacy conversion has one finite authenticated producing attempt."""
+    pins = _LEGACY_PROTOCOL_PINS
+    if (
+        (latest[1], latest[2], latest[3]["head_sha"])
+        != (pins["run_id"], pins["attempt"], pins["head"])
+        or protocol_digest(latest[4]) != pins["jobs_sha256"]
+        or artifact["id"] != pins["artifact_id"]
+        or artifact["digest"] != pins["artifact_digest"]
+    ):
+        raise AdapterError(
+            "Legacy boundary invalidated by newer state", "access"
+        )
+    file = workflow_api(
+        "/contents/adapters/" + SOURCE_ID + "/adapter.py?ref=" + pins["head"]
+    )
+    try:
+        raw = base64.b64decode(file["content"], validate=False)
+        if (
+            file["encoding"] != "base64"
+            or hashlib.sha256(raw).hexdigest() != pins["source_sha256"]
+        ):
+            raise ValueError()
+    except (ValueError, TypeError, KeyError):
+        raise AdapterError(
+            "Legacy producing source mismatch", "access"
+        ) from None
+
+
+def protocol_convert_legacy(value, origin, raw=None):
+    """Convert only exact approved old bytes after authenticated selection."""
+    purpose = protocol_purpose()
+    protocol_approval(purpose)
+    if _PROTOCOL_LEGACY_SELECTED is None:
+        raise AdapterError("Legacy owner was not authenticated", "access")
+    pins = _LEGACY_PROTOCOL_PINS
+    expected = pins["local_state"] if origin == "local" else pins["owned_state"]
+    if origin not in {"local", "owned"} or value != expected:
+        raise AdapterError(
+            "Unapproved legacy state or unknown fields", "access"
+        )
+    if origin == "local" and (
+        purpose != "local"
+        or not isinstance(raw, bytes)
+        or hashlib.sha256(raw).hexdigest() != pins["local_raw_sha256"]
+    ):
+        raise AdapterError("Exact legacy local bytes required", "access")
+    now = time.time()
+    if now < _PROTOCOL_BOUNDARY_WALL or any(
+        t >= now - 60 for t in pins["aged_starts_omitted"]
+    ):
+        raise AdapterError("Legacy history cannot yet be aged", "access")
+    return validate_budget(json.loads(json.dumps(pins["seed"])))
+
+
+def protocol_owned_value(value):
+    """Modern typed states never fall back to a legacy missing-field default."""
+    if isinstance(value, dict) and value.get("schema") == 1:
+        return protocol_convert_legacy(value, "owned")
+    return validate_budget(value)
+
+
+
+def protocol_safe_descriptor(parent, name, flags, expected=None):
+    """Bind files beneath a retained verified parent without following links."""
+    descriptor = os.open(name, flags | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+    try:
+        info = os.fstat(descriptor)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        identity = (info.st_dev, info.st_ino)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or identity != (current.st_dev, current.st_ino)
+            or expected is not None
+            and identity != tuple(expected)
+        ):
+            raise AdapterError("Untrusted protocol file identity", "access")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def protocol_peek_local():
+    """Read only beneath the exact mature parent before any legacy bridge."""
+    pins = _LEGACY_PROTOCOL_PINS["local_namespace"]
+    directory = os.path.join(
+        tempfile.gettempdir(), FAMILY + "-" + str(os.getuid())
+    )
+    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(parent)
+        if (
+            (info.st_dev, info.st_ino)
+            != (pins["directory_device"], pins["directory_inode"])
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700
+        ):
+            raise AdapterError("Legacy parent changed", "access")
+        descriptor = protocol_safe_descriptor(parent, "state.json", os.O_RDONLY)
+        try:
+            raw = os.read(descriptor, 16385)
+            if len(raw) > 16384:
+                raise AdapterError("Oversized legacy local state", "access")
+            value = json.loads(raw)
+            if not isinstance(value, dict):
+                raise AdapterError("Invalid local state", "access")
+            return value
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(parent)
+
+
+def protocol_open_namespace(incoming):
+    """Acquire lifecycle then state locks; never recreate mature local files."""
+    global _PROTOCOL_COMPAT_DIRECTORY
+    purpose, pins = protocol_purpose(), _LEGACY_PROTOCOL_PINS
+    protocol_approval(purpose)
+    directory = os.path.join(
+        tempfile.gettempdir(), FAMILY + "-" + str(os.getuid())
+    )
+    if purpose == "hosted":
+        if os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
+            raise AdapterError("Fresh hosted runner context required", "access")
+        # Fresh creation requires authenticated owner and literal approval.
+        os.mkdir(directory, 0o700)
+    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    keep = []
+    try:
+        info = os.fstat(parent)
+        current = os.stat(directory, follow_symlinks=False)
+        namespace = pins["local_namespace"]
+        expected = (namespace["directory_device"], namespace["directory_inode"])
+        if (
+            info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700
+            or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+            or purpose == "local"
+            and (info.st_dev, info.st_ino) != expected
+        ):
+            raise AdapterError("Untrusted protocol parent", "access")
+        entries = {entry["name"]: entry for entry in namespace["entries"]}
+        preview = None
+        if purpose == "local":
+            check = protocol_safe_descriptor(parent, "state.json", os.O_RDONLY)
+            try:
+                preview_raw = os.read(check, 16385)
+                preview = json.loads(preview_raw)
+            finally:
+                os.close(check)
+            if len(preview_raw) > 16384:
+                raise AdapterError("Oversized local protocol state", "access")
+        modern = isinstance(preview, dict) and preview.get("schema") == 4
+        if purpose == "local":
+            if modern:
+                protocol_healthy(validate_budget(preview))
+            else:
+                protocol_convert_legacy(preview, "local", preview_raw)
+        old_lock = (
+            entries.get("collection.lock") if purpose == "local" else None
+        )
+        if purpose == "local" and modern and old_lock is None:
+            identity = protocol_approval(purpose)["collection_lock"]
+            if (
+                not isinstance(identity, list)
+                or len(identity) != 2
+                or any(type(v) is not int or v < 0 for v in identity)
+            ):
+                raise AdapterError(
+                    "New lifecycle inode needs reviewed pin", "access"
+                )
+            old_lock = {"device": identity[0], "inode": identity[1]}
+        flags = os.O_RDWR
+        if old_lock is None:
+            flags |= os.O_CREAT | os.O_EXCL
+        collection = protocol_safe_descriptor(
+            parent,
+            "collection.lock",
+            flags,
+            (old_lock["device"], old_lock["inode"]) if old_lock else None,
+        )
+        keep.append(collection)
+        fcntl.flock(collection, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if SOURCE_ID == "ibm":
+            old = entries.get("state.lock") if purpose == "local" else None
+            state_lock = protocol_safe_descriptor(
+                parent,
+                "state.lock",
+                os.O_RDWR | (0 if old else os.O_CREAT | os.O_EXCL),
+                (old["device"], old["inode"]) if old else None,
+            )
+            keep.append(state_lock)
+            fcntl.flock(state_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        old_state = entries["state.json"] if purpose == "local" else None
+        expected_state = old_state
+        if modern and SOURCE_ID == "ibm":
+            expected_state = None
+        state_fd = protocol_safe_descriptor(
+            parent,
+            "state.json",
+            os.O_RDWR | (0 if old_state else os.O_CREAT | os.O_EXCL),
+            (
+                (expected_state["device"], expected_state["inode"])
+                if expected_state
+                else None
+            ),
+        )
+        keep.append(state_fd)
+        if SOURCE_ID != "ibm":
+            fcntl.flock(state_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raw = os.read(state_fd, 16385)
+        if purpose == "local":
+            if len(raw) > 16384:
+                raise AdapterError("Oversized protocol local state", "access")
+            parsed = json.loads(raw)
+            if parsed != preview:
+                raise AdapterError(
+                    "Local state changed before exclusive lock", "access"
+                )
+            local = (
+                validate_budget(parsed)
+                if modern
+                else protocol_convert_legacy(parsed, "local", raw)
+            )
+        else:
+            if raw:
+                raise AdapterError("Fresh hosted state is not empty", "access")
+            local = json.loads(json.dumps(pins["seed"]))
+        # Typed constraints are the independently approved full MAX, not zero.
+        state = protocol_merge_seed(local, incoming)
+        _PROTOCOL_COMPAT_DIRECTORY = (
+            directory,
+            parent,
+            (info.st_dev, info.st_ino),
+        )
+        return keep, parent, state_fd, state
+    except BaseException:
+        for descriptor in reversed(keep):
+            os.close(descriptor)
+        os.close(parent)
+        # Never delete a competing or interrupted namespace/lock to retry.
+        raise
+
+
+def protocol_merge_seed(local, incoming):
+    """Preserve pending/fatal/holds and all approved independent MAX bounds."""
+    validate_budget(local)
+    validate_budget(incoming)
+    protocol_healthy(local)
+    protocol_healthy(incoming)
+    seed = json.loads(json.dumps(_LEGACY_PROTOCOL_PINS["seed"]))
+    key = "not_before" if SOURCE_ID == "ibm" else "until"
+    values = [seed, local, incoming]
+    for field in (
+        "observed_at",
+        key,
+        "interval",
+        "page_interval",
+        "rate_failures",
+    ):
+        seed[field] = max(state[field] for state in values)
+    seed["blocked"] = any(state["blocked"] for state in values)
+    seed["legacy_rate_history_unknown"] = True
+    policy = dict(seed)
+    policy.update(merge_policy_observations(seed, local))
+    seed.update(merge_policy_observations(policy, incoming))
+    starts = sorted(set(t for state in values for t in state["starts"]))
+    capacity = 10 if SOURCE_ID == "ibm" else 5
+    if any(t >= time.time() - 60 for t in starts[:-capacity]):
+        raise AdapterError("Live protocol history exceeds storage", "access")
+    seed["starts"] = starts[-capacity:]
+    seed[key] = max(seed[key], time.time() + 60)
+    seed["observed_at"] = max(seed["observed_at"], time.time())
+    return validate_budget(seed)
+
+
+def protocol_close_compatibility():
+    """Close only retained own descriptors; interrupted files require review."""
+    global _PROTOCOL_COMPAT_FDS, _PROTOCOL_COMPAT_DIRECTORY
+    global _PROTOCOL_COMPAT_READY, _PROTOCOL_FIRST_WIRE_VERIFIED
+    global _RESTORED, _STATE_TRUSTED
+    for descriptor in reversed(_PROTOCOL_COMPAT_FDS):
+        os.close(descriptor)
+    _PROTOCOL_COMPAT_FDS = []
+    if _PROTOCOL_COMPAT_DIRECTORY is not None:
+        os.close(_PROTOCOL_COMPAT_DIRECTORY[1])
+    _PROTOCOL_COMPAT_DIRECTORY = None
+    _PROTOCOL_COMPAT_READY = _PROTOCOL_FIRST_WIRE_VERIFIED = False
+    _RESTORED = _STATE_TRUSTED = False
+    global _COLLECTION_LOCK_HELD
+    _COLLECTION_LOCK_HELD = False
+
+
+def protocol_prepare_compatibility():
+    """Perform only the finite reviewed bridge; not a generic bootstrap."""
+    global _PROTOCOL_LEGACY_SELECTED, _PROTOCOL_BOUNDARY_WALL
+    global _PROTOCOL_COMPAT_READY, _PROTOCOL_COMPAT_FDS
+    global _PROTOCOL_FIRST_WIRE_VERIFIED, _PROTOCOL_COMPAT_CONTEXT
+    global _PROTOCOL_QUIET_UNTIL, _RESTORED, _STATE_TRUSTED
+    require_protocol_transition()
+    if _PROTOCOL_FATAL:
+        raise AdapterError("Protocol failure is sticky", "access")
+    if _PROTOCOL_COMPAT_READY:
+        # Even same-process public reentry must repeat fresh coordination.
+        latest, artifact = protocol_fresh_history()
+        if protocol_context_key(latest, artifact) != _PROTOCOL_COMPAT_CONTEXT:
+            raise AdapterError("Protocol owner changed on reentry", "access")
+        _PROTOCOL_FIRST_WIRE_VERIFIED = False
+        _PROTOCOL_QUIET_UNTIL = time.monotonic() + 60
+        return
+    _PROTOCOL_BOUNDARY_WALL = time.time()
+    latest, artifact = protocol_fresh_history()
+    pins = _LEGACY_PROTOCOL_PINS
+    if protocol_purpose() == "local":
+        preview = protocol_peek_local()
+        if preview.get("schema") == 4 and (
+            latest[1],
+            latest[2],
+            latest[3]["head_sha"],
+        ) == (pins["run_id"], pins["attempt"], pins["head"]):
+            raise AdapterError(
+                "Modern local state invalidates the legacy bootstrap", "access"
+            )
+    if (latest[1], latest[2], latest[3]["head_sha"]) == (
+        pins["run_id"],
+        pins["attempt"],
+        pins["head"],
+    ):
+        protocol_legacy_selection(latest, artifact)
+        _PROTOCOL_LEGACY_SELECTED = protocol_context_key(latest, artifact)
+    else:
+        # Only a modern typed owned state may continue; old bytes cannot use
+        # an old review after a newer actual attempt.
+        _PROTOCOL_LEGACY_SELECTED = None
+    incoming = download_inert_artifact(
+        (latest[1], latest[2], SOURCE_ID), artifact["id"], artifact["digest"]
+    )
+    try:
+        descriptors, parent, state_fd, state = protocol_open_namespace(incoming)
+        _PROTOCOL_COMPAT_FDS = descriptors
+        protocol_commit_bridge(parent, state_fd, state)
+        _PROTOCOL_COMPAT_CONTEXT = protocol_context_key(latest, artifact)
+        _PROTOCOL_QUIET_UNTIL = time.monotonic() + 60
+        _PROTOCOL_FIRST_WIRE_VERIFIED = False
+        _PROTOCOL_COMPAT_READY = True
+        _RESTORED = _STATE_TRUSTED = True
+    except BaseException:
+        _STATE_TRUSTED = False
+        protocol_close_compatibility()
+        raise
+
+
+def protocol_context_key(latest, artifact):
+    return (
+        latest[1],
+        latest[2],
+        latest[3]["head_sha"],
+        artifact["id"],
+        artifact["digest"],
+    )
+
+
+def protocol_startup_quiet():
+    """Wait before a physical reservation, not after recording its start."""
+    require_protocol_transition()
+    if not _PROTOCOL_COMPAT_READY or _PROTOCOL_FATAL:
+        raise AdapterError("Publisher protocol is not prepared", "access")
+    if not _PROTOCOL_FIRST_WIRE_VERIFIED:
+        remaining = _PROTOCOL_QUIET_UNTIL - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
+
+
+def protocol_before_wire():
+    """Recheck coordination after quiet and before the first wire."""
+    global _PROTOCOL_FIRST_WIRE_VERIFIED
+    require_protocol_transition()
+    if not _PROTOCOL_COMPAT_READY or _PROTOCOL_FATAL:
+        raise AdapterError("Publisher protocol is not prepared", "access")
+    if _PROTOCOL_FIRST_WIRE_VERIFIED:
+        return
+    if time.monotonic() < _PROTOCOL_QUIET_UNTIL:
+        raise AdapterError("Startup quiet must precede reservation", "access")
+    if time.time() < _PROTOCOL_BOUNDARY_WALL:
+        raise AdapterError("Protocol clock moved backwards", "access")
+    latest, artifact = protocol_fresh_history()
+    if protocol_context_key(latest, artifact) != _PROTOCOL_COMPAT_CONTEXT:
+        raise AdapterError(
+            "Newest publisher owner changed during quiet", "access"
+        )
+    directory, parent, expected = _PROTOCOL_COMPAT_DIRECTORY
+    info = os.stat(directory, follow_symlinks=False)
+    if (info.st_dev, info.st_ino) != expected:
+        raise AdapterError("Protocol parent changed before access", "access")
+    for descriptor in _PROTOCOL_COMPAT_FDS:
+        info = os.fstat(descriptor)
+        current = os.stat(
+            "collection.lock", dir_fd=parent, follow_symlinks=False
+        )
+        if (
+            info.st_uid != os.getuid()
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise AdapterError(
+                "Protocol descriptor changed before access", "access"
+            )
+    if SOURCE_ID == "ibm" and protocol_purpose() == "local":
+        lock = next(
+            e
+            for e in _LEGACY_PROTOCOL_PINS["local_namespace"]["entries"]
+            if e["name"] == "state.lock"
+        )
+        check = protocol_safe_descriptor(
+            parent, "state.lock", os.O_RDONLY, (lock["device"], lock["inode"])
+        )
+        os.close(check)
+    _PROTOCOL_FIRST_WIRE_VERIFIED = True
+
+
+def protocol_lifecycle(function):
+    """Retain bridge descriptors through publication and export."""
+
+    @functools.wraps(function)
+    def invoke(*args, **kwargs):
+        global _PROTOCOL_LIFECYCLE_DEPTH
+        _PROTOCOL_LIFECYCLE_DEPTH += 1
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _PROTOCOL_LIFECYCLE_DEPTH -= 1
+            if not _PROTOCOL_LIFECYCLE_DEPTH:
+                if _PROTOCOL_COMPAT_READY:
+                    time.sleep(12.1)
+                protocol_close_compatibility()
+
+    return invoke
+
+
+def protocol_commit_bridge(parent, state_fd, state):
+    """Use the original in-place writer and preserve the legacy state inode."""
+    global _COLLECTION_LOCK_HELD, _BUDGET_INITIALIZING
+    directory = _PROTOCOL_COMPAT_DIRECTORY[0]
+    path = os.path.join(directory, "state.json")
+    pin_protocol_parent(path, state_fd, _PROTOCOL_COMPAT_DIRECTORY[2])
+    with os.fdopen(os.dup(state_fd), "r+", encoding="utf-8") as file:
+        pin_protocol_parent(path, file.fileno(), _PROTOCOL_COMPAT_DIRECTORY[2])
+        persist_budget(file, state)
+    _BUDGET_INITIALIZING = False
+    fcntl.flock(state_fd, fcntl.LOCK_UN)
+    _PROTOCOL_COMPAT_FDS.remove(state_fd)
+    os.close(state_fd)
+    _COLLECTION_LOCK_HELD = True
+
+
+
 def utc_now():
     return (
         datetime.datetime.now(datetime.timezone.utc)
@@ -138,7 +1739,16 @@ def numeric(value):
 
 def empty_budget(now):
     return {
-        "schema": 1,
+        "schema": 4,
+        "in_flight": False,
+        "pending": None,
+        "historical_allowed_witnesses": [],
+        "policy_denials": [],
+        "policy_pending": None,
+        "current_policy_assessment": None,
+        "legacy_policy_history_unknown": True,
+        "observed_policy_conflict": False,
+        "legacy_rate_history_unknown": True,
         "family": FAMILY,
         "starts": [],
         "interval": 12.1,
@@ -155,7 +1765,8 @@ def validate_budget(state):
     if (
         not isinstance(state, dict)
         or set(state) != set(empty_budget(0))
-        or state["schema"] != 1
+        or type(state["schema"]) is not int
+        or state["schema"] != 4
         or state["family"] != FAMILY
         or not numeric(state["until"])
         or not numeric(state["observed_at"])
@@ -175,7 +1786,7 @@ def validate_budget(state):
         or sorted(set(state["starts"])) != state["starts"]
     ):
         raise AdapterError("Invalid retained publisher state", "access")
-    return state
+    return validate_protocol(state)
 
 
 def budget_path(host=None):
@@ -218,34 +1829,34 @@ def budget_state(host=None):
     ):
         os.close(fd)
         raise AdapterError("Unsafe publisher state file", "access")
+    try:
+        pin_protocol_parent(path, fd)
+    except BaseException:
+        os.close(fd)
+        raise
     with os.fdopen(fd, "r+", encoding="utf-8") as file:
         fcntl.flock(file, fcntl.LOCK_EX)
         raw = file.read(16385)
         if len(raw) > 16384:
             raise AdapterError("Oversized publisher state", "access")
         try:
-            if not raw and not _BUDGET_INITIALIZING:
-                raise ValueError("Mature state is empty")
-            state = (
-                validate_budget(json.loads(raw))
-                if raw
-                else empty_budget(time.time())
-            )
+            if not raw:
+                raise ValueError("State requires an exact reviewed transition")
+            state = validate_budget(json.loads(raw))
         except (ValueError, TypeError) as error:
             raise AdapterError("Corrupt publisher state", "access") from error
         try:
             yield state
         finally:
+            if _PROTOCOL_FATAL:
+                raise AdapterError(
+                    "Publisher persistence failure is sticky", "access"
+                )
             state["observed_at"] = time.time()
             state["starts"] = [
                 t for t in state["starts"] if t > time.time() - 60
             ]
-            validate_budget(state)
-            file.seek(0)
-            file.truncate()
-            json.dump(state, file, separators=(",", ":"))
-            file.flush()
-            os.fsync(file.fileno())
+            persist_budget(file, state)
             _BUDGET_INITIALIZING = False
 
 
@@ -255,6 +1866,7 @@ def pace(url, interval=12):
         raise AdapterError("Publisher completion persistence failed", "access")
     while True:
         with budget_state() as state:
+            protocol_healthy(state)
             if state["blocked"]:
                 raise AdapterError(
                     "Publisher refusal requires reviewed recovery", "access"
@@ -299,6 +1911,7 @@ def http_bytes(
         return response.status, response.headers, body
 
 
+@durable_transaction("physical")
 def request_bytes(
     url, *, interval=12, method="GET", headers=None, payload=None
 ):
@@ -329,9 +1942,11 @@ def request_bytes(
     )
     try:
         try:
+            protocol_transport_started()
             response = _OPENER.open(request, timeout=60)
         except urllib.error.HTTPError as error:
             response = error
+        protocol_response_received()
         with response:
             with budget_state() as state:
                 now = time.time()
@@ -367,13 +1982,21 @@ def request_bytes(
             body = response.read(5_000_001)
             if len(body) > 5_000_000:
                 raise AdapterError("Response exceeds byte limit", "fetch")
+            if (
+                urllib.parse.urlsplit(url).path == "/robots.txt"
+                and response.status == 200
+            ):
+                _PROTOCOL_ROBOTS_HASHES[protocol_target(url)["origin"]] = (
+                    hashlib.sha256(body).hexdigest()
+                )
             return response.status, response.headers, body
     finally:
         _PUBLISHER_GATE_FAILED = True
         completed = time.time()
         with budget_state() as state:
             state["until"] = max(
-                state["until"], completed + max(12.1, interval, state["interval"])
+                state["until"],
+                completed + max(12.1, interval, state["interval"]),
             )
         _PUBLISHER_GATE_FAILED = False
         print(
@@ -385,6 +2008,7 @@ def request_bytes(
         )
 
 
+@durable_transaction("policy")
 def fetch_source(url, min_interval=12, *, with_headers=False):
     """Read a reviewed HTTPS source with checked, paced redirects and retries.
 
@@ -442,6 +2066,10 @@ def fetch_source(url, min_interval=12, *, with_headers=False):
                     raise AdapterError(
                         f"Publisher returned HTTP {status}", "fetch", status
                     )
+                if original.path == "/robots.txt":
+                    _PROTOCOL_ROBOTS_HASHES[protocol_target(url)["origin"]] = (
+                        hashlib.sha256(body).hexdigest()
+                    )
                 text = body.decode(headers.get_content_charset() or "utf-8")
                 return (text, headers) if with_headers else text
         except (urllib.error.URLError, TimeoutError, OSError) as error:
@@ -452,6 +2080,7 @@ def fetch_source(url, min_interval=12, *, with_headers=False):
     raise AdapterError("Publisher could not be read", "fetch")
 
 
+@durable_transaction("assessment")
 def check_robots(url):
     """Check endpoint access against current robots and return start spacing."""
     parsed = urllib.parse.urlsplit(url)
@@ -467,6 +2096,7 @@ def check_robots(url):
                 and 400 <= error.status < 500
                 and error.status != 429
             ):
+                unavailable_policy(url)
                 _ROBOTS_CACHE[robots_url] = ""
             else:
                 raise
@@ -532,13 +2162,15 @@ def check_robots(url):
                         )
                     )
         if matches and not max(matches)[1]:
-            with budget_state() as state:
-                state["blocked"] = True
-            raise AdapterError(
-                "Robots policy disallows this source endpoint", "access"
+            retain_policy(
+                url,
+                text,
+                False,
+                max([0] + [g["delay"] for p in policies for g in p]),
             )
-    return max([12] + [g["delay"] for policy in policies for g in policy])
-
+    delay = max([12] + [g["delay"] for policy in policies for g in policy])
+    retain_policy(url, text, True, delay)
+    return delay
 
 def make_record(
     title,
@@ -758,9 +2390,11 @@ def collection_lock():
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
+@protocol_lifecycle
 def collect():
     """Retrieve the full inventory under the shared collection lock."""
     global _STATE_TRUSTED
+    protocol_prepare_compatibility()
     with collection_lock():
         if os.environ.get("GITHUB_ACTIONS") == "true":
             restore_family_artifact()
@@ -842,6 +2476,7 @@ def one(nodes, description):
     return nodes[0]
 
 
+@durable_transaction("policy")
 def page(url, inventory=False):
     """Read permitted source markup and reject soft refusals or error pages."""
 
@@ -1448,14 +3083,19 @@ def scan_family_history():
 def workflow_api(path):
     """Read workflow history without the publication credential."""
     token = os.environ.get("GITHUB_TOKEN", "")
-    if not token:
+    if os.environ.get("GITHUB_ACTIONS") == "true" and not token:
         raise AdapterError("Workflow state credentials missing", "access")
     try:
         status, _, body = http_bytes(
-            _WORKFLOW_GITHUB + path,
+            _WORKFLOW_GITHUB
+            + path
+            + ("&" if "?" in path else "?")
+            + "_fresh="
+            + str(time.time_ns()),
             headers={
-                "Authorization": "Bearer " + token,
+                **({"Authorization": "Bearer " + token} if token else {}),
                 "Accept": "application/vnd.github+json",
+                "Cache-Control": "no-cache",
             },
         )
         if status != 200:
@@ -1469,11 +3109,14 @@ def workflow_api(path):
 
 def download_inert_artifact(identity, artifact_id, digest=None):
     """Read authenticated source/attempt-bound data; never execute artifacts."""
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if os.environ.get("GITHUB_ACTIONS") == "true" and not token:
+        raise AdapterError("Workflow state credentials missing", "access")
     try:
         status, headers, _ = http_bytes(
             _WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip",
             headers={
-                "Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                **({"Authorization": "Bearer " + token} if token else {}),
                 "Accept": "application/vnd.github+json",
             },
             limit=1024,
@@ -1542,7 +3185,7 @@ def download_inert_artifact(identity, artifact_id, digest=None):
             or envelope["source"] != source
         ):
             raise ValueError()
-        return validate_budget(envelope["state"])
+        return protocol_owned_value(envelope["state"])
     except Exception:
         raise AdapterError(
             "Invalid or unavailable source pacing artifact", "access"
@@ -1553,6 +3196,8 @@ def merge_budget(local, incoming, now):
     """Intersect retained limits without weakening refusals or rate history."""
     validate_budget(local)
     validate_budget(incoming)
+    protocol_healthy(local)
+    protocol_healthy(incoming)
     merged = empty_budget(now)
     merged["until"] = max(local["until"], incoming["until"], now + 60)
     merged["interval"] = max(local["interval"], incoming["interval"])
@@ -1564,12 +3209,18 @@ def merge_budget(local, incoming, now):
     )
     merged["blocked"] = local["blocked"] or incoming["blocked"]
     merged["starts"] = sorted(set(local["starts"] + incoming["starts"]))[-5:]
+    merged["legacy_rate_history_unknown"] = (
+        local["legacy_rate_history_unknown"]
+        or incoming["legacy_rate_history_unknown"]
+    )
+    merged.update(merge_policy_observations(local, incoming))
     return validate_budget(merged)
 
 
 def restore_family_artifact():
     """Require the exact newest completed source attempt, never an older hit."""
     global _RESTORED, _STATE_TRUSTED
+    require_protocol_transition()
     if _RESTORED:
         return
     latest = latest_family_run()
@@ -1723,13 +3374,20 @@ def artifact_output(path):
 
 def export_family_artifact():
     """Export healthy state; invalidate owned stale output on failure."""
+    invalidate_protocol_export()
     path = os.environ.get("LU_COOPERATION_PACING_ARTIFACT_PATH")
     if not path or not (_STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
         return
     with artifact_output(path) as descriptor:
         run_id, attempt = current_run_identity()
         with budget_state() as local:
+            protocol_healthy(local)
+            if local["in_flight"]:
+                raise AdapterError(
+                    "Unsettled state cannot be exported", "access"
+                )
             state = dict(local)
+        protocol_size(state, (run_id, attempt))
         envelope = {
             "schema": 1,
             "repository": "YouthOpps/data-pipeline",
@@ -1941,6 +3599,7 @@ def remove_expired_records(records, checked_at):
     return retained
 
 
+@protocol_lifecycle
 def main():
     """Keep trusted pacing available even when snapshot/authentication fails."""
     global _STATE_TRUSTED
@@ -1952,6 +3611,7 @@ def main():
         "using DATA_SOURCE_TOKEN",
     )
     args = parser.parse_args()
+    protocol_prepare_compatibility()
     with collection_lock():
         if args.publish and os.environ.get("GITHUB_ACTIONS") == "true":
             restore_family_artifact()
