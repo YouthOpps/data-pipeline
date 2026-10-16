@@ -75,3 +75,60 @@ Published metadata uses `display_name` = **Volkswagen** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+
+
+## Journal ownership maintenance (#295)
+
+
+Journal reads and commits retain the genuine current read/write file descriptor
+under the original flock authority. Parent, current pathname, acquired
+identities and observed generations are checked before use, publisher opening
+and owned export. Writes serialize in memory, then truncate/fsync and fully
+write/read back that original inode. A changed object is preserved and access
+stops; no stale pathname is reopened for destructive cleanup.
+
+IO failures latch independently of existing transport flags. Diagnostic state
+copies are best effort after the latch. Journal, lock, collection, artifact
+writer/readback, output and parent descriptors retain acquisition identity
+through cleanup. Both independent lifetime releases are attempted; a primary
+error is preserved and a healthy close failure cannot return a healthy owned
+export. Genuine verified incoming-state restoration is the only new-journal
+initialization authority. Missing mature state is not an empty-state reset.
+
+In-place interruption can sacrifice availability: empty or partial mature state
+stops. Advisory locks and observed identity/generation checks are not filesystem
+CAS or arbitrary same-user authentication. Existing schemas have no new durable
+pending barrier; total persistence plus invalidation failure across restart
+remains separate #273 work.
+
+Original facts, IDs, graph, parser, dates, expiry, metadata, publication,
+retry/redirect/REP/status interpretation, actual holds, schema, seeds, approval
+markers, timing floors, caps, tests and workflow remain unchanged. This is
+conditional IO maintenance, not pacing modernization, access approval or hold
+recovery.
+
+Both original optional legacy research paths keep their original read-only
+locks, parser, MAX and missing-path behavior. Acquired
+path/descriptor/generation checks protect those same inputs. No legacy file is
+rewritten and no missing legacy file is interpreted as a fabricated hold or
+empty history.
+
+No complete original successful native/independent full-record chain is
+established by this maintenance. Existing published counts or production success
+do not replace that missing evidence, and no original raw-RAM availability or
+replay is invented.
+
+A separate current immutable PUBLISHED snapshot qualification at
+data11536bfa/websiteaa265850 used consumer2fabcc52: 158 published and 158
+expiry-filtered records, derived empty and last-good failure cases passed. This
+checks published contracts and consumer compatibility, not current upstream
+facts, access or original full-inventory completeness.
+
+Validation is limited to bounded ordinary private
+entry/restore/request/export/lifecycle and original retry/redirect/legacy cases,
+plus whole-source protected business-AST and original envelope/literal
+comparison. No advanced descriptor campaign, publisher/native request, actual
+journal operation, ZIP download or workflow action is performed by the author.
+Independent exact-revision review is required before delivery. Refs #295. Issue
+#295 remains open.
