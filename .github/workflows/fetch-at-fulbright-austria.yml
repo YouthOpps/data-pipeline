@@ -35,7 +35,18 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish this source
+        id: collect
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
+          AUSTRIA_PACING_MAINTENANCE: '{"evidence":"https://github.com/YouthOpps/data-pipeline/issues/287#issuecomment-6206546086","family":"youthopps-at-fulbright-austria-publisher-v1","schema":1,"state":{"blocked":false,"completed":1792115592.623577,"completed_flight_id":"7e50acad6b9daa2ac4bf9dec8a02260a","completed_request_id":"ae413ef3616676eae9e8c0ff45e08f3e","family":"youthopps-at-fulbright-austria-publisher-v1","flight_id":"7e50acad6b9daa2ac4bf9dec8a02260a","flight_kind":"policy","flight_started":1792115578.7532814,"in_flight":false,"interval":12.2,"last_inventory_completed":1792114979.6843238,"legacy_rate_history_unknown":true,"not_before":1792115653.181354,"observed_at":1792115593.181354,"page_interval":30,"rate_limit_strikes":0,"rate_limit_until":0,"request_id":"ae413ef3616676eae9e8c0ff45e08f3e","request_inventory":false,"request_outcome":"response_assessed","request_started":1792115590.9510272,"schema":3,"starts":[]}}'
+          AUSTRIA_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
         run: python -B adapters/at-fulbright-austria/adapter.py --publish
+      - name: Preserve owned publisher pacing state
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: at-fulbright-austria-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
