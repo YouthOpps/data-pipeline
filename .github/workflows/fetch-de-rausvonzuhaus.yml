@@ -40,8 +40,10 @@ jobs:
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
           RAUS_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+          RAUS_PACING_MAINTENANCE: >-
+            {"evidence":"https://github.com/YouthOpps/data-pipeline/issues/342#issuecomment-6223878551","family":"youthopps-de-rausvonzuhaus-publisher-v1","schema":1,"state":{"blocked":false,"completed":1792179409.4501636,"completed_flight_id":null,"completed_request_id":null,"family":"youthopps-de-rausvonzuhaus-publisher-v1","flight_id":null,"flight_kind":null,"flight_started":0,"in_flight":false,"interval":12.2,"last_inventory_completed":1792179408.4824076,"legacy_rate_history_unknown":true,"not_before":1792181587.5854242,"observed_at":1792181527.5854242,"page_interval":30,"rate_limit_strikes":0,"rate_limit_until":0,"request_id":null,"request_inventory":false,"request_outcome":null,"request_started":0,"schema":3,"starts":[1791490097.0,1791490152.0,1791553597.0,1791623050.0,1791652913.0,1791654955.0,1791669556.0,1791700032.0,1791725496.0,1791757753.0,1791786722.0,1791821173.0,1791853098.0,1791902164.0,1791932975.0,1791955396.0,1791968445.0,1791980585.0,1791999334.0,1792015256.0,1792040333.0,1792048638.0,1792059946.0,1792061090.0,1792075676.2659442,1792075676.271686,1792075689.4015505,1792075689.4054656,1792077165.0,1792079334.8725433,1792079347.782084,1792079365.0,1792179382.1506057,1792179384.5934987,1792179384.5936615,1792179398.5170927,1792179398.9366617,1792179398.9371703]}}
         run: python -B adapters/de-rausvonzuhaus/adapter.py --publish
-      - name: Preserve source pacing and refusal state
+      - name: Preserve durable source pacing and refusal state
         if: always() && steps.collect.outputs.pacing_ready == 'true'
         uses: actions/upload-artifact@v4
         with:
