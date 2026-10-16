@@ -1804,6 +1804,26 @@ def http_bytes(
         return response.status, response.headers, body
 
 
+def header_rate_limit_failure_guard(function):
+    """Preserve a marked HTTP 429 error through failing cleanup."""
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except BaseException as error:
+            current, seen = error, set()
+            while current is not None and id(current) not in seen:
+                seen.add(id(current))
+                if getattr(current, "_header429_unassessed", False):
+                    raise current
+                current = current.__context__
+            raise
+    invoke.__name__ = function.__name__
+    invoke.__doc__ = function.__doc__
+    invoke.__wrapped__ = function
+    return invoke
+
+
+@header_rate_limit_failure_guard
 @durable_transaction("physical")
 def request_bytes(
     url, *, interval=12, method="GET", headers=None, payload=None
@@ -1840,7 +1860,11 @@ def request_bytes(
         except urllib.error.HTTPError as error:
             response = error
         protocol_response_received()
-        with response:
+        with (
+            header_rate_limit_response(response)
+            if True and response.status == 429
+            else response
+        ):
             with budget_state() as state:
                 now = time.time()
                 if response.status == 429:
@@ -1872,6 +1896,10 @@ def request_bytes(
                     except (ValueError, TypeError, OverflowError):
                         if response.status != 429:
                             state["blocked"] = True
+            if response.status == 429:
+                raise HeaderRateLimitStop(
+                    "Publisher stopped: HTTP 429", "access", 429
+                )
             body = response.read(5_000_001)
             if len(body) > 5_000_000:
                 raise AdapterError("Response exceeds byte limit", "fetch")
@@ -4539,6 +4567,26 @@ def journal_lifecycle_open(path, create):
                     journal_close_acquired(descriptor, identity)
             if primary is None:
                 raise
+
+
+class HeaderRateLimitStop(AdapterError):
+    """A header-only HTTP 429 stop assessed after safe closure."""
+
+
+@contextlib.contextmanager
+def header_rate_limit_response(response):
+    """Retain existing barriers when closing an HTTP 429 fails."""
+    try:
+        with response:
+            yield
+    except HeaderRateLimitStop:
+        raise
+    except BaseException as error:
+        error._header429_unassessed = True
+        # Latch before any fallible best-effort diagnostics.
+        with contextlib.suppress(BaseException):
+            journal_failure()
+        raise
 
 
 if __name__ == "__main__":

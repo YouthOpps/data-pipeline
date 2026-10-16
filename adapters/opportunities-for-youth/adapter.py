@@ -910,6 +910,26 @@ def ensure_publisher_document(document, state, budget):
         )
 
 
+def header_rate_limit_failure_guard(function):
+    """Preserve a marked HTTP 429 error through failing cleanup."""
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except BaseException as error:
+            current, seen = error, set()
+            while current is not None and id(current) not in seen:
+                seen.add(id(current))
+                if getattr(current, "_header429_unassessed", False):
+                    raise current
+                current = current.__context__
+            raise
+    invoke.__name__ = function.__name__
+    invoke.__doc__ = function.__doc__
+    invoke.__wrapped__ = function
+    return invoke
+
+
+@header_rate_limit_failure_guard
 def request_bytes(
     url,
     *,
@@ -949,7 +969,11 @@ def request_bytes(
             response = _OPENER.open(request, timeout=request_timeout())
         except urllib.error.HTTPError as error:
             response = error
-        with response:
+        with (
+            header_rate_limit_response(response)
+            if publisher and response.status == 429
+            else response
+        ):
             retry = response.headers.get("Retry-After")
             if publisher and retry:
                 try:
@@ -984,6 +1008,9 @@ def request_bytes(
                     time.time() + 1800 * 2 ** (budget["rate_failures"] - 1),
                 )
                 save_budget(state, budget)
+                raise HeaderRateLimitStop(
+                    "Publisher stopped: HTTP 429", "access", 429
+                )
             if publisher and response.status in (401, 403):
                 if not robots:
                     budget["blocked"] = True
@@ -2245,6 +2272,24 @@ def main():
             export_pacing()
         finally:
             release_collection()
+
+
+class HeaderRateLimitStop(AdapterError):
+    """A header-only HTTP 429 stop assessed after safe closure."""
+
+
+@contextlib.contextmanager
+def header_rate_limit_response(response):
+    """Retain existing barriers when closing an HTTP 429 fails."""
+    try:
+        with response:
+            yield
+    except HeaderRateLimitStop:
+        raise
+    except BaseException as error:
+        error._header429_unassessed = True
+        # Existing outer failure/embargo semantics remain authoritative.
+        raise
 
 
 if __name__ == "__main__":

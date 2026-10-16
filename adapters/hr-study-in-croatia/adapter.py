@@ -529,6 +529,26 @@ def publisher_transport_error(error, url):
     )
 
 
+def header_rate_limit_failure_guard(function):
+    """Preserve a marked HTTP 429 error through failing cleanup."""
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except BaseException as error:
+            current, seen = error, set()
+            while current is not None and id(current) not in seen:
+                seen.add(id(current))
+                if getattr(current, "_header429_unassessed", False):
+                    raise current
+                current = current.__context__
+            raise
+    invoke.__name__ = function.__name__
+    invoke.__doc__ = function.__doc__
+    invoke.__wrapped__ = function
+    return invoke
+
+
+@header_rate_limit_failure_guard
 def request_bytes(
     url,
     method="GET",
@@ -581,7 +601,11 @@ def request_bytes(
                 if publisher:
                     raise publisher_transport_error(error, current) from None
                 raise
-            with response:
+            with (
+                header_rate_limit_response(response)
+                if publisher and response.status == 429
+                else response
+            ):
                 status, response_headers = response.status, response.headers
                 if publisher:
                     record_retry_after(response_headers.get("Retry-After"))
@@ -1748,28 +1772,10 @@ def reject_visible_challenge(
         )
 
 def stop_rate_limit(response, *, byte_limit=65536):
-    """Read only bounded error evidence after the durable timer is saved."""
+    """Stop without reading the received rate-limit body."""
     try:
-        try:
-            limit = min(byte_limit, 65536)
-            body = response.read(limit + 1)
-        except Exception:
-            raise AdapterError(
-                "Publisher429 body unavailable; timed backoff retained",
-                "access",
-                429,
-            ) from None
-        if len(body) > limit:
-            raise AdapterError(
-                "Publisher429 body exceeds bound; timed backoff retained",
-                "access",
-                429,
-            )
-        reject_visible_challenge(
-            body, response.headers, challenge_only=True, status=429
-        )
-        raise AdapterError(
-            "Publisher429; durable adaptive backoff retained", "access", 429
+        raise HeaderRateLimitStop(
+            "Publisher stopped: HTTP 429", "access", 429
         )
     finally:
         with locked_budget():
@@ -3771,6 +3777,26 @@ def journal_lifecycle_open(path, create):
                     journal_close_acquired(descriptor, identity)
             if primary is None:
                 raise
+
+
+class HeaderRateLimitStop(AdapterError):
+    """A header-only HTTP 429 stop assessed after safe closure."""
+
+
+@contextlib.contextmanager
+def header_rate_limit_response(response):
+    """Retain existing barriers when closing an HTTP 429 fails."""
+    try:
+        with response:
+            yield
+    except HeaderRateLimitStop:
+        raise
+    except BaseException as error:
+        error._header429_unassessed = True
+        # Latch before any fallible best-effort diagnostics.
+        with contextlib.suppress(BaseException):
+            journal_failure()
+        raise
 
 
 if __name__ == "__main__":
