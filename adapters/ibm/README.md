@@ -241,18 +241,22 @@ fields are unchanged.
 The existing hard collection/run/job limits and one-hour pre-minted App token
 are unchanged. Larger complete frontiers, slow responses or stronger retained
 backoff can exhaust a cap; such a run fails and preserves last-good data
-rather than truncating, raising a cap or resetting state. Earlier
-native/consumer receipts establish historical unchanged factual coverage, not
-current 12.2/30 timing. This candidate requires independent pre-access review
-and a separately released full current native test with complete RAM
-response/stdout and consumer evidence before merge; no new native or
-production result is claimed here.
+rather than truncating, raising a cap or resetting state. In the historical
+issue #224 candidate stage, earlier native/consumer receipts established
+unchanged factual coverage without establishing current 12.2/30 timing. That
+stage required independent pre-access review and a separately released complete
+native test. The later successful current native and its retained complete RAM
+evidence are documented below; production delivery still follows the merge.
 
 ### Local and hosted restoration
 
 Every process restores fresh complete source workflow history and the newest
-exact owned ZIP before any publisher request, using read-only `GITHUB_TOKEN`
-access to Actions metadata/artifacts. Local collection requires all family
+exact owned ZIP before any publisher request. HOSTED requires `GITHUB_TOKEN`
+before metadata HTTP. LOCAL sends Authorization only when a token is configured
+and may use the existing normal TLS/proxy route without inventing a token.
+Metadata access remains read-only; actual provider scopes are not inferred.
+Credentials are never sent to publishers or signed storage. Local collection
+requires all family
 runs to be terminal; a queued or active attempt stops it. Hosted collection
 retains mandatory current-run/attempt/head validation and exact completed
 prior-attempt chronology. Missing mature history, a newer missing/expired
@@ -270,3 +274,231 @@ before the first publisher request after startup quiet. A changed/enabled
 workflow stops before that request. This is a first-request coordination guard,
 not per-page GitHub polling; maintain the pause for the complete local run.
 Hosted workflow behavior and the daily schedule are unchanged.
+
+
+## Historical first persistence prototype (issue #273)
+
+The first implementation stage introduced a source-local schema-3 transaction
+before physical publisher access and before cached REP assessment. Settlement
+follows the durable header/body/REP decisions. Policy-only transactions do not
+count as physical requests. Target-specific REP observations retain canonical
+target hashes, safe origins/paths, physical robots-body hashes, parser decisions
+and delays/rates; they do not fabricate a global publisher ban. Existing actual
+holds remain retained. State failures stay fatal, and safely owned current state
+and stale export files are invalidated where storage permits. An earlier durable
+pending record protects restart when cleanup storage is entirely unavailable.
+
+That first stage was offline. Its public preparation path refused access while
+exact mature owned-state and local-state compatibility still awaited
+implementation and independent approval; it claimed no fresh complete native
+pass or production result. The subsequent reviewed compatibility, schema 4 and
+successful separately released original test are documented below. Missing old
+fields never prove settled history, and observed new counters do not reconstruct
+unavailable historical responses. Source facts, inventory, expiry, publication,
+timing floors and the workflow schedule remain preserved.
+
+Actual unavailable REP responses bind an explicit empty-policy digest.
+Successful responses retain their physical byte digest even when decoded policy
+is empty.
+Missing or empty local publisher state is refused rather than initialized from
+unreviewed defaults, including low-level state access.
+
+## Guarded legacy compatibility (issue #273)
+
+The separate LOCAL and HOSTED boundaries bind the maintainer approval
+[6205602169](https://github.com/YouthOpps/data-pipeline/issues/273#issuecomment-6205602169)
+and the independently reviewed complete two-invocation MAX state. This is an
+IBM-only delivery within issue #273; the broader issue remains open.
+The finite bridge accepts only this source's exact reviewed schema-1 local and
+newest owned inputs; missing pending fields never prove historical settlement.
+The approved full MAX seed retains all known old constraints and explicit
+legacy rate/policy-history uncertainty; missing fields do not prove settlement.
+A newer attempt, changed producing head/jobs/artifact or modern local state
+invalidates the old legacy fallback. A different owner with schema-1 data fails.
+Modern owned schema-4 states use strict validation and strongest/MAX merging.
+
+LOCAL retains the mature parent (device 34, inode 2964), collection lock
+(device 34, inode 3053) and state lock (device 34, inode 2965) under exclusive
+nonblocking coordination. The final journal correction retains a locked RW
+state descriptor, checks its named generation and rewrites that same inode;
+it does not rotate state.json or adopt a replacement name. Reads and
+invalidation remain beneath the retained parent. A missing, changed or interrupted mature namespace is refused
+rather than recreated. Modern LOCAL state cannot fall back to the old hosted
+owner; normal modern-owned continuity follows the strict newest artifact.
+
+HOSTED is separate: authenticated GitHub run/job metadata must match the current
+repository, main ref, source workflow and revision; an environment flag alone
+is insufficient. A fresh github-hosted namespace is created exclusively only
+after the exact newest owned ZIP has passed ownership/digest checks. LOCAL
+absence cannot use this route. Metadata binding does not claim credential scope
+or cryptographic runtime attestation. The first physical request follows at
+least sixty seconds of monotonic startup quiet and every stronger old guard,
+then repeats fresh coordination/history checks. Same-process reentry also
+rechecks coordination. No publisher requests are added by policy-only events.
+
+Private controls exercise the actual decoder using explicitly synthetic ZIPs
+containing the already root-decoded envelopes, with fixture-specific digests.
+They do not claim a second download of the genuine archives, a fresh full
+publisher collection, actual migration or production readiness. Original source
+facts, IDs, pagination, expiry, publication requests, publisher pacing and caps
+remain unchanged; the new coordination adds fail-closed prerequisites. The
+implementation, successful native evidence and complete state have separate
+independent acceptance and a public production boundary. Production publication
+and live-site verification still follow the merge.
+
+IBM also retains the newly created owned artifact descriptor through output
+signalling. If opening/writing the signal or unlink cleanup fails, the held
+owned inode is truncated and synced first; foreign replacement paths remain
+untouched. This is a narrow export-error correction, with no new native claim.
+
+## Bounded policy history (issue #273)
+
+The adapter uses schema 4. Its exact finite schema-1 bridge uses the approved
+complete native MAX seed with policy-history uncertainty retained. Schema 3 is
+not accepted through generic defaults or an inferred missing-field conversion.
+The first HOSTED transition authenticates the exact pinned old producing run,
+attempt, source, jobs and owned artifact. A newer applicable attempt invalidates
+that old fallback; subsequent modern owned state uses strict validation/MAX.
+
+One whole, canonical-min historical allowed witness is retained per approved
+source origin. This is an arbitrary historical sample, never the latest policy,
+permission, an assessment owner or evidence that a pending event completed.
+Absence means unknown. All scoped denial witnesses remain lossless, separately
+from numeric MAX restrictions, holds and unknown/conflict flags. A new denial
+cannot replace another denial or silently disappear to satisfy a size bound.
+
+Every actual fresh or cached target assessment first persists a distinct
+`policy_pending` owner under its durable outer transaction. The unchanged REP
+parser still assesses that exact target. Its complete matching current
+decision and all restrictions are durably committed while the assessment is
+still pending, independently of which historical sample was selected. A
+separate commit clears the assessment; the outer transaction can settle only
+with its own matching current receipt. Physical and logical outer owners also
+retain the expected last nested assessment receipt and compare the whole
+durable record before settling. The pinned approved seed is an independent
+MAX/OR input, including its unknown flags and lossless policy restrictions.
+Pending owners, divergent pending joins and observed conflicts require review.
+Policy-only events add no physical starts.
+
+Typed input is rejected when a retained allowed witness, scoped denial or
+current receipt records a physical delay/rate above its global interval. Such
+inconsistent evidence is not silently recomputed or converted into healthy
+input. Correct normal assessment commits already retain this MAX.
+
+Allowed target/body churn does not grow the historical sample list. Scoped
+denials remain bounded at 32; local JSON and the actual owned-state envelope
+remain limited to 16 KiB, and archive downloads to 32 KiB. Prospective writes
+and exports check those unchanged byte bounds. Exceptional denial growth or
+large IRIs can exceed them: the complete collection then fails with a
+pending/sticky gate and full attempted decision retained in RAM for review. No
+route, denial or target is truncated, and a fresh process cannot use an older
+owned ZIP to clear that unsettled state. There is no claim that unlimited
+denial history can fit a fixed-size artifact.
+
+Private actual-function controls cover fresh/cached/redirected and unavailable
+REP, exact raw-body provenance, current receipt ownership, persistence and
+cleanup faults, fresh-process older-state refusal, bounded churn and lossless
+joins. These are isolated journals and inert transport/metadata fixtures, not a
+publisher crawl, real state transition or production certification. Source
+facts, IDs, parser rules, collection frontier, pacing floors, retry bounds,
+publication requests and workflow schedules remain unchanged.
+
+## Native evidence and consumed oneoff LOCAL entry
+
+The first unchanged original test failed during cleanup after ten complete
+HTTP 200 publisher responses: execution had already released the collection
+lock descriptor and compatibility cleanup attempted to close it again. The
+narrow fix removes the descriptor from the compatibility owner list before the
+original execution owner releases it. Actual private descriptor-reuse controls
+verify that cleanup cannot close an unrelated file using a recycled number.
+The first native result remains FAIL; an offline replay is not a native pass.
+
+The separately reviewed oneoff mature-LOCAL entry checked the exact retained
+state bytes, parent/state/lock identities and approved independent MAX before
+access. It repeated complete paused-workflow/owner/source/job/artifact checks
+unconditionally under both exclusive locks immediately before commit, then
+retained the normal sixty-second quiet and post-quiet/pre-wire checks. Its
+successful commit consumed the exact old raw-state boundary. The dedicated
+oneoff literal is now `None`; normal modern-owned continuity does not depend
+on it, and no generic modern-local/old-owned fallback is introduced.
+
+The second separately authorized original nonpublishing test passed with ten
+actual complete HTTP 200 responses: robots plus all nine source HTML documents.
+The full discovered graph produced five programme-overview records. Their
+availability remains unknown, deadlines null and citizenship lists empty; no
+currently open vacancy or inferred eligibility is claimed. All five records
+passed the current website consumer, as did five filtered, zero derived
+expiry-empty and five last-good records after failure. The expiry fixture
+changes clones only and does not assert that actual programmes expired.
+
+All 85 first-native and 85 second-native attempted state saves have matching
+persisted bytes. The complete MAX combines both independently reviewed seeds
+and all 170 actual snapshots; transient pending owners are matched to their
+actual durable receipt and settlement rather than blindly cleared or ORed.
+The 50 known timing observations are not 50 physical requests: the two native
+invocations made ten publisher GETs each. Explicit unknown historical rate and
+policy fields remain true. The successful test measured minimum physical
+completion-to-next-wire spacing of 12.224 seconds, inventory completion spacing
+of 30.028 seconds and at most five starts per rolling minute. These measurements
+and the native pass do not claim production or live website delivery.
+
+
+## Qualified journal generation correction (issue #273)
+
+The maintainer approved the journal-only correction in
+[review 6205710372](https://github.com/YouthOpps/data-pipeline/issues/273#issuecomment-6205710372).
+The successful original native test used revision e635dc69. The final source
+adds journal authority checks and failure handling; it has not run a third
+native collection. All ten actual response bodies, the complete nine-page
+collection graph, five factual records and current consumer cases are reused
+with explicit function parity. The earlier failed native remains recorded as
+FAIL. Seed 9a28936b and its existing LOCAL/HOSTED boundary approvals are
+unchanged.
+
+The journal holds its original RW descriptor and stable lock, verifies the
+parent, current name, inode and observed generation around IO, and checks that
+authority before transport and artifact handoff. A write failure stays fatal;
+a final completion write cannot revive it. Invalidating state uses only the
+retained original descriptor. Collection-lock cleanup checks the identity
+captured at actual acquisition and preserves a recycled foreign descriptor.
+Healthy cleanup failures propagate; an existing primary error is preserved.
+Owned artifact output is invalidated if journal or output handoff fails.
+
+This deliberately trades crash availability for safety: truncation and short
+writes occur on the held inode, so interruption can leave an empty or torn
+mature journal. Such state requires review and cannot be restored from an
+older owned artifact as fresh permission. Publication of the source data pair
+keeps its existing atomic behavior. Locks are advisory; these checks do not
+claim filesystem compare-and-swap or authentication against arbitrary writers
+with the same OS user that ignore those locks. Parser, complete frontier,
+identities, expiry rules, publisher request timing, publication API and job
+limits are unchanged. No publisher traffic was used for this conditional IO
+correction.
+
+
+The last pre-opener authority check also revalidates the collection descriptor
+against its actual acquisition identity. Initial bridge state/lock releases
+check their original IDs before unlock/close, recheck after unlock, preserve
+foreign replacements and attempt both releases without hiding a primary
+failure. Namespace and artifact/output file acquisition uses nonblocking opens
+so unsafe FIFO replacements reach type validation instead of hanging before
+it. These are conditional IO corrections, qualified by the same retained
+native evidence; no additional publisher collection was performed.
+
+
+Owned output also retains an independent reference to its acquired inode
+through handoff and cleanup. Reused foreign descriptors are neither truncated
+nor closed. A last-close fault can reacquire output only after matching the
+exact previously acquired inode beneath the verified original output parent;
+a different replacement is preserved. Cleanup errors do not replace the
+primary handoff error. These private conditional cases do not assert that a
+production IO fault occurred.
+
+
+The same acquisition-ID protection covers the finalized artifact reader,
+nested step-output directories, the step-output writer and export-root close.
+Reader identity/generation is checked after the read; output identity is
+checked after writing and fsync. Late parent-close failures invalidate the
+known original output beneath its verified original directory, and preserve
+foreign descriptors and an earlier primary error. Existing supported safe
+step-output permissions and nested paths remain accepted.
