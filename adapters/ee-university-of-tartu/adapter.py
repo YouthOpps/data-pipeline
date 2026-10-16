@@ -847,6 +847,7 @@ _JOURNAL_NEW = False
 
 
 _COLLECTION_LOCK_FD = None
+_COLLECTION_LOCK_ID = None
 
 
 _RESTORED = _STATE_TRUSTED = False
@@ -859,6 +860,8 @@ _LAST_KNOWN_STATE = None
 
 
 _JOURNAL_LOCKS = {}
+_JOURNAL_VERSIONS = {}
+_JOURNAL_DIRTY = set()
 
 
 _VERIFIED_REMOTE_CREATE = None
@@ -1441,108 +1444,175 @@ def budget_file():
     )
 
 
-def locked_budget():
-    global _JOURNAL_NEW
-    budget_file()
-    parent = state_parent()
-    name = os.path.basename(_STATE_PATH)
-    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
-    if (
-        _INITIAL_DIRECTORY_PROVEN
-        and not _RESTORED
-        and (
-            os.environ.get("GITHUB_ACTIONS") == "true"
-            or _VERIFIED_REMOTE_CREATE is not None
-        )
-    ):
-        try:
-            fd = os.open(
-                name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent
+def journal_version(info):
+    """Describe the bytes and metadata of one held journal generation."""
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_uid,
+        stat.S_IMODE(info.st_mode),
+        info.st_nlink,
+    )
+
+
+def retained_journal(check_generation=True):
+    """Use the same live RW descriptor as the exclusive journal lock."""
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+    try:
+        if _PUBLISHER_GATE_FAILED:
+            raise AdapterError("Publisher persistence gate failed", "access")
+        if len(_JOURNAL_LOCKS) != 1:
+            raise AdapterError(
+                "One live publisher journal lock required", "access"
             )
-            _JOURNAL_NEW = True
-        except FileExistsError:
-            fd = os.open(name, flags, dir_fd=parent)
-            _JOURNAL_NEW = False
-    else:
-        fd = os.open(name, flags, dir_fd=parent)
-    try:
-        info = validate_state_descriptor(fd, parent, name)
+        descriptor, identity = next(iter(_JOURNAL_LOCKS.items()))
+        parent = state_parent()
+        info = validate_state_descriptor(
+            descriptor, parent, os.path.basename(_STATE_PATH)
+        )
+        if (
+            (info.st_dev, info.st_ino) != identity
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+            != os.O_RDWR
+            or check_generation
+            and journal_version(info) != _JOURNAL_VERSIONS[descriptor]
+        ):
+            raise AdapterError("Publisher journal generation changed", "access")
+        return descriptor, info
     except BaseException:
-        os.close(fd)
+        _STATE_TRUSTED = False
+        _PUBLISHER_GATE_FAILED = True
         raise
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or info.st_uid != os.getuid()
-        or info.st_nlink != 1
-        or info.st_mode & 0o077
-    ):
-        os.close(fd)
-        raise AdapterError("Unsafe publisher journal", "access")
-    file = os.fdopen(fd, "r+")
+
+
+
+def locked_budget():
+    global _JOURNAL_NEW, _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+    fd = None
+    identity = None
     try:
-        fcntl.flock(file.fileno(), fcntl.LOCK_EX)
-        return BudgetLock(file, info)
+        budget_file()
+        parent = state_parent()
+        name = os.path.basename(_STATE_PATH)
+        flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+        if (
+            _INITIAL_DIRECTORY_PROVEN
+            and not _RESTORED
+            and (
+                os.environ.get("GITHUB_ACTIONS") == "true"
+                or _VERIFIED_REMOTE_CREATE is not None
+            )
+        ):
+            try:
+                fd = os.open(
+                    name, flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent
+                )
+                before = os.fstat(fd)
+                identity = (before.st_dev, before.st_ino)
+                _JOURNAL_NEW = True
+                os.fsync(parent)
+            except FileExistsError:
+                fd = os.open(name, flags, dir_fd=parent)
+                _JOURNAL_NEW = False
+        else:
+            fd = os.open(name, flags, dir_fd=parent)
+        before = validate_state_descriptor(fd, parent, name)
+        identity = (before.st_dev, before.st_ino)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        info = validate_state_descriptor(fd, parent, name)
+        if (
+            (info.st_dev, info.st_ino) != identity
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or _JOURNAL_LOCKS
+        ):
+            raise AdapterError("Publisher journal lock changed", "access")
+        return BudgetLock(fd, info)
     except BaseException:
-        file.close()
+        _STATE_TRUSTED = False
+        _PUBLISHER_GATE_FAILED = True
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                info = os.fstat(fd)
+                if identity is None or (info.st_dev, info.st_ino) == identity:
+                    os.close(fd)
         raise
 
 
 def load_budget():
-    parent = state_parent()
-    name = os.path.basename(_STATE_PATH)
-    fd = os.open(
-        name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
-    )
-    with os.fdopen(fd, "rb") as file:
-        validate_state_descriptor(file.fileno(), parent, name)
-        raw = file.read(16385)
-        validate_state_descriptor(file.fileno(), parent, name)
-    if len(raw) > 16384:
-        raise AdapterError("Oversized publisher journal", "access")
-    if not raw and _JOURNAL_NEW and _VERIFIED_REMOTE_CREATE is not None:
-        return validate_budget(copy.deepcopy(_VERIFIED_REMOTE_CREATE))
-    if (
-        not raw
-        and _JOURNAL_NEW
-        and os.environ.get("GITHUB_ACTIONS") == "true"
-        and not _RESTORED
-    ):
-        return empty_budget(time.time())
+    """Read the retained lock FD and reject a changed generation."""
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
     try:
-        value = json.loads(raw)
-        return validate_budget(value)
-    except (ValueError, TypeError):
-        raise AdapterError("Corrupt publisher journal", "access") from None
+        if not _JOURNAL_LOCKS:
+            if _STATE_PATH is None:
+                raise AdapterError(
+                    "Publisher state is not initialized", "access"
+                )
+            with locked_budget():
+                return load_budget()
+        descriptor, _ = retained_journal()
+        raw = os.pread(descriptor, 16385, 0)
+        retained_journal()
+        if len(raw) > 16384:
+            raise AdapterError("Oversized publisher journal", "access")
+        if not raw and _JOURNAL_NEW and _VERIFIED_REMOTE_CREATE is not None:
+            return validate_budget(copy.deepcopy(_VERIFIED_REMOTE_CREATE))
+        if (
+            not raw
+            and _JOURNAL_NEW
+            and os.environ.get("GITHUB_ACTIONS") == "true"
+            and not _RESTORED
+        ):
+            return empty_budget(time.time())
+        try:
+            return validate_budget(json.loads(raw))
+        except (ValueError, TypeError):
+            raise AdapterError("Corrupt publisher journal", "access") from None
+
+    except BaseException:
+        _STATE_TRUSTED = False
+        _PUBLISHER_GATE_FAILED = True
+        raise
 
 
 def write_budget(state):
-    """Latch and invalidate the original journal on persistence failure."""
+    """Latch every validation, serialization or persistence failure."""
     global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED, _LAST_KNOWN_STATE
-    if _LAST_KNOWN_STATE is None:
-        _LAST_KNOWN_STATE = copy.deepcopy(state)
-    else:
-        _LAST_KNOWN_STATE = merge_budget(_LAST_KNOWN_STATE, state)
     if _PUBLISHER_GATE_FAILED:
         raise AdapterError("Publisher persistence gate failed", "access")
     try:
+        if _LAST_KNOWN_STATE is None:
+            _LAST_KNOWN_STATE = copy.deepcopy(state)
+        else:
+            _LAST_KNOWN_STATE = merge_budget(_LAST_KNOWN_STATE, state)
         return write_budget_body(state)
     except BaseException:
         _STATE_TRUSTED = False
         _PUBLISHER_GATE_FAILED = True
-        invalidate_failed_journal()
+        with contextlib.suppress(BaseException):
+            invalidate_failed_journal()
         raise
 
 
 class BudgetLock:
-    """Retain the validated original journal descriptor until unlock."""
+    """Own one locked raw descriptor without closing a recycled foreign FD."""
 
-    def __init__(self, file, info):
-        self.file = file
-        self.descriptor = file.fileno()
-        _JOURNAL_LOCKS[self.descriptor] = (info.st_dev, info.st_ino)
+    def __init__(self, descriptor, info):
+        self.descriptor = descriptor
+        self.identity = (info.st_dev, info.st_ino)
+        _JOURNAL_LOCKS[descriptor] = self.identity
+        _JOURNAL_VERSIONS[descriptor] = journal_version(info)
 
-    def __getattr__(self, name):
-        return getattr(self.file, name)
+    def fileno(self):
+        if self.descriptor is None:
+            raise AdapterError("Publisher lock is closed", "access")
+        info = os.fstat(self.descriptor)
+        if (info.st_dev, info.st_ino) != self.identity:
+            raise AdapterError("Publisher lock FD was reused", "access")
+        return self.descriptor
 
     def __enter__(self):
         return self
@@ -1551,70 +1621,73 @@ class BudgetLock:
         self.close()
 
     def close(self):
-        if self.descriptor is not None:
-            _JOURNAL_LOCKS.pop(self.descriptor, None)
-            self.descriptor = None
-            self.file.close()
+        global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+        primary_error = sys.exc_info()[0] is not None
+        descriptor, self.descriptor = self.descriptor, None
+        if descriptor is not None:
+            _JOURNAL_LOCKS.pop(descriptor, None)
+            _JOURNAL_VERSIONS.pop(descriptor, None)
+            _JOURNAL_DIRTY.discard(descriptor)
+            try:
+                info = os.fstat(descriptor)
+                if (info.st_dev, info.st_ino) != self.identity:
+                    raise AdapterError("Publisher lock FD was reused", "access")
+                os.close(descriptor)
+            except BaseException:
+                _STATE_TRUSTED = False
+                _PUBLISHER_GATE_FAILED = True
+                if not primary_error:
+                    raise
 
 
 def invalidate_failed_journal():
-    """Invalidate stale JSON through retained, validated journal FDs."""
-    parent = state_parent()
-    if not _JOURNAL_LOCKS:
-        raise AdapterError(
-            "No retained journal descriptor after failure", "access"
-        )
-    retained = list(_JOURNAL_LOCKS.items())
-    for descriptor, identity in retained:
+    """Invalidate only original owned FDs, never a replacement pathname."""
+    for descriptor, identity in list(_JOURNAL_LOCKS.items()):
         info = os.fstat(descriptor)
         if (
             not stat.S_ISREG(info.st_mode)
             or info.st_uid != os.getuid()
-            or info.st_mode & 0o077
+            or stat.S_IMODE(info.st_mode) != 0o600
             or info.st_nlink not in (0, 1)
             or (info.st_dev, info.st_ino) != identity
+            or descriptor not in _JOURNAL_DIRTY
+            and info.st_nlink == 1
+            and journal_version(info) != _JOURNAL_VERSIONS[descriptor]
         ):
-            raise AdapterError("Publisher journal identity changed", "access")
-    name = os.path.basename(_STATE_PATH)
-    current = os.open(
-        name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
-    )
-    try:
-        validate_state_descriptor(current, parent, name)
-        # Atomic replacement may leave the lock on an older safe inode.
-        # Invalidate the current validated journal before those old handles.
-        for descriptor in [current] + [item[0] for item in retained]:
-            os.ftruncate(descriptor, 0)
-            os.fsync(descriptor)
-    finally:
-        os.close(current)
+            raise AdapterError("Original publisher journal changed", "access")
+        os.ftruncate(descriptor, 0)
+        os.fsync(descriptor)
 
 
 def write_budget_body(state):
-    """Persist one validated state while its original journal lock is held."""
-    global _INITIAL_DIRECTORY_PROVEN
+    """Commit through the held inode; interrupted rewrites fail closed."""
+    global _INITIAL_DIRECTORY_PROVEN, _JOURNAL_NEW
     state = validate_budget(state)
-    parent = state_parent()
-    name = os.path.basename(_STATE_PATH)
-    fd = os.open(
-        name, os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
-    )
-    with os.fdopen(fd, "w") as file:
-        info = validate_state_descriptor(file.fileno(), parent, name)
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_nlink != 1
-            or info.st_mode & 0o077
-        ):
-            raise AdapterError("Unsafe publisher journal write", "access")
-        file.seek(0)
-        json.dump(state, file, separators=(",", ":"))
-        file.truncate()
-        file.flush()
-        _INITIAL_DIRECTORY_PROVEN = False
-        os.fsync(file.fileno())
-        validate_state_descriptor(file.fileno(), parent, name)
+    payload = json.dumps(state, separators=(",", ":")).encode()
+    if len(payload) > 16384:
+        raise AdapterError("Oversized publisher journal commit", "access")
+    descriptor, _ = retained_journal()
+    _INITIAL_DIRECTORY_PROVEN = _JOURNAL_NEW = False
+    _JOURNAL_DIRTY.add(descriptor)
+    os.ftruncate(descriptor, 0)
+    os.fsync(descriptor)
+    retained_journal(False)
+    offset = 0
+    while offset < len(payload):
+        retained_journal(False)
+        count = os.pwrite(descriptor, payload[offset:], offset)
+        if type(count) is not int or not 0 < count <= len(payload) - offset:
+            raise AdapterError("Incomplete publisher journal write", "access")
+        offset += count
+        retained_journal(False)
+    os.fsync(descriptor)
+    _, before = retained_journal(False)
+    raw = os.pread(descriptor, len(payload) + 1, 0)
+    _, after = retained_journal(False)
+    if raw != payload or journal_version(before) != journal_version(after):
+        raise AdapterError("Publisher journal bytes changed", "access")
+    _JOURNAL_VERSIONS[descriptor] = journal_version(after)
+    _JOURNAL_DIRTY.discard(descriptor)
 
 
 def merge_budget(left, right):
@@ -1940,6 +2013,8 @@ def request_bytes(
             )
         try:
             attempted = True
+            if publisher:
+                retained_journal()
             response = _OPENER.open(request, timeout=request_timeout(publisher))
         except urllib.error.HTTPError as error:
             response = error
@@ -2127,6 +2202,7 @@ def fetch_inventory_page(fetch, *args, **kwargs):
 
 def prepare_collection():
     global _COLLECTION_LOCK_FD, _STATE_TRUSTED, _LOCAL_FIRST_ACCESS_CHECKED
+    global _COLLECTION_LOCK_ID, _PUBLISHER_GATE_FAILED
     if _PUBLISHER_GATE_FAILED:
         raise AdapterError("Publisher completion persistence failed", "access")
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -2141,18 +2217,30 @@ def prepare_collection():
             not stat.S_ISREG(info.st_mode)
             or info.st_uid != os.getuid()
             or info.st_nlink != 1
-            or info.st_mode & 0o077
+            or stat.S_IMODE(info.st_mode) != 0o600
         ):
+            _STATE_TRUSTED = False
+            _PUBLISHER_GATE_FAILED = True
             os.close(fd)
             raise AdapterError("Unsafe lifecycle lock", "access")
+        identity = (info.st_dev, info.st_ino)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            os.close(fd)
+            current = os.fstat(fd)
+            if (current.st_dev, current.st_ino) != identity:
+                raise AdapterError("Collection lock FD was reused", "access")
+        except BaseException:
+            _STATE_TRUSTED = False
+            _PUBLISHER_GATE_FAILED = True
+            with contextlib.suppress(OSError):
+                current = os.fstat(fd)
+                if (current.st_dev, current.st_ino) == identity:
+                    os.close(fd)
             raise AdapterError(
-                "Another publisher collector is active", "access"
+                "Another or unhealthy publisher collector", "access"
             ) from None
         _COLLECTION_LOCK_FD = fd
+        _COLLECTION_LOCK_ID = identity
     if _STATE_TRUSTED and os.environ.get("GITHUB_ACTIONS") == "true":
         return
     _LOCAL_FIRST_ACCESS_CHECKED = False
@@ -2188,6 +2276,34 @@ def arm_alarm(deadline):
     signal.setitimer(signal.ITIMER_REAL, remaining)
 
 
+def close_collection_lock():
+    """Release only the lifecycle lock identity captured at acquisition."""
+    global _COLLECTION_LOCK_FD, _COLLECTION_LOCK_ID
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+    primary_error = sys.exc_info()[0] is not None
+    descriptor, identity = _COLLECTION_LOCK_FD, _COLLECTION_LOCK_ID
+    _COLLECTION_LOCK_FD = _COLLECTION_LOCK_ID = None
+    if descriptor is None:
+        return
+    try:
+        info = os.fstat(descriptor)
+        if (
+            identity is None
+            or (info.st_dev, info.st_ino) != identity
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+        ):
+            raise AdapterError("Collection lock identity changed", "access")
+        os.close(descriptor)
+    except BaseException:
+        _STATE_TRUSTED = False
+        _PUBLISHER_GATE_FAILED = True
+        if not primary_error:
+            raise
+
+
 @contextlib.contextmanager
 def execution():
     global _RUN_END, _COLLECTION_LOCK_FD
@@ -2202,15 +2318,21 @@ def execution():
     try:
         yield
     finally:
+        primary_error = sys.exc_info()[0] is not None
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
         _RUN_END = None
-        if _COLLECTION_LOCK_FD is not None:
-            try:
-                os.close(_COLLECTION_LOCK_FD)
-            except OSError:
-                pass
-            _COLLECTION_LOCK_FD = None
+        try:
+            close_collection_lock()
+        except BaseException:
+            with contextlib.suppress(BaseException):
+                export_family_artifact()
+            if not primary_error:
+                raise
+        else:
+            if _PUBLISHER_GATE_FAILED:
+                with contextlib.suppress(BaseException):
+                    export_family_artifact()
 
 
 @contextlib.contextmanager
@@ -2964,73 +3086,89 @@ def export_family_artifact():
         temporary = None
         temporary_info = None
         try:
-            run_id, attempt = current_run_identity()
             with locked_budget():
+                run_id, attempt = current_run_identity()
                 state = load_budget()
-            if state["in_flight"]:
-                raise AdapterError(
-                    "Unsettled state cannot be exported", "access"
+                if state["in_flight"]:
+                    raise AdapterError(
+                        "Unsettled state cannot be exported", "access"
+                    )
+                envelope = {
+                    "schema": 1,
+                    "repository": "YouthOpps/data-pipeline",
+                    "run_id": run_id,
+                    "run_attempt": attempt,
+                    "source": SOURCE_ID,
+                    "head_sha": os.environ.get("GITHUB_SHA"),
+                    "adapter_sha256": source_file_digest(),
+                    "state_sha256": hashlib.sha256(
+                        json.dumps(
+                            state, sort_keys=True, separators=(",", ":")
+                        ).encode()
+                    ).hexdigest(),
+                    "state": state,
+                }
+                if not re.fullmatch(
+                    r"[0-9a-f]{40}", envelope["head_sha"] or ""
+                ):
+                    raise AdapterError(
+                        "Invalid artifact source revision", "access"
+                    )
+                temporary = ".owned-pacing-" + os.urandom(16).hex()
+                verify_artifact_directory(root, directory)
+                descriptor = os.open(
+                    temporary,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_NOFOLLOW
+                    | os.O_NONBLOCK,
+                    0o600,
+                    dir_fd=directory,
                 )
-            envelope = {
-                "schema": 1,
-                "repository": "YouthOpps/data-pipeline",
-                "run_id": run_id,
-                "run_attempt": attempt,
-                "source": SOURCE_ID,
-                "head_sha": os.environ.get("GITHUB_SHA"),
-                "adapter_sha256": source_file_digest(),
-                "state_sha256": hashlib.sha256(
-                    json.dumps(
-                        state, sort_keys=True, separators=(",", ":")
-                    ).encode()
-                ).hexdigest(),
-                "state": state,
-            }
-            if not re.fullmatch(r"[0-9a-f]{40}", envelope["head_sha"] or ""):
-                raise AdapterError("Invalid artifact source revision", "access")
-            temporary = ".owned-pacing-" + os.urandom(16).hex()
-            verify_artifact_directory(root, directory)
-            descriptor = os.open(
-                temporary,
-                os.O_WRONLY
-                | os.O_CREAT
-                | os.O_EXCL
-                | os.O_NOFOLLOW
-                | os.O_NONBLOCK,
-                0o600,
-                dir_fd=directory,
-            )
-            temporary_info = os.fstat(descriptor)
-            with os.fdopen(descriptor, "w") as stream:
-                json.dump(envelope, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            same_owned_artifact(root, directory, prior)
-            os.replace(
-                temporary,
-                "pacing-state.json",
-                src_dir_fd=directory,
-                dst_dir_fd=directory,
-            )
-            temporary = None
-            same_owned_artifact(root, directory, temporary_info)
-            workflow_output_signal("true")
+                temporary_info = os.fstat(descriptor)
+                with os.fdopen(descriptor, "w") as stream:
+                    json.dump(envelope, stream)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                same_owned_artifact(root, directory, prior)
+                retained_journal()
+                os.replace(
+                    temporary,
+                    "pacing-state.json",
+                    src_dir_fd=directory,
+                    dst_dir_fd=directory,
+                )
+                temporary = None
+                same_owned_artifact(root, directory, temporary_info)
+                retained_journal()
+                workflow_output_signal("true")
+                retained_journal()
         except BaseException:
-            invalidate_owned_artifact(root, directory)
+            with contextlib.suppress(BaseException):
+                invalidate_owned_artifact(root, directory)
             raise
         finally:
-            if temporary is not None and temporary_info is not None:
-                verify_artifact_directory(root, directory)
-                current = os.stat(
-                    temporary, dir_fd=directory, follow_symlinks=False
-                )
-                validate_owned_output(current)
-                if (current.st_dev, current.st_ino) != (
-                    temporary_info.st_dev,
-                    temporary_info.st_ino,
-                ):
-                    raise AdapterError("Temporary artifact changed", "access")
-                os.unlink(temporary, dir_fd=directory)
+            primary_error = sys.exc_info()[0] is not None
+            try:
+                if temporary is not None and temporary_info is not None:
+                    verify_artifact_directory(root, directory)
+                    current = os.stat(
+                        temporary, dir_fd=directory, follow_symlinks=False
+                    )
+                    validate_owned_output(current)
+                    if (current.st_dev, current.st_ino) != (
+                        temporary_info.st_dev,
+                        temporary_info.st_ino,
+                    ):
+                        raise AdapterError(
+                            "Temporary artifact changed", "access"
+                        )
+                    os.unlink(temporary, dir_fd=directory)
+
+            except BaseException:
+                if not primary_error:
+                    raise
 
 
 
