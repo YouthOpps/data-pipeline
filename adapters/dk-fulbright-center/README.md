@@ -375,3 +375,47 @@ artifact remains mandatory; initial approval cannot heal missing or unsettled
 mature state. The original workflow, test and native observer are unchanged.
 The maintainer owns activation, merge and the sole automatic production run.
 No production publication or website delivery is claimed here.
+
+### Finite hosted pre-access recovery preparation
+
+The first automatic production attempt, run 38856433488/attempt 1 at head
+`f9c8ae77`, failed before publisher initialization. Its exact logged error was
+`Full-native Fulbright Denmark MAX approval required`: the workflow lacked the
+separate required four-key maintenance environment mapping. The existing
+six-key HOSTED transition did not satisfy that second gate. Job 116828825815
+failed, state upload was skipped and its actual artifact inventory is empty.
+The unique logged error and immutable source/context prove no reachable
+publisher request on this path; this is not hosted wire telemetry. The LOCAL
+native passed a different mode-specific branch and did not expose this omission.
+
+The correction adds the mandatory mapping and a separate finite HOSTED
+recovery declaration. Both now bind the exact public runtime approval below;
+that boundary is limited to the one reviewed pre-access failure. The finite branch can cover
+only that exact failure, after verifying the whole original 31-attempt history
+plus the one failed attempt, exact job/immutable source proofs and zero
+artifacts. It repeats the whole inventory, active mode and current job check
+after all historical metadata, without renewing the absolute time budget.
+Additional or concurrent attempts are rejected. Original history is
+not mutated; the original verifier receives an explicit readonly 31-row subset
+only after the complete 32-attempt audit succeeds. Original LOCAL and HOSTED
+markers and LOCAL inode observations remain unchanged.
+
+A later modern attempt still requires its newest exact owned artifact; missing,
+held or unsettled state cannot use this exception. The mandatory hosted
+maintenance gate remains mandatory. The proposed stronger state preserves all
+150 prior timing observations and the MAX derived from 427 witnesses, plus the
+failed job's completion as one conservative upper bound. These 151 observations
+are not 151 publisher requests. The public runtime approval below and an
+independent frozen review precede the controlled rollout. No new
+source crawl, original-test retake or production retry is claimed here.
+
+
+The maintainer's [finite runtime decision 6209203036](https://github.com/YouthOpps/data-pipeline/issues/305#issuecomment-6209203036)
+approves the exact 151-observation state `dcd8d55b`, the pinned failure proof
+and the matching four-key maintenance value. State encoding is sorted compact
+JSON plus LF; the original 31-attempt history digest remains `78a7d50b` with no
+LF. The existing LOCAL and first-HOSTED markers and every function are unchanged
+by this binding. The original successful native and failed first production
+remain separate evidence; no second production attempt or website delivery
+is certified here. Root owns the reviewed corrective merge and controlled
+activation before its sole automatic run.
