@@ -399,3 +399,25 @@ binds the required four-key maintenance environment packet to that same
 evidence URL and exact 95-observation state. The source requires this packet on
 both the first legacy transition and later owned-artifact restoration. All
 other workflow settings and the original test remain unchanged.
+
+
+## Received-response failures (#343)
+
+A received publisher response must enter, finish its bounded body read, and
+close successfully before it can return data or permit a retry or redirect.
+A response entry, body, or close failure stops this process before another
+publisher opener. A body error remains the primary cause when closing also
+fails. Healthy responses, original pre-response retry bounds, complete
+collection, and publication transport remain unchanged. HTTP 429 still stops
+before reading its body and retains the existing adaptive spacing and
+cooldown. For a known HTTP 429, header constraints are saved before response
+entry can fail; a failed entry or close remains distinct from a healthy
+timed stop.
+
+Response failures also latch the existing source failure guard; completion
+must not settle a failed response or clear its unresolved owner. This repair
+does not replace the source's existing journal schema or restoration rules.
+
+External inert controls exercise the actual transport and callers without
+publisher access. They do not establish a new complete live collection,
+production publication, or a cause for any historical publisher failure.
