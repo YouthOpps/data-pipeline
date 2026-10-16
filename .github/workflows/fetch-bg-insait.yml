@@ -25,7 +25,7 @@ jobs:
       github.repository == 'YouthOpps/data-pipeline' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 85
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,6 +44,9 @@ jobs:
         run: python -B adapters/bg-insait/adapter.py --publish
         env:
           DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
+          WEBSITE_APP_ID: ${{ vars.WEBSITE_APP_ID }}
+          WEBSITE_APP_PRIVATE_KEY: ${{ secrets.WEBSITE_APP_PRIVATE_KEY }}
+          WEBSITE_APP_INSTALLATION_ID: ${{ steps.token.outputs.installation-id }}
           INSAIT_PACING_BOOTSTRAP: '{"schema":1,"family":"youthopps-insait-publisher-v1","not_before":1791616743.9740555,"evidence":"https://github.com/YouthOpps/data-pipeline/issues/51#issuecomment-6095058149"}'
           GITHUB_TOKEN: ${{ github.token }}
           INSAIT_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
