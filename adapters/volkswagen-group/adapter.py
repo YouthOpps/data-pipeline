@@ -62,11 +62,11 @@ CATEGORIES = {
 }
 FAMILY = "youthopps-volkswagen-group-publisher-v1"
 FAMILY_SOURCES = {SOURCE_ID}
-COLLECTION_TIMEOUT = 2400
+COLLECTION_TIMEOUT = 7200
 PUBLICATION_TIMEOUT = 900
-RUN_TIMEOUT = 4320
+RUN_TIMEOUT = 9120
 EXPORT_TIMEOUT = 120
-_STATE_SCHEMA = 1
+_STATE_SCHEMA = 3
 _ARTIFACT_NAME = "volkswagen-group-pacing-state"
 MAX_PUBLISHER_STARTS = 240
 MAX_PUBLISHER_BYTES = 64 * 1024 * 1024
@@ -81,7 +81,7 @@ _LEGACY_FDS = []
 _RESTORED = _PUBLISHING = _STATE_TRUSTED = False
 _ROBOTS = {}
 _PUBLISHER_COMPLETED_MONOTONIC = None
-_PUBLISHER_INTERVAL = 6
+_PUBLISHER_INTERVAL = 12.2
 _PUBLISHER_GATE_FAILED = False
 _RUN_END = _PHASE_END = None
 _PHASE_NAME = None
@@ -91,18 +91,8 @@ _PAGE_COMPLETED = None
 
 
 def fetch_inventory_page(fetch, *args, **kwargs):
-    """Space logical inventory pages without changing native detail pacing."""
-    global _PAGE_COMPLETED
-    if _PAGE_COMPLETED is not None:
-        while True:
-            wait = _PAGE_COMPLETED + 12 - time.monotonic()
-            if wait <= 0:
-                break
-            time.sleep(wait)
-    try:
+    with protocol_inventory():
         return fetch(*args, **kwargs)
-    finally:
-        _PAGE_COMPLETED = time.monotonic()
 
 
 class Node:
@@ -314,69 +304,216 @@ def numeric(value):
 
 
 def validate_budget(state):
-    """Validate inert state without age-expiring a future publisher embargo."""
-    if not isinstance(state, dict) or set(state) - {"interval"} != {
-        "schema",
-        "family",
+    if (
+        not isinstance(state, dict)
+        or set(state) != set(empty_budget(0))
+        or type(state["schema"]) is not int
+        or state["schema"] != 3
+        or state["family"] != FAMILY
+    ):
+        raise AdapterError("Invalid modern publisher state schema", "access")
+    for key in [
         "observed_at",
         "not_before",
-        "starts",
-        "blocked",
-    }:
-        raise AdapterError("Invalid publisher pacing state", "access")
+        "interval",
+        "page_interval",
+        "completed_at",
+        "inventory_completed_at",
+        "rate_limit_until",
+    ]:
+        if not protocol_number(state[key]):
+            raise AdapterError("Unsupported publisher numeric state", "access")
+    try:
+        for key in [
+            "observed_at",
+            "not_before",
+            "completed_at",
+            "inventory_completed_at",
+            "rate_limit_until",
+        ]:
+            datetime.fromtimestamp(state[key], timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        raise AdapterError("Unsupported publisher clock", "access") from None
     if (
-        type(state["schema"]) is not int
-        or state["schema"] != _STATE_SCHEMA
-        or state["family"] != FAMILY
-        or not numeric(state["observed_at"])
-        or not numeric(state["not_before"])
-        or type(state["blocked"]) is not bool
-        or not numeric(state.get("interval", 6))
-        or state.get("interval", 6) < 6
-        or not isinstance(state["starts"], list)
-        or len(state["starts"]) > 10
-        or any(not numeric(t) for t in state["starts"])
-        or state["starts"] != sorted(state["starts"])
-        or len(set(state["starts"])) != len(state["starts"])
-        or any(t > state["observed_at"] for t in state["starts"])
+        state["interval"] < 12.2
+        or state["page_interval"] < 30
+        or state["observed_at"] > time.time() + 1
+        or max(state["completed_at"], state["inventory_completed_at"])
+        > state["observed_at"]
     ):
-        raise AdapterError("Invalid publisher pacing history", "access")
-    if time.time() + 1 < state["observed_at"]:
-        raise AdapterError("Publisher pacing clock moved backwards", "access")
+        raise AdapterError("Invalid publisher timing evidence", "access")
+    for key in [
+        "blocked",
+        "in_flight",
+        "legacy_rate_history_unknown",
+        "legacy_policy_history_unknown",
+        "legacy_completion_history_unknown",
+    ]:
+        if type(state[key]) is not bool:
+            raise AdapterError("Invalid publisher boolean provenance", "access")
+    if (
+        type(state["rate_limit_count"]) is not int
+        or not 0 <= state["rate_limit_count"] <= 100
+    ):
+        raise AdapterError("Unsupported observed rate counter", "access")
+    starts = state["starts"]
+    if (
+        not isinstance(starts, list)
+        or len(starts) > 10
+        or any(
+            not protocol_number(t) or t > state["observed_at"] for t in starts
+        )
+        or starts != sorted(set(starts))
+    ):
+        raise AdapterError("Invalid retained start observations", "access")
+    if state["in_flight"]:
+        if not re.fullmatch(r"[0-9a-f]{32}", str(state["flight_id"])):
+            raise AdapterError("Pending owner missing", "access")
+    elif state["flight_id"] is not None or state["policy_pending"] is not None:
+        raise AdapterError("Settled state retains unresolved owner", "access")
+    if state["policy_pending"] is not None and (
+        not isinstance(state["policy_pending"], dict)
+        or set(state["policy_pending"]) != {"owner", "target_sha256"}
+        or state["policy_pending"]["owner"] != state["flight_id"]
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(state["policy_pending"]["target_sha256"])
+        )
+    ):
+        raise AdapterError("Invalid pending policy target", "access")
+    observations = []
+    for key, denied in [("policy_allowed", False), ("policy_denied", True)]:
+        if not isinstance(state[key], dict):
+            raise AdapterError("Invalid policy observation map", "access")
+        for name, witness in state[key].items():
+            protocol_observation(witness)
+            if witness["allowed"] is denied or name != (
+                witness["target_sha256"] if denied else witness["origin"]
+            ):
+                raise AdapterError("Policy observation key mismatch", "access")
+            observations.append(witness)
+    if state["last_policy_receipt"] is not None:
+        observations.append(protocol_observation(state["last_policy_receipt"]))
+    for witness in observations:
+        required = witness["delay"]
+        if witness["rate"] is not None:
+            required = max(
+                required,
+                witness["rate"]["seconds"] / witness["rate"]["requests"] + 0.01,
+            )
+        if not protocol_number(required) or state["interval"] < required:
+            raise AdapterError(
+                "State weakens known policy restriction", "access"
+            )
+    settled = state["last_settled_owner"]
+    if settled is not None and (
+        not isinstance(settled, dict)
+        or set(settled) != {"owner", "receipt_sha256", "completed_at"}
+        or not re.fullmatch(r"[0-9a-f]{32}", str(settled["owner"]))
+        or not re.fullmatch(r"[0-9a-f]{64}", str(settled["receipt_sha256"]))
+        or not protocol_number(settled["completed_at"])
+        or settled["completed_at"] > state["observed_at"]
+    ):
+        raise AdapterError("Invalid exact owner settlement receipt", "access")
+    receipt = state["last_policy_receipt"]
+    if (
+        state["in_flight"]
+        and receipt is not None
+        and receipt["owner"] != state["flight_id"]
+    ):
+        raise AdapterError("Current policy receipt has foreign owner", "access")
+    if settled is not None and (
+        settled["receipt_sha256"] != protocol_digest(receipt)
+        or receipt is not None
+        and receipt["owner"] != settled["owner"]
+    ):
+        raise AdapterError(
+            "Settled receipt does not match exact assessment", "access"
+        )
+    if state["transition_id"] is not None and not re.fullmatch(
+        r"[0-9a-f]{64}", str(state["transition_id"])
+    ):
+        raise AdapterError("Invalid reviewed transition provenance", "access")
+    bound_envelope = {
+        "schema": 2,
+        "repository": "YouthOpps/data-pipeline",
+        "source": SOURCE_ID,
+        "run_id": 2**63 - 1,
+        "run_attempt": 2**31 - 1,
+        "head_sha": "f" * 40,
+        "adapter_sha256": "f" * 64,
+        "state_sha256": "f" * 64,
+        "state": state,
+    }
+    if (
+        max(
+            len(json.dumps(state, separators=(",", ":")).encode()),
+            len(json.dumps(bound_envelope, separators=(",", ":")).encode()),
+        )
+        > 16384
+    ):
+        raise AdapterError(
+            "Publisher state/envelope exceeds original byte bound", "access"
+        )
     return state
 
 
 def empty_budget(now):
     return {
-        "schema": _STATE_SCHEMA,
+        "schema": 3,
         "family": FAMILY,
         "observed_at": now,
         "not_before": now,
         "starts": [],
         "blocked": False,
-        "interval": 6,
+        "interval": 12.2,
+        "page_interval": 30,
+        "completed_at": 0,
+        "inventory_completed_at": 0,
+        "rate_limit_count": 0,
+        "rate_limit_until": 0,
+        "legacy_rate_history_unknown": True,
+        "legacy_policy_history_unknown": True,
+        "legacy_completion_history_unknown": True,
+        "in_flight": False,
+        "flight_id": None,
+        "policy_pending": None,
+        "last_policy_receipt": None,
+        "policy_allowed": {},
+        "policy_denied": {},
+        "last_settled_owner": None,
+        "transition_id": None,
     }
 
 
-def pace():
-    (
-        "Serialize every publisher request start across the complete "
-        "origin set."
-    )
-    global _PUBLISHER_INTERVAL, _REQUEST_STARTS
+def pace(inventory=False):
+    global _PUBLISHER_INTERVAL, _REQUEST_STARTS, _PROTOCOL_PHYSICAL_INVENTORY
+    _PROTOCOL_PHYSICAL_INVENTORY = bool(inventory)
     check_deadline()
     if _REQUEST_STARTS >= MAX_PUBLISHER_STARTS:
         raise AdapterError("Publisher request-start cap reached", "access")
     with locked_budget():
         state = load_budget()
-        _PUBLISHER_INTERVAL = max(_PUBLISHER_INTERVAL, state.get("interval", 6))
-        if state["blocked"]:
+        protocol_current_owner(state)
+        if state["blocked"] or state["rate_limit_count"] >= 100:
             raise AdapterError(
-                ("Publisher backoff requires reviewed recovery"), ("access")
+                "Retained publisher hold/counter requires review", "access"
             )
         now = time.time()
         starts = [t for t in state["starts"] if t > now - 60]
-        target = max(now, state["not_before"])
+        target = max(
+            now,
+            state["not_before"],
+            state["rate_limit_until"],
+            state["completed_at"] + state["interval"],
+        )
+        if len(starts) >= 5:
+            target = max(target, starts[-5] + 60.01)
+        if starts:
+            target = max(target, starts[-1] + state["interval"])
+        if _PROTOCOL_PHYSICAL_INVENTORY:
+            target = max(
+                target, state["inventory_completed_at"] + state["page_interval"]
+            )
         if _PUBLISHER_COMPLETED_MONOTONIC is not None:
             target = max(
                 target,
@@ -384,66 +521,47 @@ def pace():
                 + max(
                     0,
                     _PUBLISHER_COMPLETED_MONOTONIC
-                    + _PUBLISHER_INTERVAL
+                    + state["interval"]
                     - time.monotonic(),
                 ),
             )
-        if starts:
-            target = max(target, starts[-1] + state.get("interval", 6))
-        if len(starts) == 10:
-            target = max(target, starts[0] + 60)
-        if target + 120 > time.time() + (_PHASE_END - time.monotonic()):
-            raise AdapterError(
-                "Publisher backoff exceeds phase budget", "access"
-            )
-        if _COLLECTION_STARTED is not None and (
-            target + 120 > _COLLECTION_STARTED + COLLECTION_TIMEOUT
+        if (
+            target + 120
+            > time.time() + min(_PHASE_END, _RUN_END) - time.monotonic()
+            or target + 120 > _COLLECTION_STARTED + COLLECTION_TIMEOUT
         ):
             raise AdapterError(
-                ("Publisher backoff exceeds collection budget"), ("access")
+                "Full publisher timing exceeds original phase", "access"
             )
-        while True:
+        while target > time.time():
             check_deadline()
-            wait = max(0, target - time.time())
-            if _PUBLISHER_COMPLETED_MONOTONIC is not None:
-                wait = max(
-                    wait,
-                    _PUBLISHER_COMPLETED_MONOTONIC
-                    + _PUBLISHER_INTERVAL
-                    - time.monotonic(),
-                )
-            if wait <= 0:
-                break
-            if wait + 120 > _PHASE_END - time.monotonic():
-                raise AdapterError(
-                    "Publisher backoff exceeds phase budget", "access"
-                )
-            if _COLLECTION_STARTED is not None and (
-                time.time() + wait + 120
+            wait = target - time.time()
+            if (
+                wait + 120 > min(_PHASE_END, _RUN_END) - time.monotonic()
+                or time.time() + wait + 120
                 > _COLLECTION_STARTED + COLLECTION_TIMEOUT
             ):
                 raise AdapterError(
-                    "Publisher backoff exceeds collection budget", "access"
+                    "Full publisher timing exceeds original phase", "access"
                 )
-            time.sleep(wait)
+            time.sleep(min(wait, 30))
+        check_deadline()
         now = time.time()
         if now < target:
-            raise AdapterError(
-                ("Publisher pacing clock moved backwards"), ("access")
-            )
-        check_deadline()
+            raise AdapterError("Publisher clock moved backwards", "access")
+        # Recheck current deadlines after waiting/processing; phase ownership
+        # never renews and zero-wait paths retain the same original reserve.
         if (
-            _PUBLISHER_COMPLETED_MONOTONIC is not None
-            and time.monotonic()
-            < _PUBLISHER_COMPLETED_MONOTONIC + _PUBLISHER_INTERVAL
+            now + 120
+            > time.time() + min(_PHASE_END, _RUN_END) - time.monotonic()
+            or now + 120 > _COLLECTION_STARTED + COLLECTION_TIMEOUT
         ):
             raise AdapterError(
-                "Publisher physical completion gate not elapsed", "access"
+                "Full publisher timing exceeds original phase", "access"
             )
+        _PUBLISHER_INTERVAL = max(_PUBLISHER_INTERVAL, state["interval"])
         state["starts"] = [t for t in starts if t > now - 60] + [now]
-        state["not_before"] = max(
-            state["not_before"], now + state.get("interval", 6)
-        )
+        state["not_before"] = max(state["not_before"], now + state["interval"])
         state["observed_at"] = now
         save_budget(state)
         _REQUEST_STARTS += 1
@@ -451,63 +569,92 @@ def pace():
 
 @contextlib.contextmanager
 def publisher_attempt(publisher):
-    """Persist a completion gate around every physical publisher attempt."""
-    global _PUBLISHER_COMPLETED_MONOTONIC, _PUBLISHER_GATE_FAILED, _PUBLISHER_INTERVAL
+    global _PUBLISHER_COMPLETED_MONOTONIC, _PUBLISHER_GATE_FAILED
     if not publisher:
         yield
         return
-    if _COLLECTION_LOCK_FD is None or _PUBLISHER_GATE_FAILED:
+    if _COLLECTION_LOCK_FD is None or _PUBLISHER_GATE_FAILED or _GUARD_FATAL:
         raise AdapterError(
             "Exclusive healthy publisher collector required", "access"
         )
-    check_deadline()
-    if (
-        _PUBLISHER_COMPLETED_MONOTONIC is not None
-        and time.monotonic()
-        < _PUBLISHER_COMPLETED_MONOTONIC + _PUBLISHER_INTERVAL
-    ):
-        raise AdapterError(
-            "Publisher physical completion gate not elapsed", "access"
-        )
+    primary = None
     try:
         yield
+    except BaseException as error:
+        primary = error
+        raise
     finally:
         _PUBLISHER_COMPLETED_MONOTONIC = time.monotonic()
         _PUBLISHER_GATE_FAILED = True
-        with locked_budget():
-            state = load_budget()
-            _PUBLISHER_INTERVAL = max(
-                _PUBLISHER_INTERVAL, state.get("interval", 6)
-            )
-            now = time.time()
-            state["not_before"] = max(
-                state["not_before"], now + _PUBLISHER_INTERVAL
-            )
-            state["observed_at"] = now
-            save_budget(state)
-        _PUBLISHER_GATE_FAILED = False
+        try:
+            with locked_budget():
+                state = load_budget()
+                protocol_current_owner(state)
+                completed = time.time()
+                state["completed_at"] = max(state["completed_at"], completed)
+                if _PROTOCOL_PHYSICAL_INVENTORY:
+                    state["inventory_completed_at"] = max(
+                        state["inventory_completed_at"], completed
+                    )
+                state["not_before"] = max(
+                    state["not_before"], completed + state["interval"]
+                )
+                state["observed_at"] = completed
+                save_budget(state)
+            if not _GUARD_FATAL:
+                _PUBLISHER_GATE_FAILED = False
+        except BaseException:
+            journal_failed()
+            if primary is None:
+                raise
 
 
-def record_retry_after(value):
-    """Persist the embargo before reporting any refusal or retrieval failure."""
-    if value is None:
-        return
+def record_retry_after(value, rate_limited=False):
     with locked_budget():
         state = load_budget()
+        protocol_current_owner(state)
         now = time.time()
-        try:
-            if re.fullmatch(r"[0-9]+", value.strip()):
-                until = now + int(value)
-            else:
-                parsed = parsedate_to_datetime(value)
-                if parsed.utcoffset() is None:
-                    raise ValueError("Missing timezone")
-                until = parsed.timestamp()
-            if not numeric(until):
-                raise ValueError("Invalid embargo")
-            state["not_before"] = max(state["not_before"], until)
-        except Exception:
-            state["blocked"] = True
+        deadline = None
+        if value is not None:
+            try:
+                raw = str(value).strip()
+                seconds = (
+                    float(raw)
+                    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", raw)
+                    else None
+                )
+                if seconds is not None:
+                    if not protocol_number(seconds) or seconds <= 0:
+                        raise ValueError("Invalid seconds")
+                    deadline = now + seconds
+                else:
+                    date = parsedate_to_datetime(raw)
+                    if date.utcoffset() is None:
+                        raise ValueError("Missing timezone")
+                    deadline = date.timestamp()
+                if not protocol_number(deadline) or deadline <= now:
+                    raise ValueError("Stale or unsupported retry deadline")
+                datetime.fromtimestamp(deadline, timezone.utc)
+            except (ValueError, TypeError, OverflowError, OSError):
+                deadline = None
+        if rate_limited:
+            count = state["rate_limit_count"] + 1
+            physical = state["interval"] * 2
+            page = state["page_interval"] * 2
+            fallback = now + 1800 * 2 ** (count - 1)
+            if count > 100 or not all(
+                protocol_number(v) for v in [physical, page, fallback]
+            ):
+                raise AdapterError("Unassessed rate-limit arithmetic", "access")
+            state["rate_limit_count"] = count
+            state["interval"] = max(12.2, physical)
+            state["page_interval"] = max(30, page)
+            state["rate_limit_until"] = max(
+                state["rate_limit_until"], fallback, deadline or 0
+            )
+        state["not_before"] = max(
+            state["not_before"], state["rate_limit_until"], deadline or 0
+        )
         state["observed_at"] = now
         save_budget(state)
 
@@ -543,178 +690,58 @@ def request_bytes(
     publisher=False,
     byte_limit=MAX_RESPONSE_BYTES,
 ):
-    """Bound response bytes; redirects are explicit and credential-safe."""
-    global _PUBLISHER_BYTES
-    headers = {
-        "User-Agent": _USER_AGENT,
-        "Accept-Encoding": "identity",
-        **(headers or {}),
-    }
-    current = url
-    for redirect in range(6):
-        check_deadline()
-        if publisher:
-            if _PUBLISHER_BYTES >= MAX_PUBLISHER_BYTES:
-                raise AdapterError("Whole publisher byte cap reached", "fetch")
-            public_url(current)
-            pace()
-        request = urllib.request.Request(
-            current, data=payload, headers=headers, method=method
+    host = urllib.parse.urlsplit(url).hostname
+    if not publisher and host in {
+        urllib.parse.urlsplit(x["url"]).hostname for x in INPUTS.values()
+    }:
+        raise AdapterError(
+            "Publisher requests cannot bypass durable pacing", "access"
         )
-        with publisher_attempt(publisher):
-            try:
-                if publisher:
-                    journal_preopener()
-                response = _OPENER.open(
-                    request, timeout=request_timeout(publisher)
-                )
-            except urllib.error.HTTPError as error:
-                response = error
-            except (urllib.error.URLError, OSError) as error:
-                if publisher:
-                    raise publisher_transport_error(error, current) from None
-                raise
-            with response:
-                status = response.status
-                response_headers = response.headers
-                retry = response.headers.get("Retry-After")
-                if publisher:
-                    record_retry_after(retry)
-                if publisher and status in (401, 403, 429):
-                    with locked_budget():
-                        state = load_budget()
-                        state["blocked"] = True
-                        state["observed_at"] = time.time()
-                        save_budget(state)
-                    refused = urllib.parse.urlsplit(current)
-                    provenance = urllib.parse.urlunsplit(
-                        (
-                            refused.scheme,
-                            refused.hostname or "",
-                            refused.path,
-                            "",
-                            "",
-                        )
-                    )
-                    raise AdapterError(
-                        f"Publisher refused access: HTTP {status}: "
-                        + provenance,
-                        "access",
-                        status,
-                    )
-                location = response.headers.get("Location")
-                is_redirect = status in (301, 302, 303, 307, 308)
-                if is_redirect and publisher:
-                    if not location or redirect == 5:
-                        raise AdapterError("Invalid redirect chain", "access")
-                    destination = urllib.parse.urljoin(current, location)
-                    public_url(destination)
-                    if (
-                        urllib.parse.urlsplit(current).scheme == "https"
-                        and urllib.parse.urlsplit(destination).scheme != "https"
-                    ):
-                        raise AdapterError(
-                            "Publisher redirect transport downgrade", "access"
-                        )
-                if is_redirect:
-                    body = b""
-                else:
-                    if publisher:
-                        byte_limit = min(
-                            byte_limit, MAX_PUBLISHER_BYTES - _PUBLISHER_BYTES
-                        )
-                        if byte_limit <= 0:
-                            raise AdapterError(
-                                "Whole publisher byte cap reached", "fetch"
-                            )
-                    declared = response.headers.get("Content-Length")
-                    if declared and (
-                        not declared.isdigit() or int(declared) > byte_limit
-                    ):
-                        raise AdapterError(
-                            ("Oversized or invalid response length"), ("fetch")
-                        )
-                    try:
-                        body = response.read(byte_limit + 1)
-                    except (urllib.error.URLError, OSError) as error:
-                        if publisher:
-                            raise publisher_transport_error(
-                                error, current
-                            ) from None
-                        raise
-                    if (
-                        len(body) > byte_limit
-                        or declared
-                        and len(body) != int(declared)
-                    ):
-                        raise AdapterError(
-                            "Incomplete or oversized response", "fetch"
-                        )
-                    if publisher:
-                        _PUBLISHER_BYTES += len(body)
-                    encoding = response.headers.get(
-                        "Content-Encoding", "identity"
-                    )
-                    if encoding != "identity":
-                        raise AdapterError(
-                            ("Unsupported response content encoding"), ("fetch")
-                        )
-        if status in (301, 302, 303, 307, 308):
-            if not location or redirect == 5:
-                raise AdapterError("Invalid redirect chain", "access")
-            destination = urllib.parse.urljoin(current, location)
-            old, new = (
-                urllib.parse.urlsplit(current),
-                urllib.parse.urlsplit(destination),
-            )
-            if publisher:
-                public_url(destination)
-                if old.scheme == "https" and new.scheme != "https":
-                    raise AdapterError(
-                        ("Publisher redirect transport downgrade"), ("access")
-                    )
-                check_robots(destination)
-            else:
-                if new.scheme != "https" or new.username or new.password:
-                    raise AdapterError(
-                        ("Unsafe authenticated redirect"), ("publish")
-                    )
-                if new.netloc != old.netloc:
-                    headers = {
-                        key: value
-                        for key, value in headers.items()
-                        if key.lower() != "authorization"
-                    }
-                if urllib.parse.urlsplit(url).hostname == "api.github.com":
-                    raise AdapterError(
-                        ("Unexpected GitHub API redirect"), ("publish")
-                    )
-            current = destination
-            continue
-        return status, response_headers, body
-    raise AdapterError("Unresolved redirect", "access")
+    if not publisher:
+        return _transport_bytes(
+            url, method, headers, payload, publisher, byte_limit
+        )
+    if method != "GET" or payload is not None:
+        raise AdapterError("Unexpected publisher request method", "access")
+    protocol_preflight_wire()
+    with protocol_transaction("physical"):
+        return _transport_bytes(
+            url, method, headers, payload, publisher, byte_limit
+        )
 
 
 def workflow_api(path):
-    """Read authenticated workflow metadata without publication permissions."""
+    """Read fresh authoritative metadata; local proxy auth is optional."""
     token = os.environ.get("GITHUB_TOKEN", "")
-    if not token:
-        raise AdapterError("Workflow state credentials missing", "access")
-    try:
-        status, _, body = request_bytes(
-            _WORKFLOW_GITHUB + path,
-            headers={
-                "Authorization": "Bearer " + token,
-                "Accept": "application/vnd.github+json",
-            },
+    if os.environ.get("GITHUB_ACTIONS") == "true" and not token:
+        raise AdapterError("Hosted workflow credentials missing", "access")
+    if not (
+        path.startswith("/actions/")
+        or re.fullmatch(
+            r"/contents/adapters/volkswagen-group/adapter\.py"
+            r"\?ref=[0-9a-f]{40}",
+            path,
         )
-        if status != 200:
-            raise ValueError("Workflow API status")
-        return json.loads(body)
-    except Exception:
-        raise AdapterError(
-            ("Workflow pacing state unavailable"), ("access")
-        ) from None
+    ):
+        raise AdapterError("Unexpected workflow metadata route", "access")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Cache-Control": "no-cache",
+    }
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    separator = "&" if "?" in path else "?"
+    status, _, raw = request_bytes(
+        _WORKFLOW_GITHUB + path + separator + "_fresh=" + str(time.time_ns()),
+        headers=headers,
+        byte_limit=3000000,
+    )
+    if status != 200:
+        raise AdapterError("Fresh workflow metadata unavailable", "access")
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise AdapterError("Malformed workflow metadata", "access") from None
 
 
 def current_run_identity():
@@ -732,171 +759,31 @@ def current_run_identity():
     return tuple(map(int, values))
 
 
-def family_source(run):
-    path = run.get("path", "")
-    for source in FAMILY_SOURCES:
-        if path == ".github/workflows/fetch-" + source + ".yml":
-            return source
-    return None
 
 
-def completed_identity(run, expected=None):
-    """Bind a completed attempt and its chronological publisher interval."""
-    try:
-        source = family_source(run)
-        identity, attempt = run["id"], run["run_attempt"]
-        if (
-            not source
-            or type(identity) is not int
-            or identity <= 0
-            or type(attempt) is not int
-            or attempt <= 0
-            or run["status"] != "completed"
-            or run["repository"]["full_name"] != "YouthOpps/data-pipeline"
-            or run[("head_repository")][("full_name")]
-            != ("YouthOpps/data-pipeline")
-            or run["head_branch"] != "main"
-            or expected
-            and (identity, attempt, source) != expected
-        ):
-            raise ValueError("Untrusted completed attempt")
-        times = []
-        for field in ("run_started_at", "updated_at"):
-            value = datetime.fromisoformat(run[field].replace("Z", "+00:00"))
-            if value.utcoffset() is None:
-                raise ValueError("Missing attempt timezone")
-            times.append(value.timestamp())
-        began, finished = times
-        if not 0 <= began <= finished <= time.time() + 1:
-            raise ValueError("Invalid attempt chronology")
-        return finished, began, identity, attempt, source
-    except Exception:
-        raise AdapterError(
-            ("Untrusted completed family attempt"), ("access")
-        ) from None
 
 
 class InventoryRace(AdapterError):
     """A changed advertised total permits a bounded fresh history scan."""
 
 
-def latest_family_run():
-    """Restart only count-drift races, without reusing partial candidates."""
-    for attempt in range(3):
-        try:
-            return scan_family_history()
-        except InventoryRace:
-            if attempt == 2:
-                raise AdapterError(
-                    "Workflow inventory remained unstable", "access"
-                ) from None
 
 
-def scan_family_history():
-    """Select newest completed chronology, including older-ID rerun attempts."""
-    current_id, current_attempt = current_run_identity()
-    candidates = []
-    total, scanned = None, 0
-    seen_ids = set()
-    for page in range(1, 101):
-        result = workflow_api(f"/actions/runs?per_page=100&page={page}")
-        count, runs = result.get("total_count"), result.get("workflow_runs")
-        if (
-            type(count) is not int
-            or count < 0
-            or not isinstance(runs, list)
-            or len(runs) > 100
-        ):
-            raise AdapterError("Invalid workflow run inventory", "access")
-        if total is None:
-            total = count
-        elif total != count:
-            raise InventoryRace(
-                ("Workflow inventory changed during restore"), ("access")
-            )
-        scanned += len(runs)
-        for run in runs:
-            if not isinstance(run, dict):
-                raise AdapterError("Invalid workflow run entry", "access")
-            run_id = run.get("id")
-            if type(run_id) is not int or run_id <= 0 or run_id in seen_ids:
-                raise AdapterError(
-                    "Invalid or duplicate workflow run identity", "access"
-                )
-            seen_ids.add(run_id)
-            source = family_source(run)
-            if not source:
-                continue
-            if (
-                run.get(("repository"), {}).get(("full_name"))
-                != ("YouthOpps/data-pipeline")
-                or run.get("head_repository", {}).get("full_name")
-                != ("YouthOpps/data-pipeline")
-                or run.get(("head_branch")) != ("main")
-            ):
-                raise AdapterError(
-                    ("Workflow repository or branch mismatch"), ("access")
-                )
-            identity, attempt = run.get("id"), run.get("run_attempt")
-            if type(identity) is not int or type(attempt) is not int:
-                raise AdapterError("Invalid family run identity", "access")
-            if identity == current_id:
-                if attempt != current_attempt:
-                    raise AdapterError(
-                        ("Current workflow attempt mismatch"), ("access")
-                    )
-                if current_attempt > 1:
-                    prior = workflow_api(
-                        (
-                            f"/actions/runs/{identity}/attempts/"
-                            f"{current_attempt - 1}"
-                        )
-                    )
-                    candidates.append(
-                        completed_identity(
-                            prior, (identity, current_attempt - 1, source)
-                        )
-                    )
-                continue
-            if run.get(("status")) in (
-                ("queued"),
-                ("waiting"),
-                ("pending"),
-                ("requested"),
-            ):
-                continue
-            if run.get("status") != "completed":
-                raise AdapterError("Another family run is active", "access")
-            candidates.append(completed_identity(run))
-        if scanned >= total:
-            if scanned != total:
-                raise AdapterError(
-                    ("Workflow inventory count mismatch"), ("access")
-                )
-            if not candidates:
-                return None
-            ordered = sorted(candidates)
-            if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
-                raise AdapterError(
-                    ("Ambiguous family attempt chronology"), ("access")
-                )
-            return ordered[-1][2:]
-        if len(runs) != 100:
-            raise AdapterError("Incomplete workflow inventory", "access")
-    raise AdapterError("Workflow inventory exceeds reviewed bound", "access")
 
 
-def download_inert_artifact(identity, artifact_id, digest=None):
+def download_inert_artifact(identity, artifact_id, digest=None, context=None):
     (
         "Download a bounded authenticated artifact, stripping "
         "cross-origin auth."
     )
     token = os.environ.get("GITHUB_TOKEN", "")
+    if os.environ.get("GITHUB_ACTIONS") == "true" and not token:
+        raise AdapterError("Hosted workflow credentials missing", "access")
     url = _WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip"
     request = urllib.request.Request(
         url,
         headers={
-            "Authorization": "Bearer " + token,
+            **({"Authorization": "Bearer " + token} if token else {}),
             "User-Agent": _USER_AGENT,
             "Accept": "application/vnd.github+json",
         },
@@ -952,28 +839,15 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                 raise ValueError("State symlink")
             raw = archive.read(entry)
         envelope = json.loads(raw)
-        if not isinstance(envelope, dict) or set(envelope) != {
-            "schema",
-            "repository",
-            "run_id",
-            "run_attempt",
-            "source",
-            "state",
-        }:
-            raise ValueError("Invalid artifact envelope")
-        run_id, attempt, source = identity
-        if (
-            type(envelope["schema"]) is not int
-            or envelope["schema"] != 1
-            or envelope["repository"] != "YouthOpps/data-pipeline"
-            or type(envelope["run_id"]) is not int
-            or type(envelope["run_attempt"]) is not int
-            or envelope["run_id"] != run_id
-            or envelope["run_attempt"] != attempt
-            or envelope["source"] != source
+        if context is None or identity != (
+            context["latest"]["id"],
+            context["latest"]["attempt"],
+            SOURCE_ID,
         ):
-            raise ValueError("Artifact ownership mismatch")
-        return validate_budget(envelope["state"])
+            raise AdapterError(
+                "Exact current artifact context required", "access"
+            )
+        return protocol_decode(envelope, context)
     except Exception:
         raise AdapterError(
             ("Invalid or unavailable family pacing artifact"), ("access")
@@ -981,70 +855,102 @@ def download_inert_artifact(identity, artifact_id, digest=None):
 
 
 def restore_family_artifact():
-    global _RESTORED, _STATE_TRUSTED
-    if _RESTORED:
-        return
-    latest = latest_family_run()
-    if latest is None:
-        raw = os.environ.get("VOLKSWAGEN_GROUP_PACING_BOOTSTRAP", "")
-        try:
-            bootstrap = json.loads(raw)
-            if (
-                set(bootstrap) != {"schema", "family", "not_before", "evidence"}
-                or type(bootstrap["schema"]) is not int
-                or bootstrap["schema"] != 1
-                or bootstrap["family"] != FAMILY
-                or not numeric(bootstrap["not_before"])
-                or not isinstance(bootstrap["evidence"], str)
-                or not re.fullmatch(
-                    (
-                        "https://github\\.com/YouthOpps/data-pipeline/(?:is"
-                        "sues|pull)/[0-9]+(?:#issuecomment-[0-9]+)?"
-                    ),
-                    bootstrap[("evidence")],
-                )
-            ):
-                raise ValueError("Invalid bootstrap")
-            incoming = empty_budget(time.time())
-            incoming[("not_before")] = max(
-                time.time() + 60, bootstrap[("not_before")]
-            )
-        except Exception:
-            raise AdapterError(
-                ("Reviewed first-family bootstrap required"), ("access")
-            ) from None
-    else:
-        run_id, attempt, source = latest
-        expected = _ARTIFACT_NAME + "-" + str(attempt)
-        result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
-        artifacts = result.get("artifacts")
-        if (
-            not isinstance(artifacts, list)
-            or result.get(("total_count")) != len(artifacts)
-            or len(artifacts) > 100
-        ):
-            raise AdapterError("Incomplete family artifact inventory", "access")
-        matches = [a for a in artifacts if a.get("name") == expected]
-        if len(matches) != 1 or matches[0].get("expired") is not False:
-            raise AdapterError(
-                ("Newest family pacing artifact missing or expired"),
-                ("access"),
-            )
-        artifact = matches[0]
-        if (
-            type(artifact.get("id")) is not int
-            or artifact["id"] <= 0
-            or artifact.get("workflow_run", {}).get("id") != run_id
-            or not numeric(artifact.get("size_in_bytes"))
-            or artifact["size_in_bytes"] > 32768
-        ):
-            raise AdapterError("Invalid family artifact binding", "access")
-        incoming = download_inert_artifact(
-            latest, artifact[("id")], artifact.get(("digest"))
+    global _RESTORED, _STATE_TRUSTED, _PROTOCOL_CONTEXT, _PROTOCOL_READY
+    context = protocol_history()
+    latest, artifact = context["latest"], context["artifact"]
+    context["source_sha256"] = protocol_source_hash(latest["head"])
+    if (
+        context["hosted"]
+        and protocol_source_hash(context["current"][2])
+        != hashlib.sha256(open(__file__, "rb").read()).hexdigest()
+    ):
+        raise AdapterError(
+            "Hosted executing adapter/source head mismatch", "access"
         )
-    with journal_restore_scope(incoming):
-        merge_budget(incoming)
-    _RESTORED, _STATE_TRUSTED = True, True
+    incoming = download_inert_artifact(
+        (latest["id"], latest["attempt"], SOURCE_ID),
+        artifact["id"],
+        artifact["digest"],
+        context,
+    )
+    legacy = incoming["schema"] == 1
+    marker = None
+    if legacy:
+        purpose = "HOSTED" if context["hosted"] else "LOCAL"
+        marker = (
+            _REVIEWED_HOSTED_TRANSITION
+            if context["hosted"]
+            else _REVIEWED_LOCAL_TRANSITION
+        )
+        proposed = protocol_marker(context, marker, purpose)
+        incoming = protocol_legacy_into(proposed, incoming)
+    # Only authenticated HOSTED input may create an ephemeral new namespace.
+    scope = (
+        journal_restore_scope(incoming)
+        if context["hosted"]
+        else contextlib.nullcontext()
+    )
+    with scope:
+        budget_file()
+        protocol_acquire_collection()
+        with locked_budget():
+            raw = journal_read()
+            if not raw and _GUARD_CREATED and journal_creation_allowed():
+                local = incoming
+            else:
+                try:
+                    local = json.loads(raw)
+                except (ValueError, UnicodeDecodeError):
+                    raise AdapterError(
+                        "Existing mature state is unreadable", "access"
+                    ) from None
+                if isinstance(local, dict) and local.get("schema") == 1:
+                    if (
+                        not legacy
+                        or context["hosted"]
+                        or protocol_local_pins(raw) != marker["local_pins"]
+                    ):
+                        raise AdapterError(
+                            "Finite existing LOCAL legacy pins required",
+                            "access",
+                        )
+                    local = protocol_legacy_into(proposed, local)
+                else:
+                    local = validate_budget(local)
+                    if legacy:
+                        # A completed native cannot be replayed against an older
+                        # owned legacy artifact without a separate exact
+                        # release.
+                        proposed = protocol_marker(
+                            context,
+                            _REVIEWED_MATURE_LOCAL_REENTRY,
+                            "MATURE_LOCAL",
+                        )
+                        if (
+                            protocol_local_pins(raw)
+                            != _REVIEWED_MATURE_LOCAL_REENTRY["local_pins"]
+                        ):
+                            raise AdapterError(
+                                "Mature LOCAL oneoff pins changed", "access"
+                            )
+                        local = protocol_join(local, proposed)
+            protocol_same_history(context)
+            state = protocol_join(local, incoming)
+            state["completed_at"] = max(
+                state["completed_at"], max(context["completion_bounds"])
+            )
+            state["not_before"] = max(
+                state["not_before"],
+                time.time() + 60,
+                state["completed_at"] + state["interval"],
+            )
+            state["observed_at"] = time.time()
+            if legacy:
+                state["transition_id"] = protocol_digest(marker)
+            save_budget(state)
+        journal_mark_mature()
+    _PROTOCOL_CONTEXT = context
+    _RESTORED = _STATE_TRUSTED = _PROTOCOL_READY = True
 
 
 def mark_pacing_artifact_ready(runner_parent, runner_root):
@@ -1181,14 +1087,7 @@ def export_family_artifact():
         run_id, attempt = current_run_identity()
         with locked_budget():
             state = load_budget()
-        envelope = {
-            "schema": 1,
-            "repository": "YouthOpps/data-pipeline",
-            "run_id": run_id,
-            "run_attempt": attempt,
-            "source": SOURCE_ID,
-            "state": state,
-        }
+        envelope = protocol_export_envelope(state, run_id, attempt)
         io_verify_current_parent(parent, root, parent_identity)
         descriptor = os.open(
             name,
@@ -2042,26 +1941,10 @@ def save_budget(state):
 
 
 def merge_budget(incoming):
-    """Conserve all timing restrictions and refuse uncertainty after union."""
     with locked_budget():
-        local = load_budget()
-        now = time.time()
-        combined = empty_budget(now)
-        combined["interval"] = max(
-            local.get("interval", 6), incoming.get("interval", 6)
-        )
-        combined["not_before"] = max(
-            local["not_before"], incoming["not_before"], now + 60
-        )
-        combined["blocked"] = local["blocked"] or incoming["blocked"]
-        union = sorted(set(local["starts"] + incoming["starts"]))
-        if union:
-            combined["not_before"] = max(
-                combined["not_before"], union[-1] + combined["interval"]
-            )
-        if len(union) > 10:
-            combined["not_before"] = max(combined["not_before"], union[-1] + 60)
-        combined["starts"] = union[-10:]
+        combined = protocol_join(load_budget(), incoming)
+        combined["not_before"] = max(combined["not_before"], time.time() + 60)
+        combined["observed_at"] = time.time()
         save_budget(combined)
 
 
@@ -2158,12 +2041,20 @@ def preserve_legacy_pacing():
                     "Invalid legacy publisher history", "access"
                 ) from None
             incoming = empty_budget(time.time())
-            incoming.update(
-                not_before=legacy["until"],
-                blocked=legacy.get("blocked", False),
-                interval=legacy.get("interval", 6),
-                starts=legacy["starts"],
+            incoming["not_before"] = max(
+                incoming["not_before"], legacy["until"]
             )
+            incoming["interval"] = max(
+                incoming["interval"], legacy.get("interval", 6)
+            )
+            incoming["blocked"] = legacy.get("blocked", False)
+            union = legacy["starts"]
+            if len(union) > 10:
+                incoming["not_before"] = max(
+                    incoming["not_before"], union[-1] + 60
+                )
+            incoming["starts"] = union[-10:]
+            validate_budget(incoming)
             merge_budget(incoming)
             _LEGACY_FDS.extend(opened)
             opened = []
@@ -2180,63 +2071,24 @@ def preserve_legacy_pacing():
 
 
 def prepare_collection():
-    global _GUARD_COLLECTION_ID, _GUARD_NEW_DIRECTORY
-    global _COLLECTION_STARTED, _STATE_TRUSTED, _COLLECTION_LOCK_FD
-    global _REQUEST_STARTS, _PUBLISHER_BYTES
+    global _COLLECTION_STARTED, _REQUEST_STARTS, _PUBLISHER_BYTES
+    global _PROTOCOL_FIRST_WIRE, _PROTOCOL_SEQUENCE
+    if _GUARD_FATAL or _PROTOCOL_DEPTH:
+        raise AdapterError(
+            "Unhealthy or nested publisher preparation", "access"
+        )
     _COLLECTION_STARTED = time.time()
     _REQUEST_STARTS = _PUBLISHER_BYTES = 0
-    if os.environ.get("GITHUB_ACTIONS") == "true":
+    _PROTOCOL_FIRST_WIRE = False
+    try:
         restore_family_artifact()
-    budget_file()
-    if _COLLECTION_LOCK_FD is not None:
-        raise AdapterError("Nested family collection refused", "access")
-    if _COLLECTION_LOCK_FD is None:
-        path = os.path.join(os.path.dirname(_STATE_PATH), "collection.lock")
-        parent = journal_parent()
-        descriptor = acquired_id = None
-        try:
-            flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
-            try:
-                descriptor = os.open("collection.lock", flags, dir_fd=parent)
-            except FileNotFoundError:
-                if not _GUARD_NEW_DIRECTORY:
-                    raise AdapterError(
-                        "Mature collection lock missing", "access"
-                    )
-                descriptor = os.open(
-                    "collection.lock",
-                    flags | os.O_CREAT | os.O_EXCL,
-                    0o600,
-                    dir_fd=parent,
-                )
-            acquired = os.fstat(descriptor)
-            acquired_id = (acquired.st_dev, acquired.st_ino)
-            journal_owned(descriptor, acquired_id)
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            journal_owned(descriptor, acquired_id)
-            current = os.stat(
-                "collection.lock", dir_fd=parent, follow_symlinks=False
-            )
-            if acquired_id != (current.st_dev, current.st_ino):
-                raise AdapterError(
-                    "Publisher collection lock changed", "access"
-                )
-        except BaseException:
-            journal_failed()
-            if descriptor is not None and acquired_id is not None:
-                journal_close(descriptor, acquired_id, True)
-            raise
-        _GUARD_COLLECTION_ID = acquired_id
-        _COLLECTION_LOCK_FD = descriptor
-        _GUARD_NEW_DIRECTORY = False
-    preserve_legacy_pacing()
-    with locked_budget():
-        state = load_budget()
-        state["not_before"] = max(state["not_before"], _COLLECTION_STARTED + 60)
-        state["observed_at"] = time.time()
-        save_budget(state)
-    _ROBOTS.clear()
-    _STATE_TRUSTED = True
+        preserve_legacy_pacing()
+        _PROTOCOL_SEQUENCE += 1
+        _ROBOTS.clear()
+        _PROTOCOL_POLICY_RAW.clear()
+    except BaseException:
+        journal_failed()
+        raise
 
 
 def public_url(value):
@@ -2283,68 +2135,81 @@ def html_fingerprint(body):
 
 
 def robots_directive(parser, directive, url=None):
-    """Retain native policy and every applicable product group's restriction."""
-    import copy
+    """Intersect current-specific-or-wildcard with legacy-specific policy."""
+    import urllib.robotparser
 
-    policies = [parser]
-    for entry in parser.entries:
-        if entry.applies_to(_USER_AGENT):
-            policy = copy.copy(parser)
-            policy.entries = [entry]
-            policy.default_entry = None
-            policies.append(policy)
+    groups = getattr(parser, "_protocol_groups", None)
+    if groups is None:
+        raise AdapterError(
+            "REP cache lacks actual grouped policy provenance", "access"
+        )
+    values = []
+    for _, entries in protocol_selected_policy_groups(groups):
+        policy = urllib.robotparser.RobotFileParser()
+        lines = ["User-agent: " + _USER_AGENT.split("/", 1)[0]]
+        lines += [
+            key + ": " + value
+            for key, value in entries
+            if key not in {"crawl-delay", "request-rate"}
+        ]
+        policy.parse(lines)
+        if directive == "can_fetch":
+            values.append(policy.can_fetch(_USER_AGENT, url))
+        else:
+            values.append(getattr(policy, directive)(_USER_AGENT))
     if directive == "can_fetch":
-        return all(policy.can_fetch(_USER_AGENT, url) for policy in policies)
-    values = [
-        getattr(policy, directive)(_USER_AGENT) for policy in policies
-    ]
-    values = [value for value in values if value is not None]
+        return all(values)
+    values = [v for v in values if v is not None]
     if not values:
         return None
-    if directive == "crawl_delay":
-        return max(values)
-    if any(rate.requests <= 0 for rate in values):
-        raise AdapterError("Invalid robots request rate", "access")
-    return max(values, key=lambda rate: rate.seconds / rate.requests)
+    return (
+        max(values)
+        if directive == "crawl_delay"
+        else max(values, key=lambda v: v.seconds / v.requests)
+    )
 
 
 def check_robots(url):
-    import urllib.robotparser
-
-    parsed = urllib.parse.urlsplit(public_url(url))
-    origin = parsed.scheme + "://" + parsed.netloc
+    reviewed = public_url(url)
+    parsed = urllib.parse.urlsplit(reviewed)
     if parsed.path == "/robots.txt":
         return
-    if origin not in _ROBOTS:
-        key = next(
-            (
-                key
-                for key, info in INPUTS.items()
-                if info["url"] == origin + "/robots.txt"
-            ),
-            None,
-        )
-        if key is None:
-            raise AdapterError(
-                "Unreviewed Volkswagen AG robots origin", "access"
+    origin = parsed.scheme + "://" + parsed.netloc
+    with protocol_transaction("policy"):
+        if origin not in _ROBOTS:
+            key = next(
+                (
+                    key
+                    for key, info in INPUTS.items()
+                    if info["url"] == origin + "/robots.txt"
+                ),
+                None,
             )
-        read_input(key)
-    parser = _ROBOTS[origin]
-    if not robots_directive(parser, "can_fetch", url):
-        raise AdapterError(
-            "Publisher robots excludes required Volkswagen AG input", "access"
-        )
+            if key is None:
+                raise AdapterError(
+                    "Unreviewed Volkswagen AG robots origin", "access"
+                )
+            read_input(key)
+        protocol_assess_policy(reviewed)
 
 
-def fetch_public(url):
+def _fetch_public_body(url):
     """Retry only bounded transient server failures under original pacing."""
     reviewed = public_url(url)
     check_robots(reviewed)
     for attempt in range(2):
         status, headers, body = request_bytes(reviewed, publisher=True)
-        if status == 200:
+        if status == 200 or (
+            urllib.parse.urlsplit(reviewed).path == "/robots.txt"
+            and 400 <= status < 500
+            and status != 429
+        ):
             return status, headers, body
-        if status in (502, 503, 504) and attempt == 0:
+        if (
+            status in (502, 503, 504)
+            and attempt == 0
+            and urllib.parse.urlsplit(reviewed).path != "/robots.txt"
+        ):
             with locked_budget():
                 state = load_budget()
                 now = time.time()
@@ -2358,51 +2223,49 @@ def fetch_public(url):
             status,
         )
 
+def fetch_public(url):
+    with protocol_transaction("fetch"):
+        return _fetch_public_body(url)
+
 
 def read_input(key):
     import urllib.robotparser
 
     info = INPUTS[key]
-    status, headers, body = fetch_public(info["url"])
-    content_type = (
-        headers.get("Content-Type", "").split(";", 1)[0].lower().strip()
-    )
-    if info["format"] == "robots":
-        if content_type not in {"text/plain", "text/html"}:
-            raise AdapterError("Unexpected robots response format", "access")
-        digest = hashlib.sha256(body).hexdigest()
-    else:
-        if content_type not in {"text/html", "application/xhtml+xml"}:
-            raise AdapterError("Unexpected programme response format", "parse")
-        digest = html_fingerprint(body)
-    if digest != info["sha256"]:
-        raise AdapterError(
-            "Reviewed Volkswagen AG material or frontier changed: " + key,
-            "parse",
-        )
-    if info["format"] == "robots":
-        parsed = urllib.parse.urlsplit(info["url"])
-        origin = parsed.scheme + "://" + parsed.netloc
-        parser = urllib.robotparser.RobotFileParser()
-        parser.parse(body.decode("utf-8", "strict").splitlines())
-        delay = robots_directive(parser, "crawl_delay")
-        if delay is not None and delay > 6:
-            with locked_budget():
-                state = load_budget()
-                state["interval"] = max(state.get("interval", 6), delay)
-                if state["starts"]:
-                    state["not_before"] = max(
-                        state["not_before"], state["starts"][-1] + delay
-                    )
-                state["observed_at"] = time.time()
-                save_budget(state)
-        rate = robots_directive(parser, "request_rate")
-        if rate and rate.seconds / rate.requests > 6:
-            raise AdapterError(
-                "Stricter publisher request rate requires review", "access"
+    if info["format"] != "robots":
+        return _read_input_base(key)
+    with protocol_transaction("robots"):
+        status, headers, body = fetch_public(info["url"])
+        origin = urllib.parse.urlsplit(info["url"])
+        origin = origin.scheme + "://" + origin.netloc
+        available = not (400 <= status < 500 and status != 429)
+        if available:
+            content_type = (
+                headers.get("Content-Type", "").split(";", 1)[0].lower().strip()
             )
+            if content_type not in {"text/plain", "text/html"}:
+                raise AdapterError(
+                    "Unexpected robots response format", "access"
+                )
+            text = body.decode("utf-8", "strict")
+            digest = hashlib.sha256(body).hexdigest()
+        else:
+            text, digest = "", None
+        parser = protocol_policy_parser(text)
         _ROBOTS[origin] = parser
-    return digest
+        _PROTOCOL_POLICY_RAW[origin] = {
+            "text": text,
+            "sha256": digest,
+            "available": available,
+            "collection": _PROTOCOL_SEQUENCE,
+        }
+        protocol_assess_policy(info["url"])
+        if available and digest != info["sha256"]:
+            raise AdapterError(
+                "Reviewed Volkswagen AG material or frontier changed: " + key,
+                "parse",
+            )
+        return digest
 
 
 def read_pages():
@@ -2503,7 +2366,7 @@ def make_record(profile, checked=None):
     if window:
         today = (
             datetime.fromisoformat(now.replace("Z", "+00:00"))
-            .astimezone(timezone(timedelta(hours=-12)))
+            .astimezone(timezone.utc)
             .date()
             .isoformat()
         )
@@ -2641,7 +2504,7 @@ def validate_owned_records(records):
 def remove_expired_records(records, now=None):
     """Filter a validated refresh; never mutate the prior published snapshot."""
     now = now or datetime.now(timezone.utc)
-    today = now.astimezone(timezone(timedelta(hours=-12))).date()
+    today = now.astimezone(timezone.utc).date()
     retained = []
     for record in records:
         value = record.get("deadline")
@@ -4501,7 +4364,7 @@ def journal_invalidate():
     os.fsync(_GUARD_FD)
 
 
-def journal_preopener():
+def _journal_preopener_base():
     """Final publisher authority check, after request construction."""
     try:
         journal_verify()
@@ -4519,6 +4382,11 @@ def journal_preopener():
     except BaseException:
         journal_failed()
         raise
+
+def journal_preopener():
+    _journal_preopener_base()
+    protocol_first_wire()
+    _journal_preopener_base()
 
 
 def journal_release():
@@ -4831,6 +4699,1643 @@ def io_signal_ready(runner_parent, runner_root, run_id, attempt):
                 errors.append(error)
         if errors and primary is None:
             raise errors[0]
+
+
+def _transport_bytes(
+    url,
+    method="GET",
+    headers=None,
+    payload=None,
+    publisher=False,
+    byte_limit=MAX_RESPONSE_BYTES,
+):
+    """Bound response bytes; redirects are explicit and credential-safe."""
+    global _PUBLISHER_BYTES
+    headers = {
+        "User-Agent": _USER_AGENT,
+        "Accept-Encoding": "identity",
+        **(headers or {}),
+    }
+    current = url
+    for redirect in range(6):
+        check_deadline()
+        if publisher:
+            if _PUBLISHER_BYTES >= MAX_PUBLISHER_BYTES:
+                raise AdapterError("Whole publisher byte cap reached", "fetch")
+            public_url(current)
+            pace(
+                inventory=bool(_PROTOCOL_INVENTORY_DEPTH)
+                and urllib.parse.urlsplit(current).path != "/robots.txt"
+            )
+        request = urllib.request.Request(
+            current, data=payload, headers=headers, method=method
+        )
+        with publisher_attempt(publisher):
+            try:
+                if publisher:
+                    journal_preopener()
+                response = _OPENER.open(
+                    request, timeout=request_timeout(publisher)
+                )
+            except urllib.error.HTTPError as error:
+                response = error
+            except (urllib.error.URLError, OSError) as error:
+                if publisher:
+                    raise publisher_transport_error(error, current) from None
+                raise
+            if publisher and response.status == 429:
+                # Save the adaptive MAX before any body or further request.
+                # A close failure is unassessed regardless of exception type.
+                try:
+                    record_retry_after(
+                        response.headers.get("Retry-After"), rate_limited=True
+                    )
+                except BaseException:
+                    try:
+                        response.close()
+                    except BaseException:
+                        journal_failed()
+                    raise
+                try:
+                    response.close()
+                except BaseException:
+                    journal_failed()
+                    raise
+                raise AssessedStop(
+                    "Publisher rate limit; timed embargo retained",
+                    "access",
+                    429,
+                )
+            with response:
+                status = response.status
+                response_headers = response.headers
+                retry = response.headers.get("Retry-After")
+                robots = (
+                    publisher
+                    and urllib.parse.urlsplit(url).path == "/robots.txt"
+                )
+                unavailable = robots and 400 <= status < 500 and status != 429
+                if publisher:
+                    record_retry_after(retry, rate_limited=status == 429)
+                if publisher and not robots and status in (401, 403, 451):
+                    with locked_budget():
+                        state = load_budget()
+                        protocol_current_owner(state)
+                        state.update(blocked=True, observed_at=time.time())
+                        save_budget(state)
+                location = response.headers.get("Location")
+                is_redirect = status in (301, 302, 303, 307, 308)
+                if is_redirect and publisher:
+                    if (
+                        robots
+                        and urllib.parse.urlsplit(
+                            urllib.parse.urljoin(current, location or "")
+                        ).path
+                        != "/robots.txt"
+                    ):
+                        raise AdapterError(
+                            "REP redirect changed literal policy purpose",
+                            "access",
+                        )
+                    if not location or redirect == 5:
+                        raise AdapterError("Invalid redirect chain", "access")
+                    destination = urllib.parse.urljoin(current, location)
+                    public_url(destination)
+                    if (
+                        urllib.parse.urlsplit(current).scheme == "https"
+                        and urllib.parse.urlsplit(destination).scheme != "https"
+                    ):
+                        raise AdapterError(
+                            "Publisher redirect transport downgrade", "access"
+                        )
+                if is_redirect and not publisher:
+                    body = b""
+                else:
+                    if publisher:
+                        byte_limit = min(
+                            byte_limit, MAX_PUBLISHER_BYTES - _PUBLISHER_BYTES
+                        )
+                        if byte_limit <= 0:
+                            raise AdapterError(
+                                "Whole publisher byte cap reached", "fetch"
+                            )
+                    declared = response.headers.get("Content-Length")
+                    if declared and (
+                        not declared.isdigit() or int(declared) > byte_limit
+                    ):
+                        raise AdapterError(
+                            ("Oversized or invalid response length"), ("fetch")
+                        )
+                    try:
+                        body = response.read(byte_limit + 1)
+                    except (urllib.error.URLError, OSError) as error:
+                        if publisher:
+                            raise publisher_transport_error(
+                                error, current
+                            ) from None
+                        raise
+                    if (
+                        len(body) > byte_limit
+                        or declared
+                        and len(body) != int(declared)
+                    ):
+                        raise AdapterError(
+                            "Incomplete or oversized response", "fetch"
+                        )
+                    if publisher:
+                        _PUBLISHER_BYTES += len(body)
+                    encoding = response.headers.get(
+                        "Content-Encoding", "identity"
+                    )
+                    if encoding != "identity":
+                        raise AdapterError(
+                            ("Unsupported response content encoding"), ("fetch")
+                        )
+                if publisher and not unavailable:
+                    if protocol_primary_challenge(body, status):
+                        protocol_hold(
+                            "Publisher displayed genuine access challenge",
+                            status,
+                        )
+                    if status == 429:
+                        raise AssessedStop(
+                            "Publisher rate limit; timed embargo retained",
+                            "access",
+                            status,
+                        )
+                    if not robots and status in (401, 403, 451):
+                        raise AssessedStop(
+                            "Publisher refused content access", "access", status
+                        )
+        if status in (301, 302, 303, 307, 308):
+            if not location or redirect == 5:
+                raise AdapterError("Invalid redirect chain", "access")
+            destination = urllib.parse.urljoin(current, location)
+            old, new = (
+                urllib.parse.urlsplit(current),
+                urllib.parse.urlsplit(destination),
+            )
+            if publisher:
+                public_url(destination)
+                if old.scheme == "https" and new.scheme != "https":
+                    raise AdapterError(
+                        ("Publisher redirect transport downgrade"), ("access")
+                    )
+                check_robots(destination)
+            else:
+                if new.scheme != "https" or new.username or new.password:
+                    raise AdapterError(
+                        ("Unsafe authenticated redirect"), ("publish")
+                    )
+                if new.netloc != old.netloc:
+                    headers = {
+                        key: value
+                        for key, value in headers.items()
+                        if key.lower() != "authorization"
+                    }
+                if urllib.parse.urlsplit(url).hostname == "api.github.com":
+                    raise AdapterError(
+                        ("Unexpected GitHub API redirect"), ("publish")
+                    )
+            current = destination
+            continue
+        return status, response_headers, body
+    raise AdapterError("Unresolved redirect", "access")
+
+def _read_input_base(key):
+    import urllib.robotparser
+
+    info = INPUTS[key]
+    status, headers, body = fetch_public(info["url"])
+    content_type = (
+        headers.get("Content-Type", "").split(";", 1)[0].lower().strip()
+    )
+    if info["format"] == "robots":
+        if content_type not in {"text/plain", "text/html"}:
+            raise AdapterError("Unexpected robots response format", "access")
+        digest = hashlib.sha256(body).hexdigest()
+    else:
+        if content_type not in {"text/html", "application/xhtml+xml"}:
+            raise AdapterError("Unexpected programme response format", "parse")
+        digest = html_fingerprint(body)
+    if digest != info["sha256"]:
+        raise AdapterError(
+            "Reviewed Volkswagen AG material or frontier changed: " + key,
+            "parse",
+        )
+    if info["format"] == "robots":
+        parsed = urllib.parse.urlsplit(info["url"])
+        origin = parsed.scheme + "://" + parsed.netloc
+        parser = urllib.robotparser.RobotFileParser()
+        parser.parse(body.decode("utf-8", "strict").splitlines())
+        delay = robots_directive(parser, "crawl_delay")
+        if delay is not None and delay > 6:
+            with locked_budget():
+                state = load_budget()
+                state["interval"] = max(state.get("interval", 6), delay)
+                if state["starts"]:
+                    state["not_before"] = max(
+                        state["not_before"], state["starts"][-1] + delay
+                    )
+                state["observed_at"] = time.time()
+                save_budget(state)
+        rate = robots_directive(parser, "request_rate")
+        if rate and rate.seconds / rate.requests > 6:
+            raise AdapterError(
+                "Stricter publisher request rate requires review", "access"
+            )
+        _ROBOTS[origin] = parser
+    return digest
+
+_REVIEWED_LOCAL_TRANSITION = {
+    "schema": 1,
+    "source": "volkswagen-group",
+    "purpose": "LOCAL",
+    "evidence": "https://github.com/YouthOpps/data-pipeline/issues/316#issuecomment-6210612968",
+    "history_sha256": "46846fa352cf704b08fd060b516a62b96444dc4aa81b79f407782aaf10877020",
+    "owner": {
+        "run_id": 38850140544,
+        "attempt": 1,
+        "head": "12f61ef6e7caba5099d1c6ef367bbe5c9abd1cff",
+        "job_id": 116809322808,
+        "artifact_id": 12026041596,
+        "artifact_digest": "sha256:f634c73ecbbbe50154cc353429adacde8748b55e8fd9ba9bf05aefb58d2b0fa3",
+        "source_sha256": "73e6f0084dc5a92415dc9a905552c09e9aa7527e21537c3966a6d9b99de7756c",
+    },
+    "seed": {
+        "schema": 3,
+        "family": "youthopps-volkswagen-group-publisher-v1",
+        "observed_at": 1792134221.0645838,
+        "not_before": 1792134281.0645838,
+        "starts": [],
+        "blocked": False,
+        "interval": 12.2,
+        "page_interval": 30,
+        "completed_at": 1792125881.0,
+        "inventory_completed_at": 1792125881.0,
+        "rate_limit_count": 0,
+        "rate_limit_until": 0,
+        "legacy_rate_history_unknown": True,
+        "legacy_policy_history_unknown": True,
+        "legacy_completion_history_unknown": True,
+        "in_flight": False,
+        "flight_id": None,
+        "policy_pending": None,
+        "last_policy_receipt": None,
+        "policy_allowed": {},
+        "policy_denied": {},
+        "last_settled_owner": None,
+        "transition_id": None,
+    },
+    "seed_sha256": "adefe5478df2084975251190f450c6501d88e659acaa5cd57d12750b07b9b49c",
+    "local_pins": {
+        "parent": [34, 2044],
+        "state": [34, 11265],
+        "collection_lock": [34, 3194],
+        "state_lock": [34, 3195],
+        "raw_sha256": "63710a5802ab4eb634cfe8f4c3a4f852446614f4479185af235e1157b57194f5",
+    },
+}
+_REVIEWED_HOSTED_TRANSITION = {'schema': 1,
+ 'source': 'volkswagen-group',
+ 'purpose': 'HOSTED',
+ 'evidence': 'https://github.com/YouthOpps/data-pipeline/issues/316#issuecomment-6212633235',
+ 'history_sha256': '46846fa352cf704b08fd060b516a62b96444dc4aa81b79f407782aaf10877020',
+ 'owner': {'run_id': 38850140544,
+           'attempt': 1,
+           'head': '12f61ef6e7caba5099d1c6ef367bbe5c9abd1cff',
+           'job_id': 116809322808,
+           'artifact_id': 12026041596,
+           'artifact_digest': 'sha256:f634c73ecbbbe50154cc353429adacde8748b55e8fd9ba9bf05aefb58d2b0fa3',
+           'source_sha256': '73e6f0084dc5a92415dc9a905552c09e9aa7527e21537c3966a6d9b99de7756c'},
+ 'seed': {'schema': 3,
+          'family': 'youthopps-volkswagen-group-publisher-v1',
+          'observed_at': 1792140630.6432664,
+          'not_before': 1792140690.6432664,
+          'starts': [],
+          'blocked': False,
+          'interval': 12.2,
+          'page_interval': 30,
+          'completed_at': 1792140554.5588405,
+          'inventory_completed_at': 1792138048.7293131,
+          'rate_limit_count': 0,
+          'rate_limit_until': 0,
+          'legacy_rate_history_unknown': True,
+          'legacy_policy_history_unknown': True,
+          'legacy_completion_history_unknown': True,
+          'in_flight': False,
+          'flight_id': None,
+          'policy_pending': None,
+          'last_policy_receipt': None,
+          'policy_allowed': {'https://jobs.volkswagen-group.com': {'owner': '0254aef1344e678b8ff42bb05171ed9b',
+                                                                   'origin': 'https://jobs.volkswagen-group.com',
+                                                                   'target_sha256': '2c49bea3221f3e7fb55308d284ea6d40d436b564d9bcef405462139d82c68999',
+                                                                   'body_sha256': '91669efc2767d124199e1d848655af18d64ac71e61ae1227be7b6aa866f03caf',
+                                                                   'available': True,
+                                                                   'allowed': True,
+                                                                   'delay': 0,
+                                                                   'rate': None},
+                             'https://www.hrd-portal.com': {'owner': '665b4c0fd5ddbeea66917dfdbefbf207',
+                                                            'origin': 'https://www.hrd-portal.com',
+                                                            'target_sha256': 'a76aa434a8d8d79dcaffd45d33914dc657514b964022c0c84aea077566c44431',
+                                                            'body_sha256': '58c109cc44da82a7ff610aaaa11a3801cb99eaa3cd98f3e05183607801af6608',
+                                                            'available': True,
+                                                            'allowed': True,
+                                                            'delay': 0,
+                                                            'rate': None},
+                             'https://www.volkswagen-karriere.de': {'owner': '4621fdba595ed092c9054239ad8863c5',
+                                                                    'origin': 'https://www.volkswagen-karriere.de',
+                                                                    'target_sha256': '7cfc6a64968a2e8f5070596ac86e392f41e361316efd716185b0087497bc7bd2',
+                                                                    'body_sha256': 'dd84e3470dafcf77ca25f1d3d448c84dfd4255988f006a0318437961d06368fb',
+                                                                    'available': True,
+                                                                    'allowed': True,
+                                                                    'delay': 0,
+                                                                    'rate': None}},
+          'policy_denied': {},
+          'last_settled_owner': None,
+          'transition_id': '1d07fbffdcc7b91edd7b9f5b7524763eb056b01edad2aa74c2a317d83a00a869'},
+ 'seed_sha256': '88fda0e9c05c6b605276cf7c17bc2fd2fa295c73bbcd464eb07afe2e9b721755',
+ 'local_pins': None}
+_REVIEWED_MATURE_LOCAL_REENTRY = None
+_PROTOCOL_READY = False
+_PROTOCOL_FIRST_WIRE = False
+_PROTOCOL_CONTEXT = None
+_PROTOCOL_DEPTH = 0
+_PROTOCOL_OWNER = None
+_PROTOCOL_EXPECTED_RECEIPT = None
+_PROTOCOL_POLICY_RAW = {}
+_PROTOCOL_INVENTORY_DEPTH = 0
+_PROTOCOL_SEQUENCE = 0
+_PROTOCOL_LAST_COMPLETED = None
+_PROTOCOL_LEGACY_INITIALIZING = False
+_PROTOCOL_PHYSICAL_INVENTORY = False
+_PROTOCOL_WORKFLOW_ID = 380821053
+_PROTOCOL_REPOSITORY_ID = 1163601208
+
+class AssessedStop(AdapterError):
+    """Stop after actual restrictive response/REP state is fully assessed."""
+
+def protocol_digest(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+def protocol_origins():
+    return {
+        urllib.parse.urlsplit(info["url"]).scheme
+        + "://"
+        + urllib.parse.urlsplit(info["url"]).netloc
+        for info in INPUTS.values()
+    }
+
+def protocol_target(url):
+    parsed = urllib.parse.urlsplit(public_url(url))
+    return (
+        parsed.scheme + "://" + parsed.netloc,
+        hashlib.sha256(
+            urllib.parse.urlunsplit(parsed._replace(fragment="")).encode()
+        ).hexdigest(),
+    )
+
+def protocol_number(value):
+    return type(value) in (int, float) and numeric(value)
+
+def protocol_observation(value):
+    fields = {
+        "owner",
+        "origin",
+        "target_sha256",
+        "body_sha256",
+        "available",
+        "allowed",
+        "delay",
+        "rate",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise AdapterError("Invalid policy receipt shape", "access")
+    if (
+        not re.fullmatch(r"[0-9a-f]{32}", str(value["owner"]))
+        or value["origin"] not in protocol_origins()
+        or not re.fullmatch(r"[0-9a-f]{64}", str(value["target_sha256"]))
+    ):
+        raise AdapterError("Invalid policy receipt identity", "access")
+    if (
+        type(value["available"]) is not bool
+        or type(value["allowed"]) is not bool
+        or not protocol_number(value["delay"])
+    ):
+        raise AdapterError("Invalid policy receipt decision", "access")
+    if (
+        value["available"]
+        and not re.fullmatch(r"[0-9a-f]{64}", str(value["body_sha256"]))
+    ) or (not value["available"] and value["body_sha256"] is not None):
+        raise AdapterError("Invalid actual policy body provenance", "access")
+    rate = value["rate"]
+    if rate is not None and (
+        not isinstance(rate, dict)
+        or set(rate) != {"requests", "seconds"}
+        or type(rate["requests"]) is not int
+        or not 1 <= rate["requests"] <= 1000000
+        or not protocol_number(rate["seconds"])
+        or rate["seconds"] <= 0
+    ):
+        raise AdapterError("Invalid policy request rate", "access")
+    return value
+
+def protocol_join(left, right):
+    left, right = validate_budget(left), validate_budget(right)
+    if left["in_flight"] or right["in_flight"]:
+        raise AdapterError(
+            "Unsettled state cannot restore older allowance", "access"
+        )
+    result = json.loads(json.dumps(left))
+    for key in [
+        "observed_at",
+        "not_before",
+        "interval",
+        "page_interval",
+        "completed_at",
+        "inventory_completed_at",
+        "rate_limit_count",
+        "rate_limit_until",
+    ]:
+        result[key] = max(left[key], right[key])
+    for key in [
+        "blocked",
+        "legacy_rate_history_unknown",
+        "legacy_policy_history_unknown",
+        "legacy_completion_history_unknown",
+    ]:
+        result[key] = left[key] or right[key]
+    union = sorted(set(left["starts"] + right["starts"]))
+    if len(union) > 10:
+        result["not_before"] = max(result["not_before"], union[-1] + 60)
+    result["starts"] = union[-10:]
+    for key in ["policy_allowed", "policy_denied"]:
+        for target, witness in right[key].items():
+            current = result[key].get(target)
+            if current is None or json.dumps(
+                witness, sort_keys=True
+            ) < json.dumps(current, sort_keys=True):
+                result[key][target] = witness
+    # Current-owner receipts never become permission or chronology authority.
+    result["last_policy_receipt"] = None
+    result["last_settled_owner"] = None
+    result["observed_at"] = max(time.time(), result["observed_at"])
+    return validate_budget(result)
+
+@contextlib.contextmanager
+def protocol_transaction(kind):
+    global _PROTOCOL_DEPTH, _PROTOCOL_OWNER, _PROTOCOL_EXPECTED_RECEIPT
+    if not _PROTOCOL_READY or _GUARD_FATAL:
+        raise AdapterError("Reviewed publisher continuity required", "access")
+    outer = _PROTOCOL_DEPTH == 0
+    if outer:
+        with locked_budget():
+            state = load_budget()
+            if state["in_flight"] or state["blocked"]:
+                raise AdapterError(
+                    "Retained pending state or access hold", "access"
+                )
+            owner = os.urandom(16).hex()
+            state.update(
+                in_flight=True,
+                flight_id=owner,
+                policy_pending=None,
+                last_policy_receipt=None,
+                last_settled_owner=None,
+                observed_at=time.time(),
+            )
+            save_budget(state)
+        _PROTOCOL_OWNER = owner
+        _PROTOCOL_EXPECTED_RECEIPT = None
+    _PROTOCOL_DEPTH += 1
+    primary = None
+    assessed = False
+    try:
+        yield
+        assessed = True
+    except AssessedStop as error:
+        primary = error
+        assessed = True
+        raise
+    except BaseException as error:
+        primary = error
+        journal_failed()
+        raise
+    finally:
+        _PROTOCOL_DEPTH -= 1
+        if outer:
+            try:
+                if assessed and not _GUARD_FATAL:
+                    with locked_budget():
+                        state = load_budget()
+                        if (
+                            not state["in_flight"]
+                            or state["flight_id"] != _PROTOCOL_OWNER
+                            or state["policy_pending"] is not None
+                            or state["last_policy_receipt"]
+                            != _PROTOCOL_EXPECTED_RECEIPT
+                        ):
+                            raise AdapterError(
+                                "Exact nested policy receipt missing", "access"
+                            )
+                        state["last_settled_owner"] = {
+                            "owner": _PROTOCOL_OWNER,
+                            "receipt_sha256": protocol_digest(
+                                _PROTOCOL_EXPECTED_RECEIPT
+                            ),
+                            "completed_at": time.time(),
+                        }
+                        state.update(
+                            in_flight=False,
+                            flight_id=None,
+                            observed_at=time.time(),
+                        )
+                        save_budget(state)
+                else:
+                    journal_failed()
+            except BaseException:
+                journal_failed()
+                if primary is None:
+                    raise
+            finally:
+                _PROTOCOL_OWNER = _PROTOCOL_EXPECTED_RECEIPT = None
+
+def protocol_current_owner(state):
+    if (
+        not state["in_flight"]
+        or state["flight_id"] != _PROTOCOL_OWNER
+        or _PROTOCOL_OWNER is None
+    ):
+        raise AdapterError("Publisher pending owner changed", "access")
+
+@contextlib.contextmanager
+def protocol_inventory():
+    global _PROTOCOL_INVENTORY_DEPTH
+    with protocol_transaction("inventory"):
+        _PROTOCOL_INVENTORY_DEPTH += 1
+        try:
+            yield
+        finally:
+            primary = sys.exc_info()[1]
+            _PROTOCOL_INVENTORY_DEPTH -= 1
+            try:
+                if not _GUARD_FATAL:
+                    with locked_budget():
+                        state = load_budget()
+                        protocol_current_owner(state)
+                        state["inventory_completed_at"] = max(
+                            state["inventory_completed_at"], time.time()
+                        )
+                        state["observed_at"] = time.time()
+                        save_budget(state)
+            except BaseException:
+                journal_failed()
+                if primary is None:
+                    raise
+
+def protocol_timestamp(value):
+    if not isinstance(value, str):
+        raise AdapterError("Missing genuine job time", "access")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.utcoffset() is None:
+            raise ValueError()
+        result = parsed.timestamp()
+        if not protocol_number(result) or result > time.time() + 1:
+            raise ValueError()
+        return result
+    except (ValueError, OverflowError, OSError):
+        raise AdapterError("Invalid genuine job chronology", "access") from None
+
+def protocol_workflow_definition():
+    obj = workflow_api("/actions/workflows/" + str(_PROTOCOL_WORKFLOW_ID))
+    if (
+        not isinstance(obj, dict)
+        or obj.get("id") != _PROTOCOL_WORKFLOW_ID
+        or obj.get("path") != ".github/workflows/fetch-volkswagen-group.yml"
+    ):
+        raise AdapterError("Workflow definition identity changed", "access")
+    expected = (
+        "active"
+        if os.environ.get("GITHUB_ACTIONS") == "true"
+        else "disabled_manually"
+    )
+    if obj.get("state") != expected:
+        raise AdapterError("Publisher workflow coordination changed", "access")
+    return obj
+
+def protocol_run(run, expected=None):
+    if (
+        not isinstance(run, dict)
+        or run.get("repository", {}).get("full_name")
+        != "YouthOpps/data-pipeline"
+        or run.get("repository", {}).get("id") != _PROTOCOL_REPOSITORY_ID
+        or run.get("head_repository", {}).get("full_name")
+        != "YouthOpps/data-pipeline"
+        or run.get("head_repository", {}).get("id") != _PROTOCOL_REPOSITORY_ID
+        or run.get("head_branch") != "main"
+        or run.get("workflow_id") != _PROTOCOL_WORKFLOW_ID
+        or run.get("path", "").split("@", 1)[0]
+        != ".github/workflows/fetch-volkswagen-group.yml"
+    ):
+        raise AdapterError("Untrusted publisher run identity", "access")
+    identity, attempt, head = (
+        run.get("id"),
+        run.get("run_attempt"),
+        run.get("head_sha"),
+    )
+    if (
+        type(identity) is not int
+        or not 1 <= identity < 2**63
+        or type(attempt) is not int
+        or not 1 <= attempt < 2**31
+        or not isinstance(head, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", head)
+        or expected is not None
+        and (identity, attempt, head) != expected
+    ):
+        raise AdapterError("Invalid publisher run attempt", "access")
+    return identity, attempt, head
+
+def protocol_jobs(identity, attempt, head, current=False):
+    jobs = []
+    total = None
+    for page in range(1, 101):
+        result = workflow_api(
+            f"/actions/runs/{identity}/attempts/{attempt}/jobs"
+            f"?per_page=100&page={page}"
+        )
+        if (
+            not isinstance(result, dict)
+            or type(result.get("total_count")) is not int
+            or result["total_count"] < 1
+            or not isinstance(result.get("jobs"), list)
+        ):
+            raise AdapterError("Missing exact-attempt job inventory", "access")
+        if total is None:
+            total = result["total_count"]
+        if total != result["total_count"]:
+            raise AdapterError("Job inventory changed", "access")
+        jobs.extend(result["jobs"])
+        if len(jobs) >= total:
+            break
+        if len(result["jobs"]) != 100:
+            raise AdapterError("Incomplete job pagination", "access")
+    if (
+        len(jobs) != total
+        or len({j.get("id") for j in jobs}) != total
+        or len(jobs) != 1
+    ):
+        raise AdapterError("Ambiguous publisher job ownership", "access")
+    job = jobs[0]
+    if (
+        type(job.get("id")) is not int
+        or job["id"] <= 0
+        or job.get("run_id") != identity
+        or job.get("run_attempt") != attempt
+        or job.get("head_sha") != head
+        or job.get("head_branch") != "main"
+        or job.get("name") != "collect"
+    ):
+        raise AdapterError("Exact job fields do not match attempt", "access")
+    began = protocol_timestamp(job.get("started_at"))
+    if current:
+        if (
+            job.get("status") != "in_progress"
+            or job.get("completed_at") is not None
+            or job.get("conclusion") is not None
+        ):
+            raise AdapterError("Current publisher job is not running", "access")
+        finished = None
+    else:
+        if job.get("status") != "completed" or job.get("conclusion") not in {
+            "success",
+            "failure",
+            "cancelled",
+            "timed_out",
+            "skipped",
+            "action_required",
+            "neutral",
+            "startup_failure",
+            "stale",
+        }:
+            raise AdapterError("Publisher attempt job not terminal", "access")
+        finished = protocol_timestamp(job.get("completed_at"))
+        if finished < began:
+            raise AdapterError("Job completion precedes start", "access")
+    return {
+        "id": identity,
+        "attempt": attempt,
+        "head": head,
+        "job_id": job["id"],
+        "started_at": began,
+        "completed_at": finished,
+        "conclusion": job.get("conclusion"),
+        "job_sha256": protocol_digest(job),
+    }
+
+def protocol_history():
+    """Authenticate current run and every full terminal attempt chronology."""
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    current = None
+    if hosted:
+        if (
+            os.environ.get("GITHUB_REPOSITORY") != "YouthOpps/data-pipeline"
+            or os.environ.get("GITHUB_REF") != "refs/heads/main"
+            or os.environ.get("GITHUB_JOB") != "collect"
+            or os.environ.get("GITHUB_WORKFLOW_REF")
+            != (
+                "YouthOpps/data-pipeline/.github/workflows/"
+                "fetch-volkswagen-group.yml@refs/heads/main"
+            )
+        ):
+            raise AdapterError("Unexpected hosted execution context", "access")
+        values = [
+            os.environ.get(k, "")
+            for k in ["GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"]
+        ]
+        head = os.environ.get("GITHUB_SHA", "")
+        if (
+            any(not re.fullmatch(r"[1-9][0-9]{0,18}", v) for v in values)
+            or not re.fullmatch(r"[0-9a-f]{40}", head)
+            or os.environ.get("GITHUB_WORKFLOW_SHA") != head
+        ):
+            raise AdapterError("Incomplete hosted source identity", "access")
+        current = int(values[0]), int(values[1]), head
+    definition = protocol_workflow_definition()
+    rows, total = [], None
+    for page in range(1, 101):
+        obj = workflow_api(
+            f"/actions/workflows/{_PROTOCOL_WORKFLOW_ID}/runs"
+            f"?per_page=100&page={page}"
+        )
+        if (
+            not isinstance(obj, dict)
+            or type(obj.get("total_count")) is not int
+            or obj["total_count"] < 1
+            or not isinstance(obj.get("workflow_runs"), list)
+        ):
+            raise AdapterError("Mature publisher history unavailable", "access")
+        if total is None:
+            total = obj["total_count"]
+        if total != obj["total_count"]:
+            raise AdapterError("Run inventory changed", "access")
+        rows.extend(obj["workflow_runs"])
+        if len(rows) >= total:
+            break
+        if len(obj["workflow_runs"]) != 100:
+            raise AdapterError("Incomplete family history", "access")
+    if len(rows) != total or len({r.get("id") for r in rows}) != total:
+        raise AdapterError("Ambiguous family history", "access")
+    completed, projection = [], []
+    found_current = False
+    for row in rows:
+        identity, latest_attempt, head = protocol_run(row)
+        projection.append(
+            (
+                identity,
+                latest_attempt,
+                head,
+                row.get("status"),
+                row.get("conclusion"),
+            )
+        )
+        own = current is not None and identity == current[0]
+        if own:
+            if (identity, latest_attempt, head) != current or row.get(
+                "status"
+            ) != "in_progress":
+                raise AdapterError("Current attempt context mismatch", "access")
+            protocol_jobs(*current, current=True)
+            found_current = True
+        elif row.get("status") != "completed":
+            raise AdapterError(
+                "Another active or queued family attempt", "access"
+            )
+        for attempt in range(1, latest_attempt + 1):
+            if own and attempt == latest_attempt:
+                continue
+            detail = workflow_api(
+                f"/actions/runs/{identity}/attempts/{attempt}"
+            )
+            protocol_run(detail, (identity, attempt, head))
+            if detail.get("status") != "completed":
+                raise AdapterError("Prior attempt still unsettled", "access")
+            record = protocol_jobs(identity, attempt, head)
+            inventory = workflow_api(
+                f"/actions/runs/{identity}/artifacts?per_page=100"
+            )
+            if (
+                not isinstance(inventory, dict)
+                or not isinstance(inventory.get("artifacts"), list)
+                or type(inventory.get("total_count")) is not int
+                or len(inventory["artifacts"]) != inventory["total_count"]
+                or len(inventory["artifacts"]) > 100
+            ):
+                raise AdapterError("Incomplete artifact inventory", "access")
+            record["artifacts"] = inventory["artifacts"]
+            record["artifacts_sha256"] = protocol_digest(inventory)
+            completed.append(record)
+        after = workflow_api(f"/actions/runs/{identity}")
+        if protocol_run(after) != (identity, latest_attempt, head) or after.get(
+            "status"
+        ) != row.get("status"):
+            raise AdapterError(
+                "Publisher attempt changed during history", "access"
+            )
+    if hosted and not found_current:
+        raise AdapterError(
+            "Current hosted attempt absent from history", "access"
+        )
+    if not completed:
+        raise AdapterError("Mature source cannot use empty bootstrap", "access")
+    ordered = sorted(
+        completed, key=lambda r: (r["completed_at"], r["started_at"])
+    )
+    if (
+        len(ordered) > 1
+        and ordered[-1]["completed_at"] == ordered[-2]["completed_at"]
+    ):
+        raise AdapterError("Ambiguous newest job chronology", "access")
+    latest = ordered[-1]
+    candidates = [
+        a
+        for a in latest["artifacts"]
+        if a.get("name") == _ARTIFACT_NAME + "-" + str(latest["attempt"])
+    ]
+    if len(candidates) != 1:
+        raise AdapterError("Newest attempt lacks its owned artifact", "access")
+    artifact = candidates[0]
+    owner = artifact.get("workflow_run", {})
+    if (
+        type(artifact.get("id")) is not int
+        or artifact["id"] <= 0
+        or artifact.get("expired") is not False
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(artifact.get("digest")))
+        or type(artifact.get("size_in_bytes")) is not int
+        or not 0 < artifact["size_in_bytes"] <= 32768
+        or owner.get("id") != latest["id"]
+        or owner.get("head_sha") != latest["head"]
+        or owner.get("head_branch") != "main"
+        or owner.get("repository_id") != _PROTOCOL_REPOSITORY_ID
+        or owner.get("head_repository_id") != _PROTOCOL_REPOSITORY_ID
+    ):
+        raise AdapterError("Newest owned artifact binding mismatch", "access")
+    fresh_rows = []
+    for page in range(1, (total + 99) // 100 + 1):
+        fresh = workflow_api(
+            f"/actions/workflows/{_PROTOCOL_WORKFLOW_ID}/runs"
+            f"?per_page=100&page={page}"
+        )
+        if (
+            not isinstance(fresh, dict)
+            or fresh.get("total_count") != total
+            or not isinstance(fresh.get("workflow_runs"), list)
+        ):
+            raise AdapterError(
+                "Family history changed during full read", "access"
+            )
+        fresh_rows.extend(fresh["workflow_runs"])
+    fresh_projection = sorted(
+        (*(protocol_run(r)), r.get("status"), r.get("conclusion"))
+        for r in fresh_rows
+    )
+    if fresh_projection != sorted(projection) or len(fresh_rows) != total:
+        raise AdapterError("Fresh family run prefix changed", "access")
+    protocol_workflow_definition()
+    stable = [
+        {k: v for k, v in r.items() if k != "artifacts"}
+        for r in sorted(completed, key=lambda x: (x["id"], x["attempt"]))
+    ]
+    return {
+        "hosted": hosted,
+        "current": current,
+        "latest": latest,
+        "artifact": artifact,
+        "history_sha256": protocol_digest(stable),
+        "run_projection": sorted(projection),
+        "workflow_id": definition["id"],
+        "completion_bounds": sorted({r["completed_at"] for r in completed}),
+    }
+
+def protocol_legacy_state(state):
+    if (
+        not isinstance(state, dict)
+        or set(state) - {"interval"}
+        != {
+            "schema",
+            "family",
+            "observed_at",
+            "not_before",
+            "starts",
+            "blocked",
+        }
+        or type(state["schema"]) is not int
+        or state["schema"] != 1
+        or state["family"] != FAMILY
+        or type(state["blocked"]) is not bool
+    ):
+        raise AdapterError("Unreviewed legacy state shape", "access")
+    if (
+        any(
+            not protocol_number(state.get(k, 6))
+            for k in ["observed_at", "not_before", "interval"]
+        )
+        or state.get("interval", 6) < 6
+        or not isinstance(state["starts"], list)
+        or len(state["starts"]) > 11
+        or any(
+            not protocol_number(x) or x > state["observed_at"]
+            for x in state["starts"]
+        )
+        or state["starts"] != sorted(set(state["starts"]))
+        or state["observed_at"] > time.time() + 1
+    ):
+        raise AdapterError("Untrusted legacy timing provenance", "access")
+    return state
+
+def protocol_marker(context, marker, purpose):
+    keys = {
+        "schema",
+        "source",
+        "purpose",
+        "evidence",
+        "history_sha256",
+        "owner",
+        "seed",
+        "seed_sha256",
+        "local_pins",
+    }
+    if (
+        not isinstance(marker, dict)
+        or set(marker) != keys
+        or marker["schema"] != 1
+        or marker["source"] != SOURCE_ID
+        or marker["purpose"] != purpose
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/316"
+            r"#issuecomment-[0-9]+",
+            str(marker["evidence"]),
+        )
+        or marker["history_sha256"] != context["history_sha256"]
+    ):
+        raise AdapterError(
+            "Explicit reviewed mature transition required", "access"
+        )
+    latest, artifact = context["latest"], context["artifact"]
+    expected = {
+        "run_id": latest["id"],
+        "attempt": latest["attempt"],
+        "head": latest["head"],
+        "job_id": latest["job_id"],
+        "artifact_id": artifact["id"],
+        "artifact_digest": artifact["digest"],
+        "source_sha256": context["source_sha256"],
+    }
+    if (
+        marker["owner"] != expected
+        or protocol_digest(marker["seed"]) != marker["seed_sha256"]
+    ):
+        raise AdapterError(
+            "Reviewed transition owner or MAX seed changed", "access"
+        )
+    seed = validate_budget(marker["seed"])
+    if (
+        seed["completed_at"] < max(context["completion_bounds"])
+        or seed["not_before"]
+        < max(context["completion_bounds"]) + seed["interval"]
+    ):
+        raise AdapterError(
+            "Reviewed MAX omits known job completion bounds", "access"
+        )
+    if seed["in_flight"]:
+        raise AdapterError(
+            "Reviewed transition cannot ignore pending owner", "access"
+        )
+    if purpose == "HOSTED" and (
+        not context["hosted"] or marker["local_pins"] is not None
+    ):
+        raise AdapterError(
+            "HOSTED transition cannot impersonate LOCAL pins", "access"
+        )
+    if purpose in {"LOCAL", "MATURE_LOCAL"} and (
+        context["hosted"] or not isinstance(marker["local_pins"], dict)
+    ):
+        raise AdapterError(
+            "LOCAL transition requires exact existing namespace", "access"
+        )
+    return json.loads(json.dumps(seed))
+
+def protocol_local_pins(raw):
+    journal_verify()
+    parent = os.fstat(journal_parent())
+    state = os.fstat(_GUARD_FD)
+    collection = os.fstat(_COLLECTION_LOCK_FD)
+    lock = os.stat(
+        os.path.basename(_STATE_LOCK),
+        dir_fd=journal_parent(),
+        follow_symlinks=False,
+    )
+    return {
+        "parent": [parent.st_dev, parent.st_ino],
+        "state": [state.st_dev, state.st_ino],
+        "collection_lock": [collection.st_dev, collection.st_ino],
+        "state_lock": [lock.st_dev, lock.st_ino],
+        "raw_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+def protocol_legacy_into(seed, legacy):
+    legacy = protocol_legacy_state(legacy)
+    result = json.loads(json.dumps(seed))
+    result["not_before"] = max(result["not_before"], legacy["not_before"])
+    result["interval"] = max(result["interval"], legacy.get("interval", 6))
+    result["blocked"] = result["blocked"] or legacy["blocked"]
+    result["legacy_rate_history_unknown"] = result[
+        "legacy_policy_history_unknown"
+    ] = result["legacy_completion_history_unknown"] = True
+    union = sorted(set(result["starts"] + legacy["starts"]))
+    if len(union) > 10:
+        result["not_before"] = max(result["not_before"], union[-1] + 60)
+    result["starts"] = union[-10:]
+    result["observed_at"] = max(
+        result["observed_at"], legacy["observed_at"], time.time()
+    )
+    return validate_budget(result)
+
+def protocol_policy_groups(text):
+    """Retain group/rule order; select exact product identities separately."""
+    groups, agents, entries = [], [], []
+    for raw in text.splitlines():
+        field = raw.partition("#")[0].strip()
+        key, separator, value = field.partition(":")
+        if not separator:
+            continue
+        key, value = key.strip().lower(), value.strip()
+        if key == "user-agent":
+            if entries:
+                groups.append((agents, entries))
+                agents, entries = [], []
+            agents.append(value.split("/", 1)[0].lower())
+        elif agents and key in {
+            "allow",
+            "disallow",
+            "crawl-delay",
+            "request-rate",
+        }:
+            entries.append((key, value))
+    if agents:
+        groups.append((agents, entries))
+    return groups
+
+def protocol_selected_policy_groups(groups):
+    current = _USER_AGENT.split("/", 1)[0].lower()
+    specific = [g for g in groups if current in g[0]]
+    wildcard = [g for g in groups if "*" in g[0]]
+    legacy = [g for g in groups if "youthopp" in g[0]]
+    return (specific or wildcard) + legacy
+
+def protocol_policy_parser(text):
+    """Use native rule matching without parsing unrelated timing numbers."""
+    import urllib.robotparser
+
+    parser = urllib.robotparser.RobotFileParser()
+    groups = protocol_policy_groups(text)
+    parser._protocol_groups = groups
+    parser._protocol_body_sha256 = hashlib.sha256(text.encode()).hexdigest()
+    policy_lines = []
+    for line in text.splitlines():
+        key = line.partition(":")[0].strip().lower()
+        policy_lines.append(
+            "Crawl-delay: 0" if key in {"crawl-delay", "request-rate"} else line
+        )
+    parser.parse(policy_lines)
+    return parser
+
+class PrimaryText(HTMLParser):
+    ("Ignore ordinary ancillary/script notices when "
+     "recognizing real refusals.")
+
+    def __init__(self, document):
+        super().__init__(convert_charrefs=True)
+        self.parts, self.stack, self.head_title_parts = [], [], []
+        self.head_seen = self.head_allowed = False
+        self.title_depth = None
+        self.feed(document)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        # HTML block starts close a paragraph in button scope, including its
+        # inline descendants. Keep suppression inherited from outer elements.
+        if tag in {
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "center",
+            "details",
+            "dialog",
+            "dir",
+            "div",
+            "dl",
+            "fieldset",
+            "figcaption",
+            "figure",
+            "footer",
+            "header",
+            "hgroup",
+            "main",
+            "menu",
+            "nav",
+            "ol",
+            "p",
+            "search",
+            "section",
+            "summary",
+            "ul",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "pre",
+            "listing",
+            "hr",
+        }:
+            for index in range(len(self.stack) - 1, -1, -1):
+                ancestor = self.stack[index][0]
+                if ancestor == "p":
+                    del self.stack[index:]
+                    break
+                if ancestor in {
+                    "applet",
+                    "button",
+                    "caption",
+                    "html",
+                    "marquee",
+                    "object",
+                    "table",
+                    "td",
+                    "template",
+                    "th",
+                }:
+                    break
+        values = {}
+        for name, value in attrs:
+            values.setdefault(name, value)
+        style = re.sub(
+            r"/\*.*?\*/", "", values.get("style") or "", flags=re.S
+        ).lower()
+        declarations, priorities = {}, {}
+        for declaration in style.split(";"):
+            name, separator, value = declaration.partition(":")
+            if separator:
+                name = name.strip()
+                important = bool(re.search(r"!\s*important\s*$", value))
+                if priorities.get(name) and not important:
+                    continue
+                declarations[name] = re.sub(
+                    r"\s*!\s*important\s*$", "", value
+                ).strip()
+                priorities[name] = important
+        explicit_suppressed = (
+            "hidden" in values
+            or (values.get("aria-hidden") or "").strip().lower() == "true"
+            or declarations.get("display") == "none"
+            or declarations.get("visibility") == "hidden"
+        )
+        if (
+            tag == "head"
+            and not self.head_seen
+            and all(
+                name == "html" and not suppressed and not visibility
+                for name, suppressed, visibility in self.stack
+            )
+        ):
+            self.head_seen = True
+            self.head_allowed = not explicit_suppressed
+        if (
+            tag == "title"
+            and self.head_allowed
+            and self.stack
+            and self.stack[-1][0] == "head"
+            and not explicit_suppressed
+        ):
+            self.title_depth = len(self.stack) + 1
+        suppressed = (
+            tag
+            in {
+                "head",
+                "title",
+                "script",
+                "style",
+                "template",
+                "noscript",
+                "footer",
+                "nav",
+                "aside",
+            }
+            or "hidden" in values
+            or (values.get("aria-hidden") or "").strip().lower() == "true"
+            or declarations.get("display") == "none"
+        )
+        inherited = self.stack[-1][1] if self.stack else False
+        visibility = self.stack[-1][2] if self.stack else False
+        if declarations.get("visibility") == "hidden":
+            visibility = True
+        elif declarations.get("visibility") == "visible":
+            visibility = False
+        if tag not in {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        }:
+            self.stack.append((tag, inherited or suppressed, visibility))
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self.title_depth = None
+        if tag == "head":
+            self.head_allowed = False
+        for position in range(len(self.stack) - 1, -1, -1):
+            if self.stack[position][0] == tag:
+                del self.stack[position:]
+                break
+
+    def handle_data(self, value):
+        if (
+            self.title_depth is not None
+            and len(self.stack) == self.title_depth
+            and self.stack[-1][0] == "title"
+        ):
+            self.head_title_parts.append(value)
+        if not self.stack or not any(self.stack[-1][1:]):
+            self.parts.append(value)
+
+def protocol_primary_challenge(body, status):
+    """Inspect actual HTML only; ancillary mentions are not access refusals."""
+    prefix = body[:1024].lstrip().lower()
+    if not re.match(
+        rb"<(?:!doctype\s+html\b|html\b|head\b|body\b|main\b|"
+        rb"h[1-6]\b|div\b|p\b)",
+        prefix,
+    ):
+        return False
+    text = PrimaryText(body.decode("utf-8", "replace"))
+    title = " ".join(" ".join(text.head_title_parts).split()).lower()
+    primary = " ".join(" ".join(text.parts).split()).lower()
+    if re.search(
+        r"just a moment|attention required|access denied|captcha|"
+        r"verify you are human|checking your browser",
+        title,
+    ):
+        return True
+    phrases = [
+        "verify you are human",
+        "checking your browser",
+        "complete the captcha",
+        "security verification required",
+        "unusual traffic from your network",
+    ]
+    if any(p in primary for p in phrases):
+        return True
+    if status == 429:
+        return False
+    # Preserve real standalone primary denials without matching help prose.
+    return bool(
+        re.fullmatch(
+            r"(?:access denied|forbidden|request blocked)[.!\s]*", primary
+        )
+    )
+
+def protocol_hold(message, status=None):
+    with locked_budget():
+        state = load_budget()
+        protocol_current_owner(state)
+        state.update(blocked=True, observed_at=time.time())
+        save_budget(state)
+    raise AssessedStop(message, "access", status)
+
+def protocol_policy_values(text):
+    """Read decimal timing from the same applicable REP product groups."""
+    groups = protocol_selected_policy_groups(protocol_policy_groups(text))
+    selected = [entry for _, entries in groups for entry in entries]
+    delays, rates = [], []
+    decimal = r"(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+    for key, value in selected:
+        if key == "crawl-delay":
+            if not re.fullmatch(decimal, value):
+                raise AdapterError(
+                    "Unsupported applicable REP crawl delay", "access"
+                )
+            delay = float(value)
+            if not protocol_number(delay):
+                raise AdapterError("Nonfinite applicable REP delay", "access")
+            delays.append(delay)
+        elif key == "request-rate":
+            match = re.fullmatch(r"([0-9]+)\s*/\s*(" + decimal + r")", value)
+            if match is None:
+                raise AdapterError(
+                    "Unsupported applicable REP request rate", "access"
+                )
+            requests, seconds = int(match[1]), float(match[2])
+            if (
+                not 1 <= requests <= 1000000
+                or not protocol_number(seconds)
+                or seconds <= 0
+            ):
+                raise AdapterError(
+                    "Invalid applicable REP request rate", "access"
+                )
+            rates.append({"requests": requests, "seconds": seconds})
+    rate = max(rates, key=lambda r: r["seconds"] / r["requests"], default=None)
+    return max(delays, default=0), rate
+
+def protocol_assess_policy(url):
+    """Commit this exact target's actual policy before its owner can settle."""
+    global _PROTOCOL_EXPECTED_RECEIPT
+    origin, target = protocol_target(url)
+    with locked_budget():
+        state = load_budget()
+        protocol_current_owner(state)
+        state["policy_pending"] = {
+            "owner": _PROTOCOL_OWNER,
+            "target_sha256": target,
+        }
+        state["observed_at"] = time.time()
+        save_budget(state)
+    policy = _PROTOCOL_POLICY_RAW.get(origin)
+    if (
+        policy is None
+        or origin not in _ROBOTS
+        or policy.get("collection") != _PROTOCOL_SEQUENCE
+    ):
+        raise AdapterError("Actual REP body provenance unavailable", "access")
+    parser = _ROBOTS[origin]
+    if policy["available"] and (
+        hashlib.sha256(policy["text"].encode()).hexdigest() != policy["sha256"]
+        or getattr(parser, "_protocol_body_sha256", None) != policy["sha256"]
+    ):
+        raise AdapterError("REP cache body provenance changed", "access")
+    delay, rate = (
+        protocol_policy_values(policy["text"])
+        if policy["available"]
+        else (0, None)
+    )
+    allowed = (
+        True
+        if urllib.parse.urlsplit(url).path == "/robots.txt"
+        else robots_directive(_ROBOTS[origin], "can_fetch", url)
+    )
+    groups = getattr(parser, "_protocol_groups", [])
+    current = _USER_AGENT.split("/", 1)[0].lower()
+    scoped = any(current in names or "*" in names for names, _ in groups)
+    if target in state["policy_denied"] and (
+        not policy["available"] or not scoped
+    ):
+        allowed = False
+    receipt = {
+        "owner": _PROTOCOL_OWNER,
+        "origin": origin,
+        "target_sha256": target,
+        "body_sha256": policy["sha256"],
+        "available": policy["available"],
+        "allowed": allowed,
+        "delay": delay,
+        "rate": rate,
+    }
+    protocol_observation(receipt)
+    required = delay
+    if rate is not None:
+        required = max(required, rate["seconds"] / rate["requests"] + 0.01)
+    if not protocol_number(required):
+        raise AdapterError("Unsupported applicable REP arithmetic", "access")
+    with locked_budget():
+        state = load_budget()
+        protocol_current_owner(state)
+        if state["policy_pending"] != {
+            "owner": _PROTOCOL_OWNER,
+            "target_sha256": target,
+        }:
+            raise AdapterError("Policy assessment owner changed", "access")
+        state["interval"] = max(state["interval"], required)
+        state["not_before"] = max(
+            state["not_before"], state["completed_at"] + state["interval"]
+        )
+        key, name = (
+            ("policy_allowed", origin) if allowed else ("policy_denied", target)
+        )
+        old = state[key].get(name)
+        if old is None or json.dumps(receipt, sort_keys=True) < json.dumps(
+            old, sort_keys=True
+        ):
+            state[key][name] = receipt
+        state.update(
+            last_policy_receipt=receipt,
+            policy_pending=None,
+            observed_at=time.time(),
+        )
+        save_budget(state)
+        _PROTOCOL_EXPECTED_RECEIPT = json.loads(json.dumps(receipt))
+    if not allowed:
+        raise AssessedStop(
+            "Publisher robots excludes required Volkswagen AG input", "access"
+        )
+    return receipt
+
+def protocol_source_hash(head):
+    if not re.fullmatch(r"[0-9a-f]{40}", str(head)):
+        raise AdapterError("Invalid immutable producer source ref", "access")
+    result = workflow_api(
+        "/contents/adapters/volkswagen-group/adapter.py?ref=" + head
+    )
+    if (
+        not isinstance(result, dict)
+        or result.get("type") != "file"
+        or result.get("path") != "adapters/volkswagen-group/adapter.py"
+        or result.get("encoding") != "base64"
+    ):
+        raise AdapterError("Immutable producer source unavailable", "access")
+    try:
+        raw = base64.b64decode(
+            result["content"].replace("\n", ""), validate=True
+        )
+    except (KeyError, ValueError, TypeError):
+        raise AdapterError(
+            "Invalid immutable producer source", "access"
+        ) from None
+    if (
+        len(raw) > 2000000
+        or result.get("size") != len(raw)
+        or hashlib.sha1(
+            b"blob " + str(len(raw)).encode() + b"\0" + raw
+        ).hexdigest()
+        != result.get("sha")
+    ):
+        raise AdapterError("Producer Git blob digest mismatch", "access")
+    return hashlib.sha256(raw).hexdigest()
+
+def protocol_decode(envelope, context):
+    """Validate real ZIP ownership before any namespace can be initialized."""
+    latest = context["latest"]
+    base = {"schema", "repository", "run_id", "run_attempt", "source", "state"}
+    modern = base | {"head_sha", "adapter_sha256", "state_sha256"}
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) not in (base, modern)
+        or type(envelope["schema"]) is not int
+        or envelope["repository"] != "YouthOpps/data-pipeline"
+        or envelope["source"] != SOURCE_ID
+        or type(envelope["run_id"]) is not int
+        or type(envelope["run_attempt"]) is not int
+        or (envelope["run_id"], envelope["run_attempt"])
+        != (latest["id"], latest["attempt"])
+    ):
+        raise AdapterError("Owned state envelope mismatch", "access")
+    if set(envelope) == base:
+        if envelope["schema"] != 1:
+            raise AdapterError("Unreviewed legacy envelope", "access")
+        return protocol_legacy_state(envelope["state"])
+    if (
+        envelope["schema"] != 2
+        or envelope["head_sha"] != latest["head"]
+        or envelope["adapter_sha256"] != context["source_sha256"]
+        or envelope["state_sha256"] != protocol_digest(envelope["state"])
+    ):
+        raise AdapterError(
+            "Modern producer/source/state digest mismatch", "access"
+        )
+    state = validate_budget(envelope["state"])
+    if state["in_flight"] or state["policy_pending"] is not None:
+        raise AdapterError(
+            "Newest owned pending state requires review", "access"
+        )
+    return state
+
+def protocol_same_history(expected):
+    current = protocol_history()
+    if (
+        current["history_sha256"] != expected["history_sha256"]
+        or current["run_projection"] != expected["run_projection"]
+        or current["current"] != expected["current"]
+        or current["artifact"] != expected["artifact"]
+    ):
+        raise AdapterError(
+            "Fresh owner/history changed before publisher access", "access"
+        )
+    return current
+
+def protocol_acquire_collection():
+    global _COLLECTION_LOCK_FD, _GUARD_COLLECTION_ID
+    if _COLLECTION_LOCK_FD is not None:
+        raise AdapterError("Nested family collection refused", "access")
+    parent = journal_parent()
+    descriptor = identity = None
+    try:
+        flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+        try:
+            descriptor = os.open("collection.lock", flags, dir_fd=parent)
+        except FileNotFoundError:
+            if not journal_creation_allowed():
+                raise AdapterError("Mature collection lock missing", "access")
+            descriptor = os.open(
+                "collection.lock",
+                flags | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=parent,
+            )
+        info = os.fstat(descriptor)
+        identity = (info.st_dev, info.st_ino)
+        journal_owned(descriptor, identity)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        journal_owned(descriptor, identity)
+        current = os.stat(
+            "collection.lock", dir_fd=parent, follow_symlinks=False
+        )
+        if (current.st_dev, current.st_ino) != identity:
+            raise AdapterError("Publisher collection lock changed", "access")
+        _COLLECTION_LOCK_FD, _GUARD_COLLECTION_ID = descriptor, identity
+    except BaseException:
+        journal_failed()
+        if descriptor is not None and identity is not None:
+            journal_close(descriptor, identity, True)
+        raise
+
+def protocol_preflight_wire():
+    if not _PROTOCOL_READY or _GUARD_FATAL:
+        raise AdapterError(
+            "Explicit mature continuity required before publisher access",
+            "access",
+        )
+
+def protocol_first_wire():
+    """Fresh authoritative coordination after quiet, under actual state lock."""
+    global _PROTOCOL_FIRST_WIRE
+    protocol_preflight_wire()
+    if _PROTOCOL_FIRST_WIRE:
+        return
+    with locked_budget():
+        protocol_same_history(_PROTOCOL_CONTEXT)
+        state = load_budget()
+        protocol_current_owner(state)
+        if state["blocked"] or time.time() < max(
+            _COLLECTION_STARTED + 60, state["rate_limit_until"]
+        ):
+            raise AdapterError(
+                "Publisher quiet/hold changed before first wire", "access"
+            )
+        journal_verify()
+        _PROTOCOL_FIRST_WIRE = True
+
+def protocol_export_envelope(state, run_id, attempt):
+    validate_budget(state)
+    if (
+        not _PROTOCOL_READY
+        or _GUARD_FATAL
+        or state["in_flight"]
+        or state["policy_pending"] is not None
+    ):
+        raise AdapterError(
+            "Unsettled publisher state cannot be uploaded", "access"
+        )
+    context = protocol_history()
+    if not context["hosted"] or context["current"][:2] != (run_id, attempt):
+        raise AdapterError(
+            "Export requires genuine current hosted owner", "access"
+        )
+    head = context["current"][2]
+    source_hash = hashlib.sha256(open(__file__, "rb").read()).hexdigest()
+    if source_hash != protocol_source_hash(head):
+        raise AdapterError("Export executing source/head mismatch", "access")
+    envelope = {
+        "schema": 2,
+        "repository": "YouthOpps/data-pipeline",
+        "run_id": run_id,
+        "run_attempt": attempt,
+        "source": SOURCE_ID,
+        "head_sha": head,
+        "adapter_sha256": source_hash,
+        "state_sha256": protocol_digest(state),
+        "state": state,
+    }
+    if len(json.dumps(envelope, separators=(",", ":")).encode()) > 16384:
+        raise AdapterError(
+            "Owned envelope exceeds original byte bound", "access"
+        )
+    return envelope
 
 
 if __name__ == "__main__":
