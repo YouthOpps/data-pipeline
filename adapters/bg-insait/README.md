@@ -131,3 +131,47 @@ Published metadata uses `display_name` = **INSAIT** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+### Journal integrity maintenance
+
+Refs #295. Issue #295 remains open. This source-local journal integrity
+maintenance retains an owned read/write journal descriptor under the existing
+separate state.lock. It checks the verified parent, current journal/lock names
+and byte generation before and after IO and immediately before a publisher
+opener. A replaced or stronger changed journal is refused instead of
+overwritten; a separate process-local fatal flag cannot be cleared by a later
+healthy finalizer.
+
+Only the original verified incoming-state restore can authorize genuinely new
+publisher-directory initialization. An existing directory with missing or
+invalid mature state does not become a fresh budget. IO writes serialize in
+RAM, then truncate, sync, completely write, sync and verify the original held
+inode. In-place interruption may leave empty or partial bytes and sacrifice
+availability; such state is rejected. Advisory locks and observed generation
+checks are not filesystem compare-and-swap or authentication of arbitrary
+same-user writers ignoring locks.
+
+Acquired collection, state, artifact writer/reader and parent descriptors
+retain their actual identities through cleanup. Both independent
+collection/journal releases are attempted, an active primary exception is
+preserved, and healthy close failure refuses a valid owned export. The current
+named artifact parent and collection lock are checked. The original artifact
+envelope and source-specific readiness contract remain; sources without
+readiness signaling gain no new output dependency.
+
+Every original schema field, seed/approval literal, parser, complete inventory,
+normalizer, ID, date/expiry rule, metadata/publication function, request
+timing, retry/redirect/status/REP interpretation and workflow is retained. In
+particular this maintenance does not raise the legacy six-second physical floor
+or modernize rate handling. These schemas have no durable pending barrier:
+total persistence plus invalidation failure across a process restart remains a
+separate #273 gap.
+
+Acceptance evidence for this maintenance is explicitly limited to existing
+byte-matched private journal findings, bounded ordinary private contexts and
+static business-AST protection. Original full native acceptance has not been
+established by this maintenance, and no expired or available original raw RAM
+replay is invented. A pinned current published snapshot/current consumer check,
+when provided, is separate evidence; it does not prove the original full raw
+inventory, current publisher facts or current access permission. No publisher
+collection is performed for this IO-only patch.
