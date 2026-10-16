@@ -90,11 +90,14 @@ and links; no images, protected full prose or claimed open licence. No publisher
 contact or application submission was performed. Malformed internal backend links
 are not requested or published; every record points to the actual public source.
 
-All source requests share a locked publisher-family allowance: at least six
-seconds between starts, at most ten in a rolling 60 seconds, including redirects,
-retries and overlapping local processes. Robots and Retry-After are honored;
+All source requests share a durable publisher-family allowance: at least
+12.2 seconds after the previous physical completion, at most five starts in a
+rolling 60 seconds, including redirects, retries and overlapping paths. Each
+physical inventory attempt waits at least 30 seconds after previous inventory
+completion. Robots, retained holds and longer Retry-After remain effective;
 normal identifying user agent, TLS and session proxy are preserved. Publication
-runs for this source are serialized; do not overlap a local source test with remote runs.
+runs for this source are serialized; do not overlap a local source test with
+remote runs.
 
 First failure creates no source folder. After success, fetch/parse/validation
 failure preserves last-good data and the success timestamp, recording sanitized
@@ -110,9 +113,10 @@ returned valid XML with all 918 locations on the reviewed HTTPS source origin.
 This does not prove which values were invalid or establish an IP/proxy cause.
 
 The runtime permits one same-endpoint re-retrieval only after invalid/malformed
-child XML metadata, delayed at least 30 seconds. Ordinary publisher spacing stays
-six seconds; a longer shared Retry-After deadline still wins. Both attempts must
-pass complete strict XML/origin and reviewed funding/policy inventory validation.
+child XML metadata, delayed at least 30 seconds. Ordinary publisher completion
+spacing stays at least 12.2 seconds; a longer shared Retry-After deadline still
+wins. Both attempts must pass complete strict XML/origin and reviewed
+funding/policy inventory validation.
 A repeated invalid result fails closed. Valid changed funding/policy inventory,
 HTTP refusal and HTML/XML challenge documents fail immediately without this
 retry. Foreign/internal locations are never accepted or fetched. Diagnostics
@@ -139,9 +143,10 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+access; restrictive rate and delay directives remain effective. The modern
+publisher protocol preserves all known legacy restrictions and
+explicit unknown ancestry; it does not create permission or erase holds.
+Existing disabled workflows remain disabled.
 
 ## Daily automation
 
@@ -155,14 +160,14 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
-This includes taxonomy/listing pages where applicable. The existing native
-transport still enforces its physical-request allowance across retries, redirects
-and detail requests, with stricter publisher limits and retained backoff taking
-precedence. The page guard does not raise the durable request interval for all
-subsequent article/detail requests or reset existing budget/refusal state.
-Inventory scope, parsing, validation and atomic publication are unchanged.
+Inventory attempts wait at least 30 seconds after previous inventory physical
+completion, including redirects and retries. Exact inventory roles are the
+scholarship entry, home, study-options, institutions, news, events, study-types
+and both sitemap documents. Privacy, tuition/application guidance, PhD,
+masters, exchange and summer article details use normal physical spacing;
+literal robots is not inventory. A longer retained page gap still wins. The
+complete original fourteen-page/frontier, record parsing and publication are
+preserved; no URL-prefix shortcut, first-known ID or page truncation is added.
 
 ## Workflow concurrency
 
@@ -238,7 +243,7 @@ Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
 
 
-### Received publisher 429 stops before body assessment
+### Earlier received-publisher-429 maintenance
 
 A received publisher HTTP 429 now retains the original valid `Retry-After`
 MAX and source-local persistence before rejecting the response without reading
@@ -256,5 +261,141 @@ be described as a durably retained hold. Validation uses bounded private
 ordinary controls and exact normal-function AST comparison. No new publisher
 request or genuine native run is claimed for this maintenance change.
 
-This adapter retains its original local host JSON, lock and fsync behavior;
-there is no new hosted owned-state handoff.
+That earlier maintenance retained the original local host JSON, lock and fsync
+behavior, without adding hosted owned-state handoff. The modern implementation
+below supersedes that transport and continuity boundary.
+
+
+## Modern durable pacing: offline implementation, not access approval
+
+Issue #327 adds a source-local schema-3 publisher journal, pending policy and
+physical request identities, exact completion accounting and source-owned
+hosted artifacts. Every physical attempt reserves pending state before wire;
+all header/body/REP decisions and resulting restrictions must be durable before
+matching settlement. One outer policy owner also covers the unchanged complete
+reader and source-policy validation, including bounded child XML recovery.
+Actual content 401/403/451 and genuine visible challenges retain scoped holds.
+Ordinary 429 is a timed restriction: before ANY body read, persist its count,
+MAX embargo of at least 1,800 seconds (even with a shorter valid Retry-After),
+and double BOTH CURRENT physical/page gaps. Longer or stronger limits remain.
+Then explicitly close before entering its response context, and stop without
+reading that body or starting another publisher request. Any close failure
+stays pending/sticky; failed persistence preserves its primary exception while
+attempting guarded close. Hidden or unrelated page chrome, invalid Retry-After
+alone and ordinary timed 429 do not invent an access hold.
+
+Verified literal robots HTTP 4xx except 429 is REP-unavailable; it does not
+clear valid known Disallow or stronger delay. Robots 5xx, TLS/DNS errors and
+timeouts are unreachable: stop or retain valid applicable cached constraints,
+never treat that as unrestricted access. Current YouthOppsBot-specific rules,
+else wildcard, intersect actual legacy Youthopp-specific rules where present.
+Longest matching rule and Allow ties apply; selected finite decimal numeric
+limits combine by MAX. Applicable unsupported numeric policy stays pending.
+Cached decisions and redirects retain their actual target/policy provenance.
+
+The original two-attempt/four-hop source bounds remain. Ordinary recovery now
+requires a typed temporary connection failure inside an actual opener with no
+response. TLS, storage, received HTTP and partial-body failures cannot become
+ordinary retries. The original XML-only child recovery still gets one same-
+endpoint re-read after at least 30 seconds; HTTP/challenge/substantive policy
+changes do not gain it. User-Agent, HTTPS/proxy and five-MB limits remain.
+
+All reservation/restriction/completion or unassessed-calculation failures are
+sticky for the process. Durable unsettled, missing/empty/corrupt mature state
+refuses fresh-process access and cannot be healed by an older healthy artifact.
+The locked retained-RW journal binds the original parent, inode, generation and
+collection authority; cleanup acts only on verified owned descriptors and
+preserves primary errors and unrelated objects. A torn in-place journal fails
+closed rather than providing an atomic availability guarantee. Opportunity
+publication remains atomic and source-scoped.
+
+The old directory is `dk-study-in-denmark-pacing-{uid}` under the configured
+temporary root. Its normalized publisher host JSON itself is flocked; GitHub
+has its own separate host bucket. ROOT inspected the original and modern
+namespaces read-only; both were absent,
+which does not establish zero historical restrictions. Both historical rate
+and policy unknown flags remain true. The modern family is
+`youthopps-dk-study-in-denmark-publisher-v1`. ROOT approved the finite LOCAL
+boundary and all 27 exact prior run/attempt/job pins. At that LOCAL binding
+stage the HOSTED initial transition remained None; that approval alone did not
+release a native run or publication.
+Every authenticated prior attempt contributes its own complete job inventory,
+including older attempts of reruns. An exact run-ID pin matches only its own
+attempt/head; additional attempts use explicit `run_id:attempt` keys, with
+normalized duplicates refused. A full job digest binds every finite pin.
+Both LOCAL and HOSTED access recheck the complete restored wrappers and exact
+attempt/job proofs after startup quiet and before the first publisher opener.
+All other nonterminal publishers, including queued ones, refuse access. A
+new wrapper, changed job/attempt/head or changed workflow mode fails closed.
+Later local and hosted runs require their newest exact-owned pacing artifact
+and merge every stronger local/maintenance limit. No generic missing-artifact
+fallback, old reset or silent hold clearance is allowed.
+
+The existing 1,800-second job and original GitHub six-second/Retry-After
+transport, exact current-job proof, 30-second per-call timer, jitter, three
+classified CAS attempts and write/read cutoffs are retained. New internal
+collection/whole allocations are 1,200/1,740 seconds within that SAME job;
+restoration up to 180, initial snapshot up to 120, publication/failure reserves
+180/180 and export 30 consume one nonrenewing deadline, never add to it.
+Restoration precedes initial data-source snapshot; persistent failure ownership
+begins before fallback reads. Existing publication alarms are clamped, not
+competed with by an enclosing timer. These are new allocations, not measured
+collection fit. App token creation/lifetime and the 08:47 UTC cron are
+unchanged.
+
+The actual workflow has a mandatory four-key maintenance packet on BOTH first
+and later hosted paths plus exact-attempt artifact export/readiness. Its public
+evidence and state remained null during initial offline QA, so that stage was
+not production-ready. The original sole live test remains unchanged. That
+implementation stage established no publisher request, actual namespace,
+genuine native collection, fresh source facts or production success. Complete
+native source clauses, raw/filtered/actual-expired/valid-empty consumer cases
+and observed constraints then required separate ROOT release and independent
+evidence. Older seven-record metadata was not new body provenance.
+
+
+## Approved LOCAL continuity boundary
+
+[ROOT approval](https://github.com/YouthOpps/data-pipeline/issues/327#issuecomment-6213730922)
+binds workflow `378390319`, all 27 authenticated exact attempts and their full
+job inventories, and a six-key LOCAL transition. All 27 actual job-completion
+upperbounds are retained as conservative timing observations; they are not 27
+measured publisher requests. No prior publisher starts were recovered from
+the absent legacy directory. The full pin digest is
+`36230108096442d22f8648d60d2e8ec8e0ca3a72e4ca17745a08752c756470be`.
+
+The prospective schema-3 state has a 12.2-second physical floor, 30-second
+inventory floor, and a separate observation-plus-60-second quiet guard. Job
+completion upperbounds also conservatively bound completion fields. Both
+unknown histories remain true. The initial false pending flag, null owners
+and zero new-transition strikes do not prove historical settlement, an absent
+old hold or a lifetime zero count. LOCAL initialization still verifies actual
+absence and complete fresh metadata; any changed namespace or history stops.
+The newest approved prior run is `38763419182`, attempt 1. Later mature runs
+require exact newest-owned continuity, not this finite missing-state bridge.
+
+The original test and workflow, all runtime algorithms, and the external
+observer were unchanged by that LOCAL literal binding. At that stage, no
+original native test or publisher request had run for the candidate. Actual
+source facts, graph/expiry/current-consumer qualification, dependency binding
+and a separate ROOT original-native release then remained required. That LOCAL
+boundary did not approve HOSTED publication.
+
+
+## ROOT-approved HOSTED transition (#327)
+
+[ROOT approval](https://github.com/YouthOpps/data-pipeline/issues/327#issuecomment-6214619603)
+binds the six-key HOSTED publisher-absent transition. It preserves all 95
+reviewed timing observations without age folding, both unknown histories, and
+the actual settled flight/request identities. The prospective HOSTED MAX has
+compact NO-LF SHA-256
+`a99f07b096fad88ebe26be5542e16dcdf1e3c09d07f8d84f559da6007f9ee413`.
+LOCAL inode authority is not transferred and the approved LOCAL marker remains
+unchanged. The original native retained 17 responses and seven current records;
+this literal binding performs no new collection or native run.
+
+[Supplemental workflow approval](https://github.com/YouthOpps/data-pipeline/issues/327#issuecomment-6214649525)
+binds the required four-key maintenance environment packet to that same
+evidence URL and exact 95-observation state. The source requires this packet on
+both the first legacy transition and later owned-artifact restoration. All
+other workflow settings and the original test remain unchanged.
