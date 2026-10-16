@@ -233,3 +233,51 @@ consumer replay, or certification of other legacy pacing/rate-limit behavior.
 Historical native proof is reused only for unchanged normal collection, facts,
 normalization, validation, expiry and publication functions; retained record
 and dependency limits are documented in the linked maintenance issue.
+
+### Current journal generation and owned IO maintenance
+
+The #295 Group C maintenance keeps the existing state schema, seed markers,
+source inventory, factual normalization, date precision, expiry, publication
+and workflow schedule. Journal reads and writes now use an owned retained
+read/write descriptor under the existing stable state.lock. Current parent,
+named inode and byte generation are checked before and after IO and again
+before opening a publisher request. Writers serialize in RAM and rewrite only
+that held inode; a changed current file is refused instead of overwritten.
+
+A genuinely new publisher namespace can be initialized only within the original
+validated incoming-state restore. Merely computing a path or finding a
+preexisting directory with missing journal/lock files does not grant
+initialization. Collection-lock identity is captured at acquisition; journal
+and collection releases are attempted independently. Cleanup preserves an
+active primary exception and refuses a healthy handoff after an IO failure.
+Export keeps the original six-key envelope and upload contract, with acquired
+writer/reader/parent identities retained through cleanup. It adds no workflow
+readiness-signal dependency.
+
+This intentionally replaces atomic journal replacement with in-place
+persistence: a crash or failed write can leave empty or partial bytes and
+sacrifice availability. Such bytes are refused rather than reconstructed from a
+weaker snapshot. Locks are advisory; these checks are not filesystem
+compare-and-swap and do not authenticate an arbitrary same-user writer ignoring
+the locks. If both persistence and invalidation fail, this unchanged schema has
+no durable pending barrier for a later process; that separate #273 limitation
+remains. Existing actual holds are never cleared.
+
+Validation for this maintenance is bounded ordinary private-namespace execution
+and whole-source static comparison. All original non-IO functions and
+state/seed/refusal literals are unchanged; the narrow main-finally wrapper only
+coordinates export and IO cleanup. Earlier complete successful native evidence
+remains historical qualification, not a native run of this maintenance. The
+original four raw-body services have expired, so no fresh full original-record
+or body replay is claimed. A separately pinned current published snapshot can
+be checked with the current consumer; it is not proof of current upstream
+accessibility or a replacement for the original full native evidence.
+
+The maintenance checks comprise 48 ordinary private contexts across the
+four-source group, plus whole-source AST protection. At immutable data snapshot
+5e7f5f11aa7698844b54ce30be12f55318425fe0, this source has 1140 published
+records; the unchanged adapter expiry filter retains 1140, and the pinned
+consumer accepts the complete published pair, its expiry-filtered pair, a
+derived valid-empty pair and failed-metadata last-good retention. These current
+published checks do not replay expired original native raw bodies or assess
+current publisher content.
