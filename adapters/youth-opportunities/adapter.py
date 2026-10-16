@@ -405,6 +405,26 @@ def retryable_connection_error(error):
     )
 
 
+def header_rate_limit_failure_guard(function):
+    """Preserve a marked HTTP 429 error through failing cleanup."""
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except BaseException as error:
+            current, seen = error, set()
+            while current is not None and id(current) not in seen:
+                seen.add(id(current))
+                if getattr(current, "_header429_unassessed", False):
+                    raise current
+                current = current.__context__
+            raise
+    invoke.__name__ = function.__name__
+    invoke.__doc__ = function.__doc__
+    invoke.__wrapped__ = function
+    return invoke
+
+
+@header_rate_limit_failure_guard
 def request_bytes(
     url,
     *,
@@ -447,7 +467,11 @@ def request_bytes(
         except urllib.error.HTTPError as error:
             response = error
         received = True
-        with response:
+        with (
+            header_rate_limit_response(response)
+            if True and response.status == 429
+            else response
+        ):
             with budget_state() as state:
                 now = time.time()
                 if response.status == 429:
@@ -471,6 +495,10 @@ def request_bytes(
                     except (ValueError, TypeError, OverflowError, OSError):
                         # Unusable timing never establishes access refusal.
                         pass
+            if response.status == 429:
+                raise HeaderRateLimitStop(
+                    "Publisher stopped: HTTP 429", "access", 429
+                )
             body = response.read(5_000_001)
             if len(body) > 5_000_000:
                 raise AdapterError("Response exceeds byte limit", "fetch")
@@ -487,6 +515,9 @@ def request_bytes(
                     raise
             assessed = True
             return response.status, response.headers, body
+    except HeaderRateLimitStop:
+        assessed = True
+        raise
     except Exception as error:
         if (
             received and not (assessed and isinstance(error, AdapterError))
@@ -3044,6 +3075,24 @@ def main():
     finally:
         if phase == "publish":
             delete_handoff()
+
+
+class HeaderRateLimitStop(AdapterError):
+    """A header-only HTTP 429 stop assessed after safe closure."""
+
+
+@contextlib.contextmanager
+def header_rate_limit_response(response):
+    """Retain existing barriers when closing an HTTP 429 fails."""
+    try:
+        with response:
+            yield
+    except HeaderRateLimitStop:
+        raise
+    except BaseException as error:
+        error._header429_unassessed = True
+        # Existing outer failure/embargo semantics remain authoritative.
+        raise
 
 
 if __name__ == "__main__":

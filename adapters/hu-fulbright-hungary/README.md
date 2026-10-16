@@ -270,3 +270,27 @@ healthy contexts raise so the existing owned-artifact cleanup invalidates output
 after readiness was signaled. An already-active body error is preserved; a
 recycled unrelated descriptor is neither closed nor modified. Collection lock
 identity is captured by the actual acquisition path, not inferred at cleanup.
+
+
+## Header-only HTTP 429 stop — issue #328
+
+A received publisher HTTP 429 now stops after the existing header constraints
+are retained, before reading any response body. The response must close
+successfully before this intentional stop is assessed. A close or persistence
+failure follows the existing failure handling; they cannot establish a healthy
+collection. Previously retained holds, numeric MAX constraints, Retry-After
+and unknown history remain. An unread 429 body provides no new challenge
+classification.
+
+This paragraph supersedes earlier 429 body-inspection descriptions. This
+conditional repair preserves non-429 responses, REP selection, the full
+collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
+caps, workflow, state schema and finite migration markers. It does not add
+missing pending ownership or upgrade a legacy source to a modern continuity
+protocol.
+
+Private ordinary transport/state controls and protected normal-AST comparisons
+qualify this change. Earlier genuine native evidence retains its original code
+and date attribution; no new publisher collection, current factual review,
+complete native replay or production run is claimed. The maintainer alone owns
+workflow/state coordination and the maintenance rollout for issue #328.

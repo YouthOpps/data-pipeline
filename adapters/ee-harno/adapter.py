@@ -5608,6 +5608,26 @@ def apply_robots_policy(text, url, state=None):
 
 
 
+def header_rate_limit_failure_guard(function):
+    """Preserve a marked HTTP 429 error through failing cleanup."""
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except BaseException as error:
+            current, seen = error, set()
+            while current is not None and id(current) not in seen:
+                seen.add(id(current))
+                if getattr(current, "_header429_unassessed", False):
+                    raise current
+                current = current.__context__
+            raise
+    invoke.__name__ = function.__name__
+    invoke.__doc__ = function.__doc__
+    invoke.__wrapped__ = function
+    return invoke
+
+
+@header_rate_limit_failure_guard
 def physical_request_bytes(
     url,
     *,
@@ -5721,7 +5741,11 @@ def physical_request_bytes(
             retryable_connection_failure = True
             raise
         response_received = True
-        with response:
+        with (
+            header_rate_limit_response(response)
+            if publisher and response.status == 429
+            else response
+        ):
             status = response.status
             if infrastructure:
                 retain_infrastructure_retry(
@@ -5751,6 +5775,10 @@ def physical_request_bytes(
                     state["blocked"] = True
                 state["observed_at"] = time.time()
                 write_budget(state)
+                if status == 429:
+                    raise HeaderRateLimitStop(
+                        "Publisher stopped: HTTP 429", "access", 429
+                    )
             declared = response.headers.get("Content-Length")
             if declared and (
                 not declared.isdigit() or int(declared) > byte_limit
@@ -5835,6 +5863,10 @@ def physical_request_bytes(
                     429,
                 )
             return status, response.headers, body
+    except HeaderRateLimitStop:
+        # A completed response exit precedes assessment.
+        response_constraints_saved = True
+        raise
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         if publisher and response_received:
             response_constraints_saved = False
@@ -6843,6 +6875,26 @@ def wait_publisher_cooldown(previous):
             raise PhaseExpired()
     legacy_wait_publisher_cooldown(previous)
     check_deadline()
+
+
+class HeaderRateLimitStop(AdapterError):
+    """A header-only HTTP 429 stop assessed after safe closure."""
+
+
+@contextlib.contextmanager
+def header_rate_limit_response(response):
+    """Retain existing barriers when closing an HTTP 429 fails."""
+    try:
+        with response:
+            yield
+    except HeaderRateLimitStop:
+        raise
+    except BaseException as error:
+        error._header429_unassessed = True
+        # Latch before any fallible best-effort diagnostics.
+        with contextlib.suppress(BaseException):
+            fail_publisher_cleanup()
+        raise
 
 
 if __name__ == "__main__":

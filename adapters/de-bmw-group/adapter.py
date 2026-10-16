@@ -188,6 +188,26 @@ def pace(url, interval=12.2):
         raise
 
 
+def header_rate_limit_failure_guard(function):
+    """Preserve a marked HTTP 429 error through failing cleanup."""
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except BaseException as error:
+            current, seen = error, set()
+            while current is not None and id(current) not in seen:
+                seen.add(id(current))
+                if getattr(current, "_header429_unassessed", False):
+                    raise current
+                current = current.__context__
+            raise
+    invoke.__name__ = function.__name__
+    invoke.__doc__ = function.__doc__
+    invoke.__wrapped__ = function
+    return invoke
+
+
+@header_rate_limit_failure_guard
 def request_bytes(
     url,
     *,
@@ -214,7 +234,11 @@ def request_bytes(
             response = _OPENER.open(request, timeout=30)
         except urllib.error.HTTPError as error:
             response = error
-        with response:
+        with (
+            header_rate_limit_response(response)
+            if publisher and response.status == 429
+            else response
+        ):
             if publisher:
                 value = response.headers.get("Retry-After")
                 if value:
@@ -261,6 +285,10 @@ def request_bytes(
             ):
                 budget["observed_at"] = time.time()
                 write_budget(budget)
+            if publisher and response.status == 429:
+                raise HeaderRateLimitStop(
+                    "Publisher stopped: HTTP 429", "access", 429
+                )
             body = response.read(byte_limit + 1)
             if len(body) > byte_limit:
                 raise AdapterError(
@@ -2974,6 +3002,26 @@ def journal_finish():
             export_family_artifact()
     if errors and primary is None:
         raise errors[0]
+
+
+class HeaderRateLimitStop(AdapterError):
+    """A header-only HTTP 429 stop assessed after safe closure."""
+
+
+@contextlib.contextmanager
+def header_rate_limit_response(response):
+    """Retain existing barriers when closing an HTTP 429 fails."""
+    try:
+        with response:
+            yield
+    except HeaderRateLimitStop:
+        raise
+    except BaseException as error:
+        error._header429_unassessed = True
+        # Latch before any fallible best-effort diagnostics.
+        with contextlib.suppress(BaseException):
+            journal_failed()
+        raise
 
 
 if __name__ == "__main__":

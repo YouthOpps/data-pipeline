@@ -4529,6 +4529,26 @@ def infrastructure_request_bytes(
         return response.status, response.headers, body
 
 
+def header_rate_limit_failure_guard(function):
+    """Preserve a marked HTTP 429 error through failing cleanup."""
+    def invoke(*args, **kwargs):
+        try:
+            return function(*args, **kwargs)
+        except BaseException as error:
+            current, seen = error, set()
+            while current is not None and id(current) not in seen:
+                seen.add(id(current))
+                if getattr(current, "_header429_unassessed", False):
+                    raise current
+                current = current.__context__
+            raise
+    invoke.__name__ = function.__name__
+    invoke.__doc__ = function.__doc__
+    invoke.__wrapped__ = function
+    return invoke
+
+
+@header_rate_limit_failure_guard
 @durable_transaction("physical")
 def request_bytes(
     url,
@@ -4623,9 +4643,17 @@ def request_bytes(
                 ) from None
             raise
         frame["received"] = True
-        with response:
+        with (
+            header_rate_limit_response(response)
+            if True and response.status == 429
+            else response
+        ):
             status, response_headers = response.status, response.headers
             record_retry_after(response_headers.get("Retry-After"), status)
+            if status == 429:
+                raise HeaderRateLimitStop(
+                    "Publisher stopped: HTTP 429", "access", 429
+                )
             if not robots and status in (401, 403, 451):
                 retain_publisher_hold()
             body = response.read(5_000_001)
@@ -5205,6 +5233,26 @@ def legacy_transition_state():
     ):
         raise AdapterError("Legacy complete conservative MAX missing", "access")
     return state
+
+
+class HeaderRateLimitStop(PolicyStop):
+    """A header-only HTTP 429 stop assessed after safe closure."""
+
+
+@contextlib.contextmanager
+def header_rate_limit_response(response):
+    """Retain existing barriers when closing an HTTP 429 fails."""
+    try:
+        with response:
+            yield
+    except HeaderRateLimitStop:
+        raise
+    except BaseException as error:
+        error._header429_unassessed = True
+        # Latch before any fallible best-effort diagnostics.
+        with contextlib.suppress(BaseException):
+            journal_failure()
+        raise
 
 
 if __name__ == "__main__":
