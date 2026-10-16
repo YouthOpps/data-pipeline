@@ -185,3 +185,43 @@ collection is used for this conditional error-path repair. The complete earlier
 native result and production comparison from issue #272 remain evidence only
 for unchanged collection, parsing, facts, validation, expiry and publication;
 this maintenance does not independently certify a new source refresh.
+
+
+## Journal integrity maintenance (#295)
+
+This guard-only maintenance retains a genuine RW journal descriptor, its
+current named inode and byte generation under the original publisher lock.
+Reads are checked before and after access. A commit serializes in RAM, rechecks
+authority, then truncates, syncs, writes fully and verifies readback through
+the same held inode. Only a successful own commit advances the expected
+generation. A changed parent, stronger replacement, missing mature journal or
+unexpected generation stops collection before another publisher request.
+
+This accepts an availability tradeoff: interruption may leave empty or partial
+JSON. Invalid mature state requires reviewed recovery; it cannot become a fresh
+budget or be restored from an older owned artifact. Failure cleanup never
+reopens a newer journal pathname for mutation. Locks are advisory, and
+generation checks are neither an atomic filesystem compare-and-swap nor
+authentication against arbitrary same-UID writers that ignore those locks.
+
+Actual acquired collection, journal, artifact, reader, step-output and parent
+descriptors retain identity through use and close. Recycled foreign descriptors
+are preserved. A healthy close error is fatal; an active primary exception is
+preserved. Owned output is invalidated on a fatal handoff even if readiness
+signalling or unlink fails. A previously written true readiness line alone is
+not proof of a valid artifact.
+
+The state schema, approved seeds and markers, strict newest-owned history,
+source parser, complete frontier, IDs, dates, expiry, network retry behavior,
+physical/page pacing, caps, publication and daily schedule are unchanged.
+Private ordinary checks cover successful requests, initial modern restoration,
+successive exports, no-acquisition exits and the original bounded retry
+behavior. No publisher request, new native test, journal migration or
+production action was performed for this maintenance.
+
+The complete earlier actual retained records (1 raw / 1 filtered) were replayed
+through unchanged validation/expiry and the byte-identical current consumer,
+including valid empty and last-good-on-failure cases. Source-content
+completeness and factual verification remain the earlier independent native
+evidence plus unchanged normal AST; no new native or source-body collection is
+claimed.
