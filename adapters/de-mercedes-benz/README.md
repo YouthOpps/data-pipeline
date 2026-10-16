@@ -216,3 +216,63 @@ failed on an actual required Group content403 and retained its owned blocked
 artifact. This correction preserves that hold, the disabled workflow and all
 limits; source issue115 remains blocked. It does not certify current publisher
 accessibility or production recovery.
+
+
+
+## Journal ownership maintenance (#295)
+
+
+Journal reads and commits retain the genuine current read/write file descriptor
+under the original flock authority. Parent, current pathname, acquired
+identities and observed generations are checked before use, publisher opening
+and owned export. Writes serialize in memory, then truncate/fsync and fully
+write/read back that original inode. A changed object is preserved and access
+stops; no stale pathname is reopened for destructive cleanup.
+
+IO failures latch independently of existing transport flags. Diagnostic state
+copies are best effort after the latch. Journal, lock, collection, artifact
+writer/readback, output and parent descriptors retain acquisition identity
+through cleanup. Both independent lifetime releases are attempted; a primary
+error is preserved and a healthy close failure cannot return a healthy owned
+export. Genuine verified incoming-state restoration is the only new-journal
+initialization authority. Missing mature state is not an empty-state reset.
+
+In-place interruption can sacrifice availability: empty or partial mature state
+stops. Advisory locks and observed identity/generation checks are not filesystem
+CAS or arbitrary same-user authentication. Existing schemas have no new durable
+pending barrier; total persistence plus invalidation failure across restart
+remains separate #273 work.
+
+Original facts, IDs, graph, parser, dates, expiry, metadata, publication,
+retry/redirect/REP/status interpretation, actual holds, schema, seeds, approval
+markers, timing floors, caps, tests and workflow remain unchanged. This is
+conditional IO maintenance, not pacing modernization, access approval or hold
+recovery.
+
+Both original optional legacy research paths keep their original read-only
+locks, parser, MAX and missing-path behavior. Acquired
+path/descriptor/generation checks protect those same inputs. No legacy file is
+rewritten and no missing legacy file is interpreted as a fabricated hold or
+empty history.
+
+The source workflow remains disabled. Existing restrictions, refusal states and
+exact reviewed recovery fingerprints remain binding; this maintenance authorizes
+no publisher requests or production recovery.
+
+The historical required-content 403 from run38740150497 and its blocked artifact
+remain controlling. The existing exact robots-only recovery and known
+native526-record evidence are preserved. Complete old raw records/bodies are not
+replayed here; no new native or current upstream-access certification is
+claimed.
+
+The current immutable published pair was absent at data11536bfa. Absence is not
+a valid empty source result or successful consumer/native proof. No dataset was
+fabricated or published.
+
+Validation is limited to bounded ordinary private
+entry/restore/request/export/lifecycle and original retry/redirect/legacy cases,
+plus whole-source protected business-AST and original envelope/literal
+comparison. No advanced descriptor campaign, publisher/native request, actual
+journal operation, ZIP download or workflow action is performed by the author.
+Independent exact-revision review is required before delivery. Refs #295. Issue
+#295 remains open.

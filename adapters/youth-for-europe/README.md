@@ -219,3 +219,61 @@ consumer replay, or certification of other legacy pacing/rate-limit behavior.
 Historical native proof is reused only for unchanged normal collection, facts,
 normalization, validation, expiry and publication functions; retained record
 and dependency limits are documented in the linked maintenance issue.
+
+
+
+## Journal ownership maintenance (#295)
+
+
+Journal reads and commits retain the genuine current read/write file descriptor
+under the original flock authority. Parent, current pathname, acquired
+identities and observed generations are checked before use, publisher opening
+and owned export. Writes serialize in memory, then truncate/fsync and fully
+write/read back that original inode. A changed object is preserved and access
+stops; no stale pathname is reopened for destructive cleanup.
+
+IO failures latch independently of existing transport flags. Diagnostic state
+copies are best effort after the latch. Journal, lock, collection, artifact
+writer/readback, output and parent descriptors retain acquisition identity
+through cleanup. Both independent lifetime releases are attempted; a primary
+error is preserved and a healthy close failure cannot return a healthy owned
+export. Genuine verified incoming-state restoration is the only new-journal
+initialization authority. Missing mature state is not an empty-state reset.
+
+In-place interruption can sacrifice availability: empty or partial mature state
+stops. Advisory locks and observed identity/generation checks are not filesystem
+CAS or arbitrary same-user authentication. Existing schemas have no new durable
+pending barrier; total persistence plus invalidation failure across restart
+remains separate #273 work.
+
+Original facts, IDs, graph, parser, dates, expiry, metadata, publication,
+retry/redirect/REP/status interpretation, actual holds, schema, seeds, approval
+markers, timing floors, caps, tests and workflow remain unchanged. This is
+conditional IO maintenance, not pacing modernization, access approval or hold
+recovery.
+
+The existing raw journal remains its flock inode in the shared temporary
+directory; no private-owner/0700 condition is imposed on that shared parent.
+Hosted first-restoration O_EXCL creation is restricted to the existing verified-
+incoming boundary. Shared-directory existence alone cannot prove source
+maturity; already-restored or LOCAL missing state is refused. This does not
+introduce a new historical namespace or schema transition proof.
+
+The historical six-raw/five-filtered complete native receipt and its exact
+earlier source remain historical evidence. This maintenance reuses unchanged
+current normal collection/factual AST and does not claim fresh full raw-body or
+original-native replay.
+
+A separate current immutable PUBLISHED snapshot qualification at
+data11536bfa/websiteaa265850 used consumer2fabcc52: 5 published and 5 expiry-
+filtered records, derived empty and last-good failure cases passed. This checks
+published contracts and consumer compatibility, not current upstream facts,
+access or original full-inventory completeness.
+
+Validation is limited to bounded ordinary private
+entry/restore/request/export/lifecycle and original retry/redirect/legacy cases,
+plus whole-source protected business-AST and original envelope/literal
+comparison. No advanced descriptor campaign, publisher/native request, actual
+journal operation, ZIP download or workflow action is performed by the author.
+Independent exact-revision review is required before delivery. Refs #295. Issue
+#295 remains open.
