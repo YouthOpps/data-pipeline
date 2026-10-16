@@ -962,6 +962,7 @@ _STATE_PATH = _STATE_LOCK = None
 _STATE_DIR_FD = _STATE_DIR_ID = None
 _STATE_INITIALIZING = False
 _COLLECTION_LOCK_FD = _COLLECTION_STARTED = None
+_COLLECTION_LOCK_ID = None
 _RESTORED = _PUBLISHING = _STATE_TRUSTED = False
 _PUBLISHER_COMPLETED_MONOTONIC = None
 _PUBLISHER_INTERVAL = 12.2
@@ -978,6 +979,9 @@ _ACTIVE_REQUEST_ID = None
 _TRANSACTION_DEPTH = 0
 _REQUEST_FRAMES = []
 _FAILED_BUDGET = None
+_JOURNAL_FD = _JOURNAL_ID = _JOURNAL_VERSION = _JOURNAL_LOCK_ID = None
+_JOURNAL_CREATED = _JOURNAL_DIRTY = False
+_JOURNAL_LOCKS = {}
 _LEGACY_TRANSITION = {
     "schema": 1,
     "family": "youthopps-hu-fulbright-hungary-publisher-v1",
@@ -1640,6 +1644,34 @@ def arm_alarm(deadline):
     signal.setitimer(signal.ITIMER_REAL, remaining)
 
 
+def close_collection_lock():
+    """Release only the lifecycle lock identity captured at acquisition."""
+    global _COLLECTION_LOCK_FD, _COLLECTION_LOCK_ID
+    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+    primary_error = sys.exc_info()[0] is not None
+    descriptor, identity = _COLLECTION_LOCK_FD, _COLLECTION_LOCK_ID
+    _COLLECTION_LOCK_FD = _COLLECTION_LOCK_ID = None
+    if descriptor is None:
+        return
+    try:
+        info = os.fstat(descriptor)
+        if (
+            identity is None
+            or (info.st_dev, info.st_ino) != identity
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+        ):
+            raise AdapterError("Collection lock identity changed", "access")
+        os.close(descriptor)
+    except BaseException:
+        _STATE_TRUSTED = False
+        _PUBLISHER_GATE_FAILED = True
+        if not primary_error:
+            raise
+
+
 @contextlib.contextmanager
 def execution():
     global _RUN_END, _COLLECTION_LOCK_FD, _RESTORED, _STATE_TRUSTED
@@ -1659,15 +1691,22 @@ def execution():
     try:
         yield
     finally:
+        primary_error = sys.exc_info()[0] is not None
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
         _RUN_END = None
-        if _COLLECTION_LOCK_FD is not None:
+        close_error = None
+        for close in (close_collection_lock, close_journal):
             try:
-                os.close(_COLLECTION_LOCK_FD)
-            except OSError:
-                pass
-            _COLLECTION_LOCK_FD = None
+                close()
+            except BaseException as error:
+                if close_error is None:
+                    close_error = error
+        if _PUBLISHER_GATE_FAILED:
+            with contextlib.suppress(BaseException):
+                export_family_artifact()
+        if close_error is not None and not primary_error:
+            raise close_error
 
 
 @contextlib.contextmanager
@@ -1741,42 +1780,206 @@ def budget_file():
         os.close(parent)
 
 
-def locked_budget():
-    budget_file()
-    descriptor = secure_file(
-        "state.lock", os.O_RDWR | (os.O_CREAT if _STATE_INITIALIZING else 0)
+def journal_version(info):
+    """Describe the bytes and metadata of one held journal generation."""
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_uid,
+        stat.S_IMODE(info.st_mode),
+        info.st_nlink,
     )
-    file = os.fdopen(descriptor, "a+")
+
+
+def journal_failure():
+    """Close access without adopting a changed named journal."""
+    global _PUBLISHER_GATE_FAILED, _STATE_TRUSTED
+    _PUBLISHER_GATE_FAILED = True
+    _STATE_TRUSTED = False
+
+
+def verify_journal(check_generation=True):
+    """Require the retained RW inode, current name and trusted generation."""
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        if _PUBLISHER_GATE_FAILED:
+            raise AdapterError("Publisher persistence gate failed", "access")
+        verify_state_directory()
+        if _JOURNAL_FD is None:
+            raise AdapterError("Publisher journal is not retained", "access")
+        info = os.fstat(_JOURNAL_FD)
+        current = os.stat(
+            "state.json", dir_fd=_STATE_DIR_FD, follow_symlinks=False
+        )
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != _JOURNAL_ID
+            or (current.st_dev, current.st_ino) != _JOURNAL_ID
+            or check_generation
+            and journal_version(info) != _JOURNAL_VERSION
+        ):
+            raise AdapterError("Publisher journal generation changed", "access")
+        lock = os.stat(
+            "state.lock", dir_fd=_STATE_DIR_FD, follow_symlinks=False
+        )
+        if (lock.st_dev, lock.st_ino) != _JOURNAL_LOCK_ID:
+            raise AdapterError("Publisher journal lock changed", "access")
+        for descriptor, identity in _JOURNAL_LOCKS.items():
+            held = os.fstat(descriptor)
+            if (held.st_dev, held.st_ino) != identity:
+                raise AdapterError("Publisher lock FD was reused", "access")
+        if fcntl.fcntl(_JOURNAL_FD, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR:
+            raise AdapterError("Publisher journal is not RW", "access")
+        return info
     except BaseException:
-        file.close()
+        journal_failure()
         raise
-    return file
+
+
+def retain_journal():
+    """Pin one journal after acquiring its stable lock; never retarget it."""
+    global _JOURNAL_FD, _JOURNAL_ID, _JOURNAL_VERSION, _JOURNAL_CREATED
+    if _JOURNAL_FD is not None:
+        verify_journal()
+        return
+    try:
+        try:
+            descriptor = secure_file("state.json", os.O_RDWR)
+        except FileNotFoundError:
+            if not _STATE_INITIALIZING:
+                raise AdapterError(
+                    "Mature publisher state is missing", "access"
+                )
+            descriptor = secure_file(
+                "state.json", os.O_RDWR | os.O_CREAT | os.O_EXCL
+            )
+            _JOURNAL_CREATED = True
+        info = os.fstat(descriptor)
+        _JOURNAL_FD = descriptor
+        _JOURNAL_ID = (info.st_dev, info.st_ino)
+        _JOURNAL_VERSION = journal_version(info)
+        verify_journal()
+        if _JOURNAL_CREATED:
+            os.fsync(_STATE_DIR_FD)
+    except BaseException:
+        journal_failure()
+        raise
+
+
+def close_journal():
+    """Close our FD; preserve primary errors and recycled foreign FDs."""
+    global _JOURNAL_FD, _JOURNAL_ID, _JOURNAL_VERSION, _JOURNAL_LOCK_ID
+    global _JOURNAL_CREATED, _JOURNAL_DIRTY
+    primary_error = sys.exc_info()[0] is not None
+    descriptor, identity = _JOURNAL_FD, _JOURNAL_ID
+    _JOURNAL_FD = _JOURNAL_ID = _JOURNAL_VERSION = _JOURNAL_LOCK_ID = None
+    _JOURNAL_CREATED = _JOURNAL_DIRTY = False
+    if descriptor is not None:
+        try:
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) != identity:
+                raise AdapterError("Publisher journal FD was reused", "access")
+            os.close(descriptor)
+        except BaseException:
+            journal_failure()
+            if not primary_error:
+                raise
+
+
+@contextlib.contextmanager
+def locked_budget():
+    """Retain the stable lock while reading and writing one pinned inode."""
+    global _JOURNAL_LOCK_ID
+    budget_file()
+    descriptor = None
+    identity = None
+    entered = False
+    try:
+        if _JOURNAL_LOCKS:
+            original = next(iter(_JOURNAL_LOCKS))
+            info = os.fstat(original)
+            if (info.st_dev, info.st_ino) != _JOURNAL_LOCKS[original]:
+                raise AdapterError("Publisher lock FD was reused", "access")
+            descriptor = os.dup(original)
+        else:
+            descriptor = secure_file(
+                "state.lock",
+                os.O_RDWR | (os.O_CREAT if _STATE_INITIALIZING else 0),
+            )
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        info = os.fstat(descriptor)
+        current = os.stat(
+            "state.lock", dir_fd=_STATE_DIR_FD, follow_symlinks=False
+        )
+        identity = (info.st_dev, info.st_ino)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or identity != (current.st_dev, current.st_ino)
+        ) or (_JOURNAL_LOCK_ID is not None and identity != _JOURNAL_LOCK_ID):
+            raise AdapterError("Publisher journal lock changed", "access")
+        _JOURNAL_LOCK_ID = identity
+        _JOURNAL_LOCKS[descriptor] = identity
+        retain_journal()
+        entered = True
+        yield descriptor
+    except BaseException:
+        if not entered:
+            journal_failure()
+        raise
+    finally:
+        primary_error = sys.exc_info()[0] is not None
+        if descriptor is not None:
+            _JOURNAL_LOCKS.pop(descriptor, None)
+            try:
+                info = os.fstat(descriptor)
+                if (
+                    identity is not None
+                    and (info.st_dev, info.st_ino) != identity
+                ):
+                    raise AdapterError("Publisher lock FD was reused", "access")
+                os.close(descriptor)
+            except BaseException:
+                journal_failure()
+                if not primary_error:
+                    raise
 
 
 def load_budget():
+    """Read the retained inode, checking its generation after the read."""
+    if not _JOURNAL_LOCKS:
+        if _STATE_PATH is None:
+            raise AdapterError("Publisher state is not initialized", "access")
+        with locked_budget():
+            return load_budget()
     try:
-        descriptor = secure_file("state.json", os.O_RDONLY)
-    except FileNotFoundError:
-        if not _STATE_INITIALIZING:
-            raise AdapterError(
-                "Mature publisher state is missing", "access"
-            ) from None
-        return empty_budget(time.time())
-    with os.fdopen(descriptor, "rb") as file:
-        raw = file.read(16385)
-    if len(raw) > 16384:
-        raise AdapterError("Oversized publisher state", "access")
-    try:
-        return validate_budget(json.loads(raw))
-    except (ValueError, TypeError):
-        raise AdapterError("Corrupt publisher state", "access") from None
+        verify_journal()
+        raw = os.pread(_JOURNAL_FD, 16385, 0)
+        verify_journal()
+        if len(raw) > 16384:
+            raise AdapterError("Oversized publisher state", "access")
+        if not raw and _JOURNAL_CREATED and _STATE_INITIALIZING:
+            return empty_budget(time.time())
+        try:
+            return validate_budget(json.loads(raw))
+        except (ValueError, TypeError):
+            raise AdapterError("Corrupt publisher state", "access") from None
+    except BaseException:
+        journal_failure()
+        raise
 
 
 def save_budget(state):
-    """Any failed persistence is fatal; the pre-wire journal remains pending."""
+    """Commit through the held inode; interrupted rewrites fail closed."""
     global _STATE_INITIALIZING, _PUBLISHER_GATE_FAILED, _FAILED_BUDGET
+    global _JOURNAL_CREATED, _JOURNAL_DIRTY, _JOURNAL_VERSION
     if _PUBLISHER_GATE_FAILED:
         raise AdapterError(
             "Fulbright Hungary state persistence is already unhealthy", "access"
@@ -1794,31 +1997,39 @@ def save_budget(state):
             raise AdapterError(
                 "Unproved Fulbright Hungary completion write", "access"
             )
-        verify_state_directory()
-        name = "pending-" + str(os.getpid()) + "-" + str(time.time_ns())
-        descriptor = secure_file(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
-        try:
-            with os.fdopen(descriptor, "w") as file:
-                json.dump(state, file, separators=(",", ":"))
-                file.flush()
-                os.fsync(file.fileno())
-            verify_state_directory()
-            os.replace(
-                name,
-                "state.json",
-                src_dir_fd=_STATE_DIR_FD,
-                dst_dir_fd=_STATE_DIR_FD,
+        payload = json.dumps(state, separators=(",", ":")).encode()
+        if len(payload) > 16384 or not _JOURNAL_LOCKS:
+            raise AdapterError(
+                "Bounded locked journal commit required", "access"
             )
-            _STATE_INITIALIZING = False
-            os.fsync(_STATE_DIR_FD)
-        finally:
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(name, dir_fd=_STATE_DIR_FD)
+        verify_journal()
+        _STATE_INITIALIZING = _JOURNAL_CREATED = False
+        _JOURNAL_DIRTY = True
+        os.ftruncate(_JOURNAL_FD, 0)
+        os.fsync(_JOURNAL_FD)
+        verify_journal(False)
+        offset = 0
+        while offset < len(payload):
+            verify_journal(False)
+            count = os.pwrite(_JOURNAL_FD, payload[offset:], offset)
+            if type(count) is not int or not 0 < count <= len(payload) - offset:
+                raise AdapterError(
+                    "Incomplete publisher journal write", "access"
+                )
+            offset += count
+            verify_journal(False)
+        os.fsync(_JOURNAL_FD)
+        before = verify_journal(False)
+        raw = os.pread(_JOURNAL_FD, len(payload) + 1, 0)
+        info = verify_journal(False)
+        if raw != payload or journal_version(before) != journal_version(info):
+            raise AdapterError("Publisher journal bytes changed", "access")
+        _JOURNAL_VERSION = journal_version(info)
+        _JOURNAL_DIRTY = False
     except BaseException:
-        _PUBLISHER_GATE_FAILED = True
-        _FAILED_BUDGET = copy.deepcopy(state)
-        # Cleanup is supplementary: even BOTH cleanup writes failing cannot
-        # clear the durable pre-wire in_flight record after a response fault.
+        journal_failure()
+        with contextlib.suppress(BaseException):
+            _FAILED_BUDGET = copy.deepcopy(state)
         with contextlib.suppress(BaseException):
             invalidate_budget()
         raise
@@ -2656,6 +2867,7 @@ def restored_state():
 
 def prepare_collection():
     global _COLLECTION_STARTED, _STATE_TRUSTED, _COLLECTION_LOCK_FD, _RESTORED
+    global _COLLECTION_LOCK_ID
     if _PUBLISHER_GATE_FAILED:
         raise AdapterError("Publisher completion persistence failed", "access")
     if _RESTORED:
@@ -2674,14 +2886,24 @@ def prepare_collection():
             "collection.lock",
             os.O_RDWR | (os.O_CREAT if _STATE_INITIALIZING else 0),
         )
+        info = os.fstat(descriptor)
+        identity = (info.st_dev, info.st_ino)
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            current = os.fstat(descriptor)
+            if (current.st_dev, current.st_ino) != identity:
+                raise AdapterError("Collection lock FD was reused", "access")
         except BaseException:
-            os.close(descriptor)
+            journal_failure()
+            with contextlib.suppress(OSError):
+                current = os.fstat(descriptor)
+                if (current.st_dev, current.st_ino) == identity:
+                    os.close(descriptor)
             raise AdapterError(
-                "Another Fulbright Hungary collector is active", "access"
+                "Another or unhealthy Fulbright Hungary collector", "access"
             ) from None
         _COLLECTION_LOCK_FD = descriptor
+        _COLLECTION_LOCK_ID = identity
     with locked_budget():
         now = time.time()
         local = load_budget()
@@ -2728,10 +2950,9 @@ def export_family_artifact():
             pass
         pacing_not_ready()
         return
-    with artifact_output(path) as descriptor:
+    with artifact_output(path) as descriptor, locked_budget():
         run_id, attempt = current_run_identity()
-        with locked_budget():
-            state = load_budget()
+        state = load_budget()
         if state["in_flight"]:
             raise AdapterError(
                 "Unsettled Fulbright Hungary flight cannot be exported",
@@ -2751,34 +2972,30 @@ def export_family_artifact():
             file.flush()
             os.fsync(file.fileno())
         verify_artifact_target(path, descriptor)
+        verify_journal()
         workflow_output_signal(True)
+        verify_journal()
         verify_artifact_target(path, descriptor)
 
 
 def invalidate_budget():
-    """Invalidate only the safely owned CURRENT journal inode."""
-    if _STATE_DIR_FD is None:
+    """Invalidate only the retained original FD, never a replacement name."""
+    if _JOURNAL_FD is None:
         return
-    verify_state_directory()
-    try:
-        descriptor = secure_file("state.json", os.O_RDWR)
-    except FileNotFoundError:
-        return
-    try:
-        info = os.fstat(descriptor)
-        current = os.stat(
-            "state.json", dir_fd=_STATE_DIR_FD, follow_symlinks=False
-        )
-        if (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
-            raise AdapterError(
-                "Fulbright Hungary journal inode changed", "access"
-            )
-        os.ftruncate(descriptor, 0)
-        os.fsync(descriptor)
-        os.unlink("state.json", dir_fd=_STATE_DIR_FD)
-        os.fsync(_STATE_DIR_FD)
-    finally:
-        os.close(descriptor)
+    info = os.fstat(_JOURNAL_FD)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink not in (0, 1)
+        or (info.st_dev, info.st_ino) != _JOURNAL_ID
+        or not _JOURNAL_DIRTY
+        and info.st_nlink == 1
+        and journal_version(info) != _JOURNAL_VERSION
+    ):
+        raise AdapterError("Original publisher journal changed", "access")
+    os.ftruncate(_JOURNAL_FD, 0)
+    os.fsync(_JOURNAL_FD)
 
 
 def selected_robots_policies(groups):
@@ -3700,6 +3917,7 @@ def request_bytes(
             _LOCAL_FIRST_WIRE_VERIFIED = True
         try:
             frame["started"] = True
+            verify_journal()
             response = _OPENER.open(request, timeout=request_timeout(True))
         except urllib.error.HTTPError as error:
             response = error

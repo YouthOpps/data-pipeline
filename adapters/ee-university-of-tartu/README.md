@@ -241,3 +241,37 @@ creation and after a new envelope is installed. Nonblocking regular-file checks
 refuse unsafe files and FIFOs without hanging. These error-only guards reuse the
 independently reviewed issue #282 pattern and private actual-function tests;
 normal collection, publisher pacing and journal state are unchanged.
+
+### Journal generation maintenance (#292)
+
+Publisher state reads and writes use the same retained RW descriptor that owns
+the exclusive journal lock. Parent/name/inode/generation checks surround reads
+and commits, precede the publisher opener, and bind the state artifact export.
+Failure cleanup truncates only the original verified owned FD, never a reopened
+current pathname. A stronger replacement keeps its bytes; a closed or recycled
+FD cannot redirect writes or cleanup to an unrelated file.
+
+Commits serialize before mutation, truncate and fsync the held FD, handle short
+writes, then fsync and verify complete bytes. An interrupted commit may leave
+empty or partial state. It is deliberately unavailable to a fresh process and
+cannot be healed from an older owned artifact or a fresh allowance. Any
+validation, serialization or persistence failure is sticky. The protocol relies
+on the existing exclusive lock; it does not authenticate arbitrary same-UID
+writers that ignore that lock and rewrite the same inode.
+
+Private actual-function replacement/IO/re-entry/export controls and offline
+replay qualify this conditional change. The retained genuine native made six
+physical requests, including repeated robots requests, across four distinct
+URLs; all six retained bodies/header sets and all 17 records were replayed.
+The previously reviewed date-only correction remains separate from that native.
+No new crawl is claimed. Normal source facts, full frontier, expiry, physical
+and page guards, historical MAX/OR constraints, artifact schema, publication and
+workflow remain unchanged.
+
+Offline implementation approval: [issue #292, maintainer decision](https://github.com/YouthOpps/data-pipeline/issues/292#issuecomment-6205456320).
+
+Journal and collection-lock release failures also latch failure. Otherwise
+healthy contexts raise so the existing owned-artifact cleanup invalidates output even
+after readiness was signaled. An already-active body error is preserved; a
+recycled unrelated descriptor is neither closed nor modified. Collection lock
+identity is captured by the actual acquisition path, not inferred at cleanup.
