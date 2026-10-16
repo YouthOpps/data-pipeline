@@ -39,21 +39,54 @@ collection for review instead of publishing stale recipes or a partial subset.
 Every origin's fresh robots is inspected before a dependent document.
 
 Standard-library-only operation uses normal verified TLS and inherited proxy/CA
-configuration. One persistent Bosch publisher family serializes all endpoints,
-robots, tests, production starts and redirects: at least six seconds between starts
-and at most ten in any rolling sixty seconds. Each physical attempt, including
-response closure and errors, preserves its completion plus the native interval
-as the next-start boundary; a monotonic gate enforces elapsed time. The exclusive
-collector preserves a sixty-second startup embargo and all stronger intervals.
-Refusal and Retry-After restrictions
-are durable and sticky. Legacy research inodes remain read-only and locked;
-modern/legacy restrictions combine with maximum embargo/interval and logical-OR
-refusal. Historical eleven-entry research state is preserved honestly and migrated
-with a conservative sixty-second hold, never reset.
+configuration. One persistent Bosch family serializes all 22 origins. Physical
+publisher starts follow the preceding response completion by at least 12.2
+seconds, with at most five starts per rolling 60 seconds. The eight programme
+inventory hubs have a separate 30-second completion guard, including their
+first request, physical redirects and any supported retry. Details and robots
+retain separate physical accounting. Bosch's original transport has no
+transient-status or connection retry; this migration adds none.
 
-Collection is capped at 64 starts, 8 MiB per response, 64 MiB overall and 900
-seconds. Publication is capped at 900 seconds, pacing export at 120 seconds, and
-the whole job at 2520 seconds. Exhaustion fails; no truncated collection succeeds.
+The collector retains a 60-second startup embargo and all stronger constraints.
+A received 429 doubles CURRENT physical and inventory gaps and persists the
+strike plus the MAX of existing embargo, at least 1,800 seconds with repeated-
+strike exponential growth, and a longer valid Retry-After before reading the
+bounded body. It stops this collection. A genuine challenge also retains an
+access hold; malformed Retry-After alone creates none. Existing actual holds
+are never cleared. Content 401/403/451 remains a refusal. Literal robots-only
+4xx other than 429 is unavailable REP, not a fabricated global content hold;
+robots 5xx, TLS failure or 429 stops. A prior target denial survives unavailable,
+stale or unscoped policy. Only fresh valid applicable policy explicitly
+allowing that target can supersede it; historical denial evidence remains.
+
+Every physical and cached-policy transaction durably records its owner before
+assessment. Only complete matching response/policy constraints, completion and
+current-owner receipt can settle that owner. Unresolved or failed persistence
+remains fatal; an older settled artifact cannot clear it. Applicable exact
+current-product groups, or their wildcard fallback, intersect independently
+with exact legacy-product restrictions, including decimal delay/rate values.
+
+Collection retains all original caps: 64 starts, 8 MiB per response, 64 MiB
+overall. Before the first new native, the maintainer approved 1,800 seconds
+for collection, a 3,420-second whole entry and a 60-minute job to accommodate
+slower traffic. Publication and failure handling each retain 900 seconds;
+export retains 120. These phase caps are not independently additive: they
+share the original whole deadline and its 300-second overlap. If collection
+uses 1,800 and publication 900, at most 600 remains for failure handling before
+export. The job retains 180 seconds outside the entry for setup/other overhead.
+The original unconditional target-plus-120 admission guard applies to BOTH
+source and phase, even without a wait, with a current-time recheck before a
+wire. No phase renews the whole deadline.
+
+The nominal 49-input zero-response-time plan reaches 692.4 seconds including
+startup, plus the original 120-second admission reserve. Under the unchanged
+64-start cap, 15 permitted extra inventory redirect hops yield a static last
+start at 1,142.4, or 1,262.4 including reserve. The advance source allocation
+leaves 537.6 seconds beyond that broader planning floor for restore, full
+history, snapshot, response/close/IO and parsing. It is not measured complete-
+native fit or a guarantee for arbitrary stronger policy/network delays.
+Exhaustion fails without truncation, partial success or automatic post-failure
+allowance. Original start/byte/redirect/no-retry caps remain unchanged.
 
 ## Running and publication
 
@@ -70,14 +103,39 @@ Unchanged substantive records retain their update timestamps; last-seen uses
 actual collection start and last-checked uses completion. Current availability
 remains unknown rather than falsely marking these programme overviews open.
 
-The workflow includes the concrete first-family bootstrap recorded in the
-[reviewed history and pacing handoff](https://github.com/YouthOpps/data-pipeline/issues/119#issuecomment-6101428656).
-It applies only when exhaustive history finds no previously completed family
-attempt and cannot override a refusal or stronger interval. Once a completed
-family attempt exists, its newest owned, validated inert pacing artifact is
-mandatory, including after failure. Missing, expired or refused state cannot
-permit fresh bootstrap or an older fallback. The workflow uploads only healthy,
-validated pacing state authorized by the current collection step.
+The workflow retains its historical first-family bootstrap value for provenance;
+it does not authorize this mature protocol transition. Before any publisher
+access, complete exact-attempt run/job/artifact inventories authenticate the
+newest actual completed job and owned artifact, source revision and digest.
+Missing, expired or ambiguous state cannot permit an older fallback. LOCAL
+execution requires fresh manually paused workflow/no-overlap checks before
+initialization and again after quiet, immediately before first publisher wire.
+HOSTED execution authenticates the standard matching workflow/current job and
+source before a genuinely new ephemeral namespace may be initialized.
+
+New state schema 3 and owned envelope schema 2 retain the original 16 KiB state/
+decoded-envelope and 32 KiB ZIP bounds. At the initial offline stage, finite
+LOCAL, HOSTED and mature-LOCAL transition literals remained None; that stage
+authorized no migration, hold release or first access. Actual namespace schema,
+full constraints and optional read-only research roots required separate root
+observation and explicit typed MAX/provenance approval. Later LOCAL and HOSTED
+approvals are recorded below; the mature-LOCAL reentry literal remains None.
+Optional missing legacy paths remain unknown, not a fresh zero budget. Their
+original read-only lock order and stronger interval/embargo/hold MAX survive.
+
+Historical policy maps use strict seven-item tuples. An allowed-map origin key
+reconstructs only its duplicated origin; a denial-map target hash reconstructs
+only its duplicated target. Every complete eight-field observation roundtrips
+without losing owner, body hash, decision, delay or rate. Targets are bound to
+all 49 exact original routes and origins; a robots-purpose denial is invalid.
+Allowed history is one canonical-min, nonauthoritative whole witness per
+origin, never current permission or settlement. Every target still receives
+its own fresh or cached policy assessment under pending ownership. All scoped
+denials and stronger global restrictions remain. The separate full current
+receipt must be durable before settlement. Source-generated full 22-origin/
+27-document history fits the byte bound in ordinary synthetic capacity checks;
+unsupported or oversized input fails closed instead of dropping restrictions.
+The uploader accepts only healthy current-owned settled state.
 
 ## Review evidence
 
@@ -129,9 +187,8 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+access; restrictive rate and delay directives remain effective. Publisher family identities and stronger retained restrictions survive the
+#322 pacing migration. Existing disabled workflows remain disabled.
 
 ## Daily automation
 
@@ -143,9 +200,9 @@ GitHub can delay scheduled events; the existing publication concurrency
 serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
-The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+The fixed collector has no discovered pagination. Its eight overview hubs
+are inventory-purpose inputs under the separate 30-second guard; this does not
+add pages or change the daily schedule.
 
 ## Source display name
 
@@ -203,3 +260,161 @@ paths, their exclusive locks, exact legacy schema/eleven-start allowance and
 MAX merge rules. It records genuine acquisition identities and file generations
 without writing legacy bytes or changing missing-path behavior. The existing
 interval field, six-second fallback and startup quiet period remain unchanged.
+
+## Slower pacing implementation — issue #322
+
+This is offline implementation evidence only. All 49 input fingerprints and 18
+profile recipes, identifiers, status/deadline semantics, original parsing,
+expiry, metadata timestamps, GitHub publication, credential environment and
+CAS behavior remain unchanged. Original expiry helpers take an ISO reference
+clock; they do not take an aware datetime. The matching workflow still provides
+DATA_SOURCE_TOKEN and GITHUB_TOKEN; no new maintenance variable is required.
+The original nonpublishing test is unchanged. The workflow changes only its
+separately approved timeout; identity, credentials and daily schedule remain
+unchanged.
+
+Ordinary synthetic transport/history/ZIP/phase checks supplement static whole-
+source parity; they are not upstream collection or factual acceptance. No
+complete original successful native/body ledger chain or current publisher
+access is claimed. No new native, production run or automatic repeat is
+authorized. A separately released complete original native must establish all
+49 actual materials, all 18 complete records, current consumer behavior and
+actual physical/completion timing within the approved source budget before
+release can be considered. Existing failed evidence must remain distinct.
+
+The existing workflow obtains its App installation token after setup and passes
+DATA_SOURCE_TOKEN unchanged. This source has no VW-style just-in-time renewal.
+A standard one-hour installation token is compatible in principle with a job
+bounded to one hour after job start; actual token lifetime and setup headroom
+still require verification before production. No new credential environment
+variable or publisher request is introduced by the advance allocation.
+
+### Finite LOCAL absence capability — inactive
+
+The separately reviewed root observation found all three exact LOCAL roots
+absent. Absence means unknown ancestry, not an empty historical publisher
+budget. A dedicated `_REVIEWED_LOCAL_ABSENCE_TRANSITION` remains null; the
+existing three transition literals also remain null. This offline capability
+confers no access, initialization, age-fold or native execution approval.
+
+A future explicit source-specific public boundary must bind the complete root
+observation, exact newest owned legacy envelope/producer provenance, full MAX
+seed, all three unknown-history flags and the external twenty-observation
+ledger. Those observations are nine owned starts and eleven actual terminal
+job completion upper bounds, not twenty physical requests. The proposed strict
+age fold requires separate root approval; prospective false/null owner fields
+never establish historical settlement.
+
+The dedicated LOCAL entry rejects a null literal before metadata or namespace
+operations. A released entry would recheck paused complete history and exact
+owner, retain the original mounted temporary ancestor, verify all three absent
+components, and claim the modern directory by exclusive mkdir. It never adopts
+or removes an existing/partial namespace. Creation uses exclusive owned files
+and nonblocking collection-then-state locks. Under both original exclusive
+locks it repeats the fresh provenance checks before the first commit. Durable
+pending initialization is followed only by its matching durable settlement;
+this policy-only owner is not a physical start. Interrupted claims stay held
+for separate review. At least sixty seconds of startup quiet and the original
+postquiet owner/identity gate precede any publisher opener.
+
+Private ordinary contexts and exact core-AST comparison qualify this inactive
+implementation only. Original HOSTED and mature LOCAL restore behavior, all
+normal parser/frontier/date/publication code, test and allocated budgets remain
+unchanged. Full original native facts and empirical full-frontier fit remain
+unresolved. The capability is not a generic missing-state bootstrap or a later
+modern-LOCAL/old-owned reentry exception.
+
+
+### Header-only 429 stop — historical offline stage
+
+A received publisher 429 now persists the current-gap doubling and stronger
+rate-limit embargo, then stops before any body read. Successful response close
+is required before that stop can settle its owner. Persistence or close errors
+remain unassessed, pending and sticky, with no retry or subsequent opener.
+No new challenge is inferred from an unread body; retained holds remain.
+This narrow error-only change supersedes earlier conditional 429 body checks.
+
+Whole original-core AST parity and bounded private ordinary transport cases
+qualify the change; prior ordinary 429 body-inspection expectations are
+historical. At that stage, four transition literals remained null. No complete
+original native,
+actual publisher access, empirical full-frontier fit or public initialization
+boundary is established by this guard. At that header-only stage, all other
+functions, schemas, seeds, parser/facts/IDs/dates, phase allocation, original
+test and workflow remained
+unchanged from the separately reviewed offline finite-absence implementation.
+
+
+### Durable one-time LOCAL claim — historical inactive stage
+
+The finite absence grant additionally requires a separately root-selected
+64-hex nonce and fresh evidence that its exact source-owned claim name is
+absent. The dedicated literal remains null; no real nonce or public boundary
+has been granted. Before family mkdir, the source exclusively creates a
+0600 claim outside that family leaf, writes and fsyncs its bounded canonical
+scope hashes, verifies exact bytes and fsyncs the retained temporary ancestor.
+
+The source retains the original claim descriptor/name/bytes through exclusive
+precommit and postquiet checks. It never removes, replaces or resets the claim.
+An existing empty, partial or complete claim consumes that nonce even after
+the whole family leaf is deleted. Interrupted initialization remains held for
+separate root review. The claim is not a physical request, historical policy
+permission or proof that missing legacy pending fields were settled.
+
+This closes family-only deletion reuse while the claim survives. It does not
+claim filesystem CAS, arbitrary same-UID writer authentication, survival after
+both objects are deleted, or a global power-loss guarantee. Availability may
+be sacrificed. Private ordinary actual-entry/cold-process checks and scoped AST
+comparison qualified that inactive stage only. At that stage, MAX/unknown
+ancestry, parser/frontier/facts, original test, budgets and all four null release
+literals remained protected; actual namespace/claim observation, public
+purpose/age-fold approval and a separate genuine native release were pending.
+The following section records the later LOCAL approval; at that historical
+stage, the separate native release remained pending.
+
+
+### Approved prospective LOCAL boundary — historical pre-native stage
+
+Root approval [6213077821](https://github.com/YouthOpps/data-pipeline/issues/322#issuecomment-6213077821)
+binds only the dedicated fourth LOCAL absence literal to its exact old cd4d
+baseline and fresh ad8cb280 claim-absence receipt. The other three transition
+literals remain null. The twenty-point historical ledger and explicit age fold
+retain their original attribution; absent legacy pending is unknown, never
+historical settlement. The three legacy unknown flags remain true.
+
+The fresh helper's observation-derived completion upper bounds are not new
+measured response completions. Root explicitly requires actual initialization
+clock at least 1792144800.5362496. Existing initialization applies current time
+and a new sixty-second embargo twice, then checks exact history/claim again
+after quiet before first wire. This bounds current restrictions without
+relabeling old observations or changing the reviewed baseline.
+
+The claim has not been created and the original full native has not run.
+A separate exact ROOT execution release and fresh consumer/source bindings
+remain required. Public LOCAL purpose/age-fold approval does not authorize
+HOSTED publication or demonstrate empirical full-frontier fit. Original test,
+workflow, functions, parsers, graph, budgets and transport remain unchanged.
+
+
+### Reviewed HOSTED production boundary
+
+ROOT approval [6213889587](https://github.com/YouthOpps/data-pipeline/issues/322#issuecomment-6213889587)
+binds only the reviewed HOSTED transition to its authenticated legacy owner,
+complete history and conservative full MAX seed. The previous LOCAL approval
+and its genuine original native remain attributed to their exact source. That
+native retrieved all 49 inputs and produced all 18 records; subsequent pure
+replay qualifies the unchanged parser and facts. Earlier statements that the
+native had not run describe those historical offline stages.
+
+All 353 persisted saves, 49 physical responses and 50 exactly settled logical
+owners retain their original attribution. The full 118 typed timing
+observations and approved age folding retain their separate acceptance; those
+observations are not 118 physical requests. This literal
+changes no function, fact, date, graph, budget, LOCAL grant or workflow. The
+existing four-key BOSCH_PACING_BOOTSTRAP workflow value remains byte-for-byte
+unchanged. This modern source does not read that historical environment value;
+it is not a missing-value runtime gate. The HOSTED literal is a distinct modern
+transition governed by authenticated owner, history and current-job checks.
+Actual production delivery remains pending maintainer enable-before-merge and
+the sole automatic run, owned-artifact QA and website verification. No further
+native collection is claimed or authorized by this configuration change.
