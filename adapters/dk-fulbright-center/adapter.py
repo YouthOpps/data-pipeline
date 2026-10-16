@@ -3109,6 +3109,16 @@ def restored_state():
         for row in _HISTORY_COMPLETED
     ):
         return production_maintenance_state(legacy_transition_state())
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and latest == (
+            _HOSTED_PREACCESS_FAILURE["run_id"],
+            _HOSTED_PREACCESS_FAILURE["run_attempt"],
+            SOURCE_ID,
+            _HOSTED_PREACCESS_FAILURE["head_sha"],
+        )
+    ):
+        return production_maintenance_state(hosted_preaccess_recovery_state())
     run_id, attempt, source, head = latest
     result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
     artifacts = result.get("artifacts")
@@ -4467,12 +4477,234 @@ def scan_family_history():
     )
 
 
+def verify_preaccess_inventory(proof, expected_current):
+    """Recheck complete family and current ownership without renewing time."""
+    workflow_mode_guard()
+    current_job_context()
+    if (
+        current_run_identity() != expected_current[:2]
+        or os.environ.get("GITHUB_SHA") != expected_current[3]
+    ):
+        raise AdapterError("Current finite recovery context changed", "access")
+    current = current_run_identity()
+    failed = (
+        proof["run_id"],
+        proof["run_attempt"],
+        SOURCE_ID,
+        proof["head_sha"],
+    )
+    expected = {
+        (int(key), pin["attempt"], SOURCE_ID, pin["head"])
+        for key, pin in _LEGACY_JOB_PINS.items()
+    } | {failed}
+    seen, total, scanned, current_seen = set(), None, 0, False
+    for page_number in range(1, 101):
+        response = workflow_api(
+            "/actions/workflows/fetch-dk-fulbright-center.yml/runs"
+            f"?per_page=100&page={page_number}"
+        )
+        count, runs = response.get("total_count"), response.get("workflow_runs")
+        if (
+            type(count) is not int
+            or count < 0
+            or not isinstance(runs, list)
+            or len(runs) > 100
+            or total is not None
+            and total != count
+        ):
+            raise AdapterError("Finite recovery inventory changed", "access")
+        total = count
+        for run in runs:
+            identity = validate_family_identity(run)
+            if identity[:2] == current:
+                if (
+                    current_seen
+                    or identity[3] != os.environ.get("GITHUB_SHA")
+                    or run.get("status") != "in_progress"
+                ):
+                    raise AdapterError("Invalid current recovery run", "access")
+                current_seen = True
+            else:
+                if run.get("status") != "completed" or identity in seen:
+                    raise AdapterError("Concurrent recovery attempt", "access")
+                seen.add(identity)
+        scanned += len(runs)
+        if scanned >= total:
+            if scanned != total or seen != expected or not current_seen:
+                raise AdapterError(
+                    "Finite recovery exact set changed", "access"
+                )
+            break
+        if len(runs) != 100:
+            raise AdapterError("Truncated finite recovery inventory", "access")
+    else:
+        raise AdapterError("Finite recovery inventory exceeds bound", "access")
+
+
+def hosted_preaccess_recovery_state():
+    """Recover only the exact reviewed, artifactless pre-access failure."""
+    approval = _HOSTED_PREACCESS_RECOVERY
+    proof = _HOSTED_PREACCESS_FAILURE
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+        or not isinstance(approval, dict)
+        or set(approval)
+        != {
+            "schema",
+            "family",
+            "evidence",
+            "legacy_history_sha256",
+            "failed_attempt",
+            "state",
+        }
+        or type(approval["schema"]) is not int
+        or approval["schema"] != 1
+        or approval["family"] != FAMILY
+        or not isinstance(approval["evidence"], str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/305"
+            r"#issuecomment-[1-9][0-9]*",
+            approval["evidence"],
+        )
+        or not isinstance(approval["failed_attempt"], dict)
+        or approval["failed_attempt"] != proof
+        or any(
+            type(value) is not type(proof.get(key))
+            for key, value in approval["failed_attempt"].items()
+        )
+        or approval["legacy_history_sha256"]
+        != hashlib.sha256(
+            json.dumps(
+                _LEGACY_JOB_PINS, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+    ):
+        raise AdapterError("Explicit finite HOSTED recovery required", "access")
+    expected_current = (
+        *current_run_identity(),
+        SOURCE_ID,
+        os.environ.get("GITHUB_SHA"),
+    )
+    verify_preaccess_inventory(proof, expected_current)
+    failed = (
+        proof["run_id"],
+        proof["run_attempt"],
+        SOURCE_ID,
+        proof["head_sha"],
+    )
+    exact = workflow_api(
+        f"/actions/runs/{proof['run_id']}/attempts/{proof['run_attempt']}"
+    )
+    validate_family_identity(exact, failed)
+    if (
+        exact.get("status") != "completed"
+        or exact.get("conclusion") != "failure"
+    ):
+        raise AdapterError("Reviewed pre-access outcome changed", "access")
+    jobs = workflow_api(
+        f"/actions/runs/{proof['run_id']}/attempts/{proof['run_attempt']}"
+        "/jobs?per_page=100"
+    )
+    actual_jobs = jobs.get("jobs")
+    if (
+        type(jobs.get("total_count")) is not int
+        or jobs["total_count"] != 1
+        or not isinstance(actual_jobs, list)
+        or len(actual_jobs) != 1
+        or hashlib.sha256(
+            json.dumps(
+                actual_jobs[0], sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        != proof["job_sha256"]
+    ):
+        raise AdapterError("Reviewed pre-access job changed", "access")
+    artifacts = workflow_api(
+        f"/actions/runs/{proof['run_id']}/artifacts?per_page=100"
+    )
+    if type(artifacts.get("total_count")) is not int or artifacts != {
+        "total_count": 0,
+        "artifacts": [],
+    }:
+        raise AdapterError("Reviewed pre-access artifact set changed", "access")
+    for path, digest in (
+        ("adapters/dk-fulbright-center/adapter.py", proof["source_sha256"]),
+        (
+            ".github/workflows/fetch-dk-fulbright-center.yml",
+            proof["workflow_sha256"],
+        ),
+    ):
+        item = workflow_api(f"/contents/{path}?ref={proof['head_sha']}")
+        if (
+            item.get("encoding") != "base64"
+            or not isinstance(item.get("content"), str)
+            or hashlib.sha256(
+                base64.b64decode(item["content"], validate=False)
+            ).hexdigest()
+            != digest
+        ):
+            raise AdapterError("Reviewed pre-access code changed", "access")
+    failed_rows = [row for row in _HISTORY_COMPLETED if row[2:] == failed]
+    expected_failed_row = (
+        datetime.fromisoformat(
+            proof["job_completed_at"].replace("Z", "+00:00")
+        ).timestamp(),
+        datetime.fromisoformat(
+            proof["job_started_at"].replace("Z", "+00:00")
+        ).timestamp(),
+        *failed,
+    )
+    if failed_rows != [expected_failed_row]:
+        raise AdapterError("Reviewed failure chronology missing", "access")
+    # The exact whole32 audit remains intact; only the original31 verifier
+    # receives an explicit readonly subset. No global history is changed.
+    legacy_rows = [row for row in _HISTORY_COMPLETED if row[2:] != failed]
+    incoming = validate_legacy_transition(
+        _HOSTED_LEGACY_TRANSITION, legacy_rows, _HISTORY_JOBLESS
+    )
+    state = validate_budget(approval["state"])
+    bound = datetime.fromisoformat(
+        proof["job_completed_at"].replace("Z", "+00:00")
+    ).timestamp()
+    if (
+        state["blocked"]
+        or state["in_flight"]
+        or not set(incoming["starts"] + [bound]).issubset(state["starts"])
+        or state["completed"] < bound
+        or state["last_inventory_completed"] < bound
+        or state["not_before"] < bound + 60
+        or any(
+            state[key] < incoming[key]
+            for key in (
+                "observed_at",
+                "not_before",
+                "interval",
+                "completed",
+                "page_interval",
+                "last_inventory_completed",
+                "rate_limit_strikes",
+                "rate_limit_until",
+            )
+        )
+    ):
+        raise AdapterError("Finite recovery stronger MAX missing", "access")
+    verify_preaccess_inventory(proof, expected_current)
+    return state
+
+
 def legacy_transition_state():
     approval = (
         _HOSTED_LEGACY_TRANSITION
         if os.environ.get("GITHUB_ACTIONS") == "true"
         else _LOCAL_LEGACY_TRANSITION
     )
+    return validate_legacy_transition(
+        approval, _HISTORY_COMPLETED, _HISTORY_JOBLESS
+    )
+
+
+def validate_legacy_transition(approval, completed_rows, jobless_rows):
     if not isinstance(approval, dict) or set(approval) != {
         "schema",
         "family",
@@ -4500,12 +4732,12 @@ def legacy_transition_state():
             approval["evidence"],
         )
         or approval["history_sha256"] != digest
-        or len(_HISTORY_COMPLETED) + len(_HISTORY_JOBLESS)
+        or len(completed_rows) + len(jobless_rows)
         != len(_LEGACY_JOB_PINS)
     ):
         raise AdapterError("Untrusted legacy transition approval", "access")
-    actual = {str(row[2]): row for row in _HISTORY_COMPLETED}
-    jobless = {str(row[0]): row for row in _HISTORY_JOBLESS}
+    actual = {str(row[2]): row for row in completed_rows}
+    jobless = {str(row[0]): row for row in jobless_rows}
     if set(actual) | set(jobless) != set(_LEGACY_JOB_PINS) or set(actual) & set(
         jobless
     ):
@@ -4591,6 +4823,247 @@ def legacy_transition_state():
                 "Legacy local stronger constraints missing", "access"
             )
     return state
+
+
+_HOSTED_PREACCESS_RECOVERY = {
+    "schema": 1,
+    "family": "youthopps-dk-fulbright-center-publisher-v1",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/"
+        "305#issuecomment-6209203036"
+    ),
+    "legacy_history_sha256": (
+        "78a7d50bfc59c5dc6eacccf58def2a233d5e39d86cc723b7f2b865f69305f870"
+    ),
+    "failed_attempt": {
+        "run_id": 38856433488,
+        "run_attempt": 1,
+        "head_sha": "f9c8ae7722aa5c52bdfaaef6514143030e491abd",
+        "source": "dk-fulbright-center",
+        "job_id": 116828825815,
+        "job_sha256": (
+            "c994cea91db5db1b5c1ce753f404c76834a0bd1de9c61e4ff8d3ec8e5daefeb2"
+        ),
+        "source_sha256": (
+            "08b03a4682dbfa42c4e63da3c63584aad85026d0f86ac2eb183d5832d3721b6c"
+        ),
+        "workflow_sha256": (
+            "edaf79774604d181545f5f5e238462de0b5094a0e68746b194bd43801e045801"
+        ),
+        "log_sha256": (
+            "66c8ae398297be3c8aed1210a359cb544d76e4e741bdc2bb15b8c7d88ef28810"
+        ),
+        "error": "Full-native Fulbright Denmark MAX approval required",
+        "stage": "access",
+        "job_started_at": "2026-10-16T05:33:55Z",
+        "job_completed_at": "2026-10-16T05:34:38Z",
+        "conclusion": "failure",
+        "artifacts": 0,
+    },
+    "state": {
+        "blocked": False,
+        "completed": 1792128878.0,
+        "completed_flight_id": "1641169274b0158c3c939cbd273ac828",
+        "completed_request_id": "fc3e74a59b005688e05fbbaf38a3895d",
+        "family": "youthopps-dk-fulbright-center-publisher-v1",
+        "flight_id": "1641169274b0158c3c939cbd273ac828",
+        "flight_kind": "policy",
+        "flight_started": 1792127860.6195807,
+        "in_flight": False,
+        "interval": 12.2,
+        "last_inventory_completed": 1792128878.0,
+        "legacy_policy_history_unknown": True,
+        "legacy_rate_history_unknown": True,
+        "not_before": 1792129067.306238,
+        "observed_at": 1792129007.306238,
+        "page_interval": 30,
+        "rate_limit_strikes": 0,
+        "rate_limit_until": 0,
+        "request_id": "fc3e74a59b005688e05fbbaf38a3895d",
+        "request_inventory": False,
+        "request_outcome": "response_assessed",
+        "request_started": 1792127872.8193245,
+        "schema": 3,
+        "starts": [
+            1791527557.0,
+            1791528729.0,
+            1791560810.0,
+            1791592332.0,
+            1791624700.0,
+            1791656469.0,
+            1791659155.0,
+            1791677104.0,
+            1791711080.0,
+            1791746627.0,
+            1791763964.0,
+            1791799198.0,
+            1791844198.0,
+            1791885436.0,
+            1791923830.0,
+            1791936548.0,
+            1791950131.0,
+            1791965447.0,
+            1791967457.0,
+            1791987151.0,
+            1792004765.0,
+            1792021014.0,
+            1792041576.0,
+            1792051147.0,
+            1792060781.5357397,
+            1792060787.5359018,
+            1792061130.0,
+            1792062740.0,
+            1792079028.0,
+            1792079694.0,
+            1792127527.0451686,
+            1792127527.3791716,
+            1792127527.5851016,
+            1792127529.7065802,
+            1792127529.7098606,
+            1792127541.911279,
+            1792127541.9133596,
+            1792127542.3197637,
+            1792127543.4386199,
+            1792127543.4394107,
+            1792127573.4406178,
+            1792127573.4417,
+            1792127573.6366472,
+            1792127575.8808029,
+            1792127575.8819118,
+            1792127588.0902243,
+            1792127588.0914094,
+            1792127588.7475235,
+            1792127590.2826326,
+            1792127590.606501,
+            1792127602.8256226,
+            1792127602.8276777,
+            1792127602.8468373,
+            1792127604.1707304,
+            1792127604.505143,
+            1792127616.7464805,
+            1792127616.7506433,
+            1792127617.0704906,
+            1792127618.3616521,
+            1792127618.8886886,
+            1792127631.1093671,
+            1792127631.11214,
+            1792127631.286656,
+            1792127633.1958413,
+            1792127633.5235348,
+            1792127645.7376156,
+            1792127645.7399242,
+            1792127646.1300485,
+            1792127647.3776379,
+            1792127647.6943083,
+            1792127659.9125977,
+            1792127659.9144711,
+            1792127660.2986984,
+            1792127662.012043,
+            1792127662.345488,
+            1792127674.5698645,
+            1792127674.5742776,
+            1792127675.0812814,
+            1792127676.5197198,
+            1792127677.0229478,
+            1792127689.2520518,
+            1792127689.2544608,
+            1792127689.4374895,
+            1792127690.7980964,
+            1792127691.0825708,
+            1792127703.3121197,
+            1792127703.3133912,
+            1792127703.6846747,
+            1792127705.6597345,
+            1792127705.9869168,
+            1792127718.2053525,
+            1792127718.2073736,
+            1792127718.3977754,
+            1792127719.6674943,
+            1792127719.9972422,
+            1792127732.2174337,
+            1792127732.219531,
+            1792127732.3840232,
+            1792127733.6687787,
+            1792127734.139479,
+            1792127746.4015903,
+            1792127746.4033968,
+            1792127746.4189107,
+            1792127747.6496696,
+            1792127747.975286,
+            1792127760.200606,
+            1792127760.2030854,
+            1792127760.5333605,
+            1792127762.0360947,
+            1792127762.367193,
+            1792127774.590586,
+            1792127774.5924397,
+            1792127774.768917,
+            1792127776.024531,
+            1792127776.3452058,
+            1792127788.5743911,
+            1792127788.5779805,
+            1792127788.5983784,
+            1792127789.6972508,
+            1792127790.1684303,
+            1792127802.389232,
+            1792127802.3906674,
+            1792127802.412891,
+            1792127803.667074,
+            1792127803.9783146,
+            1792127816.1972516,
+            1792127816.2079408,
+            1792127816.567367,
+            1792127817.857654,
+            1792127818.1800463,
+            1792127830.398507,
+            1792127830.40182,
+            1792127830.5745945,
+            1792127831.699543,
+            1792127832.0230408,
+            1792127844.251917,
+            1792127844.2556942,
+            1792127844.2838624,
+            1792127845.9333389,
+            1792127846.2593043,
+            1792127858.4772012,
+            1792127858.47896,
+            1792127858.6533701,
+            1792127860.2454839,
+            1792127860.5880265,
+            1792127872.8193245,
+            1792127872.8208349,
+            1792127872.8431194,
+            1792127873.9795253,
+            1792127874.3140788,
+            1792128878.0,
+        ],
+    },
+}
+_HOSTED_PREACCESS_FAILURE = {
+    "run_id": 38856433488,
+    "run_attempt": 1,
+    "head_sha": "f9c8ae7722aa5c52bdfaaef6514143030e491abd",
+    "source": "dk-fulbright-center",
+    "job_id": 116828825815,
+    "job_sha256": (
+        "c994cea91db5db1b5c1ce753f404c76834a0bd1de9c61e4ff8d3ec8e5daefeb2"
+    ),
+    "source_sha256": (
+        "08b03a4682dbfa42c4e63da3c63584aad85026d0f86ac2eb183d5832d3721b6c"
+    ),
+    "workflow_sha256": (
+        "edaf79774604d181545f5f5e238462de0b5094a0e68746b194bd43801e045801"
+    ),
+    "log_sha256": (
+        "66c8ae398297be3c8aed1210a359cb544d76e4e741bdc2bb15b8c7d88ef28810"
+    ),
+    "error": "Full-native Fulbright Denmark MAX approval required",
+    "stage": "access",
+    "job_started_at": "2026-10-16T05:33:55Z",
+    "job_completed_at": "2026-10-16T05:34:38Z",
+    "conclusion": "failure",
+    "artifacts": 0,
+}
 
 
 _LOCAL_LEGACY_TRANSITION = {
