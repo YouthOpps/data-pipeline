@@ -4749,12 +4749,23 @@ def legacy_request_bytes(
     byte_limit=30000000,
 ):
     """Bound response bytes; redirects are explicit and credential-safe."""
+    if (
+        publisher
+        or (urllib.parse.urlsplit(url).hostname or "").lower()
+        in _PUBLISHER_HOSTS
+    ):
+        raise AdapterError(
+            "Publisher requires durable physical transport", "access"
+        )
     headers = {"User-Agent": _USER_AGENT, **(headers or {})}
     current = url
     for redirect in range(6):
-        if publisher:
-            public_url(current)
-            pace()
+        if (
+            urllib.parse.urlsplit(current).hostname or ""
+        ).lower() in _PUBLISHER_HOSTS:
+            raise AdapterError(
+                "Publisher requires durable physical transport", "access"
+            )
         request = urllib.request.Request(
             current, data=payload, headers=headers, method=method
         )
@@ -4766,8 +4777,6 @@ def legacy_request_bytes(
             status = response.status
             response_headers = response.headers
             retry = response.headers.get("Retry-After")
-            if publisher:
-                record_retry_after(retry)
             declared = response.headers.get("Content-Length")
             if declared and (
                 not declared.isdigit() or int(declared) > byte_limit
@@ -4796,40 +4805,22 @@ def legacy_request_bytes(
                 urllib.parse.urlsplit(current),
                 urllib.parse.urlsplit(destination),
             )
-            if publisher:
-                public_url(destination)
-                if old.scheme == "https" and new.scheme != "https":
-                    raise AdapterError(
-                        ("Publisher redirect transport downgrade"), ("access")
-                    )
-                check_robots(destination)
-            else:
-                if new.scheme != "https" or new.username or new.password:
-                    raise AdapterError(
-                        ("Unsafe authenticated redirect"), ("publish")
-                    )
-                if new.netloc != old.netloc:
-                    headers = {
-                        key: value
-                        for key, value in headers.items()
-                        if key.lower() != "authorization"
-                    }
-                if urllib.parse.urlsplit(url).hostname == "api.github.com":
-                    raise AdapterError(
-                        ("Unexpected GitHub API redirect"), ("publish")
-                    )
+            if new.scheme != "https" or new.username or new.password:
+                raise AdapterError(
+                    ("Unsafe authenticated redirect"), ("publish")
+                )
+            if new.netloc != old.netloc:
+                headers = {
+                    key: value
+                    for key, value in headers.items()
+                    if key.lower() != "authorization"
+                }
+            if urllib.parse.urlsplit(url).hostname == "api.github.com":
+                raise AdapterError(
+                    ("Unexpected GitHub API redirect"), ("publish")
+                )
             current = destination
             continue
-        if publisher and status in (401, 403, 429):
-            refused = urllib.parse.urlsplit(current)
-            provenance = urllib.parse.urlunsplit(
-                (refused.scheme, refused.hostname or "", refused.path, "", "")
-            )
-            raise AdapterError(
-                f"Publisher refused access: HTTP {status}: " + provenance,
-                "access",
-                status,
-            )
         return status, response_headers, body
     raise AdapterError("Unresolved redirect", "access")
 
