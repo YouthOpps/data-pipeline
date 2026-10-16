@@ -257,9 +257,10 @@ exported even after collection, snapshot or publication failure and uploaded as
 schema-1 envelope. No normalized opportunity records or credentials belong in it.
 
 A 429 at least doubles the already retained physical and page intervals,
-including stronger publisher limits, with an exponential count-based floor. Without
-a valid Retry-After, the embargo starts at 30 minutes and doubles on repeated
-429s; longer publisher embargoes remain in force. An active embargo fails before
+including stronger publisher limits, with an exponential count-based floor.
+The embargo starts at 30 minutes and doubles on repeated 429s even when a
+short valid Retry-After is present; longer publisher embargoes remain in force.
+An active embargo fails before
 another publisher start. After expiry, a bounded normal attempt may proceed at
 the slower persisted intervals. Hard access refusals remain distinct. The
 completion guard holds the family budget lock through each response and records
@@ -359,3 +360,19 @@ Published metadata uses `display_name` = **SAIA** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Minimum 429 cooldown preservation (#317)
+
+The publisher-only 429 branch retains the maximum of its valid Retry-After
+and existing exponential 1,800-second minimum. Short, equal and longer
+headers, absent or invalid timing, repeated strikes and stronger retained
+embargoes are checked with actual request/save/close functions on private
+files and inert response IO. The response still stops before body reading.
+Current gap doubling, existing stronger MAX, access holds, state schema and
+all non-429/default GitHub paths remain unchanged.
+
+This is a narrow conditional correction, not a modern protocol migration or
+a newly observed publisher 429. Existing source/native evidence remains as
+documented above; this maintenance establishes no new complete upstream or
+current-facts evidence chain. No publisher request, genuine native test,
+workflow operation, actual namespace access or owned ZIP download is used.
