@@ -236,3 +236,37 @@ constraints and applies fresh startup quiet. This approval does not erase the
 explicit export trust-boundary negative above. The maintainer owns enable-before-
 merge and the single automatic production run; production and site delivery are
 unverified until their actual receipts are checked.
+
+### Journal generation maintenance (#292)
+
+Publisher state reads, writes and failure cleanup use the same retained RW
+journal descriptor under the existing stable lock. The current verified parent,
+name, inode and generation are checked before and after IO, before the publisher
+opener, and while exporting state. A replaced journal is refused; cleanup may
+invalidate only the original owned descriptor and preserves a replacement's
+bytes. Validation, serialization and persistence failures remain sticky, so no
+later opener, re-entry or valid owned artifact can reuse the failed allowance.
+
+The maintainer explicitly approved replacing this journal's atomic rename with
+an in-place, locked commit: serialize first, truncate and fsync the original FD,
+handle short writes, then fsync and verify the complete bytes. A crash or IO
+fault can leave empty or partial state and reduce availability. A fresh process
+must refuse that mature state, even with an older artifact; it cannot bootstrap
+or recover a weaker allowance. Actual source-data publication remains atomic.
+The checks do not claim to authenticate arbitrary same-UID writers that ignore
+locks and rewrite the same inode.
+
+This conditional maintenance preserves the state/artifact schemas, physical and
+page pacing, historical MAX/OR constraints, source frontier, dates, record
+facts, publication and workflow. Private actual-function fault controls and replay of
+all retained 18 responses and 10 native records qualify the change without a
+new publisher crawl. The retained native has 10 records; the later live dataset
+has six after the UTC closing-day filter. These are distinct outcomes.
+
+Offline implementation approval: [issue #292, maintainer decision](https://github.com/YouthOpps/data-pipeline/issues/292#issuecomment-6205456320).
+
+Journal and collection-lock release failures also latch failure. Otherwise
+healthy contexts raise so the existing owned-artifact cleanup invalidates output even
+after readiness was signaled. An already-active body error is preserved; a
+recycled unrelated descriptor is neither closed nor modified. Collection lock
+identity is captured by the actual acquisition path, not inferred at cleanup.
