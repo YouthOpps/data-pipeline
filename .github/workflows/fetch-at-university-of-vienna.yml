@@ -9,6 +9,7 @@ on:
       - 'adapters/at-university-of-vienna/**'
       - '.github/workflows/fetch-at-university-of-vienna.yml'
 permissions:
+  actions: read
   contents: read
 concurrency:
   group: youthopps-at-university-of-vienna-publisher-v1
@@ -34,6 +35,19 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish this source
+        id: collect
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VIENNA_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+          VIENNA_PACING_MAINTENANCE: >-
+            {"schema":1,"family":"youthopps-at-university-of-vienna-publisher-v1","evidence":"https://github.com/YouthOpps/data-pipeline/issues/320#issuecomment-6210831417","state":{"blocked":false,"completed":1792136358.766172,"completed_flight_id":"cbfa6256fbf8586b815de9eff6308063","completed_request_id":"54067ece60f8fb4f98a1ed140a1af45f","family":"youthopps-at-university-of-vienna-publisher-v1","flight_id":"cbfa6256fbf8586b815de9eff6308063","flight_kind":"policy","flight_started":1792136345.146338,"in_flight":false,"interval":12.2,"last_inventory_completed":1792136345.1179779,"legacy_policy_history_unknown":true,"legacy_rate_history_unknown":true,"not_before":1792137291.0558329,"observed_at":1792137231.0558329,"page_interval":30,"rate_limit_strikes":0,"rate_limit_until":0,"request_id":"54067ece60f8fb4f98a1ed140a1af45f","request_inventory":false,"request_outcome":"response_assessed","request_started":1792136357.3239512,"schema":3,"starts":[1791478882.0,1791481560.0,1791654900.0,1791966289.0,1792046074.0,1792060672.0,1792067264.0,1792079517.0,1792092308.0,1792136018.6598876,1792136019.16775,1792136019.3479404,1792136020.2387743,1792136020.2410235,1792136032.4426184,1792136032.4467227,1792136032.77915,1792136033.2420764,1792136034.7619298,1792136046.9798615,1792136046.9863496,1792136047.1833787,1792136048.1914535,1792136048.194307,1792136064.7683053,1792136064.7708163,1792136064.95483,1792136066.0348969,1792136066.387729,1792136096.4242845,1792136096.436343,1792136096.635696,1792136101.7248423,1792136102.6809394,1792136132.6914647,1792136132.6936555,1792136132.8777528,1792136134.1582372,1792136134.515467,1792136164.5166674,1792136164.5185094,1792136164.6939008,1792136168.6105626,1792136168.9817142,1792136181.1875184,1792136181.194956,1792136181.3983078,1792136182.3630636,1792136182.5291975,1792136194.7325683,1792136194.73413,1792136194.907255,1792136195.8593402,1792136196.0235257,1792136208.226069,1792136208.2279055,1792136208.3963532,1792136209.9051058,1792136210.3955936,1792136240.3992643,1792136240.4022098,1792136240.4247386,1792136241.4973407,1792136241.8182187,1792136271.8202226,1792136271.8222222,1792136271.8377733,1792136273.6264162,1792136273.993367,1792136303.996577,1792136303.9993446,1792136304.1839387,1792136305.2712693,1792136305.624564,1792136335.754154,1792136337.215474,1792136338.086361,1792136344.6151748,1792136345.1151264,1792136357.3239512,1792136357.3261197,1792136357.659733,1792136358.5982807,1792136358.7646093]}}
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
         run: python -B adapters/at-university-of-vienna/adapter.py --publish
+      - name: Retain this exact attempt's pacing state
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: at-university-of-vienna-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
