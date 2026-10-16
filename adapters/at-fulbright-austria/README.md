@@ -48,10 +48,15 @@ page remains authoritative for full conditions. Structural, transport and
 record-validation errors still fail the collection instead of emitting an
 empty successful publication.
 
-Requests retain robots checks, the identifying YouthOpp user agent, normal
-TLS/proxy behavior, Retry-After handling and shared local pacing: at least six
-seconds between starts and at most ten starts in a rolling minute, including
-redirects and retries. Separate machines must not run overlapping collections.
+Requests use `YouthOppsBot/1.0 (+https://youthopps.org/bot/)`, normal inherited
+TLS/proxy verification, and the stricter current/legacy/wildcard robots rules.
+Each physical publisher attempt waits at least 12.2 seconds after the preceding
+attempt completes, with at most five starts per rolling minute. Every physical
+sitemap or programme-directory inventory attempt also waits at least 30 seconds
+after the preceding inventory attempt completes, including redirects and bounded
+retries. Award detail requests keep the ordinary physical budget. Literal robots
+reads use that physical budget independently and remain cached per origin,
+matching the original collector. Separate machines must not overlap.
 
 ## Run and publication
 
@@ -196,3 +201,199 @@ Source-pair changes stay protected; reference writes keep force:false. Source
 collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
 Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
+
+
+## Durable pacing migration and evidence gates
+
+The daily UTC schedule remains `17 8 * * *`, with the existing serialized
+30-minute job and source-only publication token. The original source had no dedicated collection or whole-adapter phase cap.
+The revised candidate freezes at most 1,200 seconds for source I/O/wait admission
+and 1,740 seconds for overall admission, further clamped by the original exact
+hosted job proof. These are new stricter allocations within the unchanged job,
+not proof of complete fit or an uninterruptible parser wall-time guarantee.
+Publication, failure handling and export retain separate 180/180/30-second
+reserves. Slow restoration or initial snapshot work reduces the source
+allowance rather than adding another full 1,200 seconds.
+The original full sitemap, six direction/category directory patterns, all
+`/programs/us-eu-*` directories, every discovered award and grant detail, Schuman
+identity exception and derived arts track remain supported without a fixed
+frontier or record-count cap. Sitemap and hub calls explicitly carry inventory
+purpose; a detail under a similar URL prefix does not acquire a page delay.
+No verified change feed establishes complete additions, edits and removals, so
+full reconciliation remains necessary.
+
+Schema-3 family state is stored in a private, verified directory outside the
+checkout, with stable state and collection locks. Every publisher or policy
+transaction durably records pending ownership before transport or restrictive
+assessment. Only successful durable assessment and its matching completion
+settle it. Any reservation, numeric/policy assessment, restriction or completion
+write error is sticky; safe current-inode invalidation is supplementary, and an
+older owned ZIP cannot clear unresolved local state after restart. Parent
+identity, regular-file ownership, mode, links and nonblocking FIFO refusals apply
+to the journal and owned artifact paths.
+
+A 429 stops the current run before any unchanged retry. It durably doubles the
+current physical and inventory gaps and retains at least 1800 seconds of
+exponential cooldown or a stronger valid Retry-After. Invalid, stale, malformed
+or nonfinite Retry-After alone creates no hold. Content 401/403/451, a genuine
+visible challenge or explicit robots refusal retain a hold. Literal robots 4xx
+except 429 mean unavailable REP; content is never relabeled as robots across a
+redirect. Real ordinary no-response connection retries retain the original two
+attempts/four-hop bound, while unread responses and unassessed policy failures
+remain pending. GitHub publication keeps its separate original six-second
+spacing, Retry-After, bounded jitter and publication-window proof.
+
+Read-only legacy recovery found `/tmp/at-fulbright-austria-pacing-<uid>` absent.
+That is not zero history or permission to bootstrap. All 28 exact historical
+attempts and executed jobs were inspected; their artifact inventories were
+empty. Their actual job completion times provide conservative prior upper
+bounds. Lost publisher starts, headers, prior rate events and possibly
+underlying collection errors remain unknown. A new strike counter zero means
+only no newly observed modern 429. `_LEGACY_TRANSITION` stays unset until the
+maintainer approves the exact typed unknown-history state and historical pins.
+Any newly appearing legacy publisher entry or changed family history requires
+fresh review. The LOCAL workflow must be disabled with no active family runs
+before restoration, namespace creation and startup quiet, and is rechecked
+immediately before first wire. Hosted restoration requires the exact current
+run and newest completed attempt's owned artifact, immutable head/branch/jobs
+and digest; no older fallback is allowed. Production needs its separate exact
+full-native MAX maintenance approval.
+
+The latest three historical failures expose publication outcomes, including
+GitHub PATCH 422 on the newest run, and do not prove publisher denial. The latest
+successful collect-and-publish step took 350 seconds and published 13 records;
+that is not a physical-frontier count, new-pacing measurement or current native
+acceptance. Historical frozen-frontier parse and connection-timeout failures
+remain distinct. The publication implementation is preserved rather than
+speculatively changed in response to these older outcomes.
+
+Owned export pins the checked directory and safe output inode through readiness
+and healthy context completion. On failure the pinned safe output is invalidated
+before independent best-effort false signaling and unlink; unrelated or unsafe
+replacement objects remain untouched. Private job execution and `RUNNER_TEMP`
+are trusted against an independent same-user process forging replacement
+artifacts after true readiness while all subsequent false writes fail. Under
+that composed boundary case export raises and the original is invalidated, but
+an unrelated forged envelope and previous true can remain. This is not an
+absolute upload guarantee against a same-user writer, and it does not justify
+removing legitimate 429 failure-state artifacts.
+
+Offline private fault, parser-routing and real-clock controls do not establish
+publisher access or complete collection. Acceptance still needs one separately
+released original full native test, every actual input/header/body and saved
+state retained in private RAM, exact current three-file consumer validation,
+source date-precision review and independently reviewed full known-state MAX.
+No production or extra publisher diagnostic is authorized by this migration.
+
+Stronger retained intervals, repeated 429 slowdowns or a larger complete frontier
+may exceed the unchanged collection/job limits. Such attempts stop and preserve
+last-good data; this migration promises neither automatic post-429 completion nor
+a fixed record count. It does not raise caps or omit discovered awards to fit.
+
+## Revised allocation and first failed native evidence
+
+The first complete original test attempt genuinely failed after 811.619 seconds.
+It received 43 complete responses (one robots 404 and 42 content 200), including
+the sitemap, all seven hubs and 34 of 45 discovered award pages. Eleven award
+pages remained unfetched. No complete normalized JSON or current-consumer PASS
+was produced. This was the candidate's remaining-phase admission guard, not
+a publisher refusal or rate limit. Its original failed receipt, partial RAM
+evidence and complete known state remain preserved. The provisional 900/1290
+limits were introduced only by the unmerged candidate; their correction does
+not change the baseline's 30-minute job cap or omit discovered programmes.
+
+[Maintainer-approved offline allocation correction](https://github.com/YouthOpps/data-pipeline/issues/287#issuecomment-6205388964)
+keeps the full 54-request nominal graph and all existing fields. The fixed whole
+end is at most entry plus 1,740 seconds and the original job read deadline.
+Nonexport work ends at least 30 seconds earlier and no later than the original
+job write deadline. The exact job proof has at most 30 seconds; restoration and
+the initial snapshot each have at most 180. Source retrieval ends no later than
+the whole end minus 390 seconds, reserving publication 180, failure 180 and
+export 30. Publication never consumes the failure or export reserves. All phases
+share entry-frozen ends, cannot renew, and may have less than their nominal
+maximum when setup or stronger retained constraints consume headroom.
+
+The original publication bodies remain intact behind source-local deadline
+dispatch. A copy of the authentic job/token window is further tightened to the
+active phase; it is never rewritten or extended. Original GitHub six-second
+pacing, Retry-After, bounded calls, CAS jitter, three attempts and terminal
+write latch remain unchanged. Ordinary CAS verification snapshots stay in the
+success-publication phase. A failure owner begins before the first fallback
+snapshot, or before a source-failure metadata-only publication, and stays open
+through subsequent reads, metadata writes and verification until the original
+run body exits. It receives one fixed deadline, never one allowance per call.
+
+A competing whole-process alarm previously prevented the original publication
+call guard from entering. The revised admission model removes that conflict.
+Complete physical publisher and workflow/artifact operations retain a total
+30-second guard clamped to their phase, sharing a fixed end when nested. The
+original publication guard retains its own bounded timer; export has its own
+remaining 30-second allowance. Socket, CPU or filesystem stalls can still force
+a safe failure or prevent export under the original hard outer job bound.
+Neither static allocations nor the first partial retrieval prove that the full
+new graph fits; a separately approved complete original test remains required.
+
+The current mature schema-3 journal and stable locks must be retained. The
+failed attempt's full known MAX contains 243 conservative timing observations
+and 768 constraint witnesses, including 43 actual publisher requests and 84
+logical owner settlements; observation counts are not request counts. No
+missing field is converted into known zero history. A new exact maintainer
+bridge and a separate mature-state observer/release are required before another
+native attempt. This offline revision does not authorize such execution or
+production, and does not replace the preserved failed receipt with a PASS.
+
+The publisher journal is rewritten through one retained, locked read/write
+descriptor. A changed parent, name, inode or generation closes access rather
+than adopting or overwriting a replacement. This deliberately favors safety
+over crash availability: interruption during an in-place rewrite can leave an
+empty or partial journal. A later process then refuses collection and older
+artifacts cannot substitute for that invalid local state; operator review is
+required. Cleanup targets only the retained original descriptor.
+
+The revised external test observer starts a detached, private twelve-hour RAM
+keeper before the original test and streams captured request observations,
+response headers, returned body chunks, available error partials, output and
+journal-save observations as they arrive. If the controller dies, evidence
+already delivered to the keeper remains available. This does not recover
+bytes that the transport never returned or observations never delivered to
+the keeper. This revised observer has private fault-control qualification;
+at that offline stage it had not run another publisher collection.
+
+Root approved the exact mature-state bridge for a separately released revised
+original test: https://github.com/YouthOpps/data-pipeline/issues/287#issuecomment-6205971447.
+It retains the first failed attempt's full known constraints and 243 timing
+observations (not 243 requests), with unknown earlier history still explicit.
+The original 43-response attempt remains incomplete and failed; this bridge
+is neither a successful collection nor permission to launch another test. The
+existing mature journal and locks remain unchanged, and production readiness
+requires separate approval after complete full-graph evidence.
+
+The revised genuine original test passed on source `e1d28abb`: all 54 actual
+responses were retained, with 45 raw awards and 13 after expiry filtering.
+Subsequent exception/REP-only repairs preserve that attribution: typed
+pre-response network faults and temporary DNS retain the original two
+attempts; storage, TLS, permanent DNS and opaque errors fail closed. Current
+bot rules select their own specific group or wildcard independently of
+retained legacy-specific restrictions. Private counterexamples qualify those
+branches; the actual native REP was 404, so no live suppression of publisher
+policy is claimed. Full retained-body/fact/consumer replay qualifies reuse,
+without another publisher collection. The earlier incomplete attempt remains
+a separate failure. Production approval and verification remain separate.
+
+The maintainer approved the exact production MAX state in
+https://github.com/YouthOpps/data-pipeline/issues/287#issuecomment-6206546086.
+Its canonical state digest is
+`e8015838b2673a4ce99789e90e1f503f2e3e767bf7f64962639ba4b5957a5eac`.
+The full audit retains 513 conservative timing observations across both
+attempts (97 actual requests), 1,736 constraint witnesses and 190 matching
+logical settlements. The unchanged 512-observation validation bound rejects
+the unnormalized union. The approved state removes only observations strictly
+older than 60 seconds at the mandatory quiet guard, preserving all numeric
+MAX constraints, unknown history and complete audit provenance; it does not
+truncate by count or increase the schema bound. Runtime startup quiet and
+strict newest-owned/local restoration still apply, including stronger holds.
+The initial incomplete test remains a failure; the revised complete test
+passed at its original E1 source. Private conditional repairs are qualified
+by the complete retained-response replay, not another live crawl. This
+approval configures production recovery; production and website delivery
+are verified separately after the maintainer's merge.
