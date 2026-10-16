@@ -10,8 +10,9 @@ worldwide Fulbright catalogue.
 
 ## Access, licence and attribution
 
-The public [robots policy](https://fulbright.edu.pl/robots.txt) permits these
-routes; `/wp-admin/` remains excluded. Each live collection checks robots and
+The previously reviewed public [robots policy](https://fulbright.edu.pl/robots.txt)
+permitted these routes; `/wp-admin/` remained excluded. This migration makes no
+new access claim before its separately approved original live test. Each live collection checks robots and
 each redirect before following it. No application portal, authentication,
 CAPTCHA, PDF, form submission or restricted route is needed.
 
@@ -32,7 +33,8 @@ licence and modification indication alongside the source records.
 
 ## Complete programme inventory and distinctions
 
-The reviewed inventory contains 29 genuine programme/call records:
+The previously reviewed inventory contained 29 programme/call records; this
+is historical coverage evidence, not a fixed current record or HTTP count:
 
 - Fourteen own-publisher detail pages (18 records after the five named
   Schuman variants replace their parent overview): Graduate Student, Notre Dame LL.M,
@@ -143,11 +145,38 @@ dispatch, and once daily at 21:30 UTC, with repository/main guards and a source
 App token. Its sole application command executes this adapter with `--publish`.
 Production Actions are not implementation tests.
 
-Robots, pages, redirects and retries share at least six seconds between request
-starts, at most ten starts per rolling minute, and persistent `Retry-After`
-backoff. File locks serialize overlapping local collections and pacing state
-across processes. Separate machines/production runs must still coordinate the
-publisher allowance; Actions serialize publication for this source.
+Publisher robots, pages, redirects and retries share at least 12.2 seconds
+from response completion to the next physical start and at most five starts
+per rolling minute. Each physical exchange of the two inventory roots also
+waits 30 seconds after the previous inventory exchange completes; programme
+details remain on the physical floor. Stricter applicable REP and retained
+`Retry-After` constraints dominate. A 429 increases both CURRENT gaps, retains
+an exponential cooldown of at least 30 minutes, and stops the collection;
+its state is saved before the bounded response body is read. A genuine access
+refusal or human-verification challenge separately retains an access hold.
+Malformed timing alone does not invent a hold.
+
+An owned pending transaction spans every physical request and all body,
+licence and REP assessment, including cached target-policy decisions. Failed
+assessment or persistence remains unresolved across process restarts; older
+owned state cannot clear it. Original normal typed pre-response connection
+retries remain bounded to two attempts. Response/body, TLS, storage and policy
+failures are not healthy retries. The original default GitHub transport keeps
+its six-second starts, ten-start rolling allowance and Retry-After behavior;
+it does not share the publisher's new physical interval.
+
+LOCAL collection requires the exact workflow manually paused before state
+initialization and again after startup quiet, before its first publisher wire.
+Both LOCAL and hosted modes read complete exact-attempt history and restore
+the newest source/head/code/state-bound owned artifact; missing mature state
+fails closed. The separately approved finite legacy transition retains unknown
+historical access and 429 ancestry. An absent old namespace is not zero history
+or a fresh allowance. The modern publisher namespace is separate from the
+preserved default GitHub host files. The LOCAL migration literal is bound to the separately reviewed
+[initial boundary](https://github.com/YouthOpps/data-pipeline/issues/293#issuecomment-6207427595).
+The hosted marker is separately bound to the later
+[full native MAX approval](https://github.com/YouthOpps/data-pipeline/issues/293#issuecomment-6207729527).
+Neither literal activates a workflow or establishes a hosted publication result.
 
 Success atomically replaces only
 `datas/pl-fulbright-poland/{data,metadata}.json`. Later failures preserve last-good
@@ -161,7 +190,8 @@ A refresh first retrieves and validates the complete nonempty publisher inventor
 Only then are records with a verified past `deadline` removed from the next
 source snapshot, including expired identities from the previous publication.
 The existing full replacement does not merge old records back into the result.
-Date-only deadlines remain eligible through their closing date in Europe/Warsaw.
+Date-only deadlines remain eligible through their full closing UTC calendar
+date; no publisher end-of-day clock or timezone is invented.
 Explicit timezone-aware timestamps expire strictly after the stated instant;
 missing deadlines remain eligible; unresolved publisher dates stay null.
 Invalid normalized deadlines fail validation and preserve last-good data. Status, record age and
@@ -189,9 +219,13 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+access. Each current identity selects its explicit policy or wildcard fallback;
+an explicit legacy group adds its restrictions without displacing that current
+policy. Applicable finite decimal delays and request rates remain effective;
+unsupported selected numeric policy leaves assessment unresolved. Unrelated
+bots' malformed timing is not applied. Publisher pacing and durable state are
+updated as described above; source identity and default GitHub behavior remain
+preserved. Existing disabled workflows remain disabled.
 
 ## Daily automation
 
@@ -203,9 +237,12 @@ GitHub can delay scheduled events; the existing publication concurrency
 serializes source jobs when they queue. Existing disabled workflows remain
 disabled until their access hold is separately resolved.
 
-The current collector has no paginated inventory to delay. Its existing request
-pacing and publisher restrictions remain in force; this source changes only its
-daily automation schedule.
+The two inventory roots have no supported continuation pages, but both are
+listing requests and receive the separate inventory-completion guard. Current
+root navigation must still account for every supported programme path; a new
+programme route requires coverage review rather than silent truncation. No
+complete publisher delta/removal signal is established, so a complete supported
+refresh remains necessary. The daily schedule itself is unchanged.
 
 ## Workflow concurrency
 
@@ -265,7 +302,65 @@ the existing three attempts and original write deadline. Authentication,
 non-CAS and unclassified failures stop without another write attempt. Terminal
 publication errors latch a per-process write stop, including later
 failure-metadata fallback; bounded read-only outcome checks remain available.
-Source-pair changes stay protected; reference writes keep force:false. Source
-collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
+Source-pair changes stay protected; reference writes keep force:false. Those
+publication-conflict safeguards alone do not change source collection,
+fields, pacing, schedule or the 30-minute job cap. The pacing migration below
+has its own separately described scope.
 Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
+
+
+## Migration boundaries and finite admission
+
+The original workflow job remains 30 minutes. The prior adapter had no whole
+source collection timer; this migration introduces stricter 1,200-second source
+IO/wait admission and 1,740-second whole admission, frozen once before history
+restoration and the data-source snapshot. Publication and failure reporting each
+have a bounded 180-second owner, with 60 seconds for export and 120 seconds of
+coordination margin. Actual current-job proof may only tighten these bounds.
+These are admission limits and bounded calls, not a claim of hard total parser
+wall time or a guarantee that every possible redirect/retry/REP delay fits.
+No inventory is truncated or cap raised to force success.
+
+The original publication guard retains its own bounded HTTP alarms. No outer
+permanent SIGALRM competes with it. The failure owner begins before any fallback
+snapshot, and original atomic three-attempt CAS checks, token identity/window,
+last-good preservation and safe failure metadata remain in force. A transient
+snapshot failure still exports trusted publisher state. Attempt-owned uploads
+contain only inert pacing state, never records, responses or credentials.
+
+Only genuine new namespaces may initialize the explicitly reviewed legacy MAX.
+Original/current locked descriptor identity is checked around IO and before
+publisher access. Cleanup does not close a reused foreign descriptor or mutate
+a stronger replacement generation. Artifact output is safely invalidated before
+fallible signal/unlink cleanup; close failures are sticky and preserve a primary
+exception. Private controls remain outside the delivered tree. No source
+requests, original native test or production Action are part of offline work.
+
+The one original native test at `7eef97a4` passed and emitted all 29 records
+from 18 genuine physical responses. Its external observer then failed because
+it passed a string to the unchanged datetime expiry API; that failure receipt
+is preserved. A separately authorized offline supplement used the correct
+datetime contract on all actual retained inputs, reproducing all 29 records
+and their fields, with 23 current records, with the actual six expired records yielding an empty subset.
+No source request or native test was repeated.
+
+The actual Specialist notice states 8 January 2027 without a clock or timezone;
+ETA likewise supplies only 31 January 2026. The original Warsaw date-only
+helpers could remove a record during the closing UTC day. The
+[reviewed pure correction](https://github.com/YouthOpps/data-pipeline/issues/293#issuecomment-6207613896)
+uses UTC calendar status and expiry for date-only values. All eight explicitly
+supported zoned instants, 19 null dates, normalized fields and full graph stay
+unchanged. The correction is an offline projection of the complete actual
+retained inputs, not a second live native claim.
+
+
+The reviewed production state preserves all 100 known timing observations,
+including 28 historical job-completion upper bounds and actual reservation,
+opener, wire and response-completion observations from the sole native. These
+are not 100 physical requests: the native made 18. All 104 actual save snapshots
+and 34 assessed pending transactions were reviewed; historical access and 429
+uncertainty remain explicit. Pending false follows those successful settlement
+chains rather than blindly discarding historical pending states. The stronger
+receipt/final-observation quiet bound is retained. Production and website
+verification remain separate maintainer steps; no author dispatch is made.
