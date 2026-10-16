@@ -357,3 +357,21 @@ qualify this change. Earlier genuine native evidence retains its original code
 and date attribution; no new publisher collection, current factual review,
 complete native replay or production run is claimed. The maintainer alone owns
 workflow/state coordination and the maintenance rollout for issue #328.
+
+
+## Legacy transport publisher guard (#334)
+
+The supported publisher route remains `request_bytes` through the existing
+`physical_request_bytes` durable transport. The nonpublisher legacy transport
+now refuses an explicit publisher argument or a known publisher host before
+its opener, including a redirect that reaches a publisher host. Obsolete
+publisher-only branches were removed instead of recreating the undefined
+`record_retry_after` helper. The warning came from that unused alternate path;
+it was not an observed failure of the current publisher 429/Retry-After path.
+
+The default GitHub body, redirect, authentication and timeout behavior remains
+unchanged. Modern publisher pacing, pending state, MAX/backoff and holds, the
+complete collector, facts, validation, cleanup and publication are unchanged.
+The original test and workflow are unchanged. Private actual-function dispatch
+checks supplement the existing unchanged collection evidence; this maintenance
+performs no new publisher/native/Action run or data/site refresh.
