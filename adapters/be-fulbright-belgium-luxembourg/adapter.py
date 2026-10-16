@@ -322,10 +322,8 @@ def request_bytes(
                 budget["page_gap"] = max(
                     budget.get("page_gap", 30) * 2, 30 * multiplier
                 )
-                pause = (
-                    retry_seconds
-                    if retry_seconds is not None
-                    else 1800 * multiplier / 2
+                pause = max(
+                    retry_seconds or 0, 1800 * multiplier / 2
                 )
                 budget["rate_limit_until"] = max(
                     budget.get("rate_limit_until", 0), time.time() + pause

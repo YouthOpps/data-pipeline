@@ -106,10 +106,11 @@ requests, explicit redirects, retries and local overlapping runs. Request starts
 are at least 12.1 seconds apart, with at most 5 in a rolling minute; the lock
 remains held through response completion and the following gap. Stronger robots
 limits and Retry-After are honored. Required-page 401/403 refusals persist.
-A 429 stops the current job and durably records its Retry-After embargo; absent
-a valid header, the pause starts at 30 minutes and doubles on subsequent 429s.
+A 429 stops the current job and retains the maximum of a valid Retry-After
+embargo and a 30-minute minimum that doubles on subsequent 429s. A short
+valid header cannot replace this exponential minimum.
 Each 429 also doubles the currently retained physical and page gaps, including
-already stricter publisher limits, and doubles the no-header fallback cooldown.
+already stricter publisher limits, and doubles the exponential minimum.
 Longer valid Retry-After is retained. Malformed, nonpositive, nonfinite or
 unrepresentable timing is ignored before budget mutation; a 429 uses its
 existing exponential fallback. Existing content holds and stronger embargoes
@@ -252,3 +253,19 @@ Source-pair changes stay protected; reference writes keep force:false. Source
 collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
 Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
+
+## Minimum 429 cooldown preservation (#317)
+
+The publisher-only 429 branch retains the maximum of its valid Retry-After
+and existing exponential 1,800-second minimum. Short, equal and longer
+headers, absent or invalid timing, repeated strikes and stronger retained
+embargoes are checked with actual request/save/close functions on private
+files and inert response IO. The response still stops before body reading.
+Current gap doubling, existing stronger MAX, access holds, state schema and
+all non-429/default GitHub paths remain unchanged.
+
+This is a narrow conditional correction, not a modern protocol migration or
+a newly observed publisher 429. Existing source/native evidence remains as
+documented above; this maintenance establishes no new complete upstream or
+current-facts evidence chain. No publisher request, genuine native test,
+workflow operation, actual namespace access or owned ZIP download is used.
