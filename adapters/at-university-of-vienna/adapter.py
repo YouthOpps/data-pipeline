@@ -169,35 +169,69 @@ def pace(url, interval=6):
 
 
 def request_bytes(url, *, interval=6, method="GET", headers=None, payload=None):
-    budget = pace(url, interval)
-    request = urllib.request.Request(
-        url,
-        data=payload,
-        method=method,
-        headers={"User-Agent": _USER_AGENT, **(headers or {})},
-    )
+    received_publisher_429 = False
     try:
-        response = _OPENER.open(request, timeout=30)
-    except urllib.error.HTTPError as error:
-        response = error
-    with response:
-        retry = response.headers.get("Retry-After")
-        if retry:
+        budget = pace(url, interval)
+        request = urllib.request.Request(
+            url,
+            data=payload,
+            method=method,
+            headers={"User-Agent": _USER_AGENT, **(headers or {})},
+        )
+        try:
+            response = _OPENER.open(request, timeout=30)
+        except urllib.error.HTTPError as error:
+            response = error
+        if (
+            response.status == 429
+            and urllib.parse.urlsplit(url).hostname != "api.github.com"
+        ):
+            received_publisher_429 = True
             try:
-                seconds = (
-                    float(retry)
-                    if re.fullmatch(r"\d+(?:\.\d+)?", retry)
-                    else parsedate_to_datetime(retry).timestamp() - time.time()
-                )
-                budget["until"] = max(
-                    budget["until"], time.monotonic() + max(0, seconds)
-                )
-            except (ValueError, TypeError, OverflowError):
-                pass
-        body = response.read(5_000_001)
-        if len(body) > 5_000_000:
-            raise AdapterError("Response exceeds 5 MB", "fetch")
-        return response.status, response.headers, body
+                retry = response.headers.get("Retry-After")
+                if retry:
+                    try:
+                        seconds = (
+                            float(retry)
+                            if re.fullmatch(r"\d+(?:\.\d+)?", retry)
+                            else parsedate_to_datetime(retry).timestamp()
+                            - time.time()
+                        )
+                        budget["until"] = max(
+                            budget["until"], time.monotonic() + max(0, seconds)
+                        )
+                    except (ValueError, TypeError, OverflowError):
+                        pass
+            finally:
+                response.close()
+            raise AdapterError("Publisher returned HTTP 429", "fetch", 429)
+        with response:
+            retry = response.headers.get("Retry-After")
+            if retry:
+                try:
+                    seconds = (
+                        float(retry)
+                        if re.fullmatch(r"\d+(?:\.\d+)?", retry)
+                        else parsedate_to_datetime(retry).timestamp()
+                        - time.time()
+                    )
+                    budget["until"] = max(
+                        budget["until"], time.monotonic() + max(0, seconds)
+                    )
+                except (ValueError, TypeError, OverflowError):
+                    pass
+            body = response.read(5_000_001)
+            if len(body) > 5_000_000:
+                raise AdapterError("Response exceeds 5 MB", "fetch")
+            return response.status, response.headers, body
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        if received_publisher_429:
+            raise AdapterError(
+                "Publisher returned HTTP 429; response cleanup failed",
+                "fetch",
+                429,
+            ) from error
+        raise
 
 
 def fetch_source(url, min_interval=6):
