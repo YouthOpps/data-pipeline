@@ -3419,6 +3419,11 @@ def request_bytes(
         with response:
             status, response_headers = response.status, response.headers
             record_retry_after(response_headers.get("Retry-After"), status)
+            if status == 429:
+                # PolicyStop is assessed only after the response closes safely.
+                raise PolicyStop(
+                    "Publisher stopped: HTTP 429", "access", 429
+                )
             if not robots and status in (401, 403, 451):
                 retain_publisher_hold()
             body = response.read(5_000_001)

@@ -4657,6 +4657,10 @@ def apply_robots_policy(text, url, state=None):
 
 
 
+class HeaderRateLimitStop(AdapterError):
+    """A durable header-only429 whose response context closed successfully."""
+
+
 def physical_request_bytes(
     url,
     *,
@@ -4800,6 +4804,12 @@ def physical_request_bytes(
                     state["blocked"] = True
                 state["observed_at"] = time.time()
                 write_budget(state)
+                if status == 429:
+                    raise HeaderRateLimitStop(
+                        "Publisher429; durable adaptive cooldown retained",
+                        "access",
+                        429,
+                    )
             declared = response.headers.get("Content-Length")
             if declared and (
                 not declared.isdigit() or int(declared) > byte_limit
@@ -4871,6 +4881,10 @@ def physical_request_bytes(
                     429,
                 )
             return status, response.headers, body
+    except HeaderRateLimitStop:
+        # Only a successfully closed response is fully assessed.
+        response_constraints_saved = True
+        raise
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         if publisher and response_received:
             response_constraints_saved = False

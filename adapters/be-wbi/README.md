@@ -385,3 +385,27 @@ later owned continuity plus missing-configuration negatives. These are
 private ordinary controls, not successful hosted publication evidence. The
 maintainer alone enables the workflow before merge and verifies the sole
 automatic source run, full current records and resulting owned state.
+
+
+## Header-only HTTP 429 stop — issue #328
+
+A received publisher 429 now retains its adaptive constraints and stops before
+reading any response body. Both current physical and inventory gaps still
+double; the repeated-strike exponential cooldown remains at least 1800 seconds,
+and a longer valid Retry-After remains stronger. A short valid Retry-After does
+not reduce that fallback. The response context must close successfully before
+this stop is assessed; persistence or close failure leaves the original pending
+failure gate closed, with no retry or next publisher opener.
+
+This paragraph supersedes earlier 429 body-inspection descriptions. An unread
+429 body supplies no new challenge classification; previously retained holds
+and all stronger constraints remain. Non-429 response inspection, literal REP
+semantics, original parser/frontier/IDs/dates, publication and GitHub pacing,
+phase limits, owned-state schemas/seeds and workflow remain unchanged.
+
+Acceptance for this conditional guard uses actual private transport/writer/
+completion contexts and exact whole-module AST protection after removing only
+the new 429 branch. Existing genuine native evidence retains its original code
+and date attribution; this maintenance claims no new publisher collection,
+upstream factual review, full native replay or production run. Issue #328
+remains open after this three-source pilot.
