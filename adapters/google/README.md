@@ -261,3 +261,44 @@ This conditional maintenance uses actual-function inert transport controls
 and qualified prior complete native evidence; it does not claim a new live
 collection or alter source facts, identifiers, expiry, publication, caps or
 schedules. No publisher request or production Action validates this fix.
+
+## Journal ownership maintenance (#295)
+
+Publisher journal reads and writes retain the acquired original RW descriptor,
+parent identity and file generation. They check that authority again before
+transport and export. A changed name, generation, lock or descriptor fails the
+publisher gate; cleanup never adopts or truncates the stronger replacement.
+Serialization, write, fsync and release failures remain sticky for the process.
+Cleanup attempts independent original descriptors and preserves a prior error.
+Safe owned artifact output is invalidated before best-effort signaling or
+unlink; foreign descriptors and unsafe existing output are preserved.
+
+Journal updates now write through the retained, locked inode instead of
+replacing it by pathname. This deliberately trades atomic journal availability
+for original inode ownership: an interrupted update may leave an empty or
+partial mature journal, which fails closed. It cannot be healed from an older
+hosted artifact. The actual data publication still uses its existing atomic
+GitHub transaction.
+
+Only an actually newly created publisher namespace, during its existing verified
+latest-owned restoration, can initialize neutral state for the incoming MAX
+merge. An existing directory with missing or empty state fails closed. GitHub
+publication transport does not establish publisher namespace creation proof.
+
+This maintenance preserves source facts, frontier, dates, expiry rules, schemas,
+seeds, history pins, pacing limits, retries, publication and workflow settings.
+Validation uses actual functions with inert transport and private journals, plus
+prior accepted native evidence for unchanged collection functions. It does not
+certify a new crawl, production run or every legacy runtime contract. Artifact
+output assumes the existing trusted private job/temporary-directory boundary; it
+cannot authenticate an arbitrary concurrent same-UID writer forging output.
+
+The earlier native acceptance remains historical evidence. This patch does not
+claim a fresh full-body replay from expired RAM or a new publisher request.
+
+Reference: https://github.com/YouthOpps/data-pipeline/issues/295
+
+These existing schemas do not add a durable pending-transaction marker here.
+If both the restrictive write and original-inode invalidation fail, a restart
+still needs the separate #273 protocol correction. This journal-ownership patch
+does not claim to resolve that broader historical persistence limitation.
