@@ -235,3 +235,25 @@ Source-pair changes stay protected; reference writes keep force:false. Source
 collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
 Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
+
+
+### Received publisher 429 stops before body assessment
+
+A received publisher HTTP 429 now retains the original valid `Retry-After`
+MAX and source-local persistence before rejecting the response without reading
+its body. A response or pacing-state cleanup error after that status is known
+remains nonretryable, rather than entering the ordinary connection retry.
+The default `api.github.com` publication response path is unchanged. Normal
+responses, the existing two-attempt connection bound, discovery, records, REP,
+pacing limits, state schema, deadlines and schedules are unchanged.
+
+This is a narrow error-path correction, not a modern pacing migration. It
+does not add adaptive gap doubling, a minimum exponential 1,800-second hold,
+pending ownership or hosted owned-state continuity. Existing storage limits
+and unlogged historical access remain; a failed persistence operation cannot
+be described as a durably retained hold. Validation uses bounded private
+ordinary controls and exact normal-function AST comparison. No new publisher
+request or genuine native run is claimed for this maintenance change.
+
+This adapter retains its original local host JSON and flush behavior, without
+adding fsync or hosted handoff. This is not a stronger durability claim.

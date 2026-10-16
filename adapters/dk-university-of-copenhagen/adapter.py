@@ -1202,58 +1202,93 @@ def request_bytes(
     deadline=None,
     retry_jitter=0
 ):
-    if retry_jitter:
-        state, budget = pace(url, interval, start_padding=retry_jitter)
-    else:
-        state, budget = pace(url, interval)
+    received_publisher_429 = False
     try:
-        request = urllib.request.Request(
-            url,
-            data=payload,
-            method=method,
-            headers={"User-Agent": _USER_AGENT, **(headers or {})},
-        )
+        if retry_jitter:
+            state, budget = pace(url, interval, start_padding=retry_jitter)
+        else:
+            state, budget = pace(url, interval)
         try:
-            transport_timeout = 30
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise AdapterError(
-                        "Publication deadline exhausted", "publish"
-                    )
-                transport_timeout = min(30, remaining)
-            response = _OPENER.open(request, timeout=transport_timeout)
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            retry = response.headers.get("Retry-After")
-            if retry:
-                try:
-                    seconds = (
-                        float(retry)
-                        if re.fullmatch(r"\d+(?:\.\d+)?", retry)
-                        else parsedate_to_datetime(retry).timestamp()
-                        - time.time()
-                    )
-                    budget["until"] = max(
-                        budget["until"], time.time() + max(0, seconds)
-                    )
-                    save_budget(state, budget)
-                except (ValueError, TypeError, OverflowError):
-                    pass
-            body = response.read(5_000_001)
-            if len(body) > 5_000_000:
-                raise AdapterError("Response exceeds 5 MB", "fetch")
-            return response.status, response.headers, body
-    finally:
-        try:
-            # Hold the family lock through completion and the next-start gate.
-            budget["until"] = max(
-                budget["until"], time.time() + budget["interval"]
+            request = urllib.request.Request(
+                url,
+                data=payload,
+                method=method,
+                headers={"User-Agent": _USER_AGENT, **(headers or {})},
             )
-            save_budget(state, budget)
+            try:
+                transport_timeout = 30
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise AdapterError(
+                            "Publication deadline exhausted", "publish"
+                        )
+                    transport_timeout = min(30, remaining)
+                response = _OPENER.open(request, timeout=transport_timeout)
+            except urllib.error.HTTPError as error:
+                response = error
+            if (
+                response.status == 429
+                and urllib.parse.urlsplit(url).hostname != "api.github.com"
+            ):
+                received_publisher_429 = True
+                try:
+                    retry = response.headers.get("Retry-After")
+                    if retry:
+                        try:
+                            seconds = (
+                                float(retry)
+                                if re.fullmatch(r"\d+(?:\.\d+)?", retry)
+                                else parsedate_to_datetime(retry).timestamp()
+                                - time.time()
+                            )
+                            budget["until"] = max(
+                                budget["until"], time.time() + max(0, seconds)
+                            )
+                            save_budget(state, budget)
+                        except (ValueError, TypeError, OverflowError):
+                            pass
+                finally:
+                    response.close()
+                raise AdapterError("Publisher returned HTTP 429", "fetch", 429)
+            with response:
+                retry = response.headers.get("Retry-After")
+                if retry:
+                    try:
+                        seconds = (
+                            float(retry)
+                            if re.fullmatch(r"\d+(?:\.\d+)?", retry)
+                            else parsedate_to_datetime(retry).timestamp()
+                            - time.time()
+                        )
+                        budget["until"] = max(
+                            budget["until"], time.time() + max(0, seconds)
+                        )
+                        save_budget(state, budget)
+                    except (ValueError, TypeError, OverflowError):
+                        pass
+                body = response.read(5_000_001)
+                if len(body) > 5_000_000:
+                    raise AdapterError("Response exceeds 5 MB", "fetch")
+                return response.status, response.headers, body
         finally:
-            state.close()
+            try:
+                # Hold the family lock through completion and the next-start
+                # gate.
+                budget["until"] = max(
+                    budget["until"], time.time() + budget["interval"]
+                )
+                save_budget(state, budget)
+            finally:
+                state.close()
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        if received_publisher_429:
+            raise AdapterError(
+                "Publisher returned HTTP 429; response cleanup failed",
+                "fetch",
+                429,
+            ) from error
+        raise
 
 
 def fetch_source(url, min_interval=6):
