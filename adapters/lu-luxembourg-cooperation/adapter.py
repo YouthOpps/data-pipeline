@@ -3,6 +3,7 @@
 import argparse
 import base64
 import contextlib
+import copy
 import datetime
 import email.utils
 import fcntl
@@ -101,25 +102,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(NoRedirect)
 
 
-
-
 def persist_budget(file, state):
-    if _PROTOCOL_FATAL:
-        raise AdapterError("Publisher persistence failure is sticky", "access")
-    path = _PROTOCOL_DESCRIPTOR_PATHS.get(file.fileno())
-    try:
-        validate_budget(state)
-        if path is None:
-            raise AdapterError("Unbound publisher state descriptor", "access")
-        pin_protocol_parent(path, file.fileno())
-        file.seek(0)
-        json.dump(state, file, separators=(",", ":"))
-        file.truncate()
-        file.flush()
-        os.fsync(file.fileno())
-    except BaseException:
-        protocol_failure(state, [path])
-        raise
+    """Commit state through retained original journal authority."""
+    journal_acquire()
+    journal_write(state)
 
 
 @contextlib.contextmanager
@@ -522,60 +508,18 @@ def validate_target(value):
 
 
 def invalidate_protocol_export():
-    """Remove apparent readiness BEFORE new policy or publisher access."""
+    """Invalidate safe prior output through the same retained-output guards."""
     path = os.environ.get(_PROTOCOL_ARTIFACT_ENV)
     if not path:
         return
-    root = os.environ.get("RUNNER_TEMP", "")
+    root = os.environ.get("RUNNER_TEMP")
     if (
         not root
-        or not os.path.isabs(root)
         or os.path.dirname(os.path.abspath(path)) != os.path.realpath(root)
         or os.path.basename(path) != "pacing-state.json"
     ):
         raise AdapterError("Unsafe prior pacing export path", "access")
-    parent = os.open(
-        os.path.realpath(root),
-        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-    )
-    try:
-        directory = os.fstat(parent)
-        if (
-            directory.st_uid != os.getuid()
-            or directory.st_mode & 0o022
-            or directory.st_mode & 0o700 != 0o700
-        ):
-            raise AdapterError("Unsafe prior pacing export directory", "access")
-        try:
-            descriptor = os.open(
-                "pacing-state.json",
-                os.O_RDWR | os.O_NOFOLLOW,
-                dir_fd=parent,
-            )
-        except FileNotFoundError:
-            return
-        try:
-            info = os.fstat(descriptor)
-            current = os.stat(
-                "pacing-state.json",
-                dir_fd=parent,
-                follow_symlinks=False,
-            )
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_uid != os.getuid()
-                or stat.S_IMODE(info.st_mode) != 0o600
-                or info.st_nlink != 1
-                or (info.st_dev, info.st_ino)
-                != (current.st_dev, current.st_ino)
-            ):
-                raise AdapterError("Unsafe prior pacing export inode", "access")
-            os.ftruncate(descriptor, 0)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-    finally:
-        os.close(parent)
+    journal_invalidate_owned_output(path)
 
 
 def pin_protocol_parent(path, descriptor, expected=None):
@@ -623,62 +567,8 @@ def pin_protocol_parent(path, descriptor, expected=None):
 
 
 def protocol_failure(candidate, paths):
-    """Keep the strongest RAM candidate; poison only verified current files."""
-    global _PROTOCOL_FATAL, _PROTOCOL_RAM, _PUBLISHER_GATE_FAILED
-    global _STATE_TRUSTED
-    _PROTOCOL_FATAL = _PUBLISHER_GATE_FAILED = True
-    _STATE_TRUSTED = False
-    _PROTOCOL_RAM = json.loads(json.dumps(candidate))
-    for path in paths:
-        if not isinstance(path, str) or path not in _PROTOCOL_PARENT_IDS:
-            continue
-        try:
-            parent = os.open(
-                os.path.dirname(path),
-                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-            )
-            try:
-                directory = os.fstat(parent)
-                if (
-                    directory.st_uid != os.getuid()
-                    or (directory.st_dev, directory.st_ino)
-                    != _PROTOCOL_PARENT_IDS[path]
-                    or stat.S_IMODE(directory.st_mode) != 0o700
-                ):
-                    continue
-                descriptor = os.open(
-                    os.path.basename(path),
-                    os.O_RDWR | os.O_NOFOLLOW,
-                    dir_fd=parent,
-                )
-                try:
-                    info = os.fstat(descriptor)
-                    current = os.stat(
-                        os.path.basename(path),
-                        dir_fd=parent,
-                        follow_symlinks=False,
-                    )
-                    if (
-                        not stat.S_ISREG(info.st_mode)
-                        or info.st_uid != os.getuid()
-                        or stat.S_IMODE(info.st_mode) != 0o600
-                        or info.st_nlink != 1
-                        or not _PROTOCOL_ATOMIC
-                        and (info.st_dev, info.st_ino)
-                        != _PROTOCOL_INODE_IDS.get(path)
-                        or (info.st_dev, info.st_ino)
-                        != (current.st_dev, current.st_ino)
-                    ):
-                        continue
-                    os.ftruncate(descriptor, 0)
-                    os.fsync(descriptor)
-                finally:
-                    os.close(descriptor)
-            finally:
-                os.close(parent)
-        except OSError:
-            # Pre-wire durable pending survives even wholly read-only storage.
-            pass
+    """Retain failure through the original descriptor, never a new pathname."""
+    journal_failure(candidate)
 
 
 def protocol_healthy(state):
@@ -695,12 +585,12 @@ def protocol_healthy(state):
         )
 
 
-
 def protocol_transport_started():
     """Mark an actual opener invocation, after all reservation/state checks."""
     if not _PROTOCOL_RESPONSES:
         raise AdapterError("Publisher transport has no transaction", "access")
     protocol_before_wire()
+    journal_before_wire()
     _PROTOCOL_RESPONSES[-1].update(started=True, received=False)
 
 
@@ -1302,28 +1192,13 @@ def protocol_owned_value(value):
     return validate_budget(value)
 
 
-
 def protocol_safe_descriptor(parent, name, flags, expected=None):
-    """Bind files beneath a retained verified parent without following links."""
-    descriptor = os.open(name, flags | os.O_NOFOLLOW, 0o600, dir_fd=parent)
-    try:
-        info = os.fstat(descriptor)
-        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
-        identity = (info.st_dev, info.st_ino)
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o600
-            or info.st_nlink != 1
-            or identity != (current.st_dev, current.st_ino)
-            or expected is not None
-            and identity != tuple(expected)
-        ):
-            raise AdapterError("Untrusted protocol file identity", "access")
-        return descriptor
-    except BaseException:
-        os.close(descriptor)
-        raise
+    descriptor, identity = journal_open_original(parent, name, flags, expected)
+    _PROTOCOL_RETAINED_IDS[descriptor] = identity
+    _PROTOCOL_RETAINED_VERSIONS[descriptor] = journal_version(
+        os.fstat(descriptor)
+    )
+    return descriptor
 
 
 def protocol_peek_local():
@@ -1332,9 +1207,10 @@ def protocol_peek_local():
     directory = os.path.join(
         tempfile.gettempdir(), FAMILY + "-" + str(os.getuid())
     )
-    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    parent, parent_id = journal_open_directory(directory)
     try:
         info = os.fstat(parent)
+        _PROTOCOL_RETAINED_IDS[parent] = (info.st_dev, info.st_ino)
         if (
             (info.st_dev, info.st_ino)
             != (pins["directory_device"], pins["directory_inode"])
@@ -1344,7 +1220,7 @@ def protocol_peek_local():
             raise AdapterError("Legacy parent changed", "access")
         descriptor = protocol_safe_descriptor(parent, "state.json", os.O_RDONLY)
         try:
-            raw = os.read(descriptor, 16385)
+            raw = protocol_read_original(parent, "state.json", descriptor)
             if len(raw) > 16384:
                 raise AdapterError("Oversized legacy local state", "access")
             value = json.loads(raw)
@@ -1352,9 +1228,9 @@ def protocol_peek_local():
                 raise AdapterError("Invalid local state", "access")
             return value
         finally:
-            os.close(descriptor)
+            protocol_release_original(descriptor)
     finally:
-        os.close(parent)
+        protocol_release_original(parent, directory=True)
 
 
 def protocol_open_namespace(incoming):
@@ -1370,10 +1246,11 @@ def protocol_open_namespace(incoming):
             raise AdapterError("Fresh hosted runner context required", "access")
         # Fresh creation requires authenticated owner and literal approval.
         os.mkdir(directory, 0o700)
-    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    parent, parent_id = journal_open_directory(directory)
     keep = []
     try:
         info = os.fstat(parent)
+        _PROTOCOL_RETAINED_IDS[parent] = (info.st_dev, info.st_ino)
         current = os.stat(directory, follow_symlinks=False)
         namespace = pins["local_namespace"]
         expected = (namespace["directory_device"], namespace["directory_inode"])
@@ -1390,10 +1267,12 @@ def protocol_open_namespace(incoming):
         if purpose == "local":
             check = protocol_safe_descriptor(parent, "state.json", os.O_RDONLY)
             try:
-                preview_raw = os.read(check, 16385)
+                preview_raw = protocol_read_original(
+                    parent, "state.json", check
+                )
                 preview = json.loads(preview_raw)
             finally:
-                os.close(check)
+                protocol_release_original(check)
             if len(preview_raw) > 16384:
                 raise AdapterError("Oversized local protocol state", "access")
         modern = isinstance(preview, dict) and preview.get("schema") == 4
@@ -1426,6 +1305,9 @@ def protocol_open_namespace(incoming):
             (old_lock["device"], old_lock["inode"]) if old_lock else None,
         )
         keep.append(collection)
+        journal_bind_collection(collection, _PROTOCOL_RETAINED_IDS[collection])
+        global _JOURNAL_COLLECTION_FD
+        _JOURNAL_COLLECTION_FD = collection
         fcntl.flock(collection, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if SOURCE_ID == "ibm":
             old = entries.get("state.lock") if purpose == "local" else None
@@ -1454,7 +1336,7 @@ def protocol_open_namespace(incoming):
         keep.append(state_fd)
         if SOURCE_ID != "ibm":
             fcntl.flock(state_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        raw = os.read(state_fd, 16385)
+        raw = protocol_read_original(parent, "state.json", state_fd)
         if purpose == "local":
             if len(raw) > 16384:
                 raise AdapterError("Oversized protocol local state", "access")
@@ -1482,8 +1364,10 @@ def protocol_open_namespace(incoming):
         return keep, parent, state_fd, state
     except BaseException:
         for descriptor in reversed(keep):
-            os.close(descriptor)
-        os.close(parent)
+            with contextlib.suppress(BaseException):
+                protocol_release_original(descriptor)
+        with contextlib.suppress(BaseException):
+            protocol_release_original(parent, directory=True)
         # Never delete a competing or interrupted namespace/lock to retry.
         raise
 
@@ -1525,16 +1409,38 @@ def protocol_close_compatibility():
     global _PROTOCOL_COMPAT_FDS, _PROTOCOL_COMPAT_DIRECTORY
     global _PROTOCOL_COMPAT_READY, _PROTOCOL_FIRST_WIRE_VERIFIED
     global _RESTORED, _STATE_TRUSTED
+    primary = sys.exc_info()[1]
+    errors = []
+    try:
+        journal_release()
+    except BaseException as error:
+        errors.append(error)
     for descriptor in reversed(_PROTOCOL_COMPAT_FDS):
-        os.close(descriptor)
+        try:
+            protocol_release_original(descriptor)
+        except BaseException as error:
+            journal_failure()
+            errors.append(error)
     _PROTOCOL_COMPAT_FDS = []
     if _PROTOCOL_COMPAT_DIRECTORY is not None:
-        os.close(_PROTOCOL_COMPAT_DIRECTORY[1])
+        try:
+            protocol_release_original(
+                _PROTOCOL_COMPAT_DIRECTORY[1], directory=True
+            )
+        except BaseException as error:
+            journal_failure()
+            errors.append(error)
     _PROTOCOL_COMPAT_DIRECTORY = None
     _PROTOCOL_COMPAT_READY = _PROTOCOL_FIRST_WIRE_VERIFIED = False
     _RESTORED = _STATE_TRUSTED = False
     global _COLLECTION_LOCK_HELD
     _COLLECTION_LOCK_HELD = False
+
+    if _JOURNAL_FATAL:
+        with contextlib.suppress(BaseException):
+            journal_invalidate_export()
+    if errors and primary is None:
+        raise errors[0]
 
 
 def protocol_prepare_compatibility():
@@ -1689,15 +1595,20 @@ def protocol_commit_bridge(parent, state_fd, state):
     directory = _PROTOCOL_COMPAT_DIRECTORY[0]
     path = os.path.join(directory, "state.json")
     pin_protocol_parent(path, state_fd, _PROTOCOL_COMPAT_DIRECTORY[2])
-    with os.fdopen(os.dup(state_fd), "r+", encoding="utf-8") as file:
-        pin_protocol_parent(path, file.fileno(), _PROTOCOL_COMPAT_DIRECTORY[2])
-        persist_budget(file, state)
+    try:
+        info = journal_descriptor(state_fd, _PROTOCOL_RETAINED_IDS[state_fd])
+        expected_version = _PROTOCOL_RETAINED_VERSIONS[state_fd]
+        if journal_version(info) != expected_version:
+            raise AdapterError("Initial state generation changed", "access")
+        _PROTOCOL_EXPECTED_GENERATIONS[path] = expected_version
+        persist_budget(None, state)
+    except BaseException:
+        journal_failure(state)
+        raise
     _BUDGET_INITIALIZING = False
-    fcntl.flock(state_fd, fcntl.LOCK_UN)
+    protocol_release_original(state_fd, unlock=True)
     _PROTOCOL_COMPAT_FDS.remove(state_fd)
-    os.close(state_fd)
     _COLLECTION_LOCK_HELD = True
-
 
 
 def utc_now():
@@ -1812,52 +1723,34 @@ def budget_path(host=None):
 
 @contextlib.contextmanager
 def budget_state(host=None):
-    """Serialize durable local state updates outside the delivered tree."""
+    """Serialize updates through the retained schema4 journal inode."""
     global _BUDGET_INITIALIZING
-    path = budget_path()
-    fd = os.open(
-        path,
-        os.O_RDWR | (os.O_CREAT if _BUDGET_INITIALIZING else 0) | os.O_NOFOLLOW,
-        0o600,
-    )
-    info = os.fstat(fd)
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or info.st_uid != os.getuid()
-        or stat.S_IMODE(info.st_mode) != 0o600
-        or info.st_nlink != 1
-    ):
-        os.close(fd)
-        raise AdapterError("Unsafe publisher state file", "access")
-    try:
-        pin_protocol_parent(path, fd)
-    except BaseException:
-        os.close(fd)
-        raise
-    with os.fdopen(fd, "r+", encoding="utf-8") as file:
-        fcntl.flock(file, fcntl.LOCK_EX)
-        raw = file.read(16385)
-        if len(raw) > 16384:
-            raise AdapterError("Oversized publisher state", "access")
+    with journal_locked():
         try:
-            if not raw:
-                raise ValueError("State requires an exact reviewed transition")
+            raw = journal_read()
             state = validate_budget(json.loads(raw))
-        except (ValueError, TypeError) as error:
-            raise AdapterError("Corrupt publisher state", "access") from error
+            protocol_healthy(state)
+        except BaseException:
+            journal_failure()
+            raise
         try:
             yield state
         finally:
-            if _PROTOCOL_FATAL:
-                raise AdapterError(
-                    "Publisher persistence failure is sticky", "access"
-                )
-            state["observed_at"] = time.time()
-            state["starts"] = [
-                t for t in state["starts"] if t > time.time() - 60
-            ]
-            persist_budget(file, state)
-            _BUDGET_INITIALIZING = False
+            primary = sys.exc_info()[1]
+            if not _JOURNAL_FATAL:
+                try:
+                    state["observed_at"] = time.time()
+                    state["starts"] = [
+                        t for t in state["starts"] if t > time.time() - 60
+                    ]
+                    persist_budget(None, state)
+                    _BUDGET_INITIALIZING = False
+                except BaseException:
+                    journal_failure(state)
+                    if primary is None:
+                        raise
+            elif primary is None:
+                raise AdapterError("Publisher journal gate is sticky", "access")
 
 
 def pace(url, interval=12):
@@ -3373,12 +3266,15 @@ def artifact_output(path):
 
 
 def export_family_artifact():
-    """Export healthy state; invalidate owned stale output on failure."""
-    invalidate_protocol_export()
+    """Export the unchanged owned envelope under retained journal authority."""
     path = os.environ.get("LU_COOPERATION_PACING_ARTIFACT_PATH")
-    if not path or not (_STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
+    if not path:
         return
-    with artifact_output(path) as descriptor:
+    if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED or _JOURNAL_FATAL:
+        journal_invalidate_export()
+        return
+
+    def payload():
         run_id, attempt = current_run_identity()
         with budget_state() as local:
             protocol_healthy(local)
@@ -3396,10 +3292,14 @@ def export_family_artifact():
             "source": SOURCE_ID,
             "state": state,
         }
-        with os.fdopen(os.dup(descriptor), "w") as file:
-            json.dump(envelope, file, separators=(",", ":"))
-            file.flush()
-            os.fsync(file.fileno())
+        return envelope
+
+    journal_export_envelope(
+        path,
+        payload,
+        atomic=False,
+        signal=False,
+    )
 
 
 def github(method, path, payload=None, missing_ok=False):
@@ -3736,6 +3636,909 @@ def run_refresh(publish):
         )
     print(json.dumps(outcome, ensure_ascii=False))
     return 1 if failure else 0
+
+
+_JOURNAL_COLLECTION_FD = None
+_PROTOCOL_RETAINED_IDS = {}
+_JOURNAL_FD = None
+_JOURNAL_ID = None
+_JOURNAL_VERSION = None
+_JOURNAL_PARENT_FD = None
+_JOURNAL_PARENT_ID = None
+_JOURNAL_PATH = None
+_JOURNAL_LOCK_FD = None
+_JOURNAL_LOCK_ID = None
+_JOURNAL_COLLECTION_ID = None
+_JOURNAL_DEPTH = 0
+_JOURNAL_FATAL = False
+_JOURNAL_DIRTY = False
+_JOURNAL_SAVE_ATTEMPTED = False
+_JOURNAL_BOOTSTRAP_ALLOWED = False
+_JOURNAL_NEW = False
+_JOURNAL_FAILED_STATE = None
+
+
+def journal_version(info):
+    """Identify observable file generations without adopting a new inode."""
+    return info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def journal_descriptor(descriptor, identity, directory=False, unlinked=False):
+    info = os.fstat(descriptor)
+    if (
+        (info.st_dev, info.st_ino) != identity
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600)
+        or directory
+        and not stat.S_ISDIR(info.st_mode)
+        or not directory
+        and (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink not in ((0, 1) if unlinked else (1,))
+        )
+    ):
+        raise AdapterError("Original publisher descriptor changed", "access")
+    return info
+
+
+def journal_parent():
+    journal_descriptor(_JOURNAL_PARENT_FD, _JOURNAL_PARENT_ID, True)
+    named = os.stat(os.path.dirname(_JOURNAL_PATH), follow_symlinks=False)
+    if (named.st_dev, named.st_ino) != _JOURNAL_PARENT_ID:
+        raise AdapterError("Original publisher directory changed", "access")
+
+
+def journal_poison():
+    """Invalidate the held original only; preserve unrelated generations."""
+    if _JOURNAL_FD is None:
+        return
+    journal_parent()
+    info = journal_descriptor(_JOURNAL_FD, _JOURNAL_ID, unlinked=True)
+    if not _JOURNAL_DIRTY and journal_version(info) != _JOURNAL_VERSION:
+        raise AdapterError("Stronger publisher generation preserved", "access")
+    os.ftruncate(_JOURNAL_FD, 0)
+    os.fsync(_JOURNAL_FD)
+
+
+def journal_failure(candidate=None):
+    """Latch every journal authority or persistence failure across reentry."""
+    global _JOURNAL_FATAL, _PUBLISHER_GATE_FAILED, _STATE_TRUSTED
+    global _JOURNAL_FAILED_STATE, _PROTOCOL_FATAL, _PROTOCOL_RAM
+    _JOURNAL_FATAL = _PUBLISHER_GATE_FAILED = _PROTOCOL_FATAL = True
+    _STATE_TRUSTED = False
+    if candidate is not None:
+        with contextlib.suppress(BaseException):
+            _JOURNAL_FAILED_STATE = copy.deepcopy(candidate)
+            _PROTOCOL_RAM = copy.deepcopy(candidate)
+    with contextlib.suppress(BaseException):
+        journal_poison()
+
+
+def journal_close_descriptor(descriptor, identity, directory=False):
+    """Release our acquisition, preserving a primary error and foreign FD."""
+    primary = sys.exc_info()[1]
+    try:
+        journal_descriptor(descriptor, identity, directory, unlinked=True)
+        os.close(descriptor)
+    except BaseException:
+        journal_failure()
+        if primary is None:
+            raise
+
+
+def journal_verify(generation=True):
+    try:
+        if _JOURNAL_FATAL:
+            raise AdapterError("Publisher journal gate is sticky", "access")
+        journal_parent()
+        info = journal_descriptor(_JOURNAL_FD, _JOURNAL_ID)
+        named = os.stat(
+            os.path.basename(_JOURNAL_PATH),
+            dir_fd=_JOURNAL_PARENT_FD,
+            follow_symlinks=False,
+        )
+        if (named.st_dev, named.st_ino) != _JOURNAL_ID or (
+            generation and journal_version(info) != _JOURNAL_VERSION
+        ):
+            raise AdapterError("Publisher journal generation changed", "access")
+        if _JOURNAL_LOCK_FD is not None:
+            journal_descriptor(_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID)
+            if _JOURNAL_LOCK_ID != _JOURNAL_ID:
+                lock = os.stat(
+                    "state.lock",
+                    dir_fd=_JOURNAL_PARENT_FD,
+                    follow_symlinks=False,
+                )
+                if (lock.st_dev, lock.st_ino) != _JOURNAL_LOCK_ID:
+                    raise AdapterError("Publisher state lock changed", "access")
+        return info
+    except BaseException:
+        journal_failure()
+        raise
+
+
+def journal_acquire():
+    """Retain only a fully verified original RW inode and lock acquisition."""
+    global _JOURNAL_FD, _JOURNAL_ID, _JOURNAL_VERSION, _JOURNAL_PATH
+    global _JOURNAL_PARENT_FD, _JOURNAL_PARENT_ID, _JOURNAL_NEW
+    global _JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID
+    if _JOURNAL_FATAL:
+        raise AdapterError("Publisher journal gate is sticky", "access")
+    if _JOURNAL_FD is not None:
+        journal_verify()
+        return
+    path = budget_path()
+    _JOURNAL_PATH = path
+    parent, parent_id = journal_open_directory(os.path.dirname(path))
+    _JOURNAL_PARENT_FD, _JOURNAL_PARENT_ID = parent, parent_id
+    try:
+        expected = _PROTOCOL_INODE_IDS.get(path)
+        try:
+            descriptor, identity = journal_open_original(
+                parent, os.path.basename(path), os.O_RDWR, expected
+            )
+        except FileNotFoundError:
+            if not (False):
+                raise AdapterError(
+                    "Mature publisher state is missing", "access"
+                )
+            descriptor, identity = journal_open_original(
+                parent,
+                os.path.basename(path),
+                os.O_RDWR | os.O_CREAT | os.O_EXCL,
+            )
+            _JOURNAL_NEW = True
+        info = journal_descriptor(descriptor, identity)
+        required_version = _PROTOCOL_EXPECTED_GENERATIONS.get(path)
+        if (
+            required_version is not None
+            and journal_version(info) != required_version
+        ):
+            journal_close_acquired(descriptor, identity)
+            raise AdapterError("Initial publisher generation changed", "access")
+        _JOURNAL_FD, _JOURNAL_ID = descriptor, identity
+        _JOURNAL_VERSION = journal_version(info)
+        journal_verify()
+        _JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID = descriptor, identity
+        journal_verify()
+        _PROTOCOL_DESCRIPTOR_PATHS[_JOURNAL_FD] = path
+    except BaseException:
+        journal_failure()
+        raise
+
+
+@contextlib.contextmanager
+def journal_locked():
+    global _JOURNAL_DEPTH
+    journal_acquire()
+    if _JOURNAL_DEPTH == 0:
+        try:
+            fcntl.flock(_JOURNAL_LOCK_FD, fcntl.LOCK_EX)
+        except BaseException:
+            journal_failure()
+            raise
+    _JOURNAL_DEPTH += 1
+    try:
+        journal_verify()
+        yield
+    finally:
+        primary = sys.exc_info()[1]
+        _JOURNAL_DEPTH -= 1
+        if _JOURNAL_DEPTH == 0:
+            try:
+                journal_descriptor(_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID)
+                fcntl.flock(_JOURNAL_LOCK_FD, fcntl.LOCK_UN)
+                journal_descriptor(_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID)
+            except BaseException:
+                journal_failure()
+                if primary is None:
+                    raise
+
+
+def journal_read():
+    journal_acquire()
+    before = journal_verify()
+    try:
+        raw = os.pread(_JOURNAL_FD, 16385, 0)
+        after = journal_verify()
+        if (
+            journal_version(before) != journal_version(after)
+            or len(raw) > 16384
+        ):
+            raise AdapterError(
+                "Publisher journal changed during read", "access"
+            )
+        return raw
+    except BaseException:
+        journal_failure()
+        raise
+
+
+def journal_write(state):
+    global _JOURNAL_VERSION, _JOURNAL_DIRTY, _JOURNAL_SAVE_ATTEMPTED
+    global _JOURNAL_NEW, _BUDGET_INITIALIZING
+    try:
+        validate_budget(state)
+        raw = json.dumps(state, separators=(",", ":")).encode()
+        if not raw or len(raw) > 16384:
+            raise AdapterError("Oversized publisher journal", "access")
+        journal_verify()
+        _JOURNAL_SAVE_ATTEMPTED = True
+        _JOURNAL_DIRTY = True
+        os.ftruncate(_JOURNAL_FD, 0)
+        os.fsync(_JOURNAL_FD)
+        offset = 0
+        while offset < len(raw):
+            journal_verify(False)
+            written = os.pwrite(_JOURNAL_FD, raw[offset:], offset)
+            journal_verify(False)
+            if written <= 0:
+                raise AdapterError(
+                    "Incomplete publisher journal write", "access"
+                )
+            offset += written
+        journal_verify(False)
+        os.ftruncate(_JOURNAL_FD, len(raw))
+        journal_verify(False)
+        os.fsync(_JOURNAL_FD)
+        before = journal_verify(False)
+        actual = os.pread(_JOURNAL_FD, 16385, 0)
+        after = journal_verify(False)
+        if actual != raw or journal_version(before) != journal_version(after):
+            _JOURNAL_DIRTY = False
+            raise AdapterError("Publisher journal readback changed", "access")
+        _JOURNAL_VERSION = journal_version(after)
+        _JOURNAL_DIRTY = False
+        _JOURNAL_NEW = False
+        _BUDGET_INITIALIZING = False
+    except BaseException:
+        _JOURNAL_SAVE_ATTEMPTED = True
+        journal_failure(state)
+        raise
+
+
+def journal_bind_collection(descriptor, expected=None):
+    global _JOURNAL_COLLECTION_ID
+    try:
+        info = os.fstat(descriptor)
+        identity = (info.st_dev, info.st_ino)
+        if expected is not None and identity != expected:
+            raise AdapterError(
+                "Lifecycle FD changed after acquisition", "access"
+            )
+        _JOURNAL_COLLECTION_ID = expected if expected is not None else identity
+        journal_descriptor(descriptor, _JOURNAL_COLLECTION_ID)
+    except BaseException:
+        journal_failure()
+        raise
+
+
+def journal_verify_collection():
+    journal_descriptor(_JOURNAL_COLLECTION_FD, _JOURNAL_COLLECTION_ID)
+
+    named = os.stat(
+        os.path.join(os.path.dirname(_JOURNAL_PATH), "collection.lock"),
+        follow_symlinks=False,
+    )
+    if (named.st_dev, named.st_ino) != _JOURNAL_COLLECTION_ID:
+        raise AdapterError("Original lifecycle lock changed", "access")
+
+
+def journal_before_wire():
+    try:
+        if _PUBLISHER_GATE_FAILED:
+            raise AdapterError("Publisher completion gate is sticky", "access")
+        journal_verify()
+        journal_verify_collection()
+    except BaseException:
+        journal_failure()
+        raise
+
+
+def journal_release():
+    """Attempt independent releases; never clear the sticky failure gate."""
+    global _JOURNAL_FD, _JOURNAL_LOCK_FD, _JOURNAL_PARENT_FD
+    global _JOURNAL_COLLECTION_FD, _JOURNAL_COLLECTION_ID
+    global _JOURNAL_ID, _JOURNAL_LOCK_ID, _JOURNAL_PARENT_ID
+    primary = sys.exc_info()[1]
+    errors = []
+    releases = [
+        (_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID, False),
+        (_JOURNAL_FD, _JOURNAL_ID, False),
+        (_JOURNAL_PARENT_FD, _JOURNAL_PARENT_ID, True),
+    ]
+    seen = set()
+    for descriptor, identity, directory in releases:
+        if descriptor is None or descriptor in seen:
+            continue
+        seen.add(descriptor)
+        try:
+            journal_close_descriptor(descriptor, identity, directory)
+        except BaseException as error:
+            errors.append(error)
+    _JOURNAL_COLLECTION_FD = _JOURNAL_COLLECTION_ID = None
+    _JOURNAL_FD = _JOURNAL_LOCK_FD = _JOURNAL_PARENT_FD = None
+    _JOURNAL_ID = _JOURNAL_LOCK_ID = _JOURNAL_PARENT_ID = None
+    if _JOURNAL_FATAL:
+        with contextlib.suppress(BaseException):
+            journal_invalidate_export()
+    if errors and primary is None:
+        raise errors[0]
+
+
+class JournalLease:
+    """Preserve the existing immediate-lock and explicit-close interface."""
+
+    def __init__(self):
+        self.context = journal_locked()
+        self.context.__enter__()
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *failure):
+        if not self.closed:
+            self.closed = True
+            return self.context.__exit__(*failure)
+
+    def close(self):
+        self.__exit__(*sys.exc_info())
+
+    def fileno(self):
+        journal_descriptor(_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID)
+        return _JOURNAL_LOCK_FD
+
+
+def journal_invalidate_export():
+    path = os.environ.get("LU_COOPERATION_PACING_ARTIFACT_PATH")
+    if path:
+        journal_invalidate_owned_output(path)
+
+
+def protocol_release_original(descriptor, unlock=False, directory=False):
+    identity = _PROTOCOL_RETAINED_IDS.get(descriptor)
+    if identity is None:
+        raise AdapterError("Unrecorded protocol descriptor", "access")
+    journal_descriptor(descriptor, identity, directory)
+    if unlock:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        journal_descriptor(descriptor, identity, directory)
+    journal_close_descriptor(descriptor, identity, directory)
+    _PROTOCOL_RETAINED_IDS.pop(descriptor, None)
+
+
+def output_identity(descriptor, expected, directory=False, unlinked=False):
+    info = os.fstat(descriptor)
+    if (
+        (info.st_dev, info.st_ino) != expected
+        or info.st_uid != os.getuid()
+        or directory
+        and (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_mode & 0o022
+            or info.st_mode & 0o700 != 0o700
+        )
+        or not directory
+        and (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_mode & 0o022
+            or info.st_nlink not in ((0, 1) if unlinked else (1,))
+        )
+    ):
+        raise AdapterError("Original owned output changed", "access")
+    return info
+
+
+def output_close(descriptor, expected, directory=False):
+    primary = sys.exc_info()[1]
+    try:
+        output_identity(descriptor, expected, directory, True)
+        os.close(descriptor)
+    except BaseException:
+        journal_failure()
+        if primary is None:
+            raise
+
+
+def output_parent(parent, root, expected):
+    output_identity(parent, expected, True)
+    current = os.stat(root, follow_symlinks=False)
+    if (current.st_dev, current.st_ino) != expected:
+        raise AdapterError("Owned output directory changed", "access")
+
+
+def output_poison(descriptor, expected):
+    info = output_identity(descriptor, expected, unlinked=True)
+    if stat.S_IMODE(info.st_mode) != 0o600:
+        raise AdapterError("Unsafe owned artifact permissions", "access")
+    os.ftruncate(descriptor, 0)
+    os.fsync(descriptor)
+
+
+def output_open_parent(path):
+    configured = os.environ.get("RUNNER_TEMP", "")
+    if not configured or not os.path.isabs(configured):
+        raise AdapterError("Explicit runner temporary root required", "access")
+    root = os.path.realpath(configured)
+    if os.path.dirname(os.path.abspath(path)) != root:
+        raise AdapterError("Unsafe pacing artifact path", "access")
+    named_root = os.stat(root, follow_symlinks=False)
+    expected_root = (named_root.st_dev, named_root.st_ino)
+    parent = os.open(
+        root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+    )
+    info = os.fstat(parent)
+    identity = expected_root
+    try:
+        output_parent(parent, root, identity)
+    except BaseException:
+        with contextlib.suppress(BaseException):
+            journal_close_acquired(parent, identity)
+        raise
+    return parent, root, identity
+
+
+def journal_invalidate_owned_output(path):
+    """Invalidate a verified owned inode before fallible cleanup/signals."""
+    parent, root, parent_id = output_open_parent(path)
+    descriptor = None
+    identity = None
+    try:
+        try:
+            named_before = os.stat(
+                os.path.basename(path), dir_fd=parent, follow_symlinks=False
+            )
+            identity = (named_before.st_dev, named_before.st_ino)
+            descriptor = os.open(
+                os.path.basename(path),
+                os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent,
+            )
+        except FileNotFoundError:
+            return
+        info = os.fstat(descriptor)
+        if (info.st_dev, info.st_ino) != identity:
+            raise AdapterError("Owned invalidation FD changed", "access")
+        output_identity(descriptor, identity)
+        current = os.stat(
+            os.path.basename(path), dir_fd=parent, follow_symlinks=False
+        )
+        if (current.st_dev, current.st_ino) != identity:
+            raise AdapterError("Owned output identity changed", "access")
+        output_parent(parent, root, parent_id)
+        output_poison(descriptor, identity)
+        output_parent(parent, root, parent_id)
+        current = os.stat(
+            os.path.basename(path), dir_fd=parent, follow_symlinks=False
+        )
+        if (current.st_dev, current.st_ino) == identity:
+            os.unlink(os.path.basename(path), dir_fd=parent)
+            os.fsync(parent)
+    finally:
+        primary = sys.exc_info()[1]
+        errors = []
+        for fd, expected, directory in (
+            (descriptor, identity, False),
+            (parent, parent_id, True),
+        ):
+            if fd is not None:
+                try:
+                    output_close(fd, expected, directory)
+                except BaseException as error:
+                    errors.append(error)
+        if errors and primary is None:
+            raise errors[0]
+
+
+def journal_output_signal(value):
+    """Bind fresh step output and all nested descriptors through close."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise AdapterError("Fresh workflow output required", "access")
+        return
+    configured = os.environ.get("RUNNER_TEMP", "")
+    root = os.path.realpath(configured)
+    if not configured or not os.path.isabs(path):
+        raise AdapterError("Unsafe workflow output", "access")
+    relative = os.path.relpath(path, root)
+    parts = relative.split(os.sep)
+    if any(p in ("", ".", "..") for p in parts):
+        raise AdapterError("Workflow output outside runner root", "access")
+    parent, root, root_id = output_open_parent(
+        os.path.join(root, ".output-binding")
+    )
+    handles = [(parent, root_id, True, None, None)]
+    try:
+        output_parent(parent, root, root_id)
+        for name in parts[:-1]:
+            named_before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            expected_before = (named_before.st_dev, named_before.st_ino)
+            fd = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent,
+            )
+            info = os.fstat(fd)
+            identity = expected_before
+            if (info.st_dev, info.st_ino) != identity:
+                journal_failure()
+                raise AdapterError(
+                    "Step directory FD changed during open", "access"
+                )
+            handles.append((fd, identity, True, parent, name))
+            output_identity(fd, identity, True)
+            parent = fd
+        named_before = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+        expected_before = (named_before.st_dev, named_before.st_ino)
+        descriptor = os.open(
+            parts[-1],
+            os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=parent,
+        )
+        info = os.fstat(descriptor)
+        identity = expected_before
+        if (info.st_dev, info.st_ino) != identity:
+            journal_failure()
+            raise AdapterError(
+                "Workflow output FD changed during open", "access"
+            )
+        handles.append((descriptor, identity, False, parent, parts[-1]))
+        if value == "true" and info.st_size != 0:
+            raise AdapterError("Fresh workflow output required", "access")
+
+        def verify():
+            output_parent(handles[0][0], root, root_id)
+            for fd, expected, directory, base, name in handles[1:]:
+                output_identity(fd, expected, directory)
+                named = os.stat(name, dir_fd=base, follow_symlinks=False)
+                if (named.st_dev, named.st_ino) != expected:
+                    raise AdapterError("Workflow output path changed", "access")
+
+        verify()
+        line = ("pacing_ready=" + value + "\n").encode()
+        if os.write(descriptor, line) != len(line):
+            raise AdapterError("Incomplete workflow output signal", "access")
+        verify()
+        os.fsync(descriptor)
+        verify()
+    finally:
+        primary = sys.exc_info()[1]
+        errors = []
+        for fd, expected, directory, _, _ in reversed(handles):
+            try:
+                output_close(fd, expected, directory)
+            except BaseException as error:
+                errors.append(error)
+        if errors and primary is None:
+            raise errors[0]
+
+
+def journal_export_envelope(path, envelope, atomic=False, signal=False):
+    """Retain owned output references through finalization and all releases."""
+    parent, root, parent_id = output_open_parent(path)
+    name = os.path.basename(path)
+    handles = []
+    named_id = None
+    temporary = None
+    primary = None
+    try:
+        try:
+            named_before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            old_expected = (named_before.st_dev, named_before.st_ino)
+            old = os.open(
+                name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+            )
+        except FileNotFoundError:
+            old = None
+        if old is not None:
+            info = os.fstat(old)
+            named_id = old_expected
+            named_after = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if (info.st_dev, info.st_ino) != named_id or (
+                named_after.st_dev,
+                named_after.st_ino,
+            ) != named_id:
+                journal_failure()
+                raise AdapterError(
+                    "Prior output changed during acquisition", "access"
+                )
+            handles.append((old, named_id))
+            output_identity(old, named_id)
+            if stat.S_IMODE(info.st_mode) != 0o600:
+                raise AdapterError("Unsafe old pacing artifact", "access")
+            if not atomic:
+                output_poison(old, named_id)
+                output_parent(parent, root, parent_id)
+                named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if (named.st_dev, named.st_ino) != named_id:
+                    raise AdapterError("Old artifact was replaced", "access")
+                os.unlink(name, dir_fd=parent)
+                named_id = None
+        journal_before_wire()
+        if callable(envelope):
+            envelope = envelope()
+        temporary = ".owned-pacing-" + os.urandom(16).hex() if atomic else name
+        descriptor = os.open(
+            temporary,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent,
+        )
+        info = os.fstat(descriptor)
+        named_new = os.stat(temporary, dir_fd=parent, follow_symlinks=False)
+        identity = (named_new.st_dev, named_new.st_ino)
+        if (info.st_dev, info.st_ino) != identity:
+            journal_failure()
+            raise AdapterError(
+                "New output FD changed during acquisition", "access"
+            )
+        handles.append((descriptor, identity))
+        guard = os.dup(descriptor)
+        handles.append((guard, identity))
+        raw = json.dumps(envelope, separators=(",", ":")).encode()
+        if len(raw) > 16384:
+            raise AdapterError("Oversized pacing artifact", "access")
+        offset = 0
+        while offset < len(raw):
+            output_parent(parent, root, parent_id)
+            output_identity(descriptor, identity)
+            written = os.pwrite(descriptor, raw[offset:], offset)
+            output_identity(descriptor, identity)
+            if written <= 0:
+                raise AdapterError("Incomplete pacing artifact write", "access")
+            offset += written
+        output_identity(descriptor, identity)
+        os.ftruncate(descriptor, len(raw))
+        output_identity(descriptor, identity)
+        os.fsync(descriptor)
+        before = output_identity(guard, identity)
+        actual = os.pread(guard, 16385, 0)
+        after = output_identity(guard, identity)
+        if actual != raw or journal_version(before) != journal_version(after):
+            raise AdapterError("Pacing artifact changed during read", "access")
+        output_parent(parent, root, parent_id)
+        if atomic:
+            try:
+                current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                current = None
+            if (
+                None if current is None else (current.st_dev, current.st_ino)
+            ) != named_id:
+                raise AdapterError("Prior pacing artifact changed", "access")
+            os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+            temporary = None
+        os.fsync(parent)
+        journal_before_wire()
+        if signal:
+            journal_output_signal("true")
+        journal_before_wire()
+        output_parent(parent, root, parent_id)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        output_identity(descriptor, identity)
+        output_identity(guard, identity)
+        if (current.st_dev, current.st_ino) != identity:
+            raise AdapterError("Final pacing artifact was replaced", "access")
+    except BaseException:
+        journal_failure()
+        raise
+    finally:
+        primary = sys.exc_info()[1]
+        errors = []
+        failed = primary is not None or _JOURNAL_FATAL
+        if failed:
+            for fd, identity in handles:
+                with contextlib.suppress(BaseException):
+                    output_poison(fd, identity)
+        for fd, identity in reversed(handles):
+            try:
+                output_close(fd, identity)
+            except BaseException as error:
+                errors.append(error)
+        try:
+            output_close(parent, parent_id, True)
+        except BaseException as error:
+            errors.append(error)
+        if failed or errors or _JOURNAL_FATAL:
+            # Reopen only the safely owned current output for the known ID.
+            # Existing unsafe/replacement objects must remain untouched.
+            with contextlib.suppress(BaseException):
+                journal_invalidate_known_output(path, handles, parent_id)
+            if signal:
+                with contextlib.suppress(BaseException):
+                    journal_output_signal("false")
+        if errors and primary is None:
+            raise errors[0]
+
+
+def journal_invalidate_known_output(path, handles, expected_parent):
+    """Last-close recovery cannot invalidate a different replacement inode."""
+    parent, root, parent_id = output_open_parent(path)
+    if parent_id != expected_parent:
+        output_close(parent, parent_id, True)
+        raise AdapterError("Original output parent replaced", "access")
+    descriptor = None
+    identity = None
+    try:
+        named_before = os.stat(
+            os.path.basename(path), dir_fd=parent, follow_symlinks=False
+        )
+        identity = (named_before.st_dev, named_before.st_ino)
+        if identity not in [expected for _, expected in handles]:
+            raise AdapterError("Unrelated owned output preserved", "access")
+        descriptor = os.open(
+            os.path.basename(path),
+            os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=parent,
+        )
+        info = os.fstat(descriptor)
+        if (info.st_dev, info.st_ino) != identity:
+            raise AdapterError("Owned cleanup FD changed", "access")
+        if identity not in [expected for _, expected in handles]:
+            raise AdapterError("Unrelated owned output preserved", "access")
+        output_parent(parent, root, parent_id)
+        output_poison(descriptor, identity)
+        output_parent(parent, root, parent_id)
+        current = os.stat(
+            os.path.basename(path), dir_fd=parent, follow_symlinks=False
+        )
+        if (current.st_dev, current.st_ino) == identity:
+            os.unlink(os.path.basename(path), dir_fd=parent)
+            os.fsync(parent)
+    finally:
+        if descriptor is not None:
+            output_close(descriptor, identity)
+        output_close(parent, parent_id, True)
+
+
+def protocol_read_original(parent, name, descriptor):
+    """Read initial compatibility bytes through their acquired identity."""
+    try:
+        expected = _PROTOCOL_RETAINED_IDS[descriptor]
+        before = journal_descriptor(descriptor, expected)
+        parent_id = _PROTOCOL_RETAINED_IDS[parent]
+        journal_descriptor(parent, parent_id, True)
+        named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (named.st_dev, named.st_ino) != expected:
+            raise AdapterError("Initial state path changed", "access")
+        raw = os.pread(descriptor, 16385, 0)
+        after = journal_descriptor(descriptor, expected)
+        named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        journal_descriptor(parent, parent_id, True)
+        if (
+            (named.st_dev, named.st_ino) != expected
+            or journal_version(before) != journal_version(after)
+            or len(raw) > 16384
+        ):
+            raise AdapterError("Initial state generation changed", "access")
+        _PROTOCOL_RETAINED_VERSIONS[descriptor] = journal_version(after)
+        return raw
+    except BaseException:
+        journal_failure()
+        raise
+
+
+_PROTOCOL_RETAINED_VERSIONS = {}
+_PROTOCOL_EXPECTED_GENERATIONS = {}
+
+
+def journal_close_acquired(descriptor, expected):
+    """Rollback only an actual named acquisition, never an unknown FD."""
+    if expected is None:
+        return
+    primary = sys.exc_info()[1]
+    try:
+        info = os.fstat(descriptor)
+        if (info.st_dev, info.st_ino) != expected:
+            raise AdapterError("Acquired descriptor was recycled", "access")
+        os.close(descriptor)
+    except BaseException:
+        journal_failure()
+        if primary is None:
+            raise
+
+
+def journal_open_directory(path):
+    before = os.stat(path, follow_symlinks=False)
+    expected = (before.st_dev, before.st_ino)
+    descriptor = os.open(
+        path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+    )
+    try:
+        info = journal_descriptor(descriptor, expected, True)
+        current = os.stat(path, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != expected:
+            raise AdapterError(
+                "Publisher parent changed at acquisition", "access"
+            )
+        return descriptor, expected
+    except BaseException:
+        journal_failure()
+        with contextlib.suppress(BaseException):
+            journal_close_acquired(descriptor, expected)
+        raise
+
+
+def journal_open_original(parent, name, flags, expected=None):
+    """Validate both named generations before publishing an FD as authority."""
+    try:
+        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        previous = (before.st_dev, before.st_ino)
+    except FileNotFoundError:
+        previous = None
+        if not flags & os.O_CREAT:
+            raise
+        flags |= os.O_EXCL
+    if expected is not None and previous != expected:
+        raise AdapterError("Expected publisher inode changed", "access")
+    descriptor = os.open(
+        name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=parent
+    )
+    safe_close = previous
+    try:
+        named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        identity = (named.st_dev, named.st_ino)
+        if previous is not None and identity != previous:
+            raise AdapterError("Publisher name changed during open", "access")
+        journal_descriptor(descriptor, identity)
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != identity:
+            raise AdapterError(
+                "Publisher file changed at acquisition", "access"
+            )
+        safe_close = identity
+        _JOURNAL_ACQUIRED_IDS[descriptor] = identity
+        return descriptor, identity
+    except BaseException:
+        journal_failure()
+        with contextlib.suppress(BaseException):
+            journal_close_acquired(descriptor, safe_close)
+        raise
+
+
+_JOURNAL_ACQUIRED_IDS = {}
+
+
+def journal_lifecycle_open(path, create):
+    """Capture the actual collection acquisition before flock or cleanup."""
+    directory = os.path.dirname(path)
+    named = os.stat(directory, follow_symlinks=False)
+    parent_id = (named.st_dev, named.st_ino)
+    parent = os.open(
+        directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+    )
+    descriptor = identity = None
+    try:
+        held = os.fstat(parent)
+        current = os.stat(directory, follow_symlinks=False)
+        if (held.st_dev, held.st_ino) != parent_id or (
+            current.st_dev,
+            current.st_ino,
+        ) != parent_id:
+            raise AdapterError("Lifecycle parent changed during open", "access")
+        flags = os.O_RDWR | (os.O_CREAT if create else 0)
+        descriptor, identity = journal_open_original(
+            parent, os.path.basename(path), flags
+        )
+        return descriptor
+    except BaseException:
+        journal_failure()
+        if descriptor is not None:
+            with contextlib.suppress(BaseException):
+                journal_close_acquired(descriptor, identity)
+        raise
+    finally:
+        primary = sys.exc_info()[1]
+        try:
+            journal_close_acquired(parent, parent_id)
+        except BaseException:
+            if descriptor is not None:
+                with contextlib.suppress(BaseException):
+                    journal_close_acquired(descriptor, identity)
+            if primary is None:
+                raise
 
 
 if __name__ == "__main__":

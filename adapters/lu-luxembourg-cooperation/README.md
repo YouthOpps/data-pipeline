@@ -246,3 +246,37 @@ requests retain the existing independent transport guard; the page metric is
 for original logical page completion. The new collection lock and complete
 state were independently checked before public approval. This native evidence
 is not a production or live website verification; those follow the merge.
+
+## Journal ownership maintenance (#295)
+
+Publisher journal reads and writes retain the acquired original RW descriptor,
+parent identity and file generation. They check that authority again before
+transport and export. A changed name, generation, lock or descriptor fails the
+publisher gate; cleanup never adopts or truncates the stronger replacement.
+Serialization, write, fsync and release failures remain sticky for the process.
+Cleanup attempts independent original descriptors and preserves a prior error.
+Safe owned artifact output is invalidated before best-effort signaling or
+unlink; foreign descriptors and unsafe existing output are preserved.
+
+The existing in-place journal format and transaction semantics remain in place.
+The guard binds reads, writes and release to the original acquisition rather
+than trusting a later pathname or recycled descriptor.
+
+The existing schema4 exact LOCAL/hosted bridge and approval checks are
+unchanged. Initial raw-state reads and bridge releases now retain their
+acquisition identity and generation; compatibility cleanup preserves an
+unrelated recycled FD.
+
+This maintenance preserves source facts, frontier, dates, expiry rules, schemas,
+seeds, history pins, pacing limits, retries, publication and workflow settings.
+Validation uses actual functions with inert transport and private journals, plus
+prior accepted native evidence for unchanged collection functions. It does not
+certify a new crawl, production run or every legacy runtime contract. Artifact
+output assumes the existing trusted private job/temporary-directory boundary; it
+cannot authenticate an arbitrary concurrent same-UID writer forging output.
+
+The retained genuine native RAM was also replayed without source requests: all
+four responses, eight raw facts, seven filtered facts and all 33 saved states;
+the accepted consumer handled raw/filtered/empty/last-good cases as 8/7/0/7.
+
+Reference: https://github.com/YouthOpps/data-pipeline/issues/295

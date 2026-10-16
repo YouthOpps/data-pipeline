@@ -393,3 +393,41 @@ ordinary collection and data flow; these controls are neither a new publisher
 collection nor production execution. Parser, inventory, identifiers, dates,
 publication payloads, tests and scheduled workflow remain unchanged. No retained
 publisher hold, cooldown or source journal is reset by this maintenance.
+
+## Journal ownership maintenance (#295)
+
+Publisher journal reads and writes retain the acquired original RW descriptor,
+parent identity and file generation. They check that authority again before
+transport and export. A changed name, generation, lock or descriptor fails the
+publisher gate; cleanup never adopts or truncates the stronger replacement.
+Serialization, write, fsync and release failures remain sticky for the process.
+Cleanup attempts independent original descriptors and preserves a prior error.
+Safe owned artifact output is invalidated before best-effort signaling or
+unlink; foreign descriptors and unsafe existing output are preserved.
+
+The existing in-place journal format and transaction semantics remain in place.
+The guard binds reads, writes and release to the original acquisition rather
+than trusting a later pathname or recycled descriptor.
+
+Only an actually newly created publisher namespace, during its existing verified
+latest-owned restoration, can initialize neutral state for the incoming MAX
+merge. An existing directory with missing or empty state fails closed. GitHub
+publication transport does not establish publisher namespace creation proof.
+
+This maintenance preserves source facts, frontier, dates, expiry rules, schemas,
+seeds, history pins, pacing limits, retries, publication and workflow settings.
+Validation uses actual functions with inert transport and private journals, plus
+prior accepted native evidence for unchanged collection functions. It does not
+certify a new crawl, production run or every legacy runtime contract. Artifact
+output assumes the existing trusted private job/temporary-directory boundary; it
+cannot authenticate an arbitrary concurrent same-UID writer forging output.
+
+The earlier native acceptance remains historical evidence. This patch does not
+claim a fresh full-body replay from expired RAM or a new publisher request.
+
+Reference: https://github.com/YouthOpps/data-pipeline/issues/295
+
+These existing schemas do not add a durable pending-transaction marker here.
+If both the restrictive write and original-inode invalidation fail, a restart
+still needs the separate #273 protocol correction. This journal-ownership patch
+does not claim to resolve that broader historical persistence limitation.
