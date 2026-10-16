@@ -2,7 +2,7 @@
 
 This standalone standard-library adapter discovers the Bulgarian-American Commission for Educational Exchange’s own awards and structured training programmes. Its primary source is [the research-grants directory](https://www.fulbright.bg/en/research-grants-for-bulgarians/). Current source research on 14 October 2026 covered 43 complete official pages: the home and applicant directories, every supported programme leaf, the two-page conference inventory, current news cards, and both language versions of the privacy policy.
 
-The current collection has 39 genuine opportunities: the 37 existing award/applicant tracks and dated training editions, the newly opened [Opportunity Funds competition](https://www.fulbright.bg/en/opportunity-fund-bulgaria/), and the [structured EducationUSA virtual advising programme](https://www.fulbright.bg/en/educationusa-virtual-group-advising-program/). The latter is training with a weekly curriculum and participation requirements, classified as a programme overview rather than a scholarship. Scholarship capacity, course modules, country examples, grantee stories, orientation and enrichment for already selected participants, advisory provider lists and general one-to-one advising do not create opportunities.
+The complete raw collection has 39 reviewed programme/edition tracks: the 37 existing award/applicant tracks and dated training editions, the newly opened [Opportunity Funds competition](https://www.fulbright.bg/en/opportunity-fund-bulgaria/), and the [structured EducationUSA virtual advising programme](https://www.fulbright.bg/en/educationusa-virtual-group-advising-program/). The latter is training with a weekly curriculum and participation requirements, classified as a programme overview rather than a scholarship. Scholarship capacity, course modules, country examples, grantee stories, orientation and enrichment for already selected participants, advisory provider lists and general one-to-one advising do not create opportunities.
 
 The homepage changed after the original 9 October research: the 2027 Opportunity Funds competition opened on 12 October and closes on 6 December 2026. The previous combined homepage fingerprint blocked collection before extraction and omitted this new grant. All 39 other original reviewed pages still matched the prior material evidence during diagnosis. The implementation now uses current labelled programme and track blocks, rather than whole-page opportunity fingerprints or fixed editorial narratives. Numeric benefits, applicant citizenship, supported complete application dates and edition schedules come from their own source blocks. Summaries are independently written English facts; `summary_language` is `en` even for Bulgarian original pages. Unsupported or ambiguous facts remain unspecified.
 
@@ -16,7 +16,16 @@ Only complete dates from an explicit programme application-closing slot become d
 
 ## Access and rights
 
-Requests use the identifying YouthOpp user agent, inherited proxy and verified TLS. Native robots checks apply to every endpoint and redirect. Requests, robots, retries and redirects share the existing publisher/apex/www pacing allowance: at least six seconds between starts and at most ten starts in every rolling 60 seconds. A native file lock serializes overlapping local callers and retains Retry-After state. Production runs are serialized; independent machines must not overlap publisher requests. Access refusals, challenges, unsafe redirects, incomplete HTML and disallowed endpoints fail the collection.
+Requests use the identifying YouthOppsBot user agent, inherited proxy and
+verified TLS. Robots checks apply to every endpoint and redirect. Publisher,
+apex/www, robots, retries and redirects share completion-based pacing: at least
+12.2 seconds after the preceding completion, at most five starts per60 seconds,
+and an additional30-second completion guard for inventory content. The durable
+journal serializes callers and retains stronger Retry-After, adaptive intervals,
+refusals and unsettled pending ownership. Independent machines must not overlap
+publisher requests. Access refusals, challenges, unsafe redirects, incomplete
+HTML and disallowed endpoints fail collection. Production remains separately
+gated until root approval and owned-state handoff.
 
 Publisher robots disallows PDF requests. No PDF, alternate-path bypass, applicant form submission or private application data is used. Course HTML supplies the facts; an external exam-information document is unnecessary.
 
@@ -54,9 +63,10 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+access; restrictive rate and delay directives remain effective. The earlier
+identity-only maintenance preserved native pacing/backoff; the issue314
+migration below strengthens those floors and state continuity. Existing
+disabled workflows remain disabled until root separately enables production.
 
 ## Daily automation
 
@@ -70,8 +80,8 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
+Inventory page continuations and partitions wait at least30 seconds after the
+previous inventory completion before the next physical inventory attempt.
 This includes taxonomy/listing pages where applicable. The existing native
 transport still enforces its physical-request allowance across retries, redirects
 and detail requests, with stricter publisher limits and retained backoff taking
@@ -161,5 +171,188 @@ be described as a durably retained hold. Validation uses bounded private
 ordinary controls and exact normal-function AST comparison. No new publisher
 request or genuine native run is claimed for this maintenance change.
 
-This adapter retains its original local host JSON, lock and fsync behavior;
-there is no new hosted owned-state handoff.
+At that maintenance stage the adapter retained only its original local host
+JSON, lock and fsync behavior, without a hosted owned-state handoff.
+
+
+### Offline durable pacing migration — issue 314
+
+This candidate preserves the original 43 reviewed inputs, 39 programme tracks,
+complete reader, factual normalization, IDs, deadline handling and original
+publication functions. Eight exact entry/catalogue pages receive an inventory
+purpose; programme and document pages remain ordinary detail requests even
+when their content links to another page. Inventory purpose follows physical
+content redirects and retry attempts. Literal robots requests use ordinary
+physical pacing, with the original per-origin REP cache preserved.
+
+Each physical publisher attempt waits at least 12.2 seconds after the prior
+attempt completes, with at most five retained starts in 60 seconds. Inventory
+content attempts additionally wait at least 30 seconds after the prior
+inventory completion. A received 429 durably doubles the CURRENT physical and
+inventory intervals, retains the stronger exponential minimum 1,800-second
+embargo or valid longer Retry-After, and stops this collection before body
+assessment. Invalid Retry-After alone adds no permanent hold. Genuine visible
+access denials, applicable REP restrictions and content 401/403/451 retain a
+hold; literal REP unavailable statuses remain distinct. The redundant old
+all-title fallback is removed: hidden/footer titles cannot override the
+transport's genuine HEAD and visible primary-content assessment.
+
+The new schema-3 journal reserves a durable pending owner before transport.
+Policy assessment and cached REP enforcement settle only after every response
+restriction is safely retained. Any persistence or policy assessment failure
+stays sticky through finally, reentry and export. Safe current-inode journal
+and owned artifact operations retain directory/file identities, use bounded
+nonblocking reads and preserve unrelated unsafe objects. Healthy collection
+and publication continue to use the original two-attempt/four-hop source
+bounds and default GitHub six-second pacing, Retry-After, CAS, jitter and
+publication-window contracts. The original test remains unchanged.
+
+One monotonic entry admission ends no later than 1,740 seconds, additionally
+clamped by the authentic executing job's original 1,800-second limit. New
+restore (180), proof (30), initial snapshot (120), source (1,200), publication
+(180), failure (180) and export (30) phase maxima are not additive promises of
+fit. Each phase is admitted once and clamps to remaining time after downstream
+reserves; publication and failure cannot borrow export's 30 seconds. The same
+failure end begins before the first fallback snapshot and governs every
+subsequent fallback read/write. Original per-call publication alarms remain
+in charge without an outer competing publication alarm. These are stricter
+new allocations, not preexisting collection caps or demonstrated native fit.
+The daily 02:56 UTC cron and 30-minute job timeout remain unchanged.
+
+Hosted execution first authenticates the exact current job read-only, before
+trusted restoration or any default GitHub host-bucket write. The original
+publication proof runs only after restoration. Both first hosted transfer and
+later owned restoration require the separately approved exact four-key
+BG_FULBRIGHT_PACING_MAINTENANCE workflow environment envelope; the six-key
+hosted declaration does not substitute for this environment. Latest exact
+workflow/run/attempt/head/digest-owned state is mandatory, with no older-state
+fallback; stronger current holds, counters, pending and intervals survive MAX.
+LOCAL execution checks the paused workflow before restoration and again after
+startup quiet before the first wire request.
+
+The cached legacy observation is PRESENT: seven source-host starts, physical
+interval six seconds and raw hash 5a767565a583fb2c251c7eb997fb6bdc9923f411abe7c3082da11c449a0f6f5e.
+Recovered metadata covers all 30 workflow wrappers, 29 exact completed jobs
+and one jobless cancellation, with zero hosted artifacts. These bounds do not
+recover lost historical headers or establish a lifetime zero rate counter.
+The proposed finite transition retains unknown history, all known starts and
+job-completion upper bounds, stronger restrictions and a fresh quiet guard.
+Root must freshly bind actual legacy parent/file identities and exact bytes;
+this offline implementation has not touched the actual journal.
+
+The exact six-key LOCAL bridge is now root-approved and bound; the separate
+HOSTED declaration remains None. The production maintenance environment remains
+absent. A separately authorized original native execution was still required
+at that binding stage; this LOCAL bridge was not that release. A subsequent
+production boundary remains separate. Private inert tests cover the complete
+original reader and both hosted main routes with synthetic approved fixtures, missing-envelope
+negatives, actual timestamp/helper contracts and source-specific current
+consumer cases. Retained earlier research HTML reproduces the original 39
+records; this is not a recovered full native response/header/timing chain.
+At that offline implementation stage no new publisher request, original native
+PASS, production handoff or runtime fit had been claimed. A genuine original
+native required a separate root release and full private RAM evidence. Any first
+failure retains diagnostics for root review before a separately authorized
+repeat; there is no automatic retake.
+
+
+Ordinary initial acquisition errors now latch the failed publisher gate before
+best-effort cleanup of newly opened child-directory, secure-file and collection
+lock descriptors. A secondary cleanup close error preserves the active primary
+exception; a healthy parent-close failure is propagated. When the very first
+identity read fails, cleanup relies only on the newly acquired descriptor's
+ordinary ownership provenance. This is not an arbitrary same-user replacement
+or descriptor-reuse guarantee, and no such expanded fault campaign is claimed.
+
+The separate native observer starts its private 12-hour RAM keeper before the
+first actual initial-state capture. It streams safely verified exact legacy
+bytes and observed modern absence, each attempted save's prewrite raw bytes,
+returned raw bytes, and the prewire journal bytes, alongside actual response
+headers, delivered bodies/available partials and stdout. Raw empty or corrupt
+bytes remain evidence when safely observable. Successful native acceptance
+requires complete identity-verified raw captures for all successful saves;
+missing or failed capture cannot become PASS. Primary source exceptions remain
+primary when observation also fails. Only observations actually delivered to
+the keeper survive process death; future or never-returned bytes are unknown.
+Those observer checks were private ordinary fixtures and did not themselves
+execute a source native.
+
+
+The finite LOCAL declaration is exactly the state and legacy provenance approved
+at [root's issue314 boundary](https://github.com/YouthOpps/data-pipeline/issues/314#issuecomment-6209611751).
+Root freshly checked all30 terminal workflow wrappers,29 exact completed jobs,
+one jobless cancellation, zero artifacts, paused workflow and no active overlap.
+Root also read-only reverified the exact PRESENT seven-start legacy raw bytes,
+parent/file identities and genuinely absent modern namespace. This author binding
+changes only the declaration and this README, not any function, test, workflow,
+controller, keeper or consumer code. It neither clears holds nor initializes a
+journal, performs a publisher request or authorizes a native/production run.
+
+
+### Genuine native and qualified pure closure correction
+
+Root separately authorized and launched exactly one original native on source
+`0468fc35` at [execution release6209728580](https://github.com/YouthOpps/data-pipeline/issues/314#issuecomment-6209728580).
+It passed one original test: all43 reviewed HTML inputs and one robots response,
+39 raw tracks,28 records after original deadline-only cleanup, and a derived
+empty case. All44 complete responses/headers and306 actual successful save
+pairs were retained in private RAM. Actual43 nonce owners settled for44 physical
+requests. Measured completion spacing was at least12.2374 seconds, inventory
+completion spacing at least30.0445 seconds, with maximumfive starts per minute.
+This proves that original run's source collection, not hosted production.
+
+The full actual source review also identified nine own closed or specifically
+ended editions among the original28. Five programmes have explicit own
+competition-closed banners (graduate study, Leaders, Humphrey, mathematics and
+civil-society); generic email invitations do not announce a reopened round. Two
+PMI-ACP cards name their2023/2024 editions and immediately following Completed
+or Fully Booked labels. The particular PMP September/October2026 edition ends
+October4, despite a stale Ongoing label; the separate October30–November8 edition
+remains unknown/current. FISI2019 is a dated particular seminar described as
+having taken place, not an annual-programme cutoff inferred from its title.
+FISI2022 has no concrete own event end or closing date. Its own heading,
+participation invitation and stated purpose all identify the specific2022
+seminar edition. A distinct archival eligibility proof excludes that edition;
+its raw status stays unknown and its deadline stays null. This is not a claim
+of confirmed closure. Conflicting, unresolved or future edition statements,
+annual programme history and a URL year alone do not establish this proof.
+
+A post-native pure correction preserves all39 raw IDs and the nonempty guard.
+It adds bounded factual own-closure/ended-edition evidence to the existing
+classification.evidence of those nine tracks and distinct archival evidence
+for the2022 seminar; no new public field or global
+ID map is added. Cleanup recognizes the exact generated own-source evidence,
+with matching canonical URL and independently checked calendar end for a dated
+edition. Status alone, generic degree completion, footer/related-programme
+closures, past winner/testimonial years and annual yearless dates do not retire
+a record. The generic completed-the-day status match is narrowed. The actual
+mathematics and past PMP edition raw statuses become expired; all other actual
+public fields remain unchanged except those ten added evidence notes.
+
+The complete own body is inspected for announced reopening beyond any short
+summary; unsupported possibly future reopening remains unresolved. Existing
+UTC−12 certainty and UTC+14 status boundaries are preserved. Event-end evidence
+never becomes an invented application deadline, timezone or time. All nine
+retired raw deadlines remain null. The exact actual43 inputs replay to39 raw,
+18 current and21 removed (nine own closed, one archival and11
+calendar-expired). Each actual excluded subset filters to valid empty; a genuinely empty raw collection
+still fails. All remaining18 public facts match the original native exactly.
+The full original test/response/state history remains attributed to0468; no
+second native or publisher request was made for this pure qualification.
+
+At that pure-replay stage, HOSTED initialization and production were unapproved,
+and both the HOSTED marker and maintenance environment remained absent. The
+full-known native MAX was not modified by the factual cleanup correction.
+
+The separate production boundary is now approved and bound at
+https://github.com/YouthOpps/data-pipeline/issues/314#issuecomment-6210529147.
+The exact six-key HOSTED declaration and matching four-key
+BG_FULBRIGHT_PACING_MAINTENANCE workflow environment preserve full-known state
+7608276489506948a6d550e58425c4537fa7c7d7c034c67809adedd5ee69709e:
+256 conservative timing observations and MAX from963 state witnesses, not256
+requests. LOCAL provenance and its original approval remain unchanged. Both
+first-hosted and later-owned main routes require the complete matching workflow
+configuration; missing or mismatched configuration fails before collection.
+The39 raw/18 current pure qualification remains an offline replay of the sole
+original0468 native; no second native occurred. Hosted execution, owned artifact
+and website delivery remain pending the maintainer's separate merge/run review.
