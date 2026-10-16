@@ -109,33 +109,20 @@ It requires no publication credentials, writes no dataset, uses no fixture or
 mock, and asserts no fixed record count. A run fetches the catalogue pages and
 one English detail per discovered programme, advertised Czech details where
 needed, plus robots and redirects. Runtime depends
-on the current inventory; the existing 180-minute collection/job limits remain.
+on the complete current inventory. The old 10,800-second collection ceiling
+remains an upper bound; the new effective prepublication limit is 9,900 seconds
+(165 minutes), inside a once-frozen 10,560-second lifecycle (176 minutes). This
+reserves 300 seconds each for publication and failure reporting and 60 seconds
+for inert state export, within the unchanged 180-minute hosted job. History
+restore and the initial snapshot are included in the prepublication phase.
+Absolute phase alarms enforce total wall time; no request or retry renews it.
 
 ## Pacing and publication
 
-The existing DZS-family pacing and publication implementation is retained.
-`cz-dzs` and this adapter share `youthopps-dzs-publisher-v1`: at least six seconds
-between request starts and at most ten starts in each rolling sixty seconds,
-including robots, redirects and retries. A locked, owned temporary budget
-coordinates local processes, and overlapping collectors are rejected. A single
-retry of a 503 waits at least thirty seconds and honors a longer `Retry-After`.
-403 and 429 refusals are not retried. Errors omit response bodies, credentials
-and URL query strings.
-
 The workflow preserves its main/repository guard, source-specific push paths,
-manual dispatch, daily schedule and family concurrency with cancellation
-disabled. Its application command is solely `adapter.py --publish`; it does
-not run tests. Production execution is not used for implementation validation.
-
-Actions restore the latest completed family attempt's inert pacing artifact,
-including failed/cancelled attempts and reruns, with repository/workflow/attempt
-and chronology checks. History scans are bounded, duplicate run IDs fail, and
-only a bounded JSON ZIP member is read without extracting files. Future backoff
-is never aged away. Missing, expired, corrupt or mismatched state fails closed;
-no older successful artifact substitutes for it. The initial nonsecret bootstrap
-is accepted only when authenticated history proves no preceding family attempt.
-Artifact retention is ninety days; runner loss or missing artifacts can require
-separately reviewed maintainer recovery. Upload is best effort, not a guarantee.
+manual dispatch, daily schedule and serialized family concurrency. It runs
+only this adapter's publication command. Readiness-gated artifact upload does
+not certify source collection or successful publication.
 
 Publication uses the existing in-memory repository-scoped GitHub App token and
 renewal. The initial source snapshot is retained across collection. Data and
@@ -163,11 +150,12 @@ old dataset; old records are never merged back, including expired old IDs
 still returned by the publisher. Status, record age, absence from a response
 and missing or ambiguous deadlines do not establish expiry.
 
-For a supported date-only closing without a documented timezone, UTC-12 is
-used only as a conservative global certainty bound, not an inferred publisher
-timezone: retain the record throughout its possible local closing day, and
-remove it only once that date has ended everywhere. Aware timestamps are
-retained at the exact cutoff and removed afterwards.
+Date-only deadlines remain eligible throughout their UTC closing calendar
+day and expire at the next UTC midnight. This shared calendar rule does not
+infer a publisher closing clock or timezone. Offset-aware deadlines retain
+their explicit instant and are removed only afterwards. The original DZS
+native passed before this pure cleanup correction; all actual retained inputs
+are replayed offline without another publisher collection.
 
 If every validated retrieved record has expired, publish an empty data array
 and success metadata atomically, with record_count zero. An empty or invalid
@@ -189,9 +177,8 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
-disabled workflows remain disabled.
+access; restrictive rate and delay directives remain effective. The family identity remains stable; the stronger pacing and continuity
+protocol is documented below. Existing disabled workflows remain disabled.
 
 ## Daily automation
 
@@ -205,14 +192,11 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
-This includes taxonomy/listing pages where applicable. The existing native
-transport still enforces its physical-request allowance across retries, redirects
-and detail requests, with stricter publisher limits and retained backoff taking
-precedence. The page guard does not raise the durable request interval for all
-subsequent article/detail requests or reset existing budget/refusal state.
-Inventory scope, parsing, validation and atomic publication are unchanged.
+The 30-second durable inventory completion guard covers all three catalogue scopes and every advertised AJAX pagination fragment.
+It applies to each physical retry and redirect, while literal robots and
+programme/event/delegated detail exchanges keep the separate 12.2-second floor.
+Stricter publisher policy, retained embargoes and family history take precedence.
+No source inventory, parser, ID or publication scope is truncated to fit timing.
 
 ## Workflow concurrency
 
@@ -229,3 +213,123 @@ Published metadata uses `display_name` = **DZS** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+## Shared family pacing and continuity (#289)
+
+Both this producer and its sibling use the same `youthopps-dzs-publisher-v1`
+namespace, lifecycle lock, modern state schema and inert artifact contract.
+They must migrate together. Every physical publisher request, including robots,
+redirects, delegated requests and the existing one-time HTTP 503 retry, is at
+least 12.2 seconds after the preceding response completes and at most five
+starts occur in any rolling minute. Every physical inventory exchange also
+waits at least 30 seconds after the previous inventory exchange completes.
+Details retain the physical floor; inventory pacing does not globally slow
+all later details. Applicable current and legacy REP groups, stricter delays
+and request rates remain protective constraints. Applicable finite decimal
+timing is retained as a physical floor. Unsupported applicable numeric timing
+leaves assessment pending and refuses traffic; malformed directives for
+unrelated agents do not impose a new restriction.
+
+HTTP 429 persists adaptive cooldown and doubles both CURRENT physical and
+inventory gaps before reading the response body. Invalid Retry-After alone
+creates no refusal; a valid longer value cannot shorten existing constraints.
+A fully assessed ordinary rate warning stops the job with a timed embargo.
+Actual content 401/403/451, primary content challenges and applicable REP
+Disallow retain a separate protective hold. Literal robots-only 4xx except 429
+mean unavailable REP; TLS, server and rate-limit failures still stop access.
+There is no identity switch, immediate 429 retry or automatic hold clearing.
+The existing single fully assessed 503 retry waits at least 30 seconds, retaining
+stronger timing; no generic connection retry is added.
+
+A durable `in_flight` barrier covers each physical request through headers,
+body, policy assessment and successful completion persistence. Cached REP
+application has its own zero-wire transaction. An unassessed response,
+failed restrictive/completion write or unsettled prior transaction refuses
+same-process reentry and a fresh process restoring an older owned state.
+Owner/mode/link checks, nonblocking file opens and pinned parent-relative
+operations protect the current journal inode. Normal reads and writes use the
+retained locked descriptor; a replacement cannot inherit stale lock authority
+or have stronger constraints overwritten. Failed export invalidates only
+safely owned output before fallible readiness signaling and removal.
+
+Both LOCAL and hosted collection read complete histories of BOTH workflows,
+rank actual exact-attempt job completions, include prior rerun attempts and
+require the exact newest owned artifact. Modern envelopes bind repository,
+source, run, attempt, head and implementation/state digests. Missing, unsafe,
+expired or unsettled modern state never falls back to an older success.
+LOCAL collection additionally requires both exact workflows manually paused
+before state initialization and again after startup quiet, immediately before
+the first publisher request. Read-only GitHub access uses the configured
+connection; hosted jobs require their supplied workflow credential.
+
+The first migration is a separately approved exact legacy handoff, not a
+new empty allowance or generic old-schema conversion. The inspected local
+namespace was genuinely absent, which does not establish zero historical
+traffic. The root-verified latest legacy artifact belongs to DZS run
+38823222698/attempt 1. Known state/timing constraints and all 20 actual job
+completion upper bounds are retained with at least 60 seconds startup quiet.
+Rate counters begin only since migration; unknown historic 429 history remains
+explicit. `legacy_access_history_unknown` is strictly true, with immutable
+provenance for the route-unidentified 403 in CZStudy run 37962105063. A later
+successful run or legacy `blocked: false` cannot erase that uncertainty.
+The later run 38245510407 specifically failed on the now-excluded historical
+`http://static.daad.de/robots.txt` dependency; it does not identify the first
+403's route. Any guarded reevaluation of current routes requires a separate
+explicit maintainer boundary approval, never an assertion of inherited access
+permission. DZS LOCAL and Study LOCAL are separately approved and bound.
+Both hosted migration markers now bind the reviewed full-family MAX
+normalization. Study used the existing DZS family journal and reviewed
+post-DZS MAX for its separately released complete original live test.
+
+Original live tests remain sole complete nonpublishing tests. Private failure,
+interop, graph and clock controls are not publisher collection evidence.
+Implementation validation does not dispatch production Actions. Both sources'
+complete original tests must be separately released and serialized under the
+family lock; full bodies, headers, stdout and state-save evidence stay in RAM.
+
+The initial production cutover is staged: keep Study in Czechia paused while
+DZS creates the first verified modern owned artifact, then enable the companion
+only after the family is idle and that newest state is verified. Starting both
+from the finite legacy bridge would correctly fail its history guard. LOCAL
+validation is also serialized DZS then Study; the companion retains the same
+actual journal and full known MAX under a fresh explicit release, never a reset.
+
+Journal and collection-lock cleanup retain explicit ownership of their original
+descriptors. A reused foreign descriptor is never closed or truncated, and
+failed journal cleanup never opens a newer named replacement. Close failures
+are sticky access failures, invalidate safe owned artifact output, and preserve
+an existing primary exception. These conditional IO repairs use private fault
+controls and retained-input replay; they do not constitute a new live test.
+
+
+### Reviewed complete-family production handoff
+
+The maintainer approved both hosted literals in
+[the complete-family production boundary](https://github.com/YouthOpps/data-pipeline/issues/289#issuecomment-6208060152).
+The full shared history retains 1,926 typed timing observations, including the
+previous DZS 130 and all 449 Study reservations, opener invocations, physical
+starts and response completions. These observations are not request counts.
+The explicit normalization retains the 20 observations within the documented
+60-second window and preserves all other MAX constraints, unknown access and
+429 history, and complete external provenance for the 1,906 aged observations.
+Historical pending states settle only through their matching successful durable
+response or policy chains. This approval does not clear any future hold or
+permit fallback from a missing newest owned state.
+
+The genuine Study original test at source `2440aed8` passed with all three
+catalogue scopes: 271 programmes, 258 normalized records, 174 current records
+and 84 actually expired records. All 449 real responses and headers, 1,351
+successful saves and 450 sequential transactions were retained and audited.
+The actual 254 date-only deadlines and four null deadlines introduce no clock
+or timezone claims. Measured completion spacing was at least 12.2148 seconds;
+29 inventory exchanges were at least 30.0159 seconds apart after completion,
+with no more than five physical starts per rolling minute.
+
+The complete measured Study native took 6,503.34 seconds. Adding the full
+300-second publication, 300-second failure and 60-second export reserves plus
+a nominal 240-second setup allowance leaves about 3,396 seconds within the
+180-minute job. This is measured planning headroom, not proof of a future job
+start clock or guaranteed setup duration. The original repository-scoped App
+token renewal remains in place for collections lasting more than one hour.
+The maintainer controls the serialized rollout: DZS first, then the Study
+companion using the newest verified modern family state.

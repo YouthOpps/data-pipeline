@@ -41,6 +41,7 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Discover and publish current portal programmes
+        id: collect
         run: python -B adapters/cz-study-in-czechia/adapter.py --publish
         env:
           DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
@@ -48,16 +49,9 @@ jobs:
           WEBSITE_APP_PRIVATE_KEY: ${{ secrets.WEBSITE_APP_PRIVATE_KEY }}
           WEBSITE_APP_INSTALLATION_ID: ${{ steps.token.outputs.installation-id }}
           GITHUB_TOKEN: ${{ github.token }}
-          DZS_PACING_BOOTSTRAP: >-
-            {
-            "schema": 1,
-            "family": "youthopps-dzs-publisher-v1",
-            "not_before": 1791564611.035954,
-            "evidence": "https://github.com/YouthOpps/data-pipeline/issues/55#issuecomment-6085237730"
-            }
           DZS_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
       - name: Preserve inert publisher pacing state
-        if: always()
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: dzs-pacing-state-${{ github.run_attempt }}
