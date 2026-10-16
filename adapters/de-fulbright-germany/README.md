@@ -193,16 +193,16 @@ assessment (including a stricter crawl delay or Disallow) remain pending until
 all restrictions are durably saved; pending state OR merges and blocks new
 requests across processes. Only the exact reviewed legacy transition may seed
 an explicit false flag. Missing flags and older schemas cannot grant access.
-A failed write remains fatal even if failure-marker creation and safe journal
-invalidation both fail: the already-synced pending reservation remains. A
-completion may clear pending only after saving all response constraints.
+A failed write remains fatal. An interrupted rewrite may leave invalid JSON;
+a later process refuses invalid mature state rather than reviving an older
+owned artifact. A completion may clear pending only after saving all response
+constraints.
 
 The verified journal directory identity stays pinned across the process.
-Journal reads, locks, temporary files, atomic replacement and failure cleanup
-use descriptors relative to that verified parent. A renamed/replaced parent
-closes access and cannot authorize writing or truncating an unrelated owned
-file at the new path. A legitimate atomic state-file replacement within the
-same parent remains valid; failure cleanup checks its current inode.
+Journal reads, locks, in-place commits and failure cleanup use the retained
+parent and original RW journal descriptor. A changed current inode or byte
+generation closes access. Failure cleanup does not reopen or mutate a stronger
+replacement at the current path.
 
 Any reservation, response restriction or completion persistence failure latches
 source access closed, including initialization re-entry. Safely owned stale
@@ -230,3 +230,43 @@ is at least native receipt completion plus 60 seconds, with runtime startup
 quiet still enforced. The explicit settled false flag follows successful REP
 and response persistence. Modern newest-artifact restoration remains mandatory
 after the first owned hosted handoff; no missing-artifact fallback is added.
+
+
+## Journal integrity maintenance (#295)
+
+This guard-only maintenance retains a genuine RW journal descriptor, its
+current named inode and byte generation under the original publisher lock.
+Reads are checked before and after access. A commit serializes in RAM, rechecks
+authority, then truncates, syncs, writes fully and verifies readback through
+the same held inode. Only a successful own commit advances the expected
+generation. A changed parent, stronger replacement, missing mature journal or
+unexpected generation stops collection before another publisher request.
+
+This accepts an availability tradeoff: interruption may leave empty or partial
+JSON. Invalid mature state requires reviewed recovery; it cannot become a fresh
+budget or be restored from an older owned artifact. Failure cleanup never
+reopens a newer journal pathname for mutation. Locks are advisory, and
+generation checks are neither an atomic filesystem compare-and-swap nor
+authentication against arbitrary same-UID writers that ignore those locks.
+
+Actual acquired collection, journal, artifact, reader, step-output and parent
+descriptors retain identity through use and close. Recycled foreign descriptors
+are preserved. A healthy close error is fatal; an active primary exception is
+preserved. Owned output is invalidated on a fatal handoff even if readiness
+signalling or unlink fails. A previously written true readiness line alone is
+not proof of a valid artifact.
+
+The state schema, approved seeds and markers, strict newest-owned history,
+source parser, complete frontier, IDs, dates, expiry, network retry behavior,
+physical/page pacing, caps, publication and daily schedule are unchanged.
+Private ordinary checks cover successful requests, initial modern restoration,
+successive exports, no-acquisition exits and the original bounded retry
+behavior. No publisher request, new native test, journal migration or
+production action was performed for this maintenance.
+
+The complete earlier actual retained records (1 raw / 1 filtered) were replayed
+through unchanged validation/expiry and the byte-identical current consumer,
+including valid empty and last-good-on-failure cases. Source-content
+completeness and factual verification remain the earlier independent native
+evidence plus unchanged normal AST; no new native or source-body collection is
+claimed.

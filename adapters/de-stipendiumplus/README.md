@@ -369,3 +369,46 @@ ordinary collection and data flow; these controls are neither a new publisher
 collection nor production execution. Parser, inventory, identifiers, dates,
 publication payloads, tests and scheduled workflow remain unchanged. No retained
 publisher hold, cooldown or source journal is reset by this maintenance.
+
+
+## Journal integrity maintenance (#295)
+
+This guard-only maintenance retains a genuine RW journal descriptor, its
+current named inode and byte generation under the original publisher lock.
+Reads are checked before and after access. A commit serializes in RAM, rechecks
+authority, then truncates, syncs, writes fully and verifies readback through
+the same held inode. Only a successful own commit advances the expected
+generation. A changed parent, stronger replacement, missing mature journal or
+unexpected generation stops collection before another publisher request.
+
+This accepts an availability tradeoff: interruption may leave empty or partial
+JSON. Invalid mature state requires reviewed recovery; it cannot become a fresh
+budget or be restored from an older owned artifact. Failure cleanup never
+reopens a newer journal pathname for mutation. Locks are advisory, and
+generation checks are neither an atomic filesystem compare-and-swap nor
+authentication against arbitrary same-UID writers that ignore those locks.
+
+Actual acquired collection, journal, artifact, reader, step-output and parent
+descriptors retain identity through use and close. Recycled foreign descriptors
+are preserved. A healthy close error is fatal; an active primary exception is
+preserved. Owned output is invalidated on a fatal handoff even if readiness
+signalling or unlink fails. A previously written true readiness line alone is
+not proof of a valid artifact.
+
+The state schema, approved seeds and markers, strict newest-owned history,
+source parser, complete frontier, IDs, dates, expiry, network retry behavior,
+physical/page pacing, caps, publication and daily schedule are unchanged.
+Private ordinary checks cover successful requests, initial modern restoration,
+successive exports, no-acquisition exits and the original bounded retry
+behavior. No publisher request, new native test, journal migration or
+production action was performed for this maintenance.
+
+This existing state schema has no durable pending field. This IO correction
+does not add one or claim cross-process protection when both persistence and
+original-inode invalidation fail. That separate protocol migration remains
+tracked by #273.
+
+The earlier independently accepted complete native evidence is qualified by
+unchanged normal source AST. Its original RAM capture has expired; this
+maintenance does not claim a fresh full-record or full-body replay for this
+source.
