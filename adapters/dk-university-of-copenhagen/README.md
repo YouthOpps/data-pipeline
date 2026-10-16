@@ -193,10 +193,12 @@ python -B adapters/dk-university-of-copenhagen/test_adapter.py
 Both commands retrieve real records without publishing. The sole live test
 validates nonempty complete JSON and prints the entire array to stdout;
 diagnostics go to stderr. There are no fixtures, output files or dependencies.
-Keep overlapping tests and production runs serialized. Every KU subdomain
-shares one process-safe allowance: at least six seconds between starts and
-at most ten requests in any rolling sixty seconds, including robots,
-redirects and retries. Backoff is honored. Pacing state is outside the checkout.
+Keep overlapping tests and production runs serialized. Every KU subdomain shares one durable publisher allowance: at least
+12.2 seconds after the preceding physical attempt completes and at most five
+starts in a rolling minute, including robots, redirects and retries. Stronger
+retained constraints take precedence. State is outside the checkout; local
+collection requires the exact workflow to be paused before initialization and
+again after the startup quiet guard before its first publisher request.
 
 ## Publication
 
@@ -236,14 +238,6 @@ under this source's paths. An empty/invalid raw response or fetch, parse,
 validation or publication failure preserves last-good data and its success
 timestamp; safe failure metadata may be updated. Tests never publish.
 
-The shared KU-family native pacing budget uses a minimum 6.1-second reserved
-gap and keeps the family lock until response/error completion has durably
-advanced the next-start watermark by that interval. The conservative completion
-gate guarantees spacing even when request construction or scheduling varies.
-Existing stronger intervals and Retry-After deadlines are kept;
-all origins, robots requests, redirects and retries share the same lock and
-rolling request history.
-
 ## Bot identity
 
 This adapter sends the following identifying HTTP header:
@@ -256,8 +250,9 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
+access; restrictive rate and delay directives remain effective. The current
+migration changes publisher pacing and state continuity as described below;
+the identifying header and public source identities remain stable. Existing
 disabled workflows remain disabled.
 
 ## Daily automation
@@ -272,14 +267,12 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
-This includes taxonomy/listing pages where applicable. The existing native
-transport still enforces its physical-request allowance across retries, redirects
-and detail requests, with stricter publisher limits and retained backoff taking
-precedence. The page guard does not raise the durable request interval for all
-subsequent article/detail requests or reset existing budget/refusal state.
-Inventory scope, parsing, validation and atomic publication are unchanged.
+The scholarship inventory and all doctoral listing pages, including every
+redirected or retried inventory hop, wait at least 30 seconds after the
+preceding inventory physical completion. Literal robots and doctoral details
+retain the separate physical completion guard. Detail links do not promote
+all later requests to a longer persistent interval. Stronger retained page
+gaps remain effective.
 
 ## Workflow concurrency
 
@@ -328,18 +321,22 @@ Hosted publication proves the exact current job, run attempt, source workflow,
 matching head/workflow SHA, main branch, assigned runner and UTC start before
 data-source access. A fresh GitHub Date maps the existing 30-minute job bound
 to one conservative monotonic deadline; retries cannot renew it. The pinned
-App token is minted after job start and expires after one hour, so no token
-renewal is needed. Missing or inconsistent proof fails closed.
+App action mints its scoped token after setup. Under its documented default
+one-hour lifetime the unchanged 30-minute job bound has static token headroom;
+no observed expiry or token renewal is claimed. Missing or inconsistent proof
+fails closed.
 
 Every guarded publication call and the current-job proof call on the reviewed
 Ubuntu/Python path has a total alarm guard of at most 30 seconds, plus a
-remaining-time socket timeout, including its bounded body read. Existing or
-unsupported timers stop before transport. Writes and retry waits stop 60
-seconds before the job deadline, final outcome reads stop 30 seconds before
-it, leaving a cleanup/export allowance. These publication reserves do not
-guarantee export after an overlong collection, runner death or an
-uninterruptible native call; the existing job timeout remains the outer bound.
-No API call receives a fresh deadline.
+remaining-time socket timeout, including its bounded body read. Unowned or
+unsupported timers stop before transport. The source-owned lifecycle alarm
+composes with the original publication call guard without renewing either
+deadline. Writes and retry waits stop 60 seconds before the job deadline,
+final outcome reads stop 30 seconds before it, leaving a cleanup/export
+allowance. These publication reserves do not guarantee export after an
+overlong collection, runner death or an uninterruptible native call; the
+existing job timeout remains the outer bound. No API call receives a fresh
+deadline.
 
 Only an actual, classified non-fast-forward reference response can retry,
 after checking that the desired outcome has not landed and this source pair is
@@ -349,29 +346,211 @@ the existing three attempts and original write deadline. Authentication,
 non-CAS and unclassified failures stop without another write attempt. Terminal
 publication errors latch a per-process write stop, including later
 failure-metadata fallback; bounded read-only outcome checks remain available.
-Source-pair changes stay protected; reference writes keep force:false. Source
-collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
-Validation uses inert external controls; no source fetch, GitHub test write or
-production invocation is claimed.
+Source-pair changes stay protected; reference writes keep force:false. Those
+publication-conflict safeguards preserve source fields, the schedule and the
+30-minute job cap. The publisher migration below changes pacing and adds
+stricter lifecycle limits. Validation uses inert external controls; no source
+fetch, GitHub test write or production invocation is claimed.
+
+## Durable pacing migration (#326)
+
+The complete scholarship and doctoral graph, the one bounded catalogue-change
+restart, record identifiers, source clauses, date extraction and the original
+single live test remain unchanged. No publisher change feed or ordering proof
+supports a safe incremental shortcut, so every collection reconciles the full
+current inventory. Historical counts in this README are reviewed snapshots,
+not a current fixed count or an early-stop rule.
+
+Each physical publisher reservation is durable and pending through response
+headers, bounded body assessment, closure and applicable policy persistence.
+Cached robots decisions have their own pending policy transaction, even when
+no wire request occurs. A received 429 doubles BOTH CURRENT retained physical
+and inventory gaps, saves its strike count and maximum embargo before reading
+a body, and stops the collection without reading it. A failed response close
+retains the pending owner and cannot enter the connection retry. The embargo
+includes at least 1,800 seconds, exponentially increased for observed repeat
+strikes, any longer valid header and all stronger retained constraints.
+Technical body, TLS, storage or policy assessment failures retain unresolved
+pending state and prevent a retry or healthy export. Ordinary typed
+pre-response connection failures retain the original two-attempt bound. A
+technical failure is not a publisher denial.
+
+Literal robots 4xx other than 429 means unavailable REP rules, not permission
+asserted by the publisher or a content-access refusal. Content refusals and
+visible primary challenges stop and remain held. Current product-specific
+rules, or their applicable wildcard fallback, intersect any actual legacy
+product-specific restrictions; unrelated agents do not impose new rules.
+Applicable finite delays and request rates retain their strictest constraints,
+including cached target assessments. Invalid Retry-After alone creates no
+hold.
+
+The original host journal remains under
+`/tmp/dk-university-of-copenhagen-pacing-UID/`, with hashed `ku.dk` and
+optional `api.github.com` names. Its raw constraints are never assumed absent
+or reset. The new family namespace is
+`/tmp/youthopps-dk-university-of-copenhagen-publisher-v1-UID/state.json`, with
+a separate source lifecycle lock. New state explicitly preserves unknown old
+refusal and rate-limit ancestry. Every future owned artifact binds the exact
+repository, source, run, attempt, head, implementation hash and state hash.
+Every prior attempt is authenticated from its own wrapper and complete job
+inventory; other queued or active wrappers stop access. Fresh complete history
+is checked again after quiet before the first physical request. The newest
+applicable attempt must supply its exact authenticated state; missing or
+incomplete modern state cannot fall back to an older allowance.
+
+ROOT first approved the finite LOCAL transition in issue #326,
+comment 6213563204.
+The exact 28 prior attempts and complete job-page digests are now pinned.
+That initial MAX retained 30 timing observations, including authentic legacy
+starts and job completion upper bounds, with unknown prior access and refusal
+history. These observations are not 30 publisher requests. At that initial
+stage HOSTED and mature reentry were unset. That binding granted no native or
+production release; ROOT separately controls access after observer and current
+state readiness. The
+matching workflow supplies `UCPH_PACING_ARTIFACT_PATH`; there is no hidden
+mandatory maintenance environment variable. Only a trusted, settled state
+signals `pacing_ready=true` for the exact-attempt upload. Failure cleanup
+invalidates a safe owned stale envelope before signalling failure; unsafe
+objects remain untouched. Descriptor ownership, current named inode and pinned
+parent checks prevent a weaker stale journal from replacing stronger state.
+
+The new entry clock is 1,740 seconds within the unchanged 1,800-second job. A
+NEW 1,350-second prepublication ceiling includes history, authenticated
+restoration, current-job proof, prior snapshot, startup quiet, collection and
+parsing; it is not a retained historical source cap. Publication, failure
+reporting and export reserve 180, 180 and 30 seconds respectively. Failure
+ownership begins before fallback snapshot reads. Setup and API latency debit
+the same entry budget; no retry or phase call renews it. The original
+authentic job proof can only tighten these bounds. Publication keeps its
+original GitHub 6.1-second pacing, Retry-After, body bounds and three
+classified CAS attempts. An unowned alarm is rejected; one source-owned phase
+timer composes with the existing 30-second publication call guards.
+
+The older 43-record native receipt used a different source hash and observed
+21 physical requests. Its optimistic new physical span is at least 304 seconds
+including startup quiet, with additional inventory waits, setup and body time.
+It supports retaining the existing job allocation, not a current full-graph
+fit claim. Dynamic listings/details and the bounded complete restart must
+finish or fail closed; no first-known-ID truncation or partial success is
+allowed. The latest retained failed Action 38763419676 reported a publication
+HTTP 422; its precise API cause and initial collection success are unproven.
+No new genuine native or production success is claimed for this offline code.
+The existing date-only UTC-12 cleanup is preserved pending actual-source
+review and a separately authorized factual correction.
 
 
-### Received publisher 429 stops before body assessment
+### Exact historical cancellation and first native failure
 
-A received publisher HTTP 429 now retains the original valid `Retry-After`
-MAX and source-local persistence before rejecting the response without reading
-its body. A response or pacing-state cleanup error after that status is known
-remains nonretryable, rather than entering the ordinary connection retry.
-The default `api.github.com` publication response path is unchanged. Normal
-responses, the existing two-attempt connection bound, discovery, records, REP,
-pacing limits, state schema, deadlines and schedules are unchanged.
+The first separately released original native attempt used source `c9b7db80`
+and remains FAIL: receipt SHA-256
+`6235909494561722c64e789c5e0c19aa513737deff500eabe0e87943aae39313`
+records one unsuccessful original test, zero publisher responses and zero
+state-save calls. It stopped during historical metadata assessment; no source
+retrieval or corrected native success is inferred from that attempt.
 
-This is a narrow error-path correction, not a modern pacing migration. It
-does not add adaptive gap doubling, a minimum exponential 1,800-second hold,
-pending ownership or hosted owned-state continuity. Existing storage limits
-and unlogged historical access remain; a failed persistence operation cannot
-be described as a durably retained hold. Validation uses bounded private
-ordinary controls and exact normal-function AST comparison. No new publisher
-request or genuine native run is claimed for this maintenance change.
+ROOT separately approved only the existing `_LEGACY_NO_JOB` literal in
+[issue #326](https://github.com/YouthOpps/data-pipeline/issues/326),
+comment 6213925496.
+The exact historical run 38001485160, attempt 1, is completed/cancelled at head
+`2d6491ddf2a37047efc7b996f190f648e647c0c6`, created
+`2026-10-09T22:51:57Z`, with the authenticated complete empty job inventory
+SHA-256 `b512fdf501ffbdb48c1ff8a334798223dc87ae5ec6e009140ec9c2633b967b7f`.
+It remains in the full history as a no-executed-job observation; no job or
+publisher completion is fabricated from created/updated timestamps. Only
+this exact wrapper/attempt/head/conclusion/created time/job digest is excluded
+from executed-completion ranking. An unknown or changed empty-job attempt
+still fails closed.
 
-This adapter retains its original local host JSON, lock and fsync behavior;
-there is no new hosted owned-state handoff.
+That cancellation-only correction kept every source function, original test,
+workflow, LOCAL/HOSTED/reentry literals, approved seed and budget unchanged.
+Ordinary controls use the retained authentic cancelled wrapper and
+empty job payload via private API stubs, plus exact mismatch negatives. The
+original FAIL receipt, original tested source and RAM keeper are preserved.
+No retake, publisher request, namespace access, workflow action, production
+approval or corrected-run execution is granted by this binding. ROOT must
+review current continuity and issue a separate explicit execution release.
+
+
+### Second observer failure and stronger current LOCAL boundary
+
+The second separately released original test used source `86d3c7e6` and also
+remains FAIL. It received four responses (200, 200, robots404, 200) and completed
+14 successful state-save calls. Its 26 partial award records and 17 catalogue
+date tuples do not establish a complete source refresh. The external observer
+could not serialize real `datetime.date` catalogue fields and stopped before
+the first PhD detail. The third observer fixes only captured-copy encoding and
+formal failure receipts; it does not change source parsing or data objects.
+
+A subsequent read-only check also failed its metadata acknowledgement because
+Node rounded large nanosecond generation integers. That failed check remains
+preserved. A separately reviewed external correction retains canonical metadata
+JSON bytes with base64, SHA-256 and length; no tolerance or reconstructed digits
+replace exact generation evidence. ROOT alone repeated the read-only check.
+
+ROOT approved the stronger LOCAL literal in
+[comment 6215354159](https://github.com/YouthOpps/data-pipeline/issues/326#issuecomment-6215354159).
+The fresh complete 28-attempt/job history and zero-artifact inventories bracket
+an unchanged, settled mature journal and the original legacy publisher state.
+The bound MAX now retains all 54 timing observations: the original 30 plus six
+kinds of timing evidence for each of four actual physical requests. These are
+not 54 requests. Every retained save witness, stronger constraint, historical
+access/429/hold unknown and fresh quiet guard remains represented; no history
+was aged away or truncated. The compact state SHA-256 is
+`3dde0d8b8fa2ac1d4cbe2e988b634c900abd68f96f36a134a20663cbfc42e466`.
+
+At that binding stage, only the existing LOCAL literal and README changed.
+The ordinary mature restore already merged existing and incoming constraints;
+no new reentry exception or namespace reset was introduced. Source functions,
+original test, workflow, HOSTED and unused mature-reentry markers were unchanged.
+The two native failures and failed read-only check remain immutable. That
+stronger binding granted no third test or publisher access: ROOT still had to
+provide fresh consumer, resource and exact initial-object checks and a separate
+public third original-native execution release. The partial collection did not
+establish production success.
+
+
+The third original native test passed on immutable source `6dba24c2`, after two
+separately preserved failed attempts. All 21 retained responses yielded the
+complete 26 award overviews and 17 doctoral adverts (43 records); all fields and
+65 successful persistence steps were checked from private RAM. The 180 retained
+timing observations include the earlier 54; they are not 180 source requests.
+
+A subsequent pure correction aligns only date-only application status with the
+existing conservative UTC−12 cleanup calendar. This is an index policy, not a
+publisher-stated Danish timezone. Four calendar dates, twelve explicit-offset
+instants and twenty-seven null deadlines keep their original precision; the
+conflicting doctoral advert remains unknown. Closing-day and next-day controls
+plus all retained inputs qualify this helper correction. The current 43 records
+remain unchanged; no second execution of the successful original native test
+was made for this new helper. All 26 award overviews remain unknown rather than
+being asserted as currently open calls. Transport, full graph, publication,
+limits, migration literals, workflow and the original test are unchanged.
+
+
+### Approved finite first HOSTED continuity
+
+[ROOT approval](https://github.com/YouthOpps/data-pipeline/issues/326#issuecomment-6216556689)
+binds the existing six-key HOSTED migration literal to the full 180 known timing
+observations and the fresh read-only continuity guard. Its compact state hash is
+`32c4c3331f34cee7bec72b1f2ab1aa5eae5e67441958b86c9524465c93e214ae`.
+The observations include the earlier 54 plus six clocks for each of 21 actual
+third-test responses; they are not 180 publisher requests. Unknown access, rate
+and hold histories remain explicit; no observations were aged away or truncated.
+
+The actual LOCAL mature journal and original publisher state remain separate
+from the prospective first HOSTED original-namespace absence contract. The latter
+has compact hash
+`fea4e334fd7dc012aac874a9b0ff68666ebcb63d256e4cce13ed1c20ced67ab4`;
+no LOCAL inode authority transfers to a fresh runner. The original source had no
+separate collection lock. Existing LOCAL and unused mature-reentry literals are
+unchanged. The actual marker keys include `source`, not a donor `family` field.
+
+This source has no maintenance environment reader or four-key maintenance
+packet. The workflow remains byte-for-byte unchanged, including the existing
+publication token and `UCPH_PACING_ARTIFACT_PATH` configuration. Original startup
+authenticates and restores continuity before its data-source snapshot. Genuine
+third native success remains attributed to immutable `6dba24c2`; the subsequent
+pure UTC−12 calendar-status correction is qualified by the retained-input replay
+described above. No further source/native run or production success is asserted
+by this literal binding. ROOT owns controlled enable/merge, the sole automatic
+source Action and artifact/site delivery after independent configuration review.
