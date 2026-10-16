@@ -70,9 +70,16 @@ Its expected count is dynamic. Keep test stdout in memory; no publication
 credentials, data files or production Actions are used for validation.
 
 The persistent `youthopps-onek-publisher-v1` allowance serializes collectors,
-with at least six seconds between starts and at most ten per rolling minute.
-Robots, pagination, redirects and retries share that allowance. Retry-After
-and refusals preserve embargo/blocked state. Production restores the latest
+with at least 12.2 seconds from each physical completion to the next start and
+at most five starts per rolling minute. Robots, pagination, redirects, the
+calendar POST and original first 503 retry share that allowance. A received 429
+durably doubles CURRENT physical and inventory gaps and stops before any
+response-body read. It
+retains at least 1,800 seconds of exponential cooldown even with a shorter valid
+Retry-After. Longer headers and stronger retained limits remain effective.
+Content 401/403/451 and genuine visible challenges retain a separate access
+hold; literal robots unavailable responses and malformed headers alone do not
+invent such a hold. Production restores the latest
 trusted family attempt's timing artifact, including failed/cancelled attempts;
 missing newest state cannot fall back to older successful state.
 
@@ -85,9 +92,18 @@ creation and first-seen timestamps; material changes advance updated time.
 
 The existing matching main-push, schedule and manual workflow retains its
 main/repository guard, restricted credential, serialized family concurrency,
-30-minute job limit and trusted timing artifact. Collection has a 900-second
-bound within the 1,290-second lifecycle, including bounded publication,
-failure reporting and export phases. Production runs require maintainer
+trusted timing artifact. The upfront issue 325 allocation raises the previous
+900-second prepublication/1,290-second entry/30-minute job bounds to 2,400 seconds,
+2,790 seconds and 55 minutes. Prepublication includes restoration, current-job
+proof, prior snapshot, complete collection and parsing. Publication 180 seconds,
+failure 180 seconds and export 30 seconds remain nonborrowable, preserving the
+original 510-second outer job margin. The original 120-second publisher request
+admission headroom and 60/15-second publisher/infrastructure socket bounds
+remain. One phase alarm governs execution; no competing publication timer or
+new GitHub six-second gate is introduced. The workflow mints its App token after
+setup; a usual one-hour lifetime exceeds the 55-minute job by five minutes, but
+this static arithmetic is not an actual expiry or complete-graph fit proof.
+Production runs require maintainer
 authorization; live collection and static review do not prove publication.
 
 ## Expired-record cleanup
@@ -124,7 +140,7 @@ and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
+publisher identity and stronger retained backoff remain effective. Existing
 disabled workflows remain disabled.
 
 ## Daily automation
@@ -139,14 +155,47 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
-This includes taxonomy/listing pages where applicable. The existing native
-transport still enforces its physical-request allowance across retries, redirects
-and detail requests, with stricter publisher limits and retained backoff taking
-precedence. The page guard does not raise the durable request interval for all
-subsequent article/detail requests or reset existing budget/refusal state.
-Inventory scope, parsing, validation and atomic publication are unchanged.
+Inventory attempts wait at least 30 seconds after the preceding inventory
+completion, including their physical redirects and original retries. This
+covers the programme directory, every programme table partition, each news
+listing, calendar form and calendar POST listing including the required empty
+termination. News notices, event details and literal robots remain on their
+separate physical budget; links alone do not turn a detail into inventory.
+The entire dynamic graph remains mandatory: programme links, every advertised
+news page (40-page safety limit), selected notices, up to 100 calendar POST pages
+with explicit empty termination, and all event details. Exhausted pagination,
+missing structures or a budget failure cannot publish a partial result. No
+aggregate request/byte cap or first-known-record stop has been added. Existing
+per-response 30 MB and six-hop bounds remain; GET retries only the original first
+HTTP503 and calendar POST gains no generic retry.
+
+The current full graph and total body volume are unknown. Even the enlarged
+allocation cannot guarantee every graph allowed by safety bounds will fit.
+Complete genuine collection and full consumer/body/state evidence require a
+separate root-authorized native; the old seven published records and successful
+Action wrapper do not establish that proof.
+
+Schema 3 journals retain pending logical owners through every physical request,
+body read and new/cached REP assessment. Any failed restrictive calculation or
+write remains sticky; successful matching completion alone settles the owner.
+Safe retained current inodes and parent identities protect state/export writes;
+unsafe objects are refused. Strict newest owned identity, attempt/head/digest
+and MAX constraints are restored before access; no fallback after a newer
+missing artifact is permitted. The existing schema 1 family is not treated as
+lost RAM or an absent modern namespace. Its one exact in-place transition
+requires separately approved complete old history, newest owned state, local
+raw bytes/inodes/locks and full known MAX. Unknown rate ancestry is explicit;
+other missing historical policy provenance stays externally unknown.
+
+At the initial LOCAL-binding stage, HOSTED was unset and a separate native
+release was still required. The old ONEK_PACING_BOOTSTRAP reference is historical
+schema 1 evidence, not authority to initialize schema 3. Any future first-HOSTED
+approval must also bind the matching four-key ONEK_PACING_MAINTENANCE workflow
+environment. Both first and later-owned actual-main paths and missing/mismatched
+configuration refusals must be qualified before production. LOCAL requires a
+paused workflow/no overlap and a fresh check after quiet before first wire.
+No actual state, publisher request, native test or Action was performed for this
+offline implementation.
 
 ## Workflow concurrency
 
@@ -164,10 +213,12 @@ institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
 
-### Journal integrity maintenance
+### Historical #295 journal integrity maintenance
 
-Refs #295. Issue #295 remains open. This source-local journal integrity
-maintenance retains an owned read/write journal descriptor under the existing
+The following evidence and scope describe the earlier #295 IO-only patch,
+before this #325 schema 3 migration. At that stage #295 remained open. That
+source-local journal integrity maintenance retained an owned read/write journal
+descriptor under the existing
 separate state.lock. It checks the verified parent, current journal/lock names
 and byte generation before and after IO and immediately before a publisher
 opener. A replaced or stronger changed journal is refused instead of
@@ -191,19 +242,176 @@ named artifact parent and collection lock are checked. The original artifact
 envelope and source-specific readiness contract remain; sources without
 readiness signaling gain no new output dependency.
 
-Every original schema field, seed/approval literal, parser, complete inventory,
-normalizer, ID, date/expiry rule, metadata/publication function, request
-timing, retry/redirect/status/REP interpretation and workflow is retained. In
-particular this maintenance does not raise the legacy six-second physical floor
-or modernize rate handling. These schemas have no durable pending barrier:
-total persistence plus invalidation failure across a process restart remains a
-separate #273 gap.
+That earlier patch retained every original schema field, seed/approval literal,
+parser, complete inventory, normalizer, ID, date/expiry rule, metadata/publication
+function, request timing, retry/redirect/status/REP interpretation and workflow. In
+particular it did not raise the legacy six-second physical floor or modernize
+rate handling. Its schema 1 had no durable pending barrier; total persistence
+plus invalidation failure across a process restart was a separate #273 gap.
+This #325 migration supersedes those timing/schema statements with the physical
+12.2-second completion floor, inventory 30-second floor and durable schema 3
+owners described above.
 
-Acceptance evidence for this maintenance is explicitly limited to existing
+Acceptance evidence for that earlier patch was explicitly limited to existing
 byte-matched private journal findings, bounded ordinary private contexts and
 static business-AST protection. Original full native acceptance has not been
 established by this maintenance, and no expired or available original raw RAM
 replay is invented. A pinned current published snapshot/current consumer check,
 when provided, is separate evidence; it does not prove the original full raw
 inventory, current publisher facts or current access permission. No publisher
-collection is performed for this IO-only patch.
+collection was performed for that #295 IO-only patch; it does not qualify the
+complete genuine native still required for #325.
+
+### Prospective LOCAL initialization and original owned format
+
+The finite schema 1 compatibility path validates the original six-key envelope;
+its producer did not include `head_sha`. A separately approved owner, job,
+artifact digest and immutable producer binding supply that provenance. The
+adapter verifies the producer through the existing repository contents API
+route at the exact approved head, including decoded source and Git blob hashes.
+LOCAL uses the configured proxy route with an optional explicit token; HOSTED
+retains its existing current-job token prerequisite. It
+never follows `download_url`. Modern seven-key owned artifacts remain strict;
+a missing or invalid newest artifact cannot fall back to an older format.
+
+A genuinely absent LOCAL family directory needs an exact prospective grant,
+including a retained ancestor identity, nonce, owned state and history pins.
+An owned private ancestor must have mode 0700. The actual mapped-owner sticky
+`/tmp` requires exact approved owner/mode/device/inode pins and a separately
+retained, approved `/` to named `tmp` identity chain; other writable parents
+are refused.
+Newest owned state alone does not authorize recreating that directory. Before
+creating it, the adapter exclusively creates and syncs a source-owned one-off
+consumption record outside the family directory. Existing or interrupted claims
+refuse reuse, including in a cold process after the family directory is removed.
+This protection assumes the trusted ancestor and claim survive; it does not
+protect against an independent same-user writer deleting either authority.
+
+The new directory and both lock files must be exclusively created. With both
+locks held and checked, two durable matching commits establish a new pending
+initialization and its completion before collection becomes trusted. This is
+`PROSPECTIVE_FIRST_LOCAL_INITIALIZATION` only: schema 1's missing pending field
+never proves historical settlement. Partial directories, missing mature files
+and unsettled state refuse automatic recovery. Known timing and hold constraints
+remain MAX/OR; rate-history ancestry stays explicitly unknown, and other lost
+historical policy ancestry is qualified externally rather than invented fields.
+
+At that finite-initialization offline stage, HOSTED and the separate modern
+LOCAL initializer were unset. Its evidence consisted of bounded private
+fixtures, including one cold-process grant-reuse case, with no actual claim,
+family initialization, publisher request or native collection at that stage.
+
+Response-less opener failures preserve their original exception and remain
+unassessed and sticky. The legacy source retries only its first HTTP 503; this
+migration adds no DNS, connection, timeout, TLS or storage-error retry.
+
+
+### Exact prospective LOCAL bridge
+
+ROOT approved the exact LOCAL-only bridge in
+https://github.com/YouthOpps/data-pipeline/issues/325#issuecomment-6213562887.
+It binds all ten original attempts/jobs, the authenticated original six-key owned
+artifact and immutable producer, all twenty known timing observations, the exact
+mapped-owner sticky ancestor chain and the once-only outside-family claim.
+The prospective seed is not historical settlement or lifetime-zero proof;
+`legacy_rate_history_unknown` stays true and other lost ancestry stays qualified
+as unknown. Binding the literal performs no claim or journal initialization.
+At that first LOCAL stage, HOSTED remained unapproved. The separate modern
+LOCAL initializer remains unset.
+The original source, test, workflow and observer algorithms are unchanged by this
+binding. A separate ROOT public release and fresh readiness checks are required
+before the one complete original nonpublishing native test.
+
+
+### First native failure and original date dependencies
+
+The separately released original nonpublishing test failed after retrieving
+21 complete HTTP 200 responses and finishing discovery of three programmes,
+two news pages, twelve notices and an explicitly empty calendar result. The
+parser then raised NameError because this migration had omitted the original
+_MONTHS and _DATE_PATTERN module assignments used by unchanged dates(). No
+records were emitted; this is not a complete native or consumer success.
+
+The two assignments are restored exactly from the immutable original source.
+All other module AST, date interpretation, transport, budgets, transition
+literals, original test and workflow remain unchanged. Complete retained-body
+replay is offline semantic QA and cannot relabel the failed original test.
+Its 168 exact persisted saves, 21 requests and 22 matched owner settlements
+remain restrictive continuity evidence, including the consumed outside claim.
+No fresh initialization or automatic native retry is authorized by this fix.
+
+
+### Finite mature LOCAL reentry — initial offline stage
+
+At that offline stage, a separate default-null
+MATURE_LOCAL_LEGACY_OWNED_REENTRY declaration supported
+a reviewed existing schema3 journal while the authentic newest owned artifact
+still uses the old six-key schema1 format. It cannot authorize HOSTED or missing
+LOCAL state. The original ABSENT grant and its consumed outside claim remain
+unchanged; this gate never creates a parent, initializes state or consumes a
+claim again. Its runtime authority begins null and ends with the execution.
+
+A future ROOT declaration must bind complete old history, immutable producer
+and owned identity, the exact current parent/state/locks/claim, and the full
+known MAX with individually matched nonce/request settlement evidence. The
+finite proof names the first failed attempt's 22 settled owners and 21 physical
+requests; these are prior evidence identities, not next-collection limits. Initial
+bytes are checked again under the original collection and state locks before
+the ordinary merge/write. After quiet, fresh exact metadata and the surviving
+claim are checked with our resulting retained journal generation and current
+name, rather than incorrectly requiring obsolete pre-restore bytes.
+
+Missing, pending, changed or stronger unapproved state fails closed. Existing
+completed flight/request identities and outcomes are preserved; no blanket
+pending reset or inferred historical settlement is permitted. That offline
+implementation supplied no actual pins, public reentry literal or execution
+grant. Original failed-native evidence and its keeper remain immutable.
+
+
+### Exact existing mature LOCAL bridge
+
+ROOT approved this source-constant-only declaration in
+https://github.com/YouthOpps/data-pipeline/issues/325#issuecomment-6215098088.
+It binds the actual existing schema3 parent, journal, both lock names and the
+surviving consumed outside claim. The full 125 known timing observations and
+MAX derived from 526 state witnesses remain intact without age folding.
+The first failed attempt supplies 22 individually settled owner identities
+and 21 request identities; existing completed IDs and outcomes are retained.
+All ten old attempts and the authentic six-key owned producer remain pinned.
+
+Binding performs no namespace read/write, claim consumption, initialization or
+publisher access. That binding left the original ABSENT grant, HOSTED null
+declaration and separate LOCAL initializer unchanged. At that source-constant
+stage, the corrected observer release remained unauthorized pending fresh
+consumer/resource checks and a separate ROOT original-native execution grant.
+The first native failure and its original source, receipt and keeper remain
+immutable; its retained-body replay is offline semantic QA, not a native pass.
+
+
+### Corrected native and exact HOSTED binding
+
+The separately approved corrected original test and observer passed on source
+f23e7393, with 21 complete HTTP 200 responses and all 14 raw records. Seven
+records remain current; the seven actually expired records filter to an empty
+set. Full retained-body facts and current-consumer checks passed 14/7/0. The
+167 successful save pairs prove 21 new settled owners, with no initialization
+or consumed-claim reuse. The first failed attempt remains separate evidence.
+
+ROOT approved the exact production binding in
+https://github.com/YouthOpps/data-pipeline/issues/325#issuecomment-6215811228.
+The six-key HOSTED declaration and matching four-key ONEK_PACING_MAINTENANCE
+collect environment carry the same full MAX and evidence. All 230 known timing
+observations and the MAX derived from 1,053 state witnesses are preserved,
+including 43 individually settled owners and 42 actual requests across both
+attempts. These observations are not 230 publisher requests. Unknown old
+policy, pending and 429 ancestry remains qualified; the supported rate-history
+unknown flag stays true.
+
+Only that literal, workflow environment and this documentation changed after
+the genuine corrected native. LOCAL declarations, the consumed claim, all
+source functions, original test, budgets, full graph, daily schedule, App token
+step and publication behavior remain unchanged. Before production, original
+main must pass first-legacy and later-modern tests with the delivered workflow
+environment, including missing, null, mismatched, held and pending negatives.
+Binding is not production execution or site delivery. ROOT owns the separate
+enable-before-merge step and sole automatic production collection.
