@@ -35,7 +35,19 @@ jobs:
           repositories: data-source
           permission-contents: write
       - name: Collect and publish this source
+        id: collect
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DATA_SOURCE_TOKEN: ${{ steps.data-token.outputs.token }}
+          FEBA_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+          FEBA_PACING_MAINTENANCE: >-
+            {"evidence":"https://github.com/YouthOpps/data-pipeline/issues/299#issuecomment-6208380160","family":"youthopps-bg-feba-alumni-publisher-v1","schema":1,"state":{"blocked":false,"completed":1792125481.3294282,"completed_flight_id":"070162d80a8be741134ef9e905705672","completed_request_id":"c64834df32463161ef5d0f9843fa4696","family":"youthopps-bg-feba-alumni-publisher-v1","flight_id":"070162d80a8be741134ef9e905705672","flight_kind":"policy","flight_started":1792125478.358737,"in_flight":false,"interval":12.2,"last_inventory_completed":1792125481.324248,"legacy_rate_history_unknown":true,"not_before":1792125541.9774039,"observed_at":1792125481.9774039,"page_interval":30,"rate_limit_strikes":0,"rate_limit_until":0,"request_id":"c64834df32463161ef5d0f9843fa4696","request_inventory":true,"request_outcome":"response_assessed","request_started":1792125478.3653035,"schema":3,"starts":[1791462086.0,1791462198.0,1791501529.0,1791525777.0,1791551432.0,1791585336.0,1791611119.0,1791635125.0,1791668295.0,1791697219.0,1791722586.0,1791755629.0,1791784215.0,1791818104.0,1791851737.0,1791900358.0,1791931245.0,1791953270.0,1791969035.0,1791978341.0,1791997584.0,1792013885.0,1792038636.0,1792042310.0,1792061125.0,1792062300.0,1792079564.0,1792088335.0,1792125397.538579,1792125397.893058,1792125398.078148,1792125399.653259,1792125399.6591125,1792125411.8636668,1792125411.8721228,1792125411.9147599,1792125414.8331335,1792125415.3621469,1792125445.4184377,1792125445.425461,1792125445.6688144,1792125447.83675,1792125448.3283021,1792125478.3653035,1792125478.3693438,1792125478.555548,1792125481.1478407,1792125481.3133814]}}
         run: python -B adapters/bg-feba-alumni/adapter.py --publish
+      - name: Retain owned publisher pacing state
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bg-feba-alumni-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90

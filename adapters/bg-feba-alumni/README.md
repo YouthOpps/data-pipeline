@@ -3,7 +3,7 @@
 The standalone standard-library adapter reads the official public
 [FEBA Alumni news API](https://febalumni.org/wp-json/wp/v2/posts) linked to
 [the publisher news site](https://febalumni.org/news/). It checks robots
-before requests, spaces requests by at least six seconds, honors backoff
+before requests, spaces physical requests by at least 12.2 seconds, honors backoff
 and fails on access refusals. Public access is not an open licence;
 records retain FEBA attribution and original notice links rather than
 redistributing article content.
@@ -95,7 +95,7 @@ and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
 access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
+pacing and backoff use the source-local durable family below. Existing
 disabled workflows remain disabled.
 
 ## Daily automation
@@ -110,7 +110,7 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
+Inventory page continuations and partitions wait at least 30 seconds after the
 previous inventory page finishes before fetching the next page in this process.
 This includes taxonomy/listing pages where applicable. The existing native
 transport still enforces its physical-request allowance across retries, redirects
@@ -191,3 +191,136 @@ Source-pair changes stay protected; reference writes keep force:false. Source
 collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
 Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
+
+## Durable pacing migration (offline candidate)
+
+The source-local schema-3 journal retains publisher constraints across runs.
+Every physical attempt waits at least 12.2 seconds after the previous physical
+completion, with at most five starts in a rolling minute. Each actual posts
+inventory attempt, including its redirects and retries, additionally waits
+30 seconds after the previous inventory completion. Literal robots requests
+use the physical allowance; this does not impose 30 seconds on every request.
+Stronger restored intervals and applicable REP timing remain effective.
+
+A 429 stops this collection without a same-run retry, doubles both current
+physical and inventory gaps, and retains at least the exponential 1800-second
+cooldown or a longer valid Retry-After. Invalid, stale or nonfinite header
+values alone create no permanent refusal. Actual content refusal or visible
+verification remains held; literal robots unavailability is separate.
+Pending ownership is durably written before transport. Any restriction,
+policy-calculation or persistence failure remains sticky, including across
+completion cleanup; unsettled restored ownership refuses further requests.
+Writes retain the verified original journal inode and update it in place.
+An interrupted rewrite may leave an invalid journal, which later attempts
+refuse even if an older artifact exists. This deliberately trades crash
+availability for preserving restrictions; it does not reconstruct a fresh
+budget from missing or corrupt state. Recovery needs a separately reviewed
+known-MAX boundary. Unsafe or unrelated replacement objects remain untouched.
+
+Hosted runs require exact current-job/head proof and the newest exact owned
+artifact, with no fallback to an older successful run. LOCAL runs require the
+workflow paused and no active family attempt, restore fresh history before
+any source request, and recheck the pause after startup quiet. Missing old
+RAM-only budgets and absent artifacts do not establish a zero-rate history.
+An exact reviewed transition with historical job upper bounds and unknown
+legacy constraints is required. Its exact LOCAL marker is now approved and
+bound as described below; separate native and production releases remain
+pending at that offline stage. The genuine native and subsequent pure-date
+qualification are described below; production remains separately gated.
+
+The existing 30-minute job remains unchanged. New source-I/O admission of
+1200 seconds and whole-run admission of 1740 seconds are stricter allocations
+within that job, dynamically clamped for current-job proof and nonborrowable
+publication, failure-reporting and export reserves. They do not guarantee that
+a large or slow catalogue fits. Original GitHub retry/CAS semantics and
+publication bodies remain unchanged; no competing outer publication alarm
+extends their existing limits.
+
+Both completeness guards remain strict: the complete posts sequence
+must reach a short page within the original 25-page bound, and eligible raw
+records must be nonempty. A full 25th page fails rather than truncating.
+Only successful expiry filtering/publication may yield a valid empty result.
+The API content field remains necessary for editorial exclusions; full post
+text is not copied into the normalized summaries. No safe incremental stop
+is inferred from an old record or article date.
+
+The future original live test requires a separately approved exact code,
+legacy state and fresh paused-family boundary. Full actual response headers,
+bodies and available partial bytes, stdout and every attempted/persisted state
+must remain in private RAM. Any first failure retains diagnostics for root
+review; another complete attempt requires a separate explicit release. There
+is no automatic full-test retry or authorization to activate this workflow.
+
+The maintainer approved the exact initial LOCAL bridge in
+https://github.com/YouthOpps/data-pipeline/issues/299#issuecomment-6208089574.
+It retains all 28 actual completed-job upper bounds and unknown legacy RAM
+history; the cancelled jobless attempt has no invented request timestamp.
+This binds the reviewed transition only. The first complete original test subsequently ran under the separate execution
+release linked below. This LOCAL approval alone did not authorize it.
+
+
+## Genuine native and retained-response deadline qualification
+
+The separate execution release was
+https://github.com/YouthOpps/data-pipeline/issues/299#issuecomment-6208150769.
+The original, unchanged test passed on source `e0c7ca3a`: four complete HTTP
+200 responses contained robots plus three WordPress pages of 100, 100 and
+39 posts, matching the advertised 239 posts and three pages. It produced
+13 eligible raw records and five after the original expiry filter. Actual
+completion gaps were at least 12.255 seconds, inventory completion gaps at
+least 30.207 seconds, and at most three requests started in a rolling minute.
+All headers, bodies, stdout and 26 exact persisted-save pairs remain private
+RAM evidence. No normalized dataset was saved for this review.
+
+A pure deadline correction was then qualified offline against those same
+239 posts and all 13 original records, without another publisher collection.
+Explicit full-year application/registration closing clauses now supply three
+previously missing calendar dates: 30 June 2026, 17 August 2026 and
+27 November 2022. Spaced publisher digits and Bulgarian month names retain
+the actual year. No local timezone or closing instant is inferred. Every
+recognized closing clause must parse; an additional malformed, unsupported
+or invalid clause leaves the deadline unknown and forbids closed-conflict
+exclusion. Event or interview dates alone do not establish application expiry.
+
+One post has conflicting explicit closing dates: its title says 20 May 2024
+and its body says 20 May 2025. The correction does not choose a year. It
+excludes the normalized post only when all supported conflicting closing
+days have certainly ended under the existing UTC-12 certainty rule. A future
+or uncertain conflicting clause retains the record with an unknown deadline.
+The full original post and the original 13/five outcome remain in the private
+native evidence. The qualified correction yields 12 normalized records and
+one current record; its 11 actual expired records filter to a valid empty
+subset. The current consumer accepts the complete 12/one/zero cases.
+
+The collector still requires eligible raw calls and a complete short terminal
+page within the original 25-page bound. If every eligible call is excluded
+only for confirmed, conflicting dates that are all past, an explicit typed
+collection-local proof carries the page counts, eligible count, original
+closing clauses and aware reference clock. Initial validation rechecks that
+proof before accepting the empty result; the unchanged publication body can
+then publish an empty success. An empty catalogue, unproven empty result,
+missing page or full 25th page still fails. No new record fields or hidden
+global record map carry this evidence.
+
+The genuine native pacing state is proposed for a separately approved
+production handoff, retaining all known historical constraints, four matched
+request-owner settlements and unknown legacy rate history. The pure date
+qualification does not claim another native run or authorize production.
+
+
+The maintainer approved the exact full-known production MAX in
+https://github.com/YouthOpps/data-pipeline/issues/299#issuecomment-6208380160.
+The workflow binds only that four-key approval envelope. It retains all 48
+known timing observations (28 historical job upper bounds plus 20 observations
+from four actual native requests) and the MAX derived from all 56 state
+witnesses, unknown legacy rate
+history and four independently matched ownership settlements. These are
+conservative observations, not 48 requests; no timing history was truncated.
+Current held or stronger owned/local constraints still win through MAX/OR.
+
+The original native result remains 13 raw/five filtered. The later pure-date
+qualification uses the same complete 239-post responses and yields 12
+normalized/one current, with 11 actual expired records filtering to zero.
+Initial validation accepts an all-closed empty collection only with its
+rechecked typed collection-local proof. Production execution and live delivery
+remain separate from the native and offline qualification recorded here.
