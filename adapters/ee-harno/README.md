@@ -93,11 +93,29 @@ factual-collection prohibition was found. This is not an open licence to reprodu
 protected works. Normal TLS, the identifying YouthOppsBot User-Agent, refusal handling,
 same-publisher redirects and complete-document checks remain enabled.
 
-Requests, redirects, retries and robots share a locked local allowance of at
-least twelve seconds between Harno starts and no more than ten starts in any
-rolling 60 seconds. Longer Retry-After and robots delays remain authoritative.
-Only 429/502/503/504 receive the existing bounded retry; 403 is not retried.
-Separate machines must not overlap publisher collections.
+This migration gives every Harno physical exchange, including robots, redirects
+and retries, at least 12.2 seconds after the previous response completes and no
+more than five starts in any rolling 60 seconds. Actual catalogue, umbrella and
+pagination exchanges receive a separate 30-second completion guard; ordinary
+programme details and literal robots remain on the physical floor. Longer
+applicable robots and Retry-After constraints remain authoritative.
+
+A received 429 persists an increasing cooldown of at least 1,800 seconds and
+doubles the current physical and inventory gaps before its body is read, then
+stops the collection. Repeated strikes increase the retained constraints;
+short valid Retry-After cannot reduce that floor. The original single retry
+for fully assessed 502/503/504 remains. Ordinary typed pre-response connection
+failures retain their original two-attempt bound. TLS, local storage, partial
+body and unresolved policy failures cannot become healthy connection retries.
+
+Complete exact-attempt history and the newest owned state are verified before
+collection in both LOCAL and hosted modes. LOCAL additionally requires the
+exact own workflow paused before initialization and after startup quiet, before
+its first publisher exchange. Missing or corrupt mature state cannot fall back
+to an older allowance. The LOCAL marker binds the reviewed first transition.
+The hosted marker now binds its separately approved conditional first-run
+MAX. Complete genuine
+native evidence and its qualified offline expiry projection are described below.
 
 During scope research the unrelated [municipal integration-grant endpoint](https://www.harno.ee/stipendiumid-ja-toetused/muud-toetusmeetmed/formaal-ja-mitteformaaloppe-loimingu-rakendamise-toetus)
 returned 403. It was requested once through the existing transport, never retried or
@@ -172,8 +190,9 @@ The [bot information page](https://youthopps.org/bot/) explains the project
 and provides contact and indexing-removal information. This identity does not
 grant source access or clear retained refusals. Robots checks use the advertised
 product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-pacing, backoff and durable budget identities remain unchanged. Existing
+access; restrictive rate and delay directives remain effective. The migration changes
+pacing and durable state as described above; the source identity and original
+default GitHub pacing remain preserved. Existing
 disabled workflows remain disabled.
 
 ## Daily automation
@@ -188,8 +207,10 @@ disabled until their access hold is separately resolved.
 
 ### Pagination spacing
 
-Inventory page continuations and partitions wait at least 12 seconds after the
-previous inventory page finishes before fetching the next page in this process.
+Actual inventory hubs, continuations and partitions wait at least 30 seconds
+after the preceding inventory response completes. Each physical redirect and
+retry retains that purpose, while literal robots use the separate physical
+allowance.
 This includes taxonomy/listing pages where applicable. The existing native
 transport still enforces its physical-request allowance across retries, redirects
 and detail requests, with stricter publisher limits and retained backoff taking
@@ -265,7 +286,152 @@ the existing three attempts and original write deadline. Authentication,
 non-CAS and unclassified failures stop without another write attempt. Terminal
 publication errors latch a per-process write stop, including later
 failure-metadata fallback; bounded read-only outcome checks remain available.
-Source-pair changes stay protected; reference writes keep force:false. Source
-collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
+Source-pair changes stay protected; reference writes keep force:false. These publication-conflict safeguards alone leave source collection, fields,
+pacing, schedule and the 30-minute job cap unchanged. The migration described
+above has its own pacing scope.
 Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
+
+
+## Reviewed migration and finite admission
+
+The original 30-minute job, 04:56 UTC schedule, full bilingual breadth-first
+frontier, original test and normal record/publication helpers are retained.
+The prior code had no whole collection timer. This migration introduces
+stricter entry-frozen 1,200-second source IO/wait admission and 1,740-second
+whole admission. History, restoration, snapshot and cross-run cooldown all
+debit the same clock. Publication owns at most 180 seconds without borrowing
+the reserved 180 seconds for failure reporting or 60 seconds for export;
+coordination headroom is shared, never renewed. Authentic current-job proof
+may only tighten the remaining allowance. Original publication HTTP alarms
+retain ownership; no permanent outer alarm competes with them. These bounds
+are admission and IO limits, not a hard arbitrary-parser wall guarantee or a
+claim that every possible frontier/retry/stronger policy fits. Exhaustion
+preserves last-good data rather than truncating the supported inventory.
+
+Source-local modern state retains unknown legacy access/429 ancestry and the
+exact known municipal 403 observation above. No absent old state is treated
+as zero history. The original source and GitHub buckets and cross-run metadata
+constraints must be recovered and reviewed before a one-time public boundary.
+Three exact cancelled old attempts with authenticated empty job inventories
+remain in the history; they supply no invented completion or wire timestamp.
+Any changed identity, unreviewed empty attempt or missing newest owned state
+fails closed. Both initial and later state handoffs require explicit ownership.
+
+A durable pending transaction covers physical reservations and every cached
+robots target assessment until all response and policy constraints are saved.
+Unresolved transactions cannot be cleared by an older artifact or a fresh
+process. Retained original locked descriptors and pinned parent/current
+identities protect state mutation and cleanup; a stronger replacement or reused
+foreign descriptor is preserved. Persistence/close failures remain sticky and
+preserve a primary exception. Attempt-owned output contains inert state only;
+safe stale output is invalidated before fallible readiness signal/unlink work.
+Responses and records are never uploaded with pacing artifacts.
+
+Offline controls use private inert IO and localhost clocks only. Current full
+publisher facts, all discovered links and date precision remain gates for the
+later separately released original native test. The existing UTC-12 date-only
+cleanup is preserved for factual review, not asserted as a publisher timezone;
+any UTC calendar correction needs actual source evidence and narrow review.
+
+
+When the original breadth-first reader discovers pagination on a previously
+unclassified first listing, its logical completion signal is converted to a
+wall-clock observation and MAX-retained in durable inventory state before the
+continuation can open. This handoff has its own pending assessment transaction;
+a persistence failure stops before the next request. Stronger retained gaps,
+embargoes and holds remain effective. Ordinary detail requests retain their
+physical floor; no new graph edge or blanket listing classification is added.
+
+
+### Approved first LOCAL transition
+
+The [maintainer's exact LOCAL boundary](https://github.com/YouthOpps/data-pipeline/issues/300#issuecomment-6208100706)
+binds the reviewed seed with all 30 known timing observations: 28 actual job
+completion upper bounds and two retained original publisher reservations.
+The original publisher namespace is present, with its authenticated raw state
+retained in provenance; the modern namespace is separately absent. Absence of
+the modern state is not zero publisher history or permission to clear holds.
+The original municipal-content 403 and unknown unretained access/429 ancestry
+remain explicit. The source-specific LOCAL literal was bound for the
+separately released complete original live test below. The hosted literal now binds its separate
+conditional first-production boundary; authoring this binding does not
+launch collection.
+
+The private observer readiness uses the actual source normalizer, timezone-aware
+expiry argument and metadata helpers. Synthetic current/expired records pass
+the complete-ID consumer checks; wrong record and metadata sources fail. The
+original external-wrapper source-validation gap and its narrow repair are
+retained separately. Synthetic readiness does not establish live source facts.
+
+
+### Complete native evidence and qualified source-expiry correction
+
+The one genuine original live test at source `c5f41b39` passed: all 30 canonical
+HTML pages (32 BFS entries), 36 physical responses with full headers, 70 raw
+records and the original 29 filtered records. All 212 actual successful state
+writes and 70 sequential physical/policy transactions were retained. Actual
+completion-to-wire spacing was at least 12.2213 seconds; inventory completion
+spacing was at least 30.1941 seconds, with at most five starts per rolling
+minute. The complete native took 641.61 seconds.
+
+Review of those same complete actual pages found seven own country panels
+under the publisher's closed-round heading, one programme whose complete
+2025/2026 application windows had all ended, and the Slovak offer's own
+statement that applications are currently not accepted. Three pure helpers
+now use that source authority: recognized open headings reset prior closed
+context; the exact Slovak clause affects only its own section; expiry removes
+source-proven closed records or complete supported windows that have all
+ended. An expired status alone cannot remove an eligible future record. Closure
+evidence must belong to the exact primary source segment; an older related
+translation cannot supply it. Aware window boundaries use their full instants;
+mixed precision, missing, ambiguous or future windows preserve uncertainty.
+No new deadline, year, ID or lifecycle schema is invented.
+
+Date-only cleanup now uses the UTC closing calendar day. All 49 actual
+date-only records were checked at closing-day and next-midnight boundaries.
+The three genuine aware deadlines retain the explicit publisher wording
+23:59 Estonian time; their exact before/equal/after behavior is unchanged.
+The complete retained input reproduces all 70 records, with only the Slovak
+record's status changed. Corrected filtering retains 20 records and removes
+50 actually expired records; that expired subset produces a valid empty
+envelope. Full current-consumer replay passes 70/20/0. These are qualified
+offline projections of complete genuine inputs, not a second live test or
+a live run at the corrected source revision.
+
+The full proposed MAX retains all 174 known timing observations: 28 actual
+legacy job-completion upper bounds, two retained original publisher starts
+and four observations per each of the 36 real native exchanges. Observations
+are not request counts. All numeric constraints, unknown historical access
+and 429 ancestry, and the original 120-second metadata tail remain. A future
+hosted transition must separately bind its fresh namespace observation while
+preserving the complete known MAX; LOCAL state or inodes are not assumed to
+exist on a fresh hosted runner. That conditional first-hosted boundary is now approved and bound, as
+described below.
+
+
+### Conditional first hosted MAX boundary
+
+The [maintainer production boundary](https://github.com/YouthOpps/data-pipeline/issues/300#issuecomment-6208578215)
+approves the exact full 174-observation MAX and the qualified pure expiry
+correction. The hosted full MAX is derived from all 212 actual native
+persistence witnesses and retains the 120-second metadata tail, original
+LOCAL constraints, municipal-content 403 provenance and unknown historical
+access/429 fields. Complete persistence witnesses remain in external receipts.
+The unchanged LOCAL literal describes its initial 30-observation transition;
+actual newer state is retained through strict continuity and MAX merging.
+
+The first hosted literal expects the original pacing namespace and original
+coordination lock to be absent on that fresh runner. This is an exact
+conditional observation, not an assertion that LOCAL state is absent: the
+actual LOCAL original namespace was present, and its constraints remain in
+full provenance. Unexpected hosted legacy state fails the digest check; no
+runtime exception, compatibility bypass or generic empty-state fallback was
+added. Later mature executions require their newest exact owned state.
+
+Independent review separately accepted the genuine original `c5f41b39` test,
+the three pure helper corrections at `e8fed826` using all complete retained
+inputs, and this literal-only binding. No second publisher native is claimed.
+The maintainer owns enable-before-merge, the single automatic production
+refresh and its complete 20-record comparison; this README does not claim
+that hosted production has run yet.
