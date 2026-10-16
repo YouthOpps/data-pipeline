@@ -3673,7 +3673,7 @@ def publisher_attempt(inventory=False):
     try:
         yield frame
     except PolicyStop:
-        frame["assessed"] = True
+        frame["assessed"] = not _PUBLISHER_GATE_FAILED
         raise
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         ordinary_no_response = (
@@ -3890,6 +3890,93 @@ def infrastructure_request_bytes(
         return response.status, response.headers, body
 
 
+class PublisherResponse:
+    """Keep received-response failures outside the connection retry path."""
+
+    _failure = None
+
+    def __init__(self, response, publisher=True, frame=None):
+        self.response = response
+        self.publisher = publisher
+        self.frame = frame
+
+    @classmethod
+    def check(cls, publisher=True):
+        if publisher and cls._failure is not None:
+            raise AdapterError(
+                "Publisher response failure is sticky", "access"
+            ) from cls._failure
+
+    def fail(self, error):
+        if not self.publisher:
+            return
+        if type(self)._failure is None:
+            type(self)._failure = error
+        if self.frame is not None:
+            self.frame["assessed"] = False
+        try:
+            fail_policy()
+        except BaseException:
+            pass
+
+    def __enter__(self):
+        if not self.publisher:
+            return self.response.__enter__()
+        try:
+            return self.response.__enter__()
+        except BaseException as error:
+            self.fail(error)
+            # A failed enter still owns the received response. Keep its error
+            # primary if releasing that response also fails.
+            try:
+                self.response.close()
+            except BaseException:
+                pass
+            if self.publisher and isinstance(
+                error, (OSError, urllib.error.URLError)
+            ):
+                raise AdapterError(
+                    "Publisher response entry failed", "access"
+                ) from error
+            raise
+
+    def __exit__(self, kind, error, traceback):
+        if not self.publisher:
+            return self.response.__exit__(kind, error, traceback)
+        try:
+            suppressed = self.response.__exit__(kind, error, traceback)
+        except BaseException as close_error:
+            self.fail(error if error is not None else close_error)
+            if error is None:
+                if self.publisher:
+                    raise AdapterError(
+                        "Publisher response close failed", "access"
+                    ) from close_error
+                raise
+            if isinstance(error, AdapterError) and error.status == 429:
+                # Keep the intentional stop primary, with the failed release
+                # retained as its cause rather than a healthy assessment.
+                error._header429_unassessed = True
+                raise error from close_error
+            # Preserve the body failure instead of the secondary close error.
+            if self.publisher and isinstance(
+                error, (OSError, urllib.error.URLError)
+            ):
+                raise AdapterError(
+                    "Publisher response body failed", "access"
+                ) from error
+            return False
+        if error is not None and not isinstance(error, AdapterError):
+            self.fail(error)
+            if self.publisher and isinstance(
+                error, (OSError, urllib.error.URLError)
+            ):
+                raise AdapterError(
+                    "Publisher response body failed", "access"
+                ) from error
+        return suppressed
+
+
 @durable_transaction("physical")
 def request_bytes(
     url,
@@ -3983,6 +4070,7 @@ def request_bytes(
             verify_journal()
             verify_collection()
             frame["started"] = True
+            PublisherResponse.check()
             response = _OPENER.open(request, timeout=request_timeout(True))
         except urllib.error.HTTPError as error:
             response = error
@@ -4010,7 +4098,7 @@ def request_bytes(
                 raise
             # Only our intentional stop after healthy close is assessed.
             raise PolicyStop("Publisher stopped: HTTP 429", "fetch", 429)
-        with response:
+        with PublisherResponse(response, frame=frame):
             status, response_headers = response.status, response.headers
             record_retry_after(response_headers.get("Retry-After"), status)
             if not robots and status in (401, 403, 451):
