@@ -554,3 +554,41 @@ pure UTC−12 calendar-status correction is qualified by the retained-input repl
 described above. No further source/native run or production success is asserted
 by this literal binding. ROOT owns controlled enable/merge, the sole automatic
 source Action and artifact/site delivery after independent configuration review.
+
+## Journal generation authority — issue #295
+
+The source keeps its original read/write journal descriptor and verified parent
+across budget-lock scopes. Reads compare the complete acknowledged byte and
+metadata generation before and after access. A stronger same-inode update,
+replacement, missing mature journal or changed descriptor closes access without
+adopting or overwriting that generation. Existing pre-opener checks and export
+use the same authority. The original 16 KiB journal read bound is unchanged.
+
+Writes serialize in RAM, recheck authority, truncate in place, fsync, complete
+short writes, fsync again and compare the complete readback before advancing the
+acknowledged generation. An interrupted write can leave invalid/empty state and
+sacrifice availability; it cannot authorize a fresh budget or older-state heal.
+These are advisory checks, not filesystem CAS or arbitrary same-user isolation.
+
+Owned artifacts and readiness signals use checked immediate writes without a
+buffered destructor. Their original descriptors remain available through outer
+cleanup, so journal or lifetime-close failures invalidate the retained artifact
+before fallible readiness signalling. Cleanup preserves unrelated replacements,
+foreign reused descriptors and original body errors. An otherwise healthy close
+failure remains fatal. No failure path reopens a newer output for mutation.
+
+The repair changes only journal/output IO and its cleanup. Pending-owner and MAX
+schemas, finite migration literals, source graph, parsing, IDs, dates, expiry,
+publication, workflow and original test remain unchanged. External private
+controls exercise actual source functions with networking denied and explicitly
+synthetic admission/metadata/archive inputs. They are not publisher or hosted
+provenance. Historical native success and its qualified expiry projection remain
+attributed above and to independent PR #341 review 5548637554 at exact commit
+`3865398a250d029a79941c3058bda8e1e30be7f0`. Historical raw input is no longer
+available; no new native collection, complete factual replay, current-consumer
+pass, state reset, workflow activation or production recovery is claimed.
+
+Each successful truncate, short write, and fsync now receives an exact-byte
+readback acknowledgement before the next mutation. Failure invalidation also
+requires that last acknowledged full generation; an external stronger generation
+arriving during a partial write is preserved and makes the run fail closed.
