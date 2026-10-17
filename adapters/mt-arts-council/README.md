@@ -141,3 +141,15 @@ comparison. No advanced descriptor campaign, publisher/native request, actual
 journal operation, ZIP download or workflow action is performed by the author.
 Independent exact-revision review is required before delivery. Refs #295. Issue
 #295 remains open.
+
+
+### Interrupted journal writes
+
+Each in-place truncate and partial write is acknowledged only after its exact
+bounded bytes and full inode generation are checked. The next mutation and
+failure cleanup require that same acknowledgement. A stronger same-inode update
+observed during a write is preserved; the process latches publisher access
+closed instead of continuing or truncating that update. These checks retain the
+existing 16 KiB journal bound, state schema, MAX restrictions and publication
+behavior. They detect observed generation changes; they are not filesystem
+compare-and-swap operations.

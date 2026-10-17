@@ -329,3 +329,15 @@ qualify this change. Earlier genuine native evidence retains its original code
 and date attribution; no new publisher collection, current factual review,
 complete native replay or production run is claimed. The maintainer alone owns
 workflow/state coordination and the maintenance rollout for issue #328.
+
+
+### Interrupted journal writes
+
+Each in-place truncate and partial write is acknowledged only after its exact
+bounded bytes and full inode generation are checked. The next mutation and
+failure cleanup require that same acknowledgement. A stronger same-inode update
+observed during a write is preserved; the process latches publisher access
+closed instead of continuing or truncating that update. These checks retain the
+existing 16 KiB journal bound, state schema, MAX restrictions and publication
+behavior. They detect observed generation changes; they are not filesystem
+compare-and-swap operations.

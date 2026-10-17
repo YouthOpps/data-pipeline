@@ -3851,6 +3851,7 @@ _GUARD_FD = _GUARD_ID = _GUARD_VERSION = None
 _GUARD_LOCK_ID = None
 _GUARD_LOCKS = {}
 _GUARD_CREATED = _GUARD_DIRTY = _GUARD_FATAL = False
+_GUARD_WRITE_ACK = None
 _GUARD_COLLECTION_ID = None
 _GUARD_NEW_DIRECTORY = False
 _GUARD_REMOTE_INITIALIZING = False
@@ -4075,10 +4076,72 @@ def journal_read():
         raise
 
 
+def journal_snapshot():
+    """Observe bounded bytes and stat generation without adopting them."""
+    parent = journal_parent()
+    before = journal_owned(_GUARD_FD, _GUARD_ID)
+    current = os.stat(
+        os.path.basename(_STATE_PATH),
+        dir_fd=parent,
+        follow_symlinks=False,
+    )
+    if (
+        (current.st_dev, current.st_ino) != _GUARD_ID
+        or fcntl.fcntl(_GUARD_FD, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR
+    ):
+        raise AdapterError("Publisher journal identity changed", "access")
+    raw = os.pread(_GUARD_FD, 16385, 0)
+    after = journal_owned(_GUARD_FD, _GUARD_ID)
+    journal_parent()
+    latest = os.stat(
+        os.path.basename(_STATE_PATH),
+        dir_fd=parent,
+        follow_symlinks=False,
+    )
+    if (
+        (latest.st_dev, latest.st_ino) != _GUARD_ID
+        or len(raw) > 16384
+        or len(raw) != after.st_size
+        or journal_generation(before) != journal_generation(after)
+    ):
+        raise AdapterError("Publisher journal snapshot changed", "access")
+    for descriptor, identity in _GUARD_LOCKS.items():
+        journal_owned(descriptor, identity)
+    if _GUARD_LOCK_ID is not None:
+        lock = os.stat(
+            os.path.basename(_STATE_LOCK),
+            dir_fd=parent,
+            follow_symlinks=False,
+        )
+        if (lock.st_dev, lock.st_ino) != _GUARD_LOCK_ID:
+            raise AdapterError("Publisher journal lock changed", "access")
+    return journal_generation(after), raw
+
+
+def journal_require_write():
+    """Require the exact last acknowledged own mutation before another."""
+    journal_verify(False)
+    observed = journal_snapshot()
+    journal_verify(False)
+    if _GUARD_WRITE_ACK is None or observed != _GUARD_WRITE_ACK:
+        raise AdapterError("Publisher journal write changed", "access")
+
+
+def journal_acknowledge_write(expected):
+    """Adopt only the exact bytes produced by our completed syscall."""
+    global _GUARD_WRITE_ACK
+    journal_verify(False)
+    observed = journal_snapshot()
+    journal_verify(False)
+    if observed[1] != expected:
+        raise AdapterError("Publisher journal write changed", "access")
+    _GUARD_WRITE_ACK = observed
+
+
 def journal_commit(state):
-    """Rewrite only our held inode; interrupted bytes sacrifice availability."""
+    """Rewrite only acknowledged own bytes, checking each partial write."""
     global _GUARD_VERSION, _GUARD_CREATED, _GUARD_DIRTY
-    global _GUARD_FAILED_STATE
+    global _GUARD_FAILED_STATE, _GUARD_WRITE_ACK
     if _GUARD_FATAL:
         raise AdapterError("Publisher persistence gate failed", "access")
     try:
@@ -4088,15 +4151,21 @@ def journal_commit(state):
                 "Bounded locked publisher commit required", "access"
             )
         journal_verify()
+        _GUARD_WRITE_ACK = journal_snapshot()
+        if _GUARD_WRITE_ACK[0] != _GUARD_VERSION:
+            raise AdapterError("Publisher journal generation changed", "access")
         _GUARD_CREATED = False
         journal_mark_mature()
         _GUARD_DIRTY = True
+        journal_require_write()
         os.ftruncate(_GUARD_FD, 0)
+        journal_acknowledge_write(b"")
+        journal_require_write()
         os.fsync(_GUARD_FD)
-        journal_verify(False)
+        journal_require_write()
         offset = 0
         while offset < len(payload):
-            journal_verify(False)
+            journal_require_write()
             written = os.pwrite(_GUARD_FD, payload[offset:], offset)
             if (
                 type(written) is not int
@@ -4106,23 +4175,20 @@ def journal_commit(state):
                     "Incomplete publisher journal write", "access"
                 )
             offset += written
-            journal_verify(False)
+            journal_acknowledge_write(payload[:offset])
+        journal_require_write()
         os.fsync(_GUARD_FD)
-        before = journal_verify(False)
-        raw = os.pread(_GUARD_FD, len(payload) + 1, 0)
-        after = journal_verify(False)
-        if raw != payload or journal_generation(before) != journal_generation(
-            after
-        ):
-            raise AdapterError("Publisher journal readback changed", "access")
-        _GUARD_VERSION = journal_generation(after)
+        journal_require_write()
+        _GUARD_VERSION = _GUARD_WRITE_ACK[0]
         _GUARD_DIRTY = False
+        _GUARD_WRITE_ACK = None
     except BaseException:
         _GUARD_FAILED_STATE = json.loads(json.dumps(state))
         journal_failed()
         with contextlib.suppress(BaseException):
             journal_invalidate()
         raise
+
 
 
 def journal_invalidate():
@@ -4138,7 +4204,11 @@ def journal_invalidate():
     )
     if (current.st_dev, current.st_ino) != _GUARD_ID:
         return
-    if not _GUARD_DIRTY and journal_generation(info) != _GUARD_VERSION:
+    observed = journal_snapshot()
+    if _GUARD_DIRTY:
+        if _GUARD_WRITE_ACK is None or observed != _GUARD_WRITE_ACK:
+            return
+    elif observed[0] != _GUARD_VERSION:
         return
     os.ftruncate(_GUARD_FD, 0)
     os.fsync(_GUARD_FD)
