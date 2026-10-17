@@ -3181,6 +3181,21 @@ def journal_read():
         raise
 
 
+def journal_acknowledge(expected):
+    """Acknowledge only complete bytes produced by our own last syscall."""
+    global _GUARD_VERSION
+    before = journal_verify(False)
+    raw = os.pread(_GUARD_FD, 16385, 0)
+    after = journal_verify(False)
+    if (
+        raw != expected
+        or len(raw) != after.st_size
+        or journal_generation(before) != journal_generation(after)
+    ):
+        raise AdapterError("Publisher write generation changed", "access")
+    _GUARD_VERSION = journal_generation(after)
+
+
 def journal_commit(state):
     """Rewrite only our held inode; interrupted bytes sacrifice availability."""
     global _GUARD_VERSION, _GUARD_CREATED, _GUARD_DIRTY
@@ -3198,11 +3213,12 @@ def journal_commit(state):
         journal_mark_mature()
         _GUARD_DIRTY = True
         os.ftruncate(_GUARD_FD, 0)
+        journal_acknowledge(b"")
         os.fsync(_GUARD_FD)
-        journal_verify(False)
+        journal_verify()
         offset = 0
         while offset < len(payload):
-            journal_verify(False)
+            journal_verify()
             written = os.pwrite(_GUARD_FD, payload[offset:], offset)
             if (
                 type(written) is not int
@@ -3212,11 +3228,11 @@ def journal_commit(state):
                     "Incomplete publisher journal write", "access"
                 )
             offset += written
-            journal_verify(False)
+            journal_acknowledge(payload[:offset])
         os.fsync(_GUARD_FD)
-        before = journal_verify(False)
+        before = journal_verify()
         raw = os.pread(_GUARD_FD, len(payload) + 1, 0)
-        after = journal_verify(False)
+        after = journal_verify()
         if raw != payload or journal_generation(before) != journal_generation(
             after
         ):
@@ -3245,7 +3261,7 @@ def journal_invalidate():
     )
     if (current.st_dev, current.st_ino) != _GUARD_ID:
         return
-    if not _GUARD_DIRTY and journal_generation(info) != _GUARD_VERSION:
+    if journal_generation(info) != _GUARD_VERSION:
         return
     os.ftruncate(_GUARD_FD, 0)
     os.fsync(_GUARD_FD)
