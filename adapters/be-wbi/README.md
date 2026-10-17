@@ -409,3 +409,39 @@ the new 429 branch. Existing genuine native evidence retains its original code
 and date attribution; this maintenance claims no new publisher collection,
 upstream factual review, full native replay or production run. Issue #328
 remains open after this three-source pilot.
+
+
+## Exact journal generation authority — issue #295
+
+A validated complete read now acknowledges the original journal descriptor,
+pinned parent, metadata generation and all accepted bytes. Every later read,
+write, final publisher prewire check and healthy lifecycle close must still
+match that acknowledgement. Only this process's fully written, fsynced and
+read-back commit advances it. An unseen same-inode replacement, including a
+stronger hold or pending state, stops the run without overwriting its bytes.
+The existing 16 KiB reader bound, Boolean pending schema, RAM/remote MAX merge,
+reviewed legacy boundary and newest-owned restoration markers stay unchanged.
+
+Writes use verified unbuffered descriptors with complete short-write handling.
+An interrupted in-place journal commit may leave invalid partial state; cleanup
+invalidates only the exact last generation written by this process. This is a
+fail-closed availability tradeoff, not an atomic filesystem compare-and-swap.
+A changed generation cannot be adopted by failure cleanup. No retry or later
+publisher opener is allowed after a persistence or ownership failure.
+
+Export retains the original output and parent descriptors until lifecycle
+cleanup. Failure truncates the verified original before fallible readiness or
+unlink operations, preserving an independently replaced named output and any
+foreign descriptor. Healthy collection/output close failures are fatal; an
+existing primary error survives cleanup. If acquisition's first identity query
+fails, an unverified descriptor is retained until process exit instead of being
+blindly closed. This bounded terminal retention does not permit another attempt
+or a healthy export.
+
+The scoped maintenance uses actual private read/write, transport, strict ZIP
+restore, legacy bridge, export and lifecycle functions with synthetic metadata
+and network denied. It preserves the original native-test and business-function
+ASTs, source facts, IDs, expiry rules, workflows and publication contract.
+Historical native results retain their original code/date attribution in the
+preceding sections; their raw input RAM is no longer available in this session.
+No fresh publisher collection, native replay or production run is claimed here.
