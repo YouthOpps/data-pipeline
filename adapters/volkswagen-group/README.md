@@ -381,3 +381,15 @@ later modern hosted restores require the actual standard workflow context and
 credentials. Offline matching-workflow/main checks qualify those paths; they do
 not claim another native collection or hosted production result. ROOT alone
 controls activation, the reviewed merge and its first automatic production run.
+
+
+### Interrupted journal writes
+
+Each in-place truncate and partial write is acknowledged only after its exact
+bounded bytes and full inode generation are checked. The next mutation and
+failure cleanup require that same acknowledgement. A stronger same-inode update
+observed during a write is preserved; the process latches publisher access
+closed instead of continuing or truncating that update. These checks retain the
+existing 16 KiB journal bound, state schema, MAX restrictions and publication
+behavior. They detect observed generation changes; they are not filesystem
+compare-and-swap operations.
