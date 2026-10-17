@@ -3013,7 +3013,7 @@ def journal_acquire(path, initializing):
 
 
 def journal_before_wire():
-    """Refuse generation changes after the policy reservation releases its lock."""
+    """Reject generation changes after releasing the reservation lock."""
     if _JOURNAL_FAILED:
         raise journal_failure()
     if _JOURNAL_COLLECTION is not None:
@@ -3023,7 +3023,7 @@ def journal_before_wire():
 
 
 def journal_finish():
-    """Release each original inode independently and preserve a primary error."""
+    """Release original inodes independently, preserving a primary error."""
     primary = journal_has_primary()
     failures = []
     for path, journal in list(_JOURNAL_OWNERS.items()):
