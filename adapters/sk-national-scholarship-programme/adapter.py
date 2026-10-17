@@ -1,6 +1,7 @@
 """Collect official National Scholarship Programme mobility awards."""
 
 import argparse
+import contextlib
 import base64
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -740,19 +741,365 @@ def publisher_host(url):
     ) or host.endswith(".saia.sk")
 
 
+# Process-local acknowledgements survive close/reopen; uncertainty is terminal.
+_BUDGET_ACKS = {}
+_BUDGET_PARENTS = {}
+_BUDGET_FATAL = False
+_BUDGET_OUTPUT = None
+_COLLECTION_GUARD = None
+
+
+def budget_failure():
+    global _BUDGET_FATAL, _STATE_TRUSTED, _BUDGET_OUTPUT
+    _BUDGET_FATAL, _STATE_TRUSTED = True, False
+    if _BUDGET_OUTPUT is not None:
+        path, identity, descriptor = _BUDGET_OUTPUT
+        # Invalidate retained authority before fallible pathname cleanup.
+        try:
+            if (budget_identity(os.fstat(descriptor))[:-1] == identity[:-1]
+                    and os.fstat(descriptor).st_nlink in (0, identity[-1])
+                    and fcntl.fcntl(descriptor, fcntl.F_GETFL)
+                        & os.O_ACCMODE == os.O_WRONLY):
+                os.ftruncate(descriptor, 0)
+                os.fsync(descriptor)
+        except BaseException:
+            pass
+        try:
+            info = os.lstat(path)
+            if budget_identity(info) == identity:
+                os.unlink(path)
+                current = budget_identity(os.fstat(descriptor))
+                if current[:-1] == identity[:-1] and current[-1] == 0:
+                    _BUDGET_OUTPUT = (path, current, descriptor)
+        except BaseException:
+            pass
+
+
+def budget_available():
+    if _BUDGET_FATAL:
+        raise AdapterError("Publisher journal authority is uncertain", "access")
+
+
+def budget_primary():
+    error = sys.exc_info()[1]
+    # The NSP command exports from a finally after sys.exit(main()).
+    if isinstance(error, SystemExit) and error.code in (None, 0):
+        return None
+    return error
+
+
+def budget_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+            info.st_gid, info.st_nlink)
+
+
+def budget_snapshot(file):
+    guard = file._budget_guard
+    parent = os.fstat(guard["parent"])
+    named_parent = os.lstat(guard["directory"])
+    before = os.fstat(file.fileno())
+    named = os.stat(guard["leaf"], dir_fd=guard["parent"],
+                    follow_symlinks=False)
+    if (fcntl.fcntl(file.fileno(), fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR
+            or budget_identity(parent) != guard["parent_identity"]
+            or budget_identity(named_parent) != guard["parent_identity"]
+            or budget_identity(before) != guard["identity"]
+            or budget_identity(named) != guard["identity"]):
+        raise AdapterError("Publisher journal identity changed", "access")
+    raw = os.pread(file.fileno(), 16385, 0)
+    after = os.fstat(file.fileno())
+    generation = lambda value: (budget_identity(value), value.st_size,
+                                 value.st_mtime_ns, value.st_ctime_ns)
+    if len(raw) > 16384 or generation(before) != generation(after):
+        raise AdapterError("Publisher journal changed during read", "access")
+    if len(raw) != after.st_size:
+        raise AdapterError("Incomplete publisher journal read", "access")
+    return generation(after) + (hashlib.sha256(raw).hexdigest(),), raw
+
+
+def acknowledge_budget(file):
+    try:
+        budget_available()
+        generation, raw = budget_snapshot(file)
+        path = file._budget_guard["path"]
+        if path in _BUDGET_ACKS and _BUDGET_ACKS[path] != generation:
+            raise AdapterError("Publisher journal generation changed", "access")
+        file._budget_guard["generation"] = generation
+        _BUDGET_ACKS[path] = generation
+        return raw.decode("utf-8")
+    except BaseException:
+        budget_failure()
+        raise
+
+
+def verify_budgets(files):
+    try:
+        budget_available()
+        for file in files:
+            generation, _ = budget_snapshot(file)
+            if generation != file._budget_guard["generation"]:
+                raise AdapterError(
+                    "Publisher journal generation changed", "access"
+                )
+    except BaseException:
+        budget_failure()
+        raise
+
+
+
+def verify_collection_lock():
+    if _COLLECTION_GUARD is not None:
+        verify_budgets([_COLLECTION_GUARD])
+
+
+def write_budget_output(path, text):
+    global _BUDGET_OUTPUT
+    budget_available()
+    descriptor = None
+    identity = None
+    primary = None
+    raw = text.encode("utf-8")
+    try:
+        descriptor = os.open(
+            path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600
+        )
+        info = os.fstat(descriptor)
+        identity = budget_identity(info)
+        if (fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE != os.O_WRONLY
+                or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_uid != os.getuid() or info.st_mode & 0o077
+                or budget_identity(os.lstat(path)) != identity):
+            raise AdapterError("Unsafe family artifact inode", "access")
+        close_budget_output((path, identity, descriptor))
+        os.ftruncate(descriptor, 0)
+        offset = 0
+        while offset < len(raw):
+            count = os.write(descriptor, raw[offset:])
+            if not 0 < count <= len(raw) - offset:
+                raise AdapterError("Incomplete family artifact write", "access")
+            offset += count
+        os.fsync(descriptor)
+        if budget_identity(os.lstat(path)) != identity:
+            raise AdapterError("Family artifact inode changed", "access")
+    except BaseException as error:
+        primary = error
+        budget_failure()
+        raise
+    finally:
+        try:
+            if descriptor is not None:
+                if (identity is None
+                        or budget_identity(os.fstat(descriptor)) != identity
+                        or fcntl.fcntl(descriptor, fcntl.F_GETFL)
+                            & os.O_ACCMODE != os.O_WRONLY):
+                    raise AdapterError(
+                        "Family artifact descriptor changed", "access"
+                    )
+                if _BUDGET_OUTPUT is None or _BUDGET_OUTPUT[2] != descriptor:
+                    os.close(descriptor)
+        except BaseException:
+            budget_failure()
+            if primary is None:
+                raise
+
+
+def close_budget_output(replacement=None):
+    global _BUDGET_OUTPUT
+    if _BUDGET_OUTPUT is None:
+        _BUDGET_OUTPUT = replacement
+        return
+    primary = budget_primary()
+    path, identity, descriptor = _BUDGET_OUTPUT
+    try:
+        if (budget_identity(os.fstat(descriptor))[:-1] != identity[:-1]
+                or os.fstat(descriptor).st_nlink not in (0, identity[-1])
+                or fcntl.fcntl(descriptor, fcntl.F_GETFL)
+                    & os.O_ACCMODE != os.O_WRONLY):
+            raise AdapterError("Family artifact descriptor changed", "access")
+        os.close(descriptor)
+    except BaseException:
+        budget_failure()
+        if primary is None:
+            raise
+    finally:
+        _BUDGET_OUTPUT = replacement
+
+
+def prepare_budget_directory(directory):
+    budget_available()
+    try:
+        if directory in _BUDGET_PARENTS:
+            if (budget_identity(os.lstat(directory))
+                    != _BUDGET_PARENTS[directory]):
+                raise AdapterError("Publisher journal parent changed", "access")
+        else:
+            os.makedirs(directory, mode=0o700, exist_ok=True)
+        info = os.lstat(directory)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077):
+            raise AdapterError("Unsafe publisher journal parent", "access")
+    except BaseException:
+        budget_failure()
+        raise
+
+
+def open_budget_file(directory, leaf):
+    budget_available()
+    parent = descriptor = None
+    file = None
+    parent_info = info = None
+    try:
+        parent = os.open(
+            directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        parent_info = os.fstat(parent)
+        if (not stat.S_ISDIR(parent_info.st_mode)
+                or parent_info.st_uid != os.getuid()
+                or parent_info.st_mode & 0o077):
+            raise AdapterError("Unsafe publisher journal parent", "access")
+        identity = budget_identity(parent_info)
+        if (directory in _BUDGET_PARENTS
+                and _BUDGET_PARENTS[directory] != identity):
+            raise AdapterError("Publisher journal parent changed", "access")
+        _BUDGET_PARENTS[directory] = identity
+        path = os.path.join(directory, leaf)
+        descriptor = os.open(leaf, os.O_RDWR | os.O_NOFOLLOW
+                             | (0 if path in _BUDGET_ACKS else os.O_CREAT),
+                             0o600, dir_fd=parent)
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077 or info.st_nlink != 1
+                or fcntl.fcntl(descriptor, fcntl.F_GETFL)
+                    & os.O_ACCMODE != os.O_RDWR):
+            raise AdapterError("Unsafe publisher journal inode", "access")
+        file = os.fdopen(descriptor, "r+", encoding="utf-8", closefd=False)
+        file._budget_guard = {"parent": parent, "directory": directory,
+                              "parent_identity": budget_identity(parent_info),
+                              "leaf": leaf, "path": path,
+                              "identity": budget_identity(info)}
+        return file
+    except BaseException:
+        budget_failure()
+        if file is not None:
+            try:
+                file.close()
+            except BaseException:
+                pass
+        for owned, acquired in ((descriptor, info), (parent, parent_info)):
+            if owned is not None and acquired is not None:
+                try:
+                    if (budget_identity(os.fstat(owned))
+                            == budget_identity(acquired)
+                            and fcntl.fcntl(owned, fcntl.F_GETFL) & os.O_ACCMODE
+                            == (os.O_RDWR if owned == descriptor
+                                else os.O_RDONLY)):
+                        os.close(owned)
+                except OSError:
+                    pass
+        raise
+
+
+def close_budget_files(files):
+    primary = budget_primary()
+    failure = None
+    try:
+        if files and all("generation" in f._budget_guard for f in files):
+            verify_budgets(files)
+    except BaseException as error:
+        failure = error
+    for file in reversed(files):
+        guard = file._budget_guard
+        descriptor = file.fileno()
+        try:
+            if (budget_identity(os.fstat(descriptor)) != guard["identity"]
+                    or fcntl.fcntl(descriptor, fcntl.F_GETFL)
+                        & os.O_ACCMODE != os.O_RDWR):
+                raise AdapterError(
+                    "Publisher journal descriptor changed", "access"
+                )
+            try:
+                file.close()
+            finally:
+                os.close(descriptor)
+        except BaseException as error:
+            budget_failure()
+            failure = failure or error
+        try:
+            if (budget_identity(os.fstat(guard["parent"]))
+                    != guard["parent_identity"]):
+                raise AdapterError(
+                    "Publisher journal parent descriptor changed", "access"
+                )
+            os.close(guard["parent"])
+        except BaseException as error:
+            budget_failure()
+            failure = failure or error
+    if failure is not None and primary is None:
+        raise failure
+
+
+def write_budgets(files, state):
+    try:
+        validate_budget(state)
+        raw = json.dumps(state, separators=(",", ":"), allow_nan=False).encode()
+        if len(raw) > 16384:
+            raise AdapterError("Oversized publisher journal commit", "access")
+        # The real SAIA family has two members: check both before either write.
+        verify_budgets(files)
+        for file in files:
+            verify_budgets(files)
+            descriptor = file.fileno()
+            os.ftruncate(descriptor, 0)
+            os.fsync(descriptor)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            offset = 0
+            while offset < len(raw):
+                count = os.write(descriptor, raw[offset:])
+                if not 0 < count <= len(raw) - offset:
+                    raise AdapterError(
+                        "Incomplete publisher journal write", "access"
+                    )
+                offset += count
+            os.ftruncate(descriptor, len(raw))
+            os.fsync(descriptor)
+            generation, actual = budget_snapshot(file)
+            if actual != raw:
+                raise AdapterError(
+                    "Publisher journal readback changed", "access"
+                )
+            file._budget_guard["generation"] = generation
+            _BUDGET_ACKS[file._budget_guard["path"]] = generation
+        verify_budgets(files)
+    except BaseException:
+        budget_failure()
+        raise
+
+
+@contextlib.contextmanager
+def publisher_response(response, publisher=True):
+    primary = None
+    try:
+        yield response
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        try:
+            response.close()
+        except BaseException:
+            if publisher:
+                budget_failure()
+            if primary is None:
+                raise
+
+
 def open_budget(url):
     """Lock both legacy SAIA inodes in the sibling adapter's sorted order."""
+    budget_available()
     directory = os.path.join(
         tempfile.gettempdir(), "saia-publisher-pacing-" + str(os.getuid())
     )
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    information = os.lstat(directory)
-    if (
-        not stat.S_ISDIR(information.st_mode)
-        or information.st_uid != os.getuid()
-        or information.st_mode & 0o077
-    ):
-        raise AdapterError("Unsafe publisher pacing directory", "access")
+    prepare_budget_directory(directory)
     host = (urllib.parse.urlsplit(url).hostname or "").lower()
     keys = ("saia.sk", "scholarships.sk") if publisher_host(url) else (host,)
     files = []
@@ -765,22 +1112,9 @@ def open_budget(url):
     }
     try:
         for key in sorted(hashlib.sha256(k.encode()).hexdigest() for k in keys):
-            fd = os.open(
-                os.path.join(directory, key),
-                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-                0o600,
-            )
-            info = os.fstat(fd)
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_uid != os.getuid()
-                or info.st_mode & 0o077
-                or info.st_nlink != 1
-            ):
-                os.close(fd)
-                raise AdapterError("Unsafe publisher pacing inode", "access")
-            file = os.fdopen(fd, "r+", encoding="utf-8")
+            file = open_budget_file(directory, key)
             files.append(file)
+            fd = file.fileno()
             while True:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -788,7 +1122,7 @@ def open_budget(url):
                 except BlockingIOError:
                     lifecycle_remaining()
                     time.sleep(0.25)
-            raw = file.read(16385)
+            raw = acknowledge_budget(file)
             if len(raw) > 16384:
                 raise AdapterError("Oversized publisher pacing state", "access")
             try:
@@ -799,25 +1133,18 @@ def open_budget(url):
                 ) from None
             budget = merge_budget(budget, prior)
         return files, validate_budget(budget)
-    except Exception:
-        for file in reversed(files):
-            file.close()
+    except BaseException:
+        budget_failure()
+        close_budget_files(files)
         raise
 
 
 def save_budget(files, budget):
-    validate_budget(budget)
-    for file in files:
-        file.seek(0)
-        json.dump(budget, file, separators=(",", ":"))
-        file.truncate()
-        file.flush()
-        os.fsync(file.fileno())
+    write_budgets(files, budget)
 
 
 def close_budget(files):
-    for file in reversed(files):
-        file.close()
+    close_budget_files(files)
 
 
 def pace(url, interval=6):
@@ -958,13 +1285,15 @@ def request_bytes(
         )
         if request.get_header("User-agent") != _USER_AGENT:
             raise AdapterError("Crawler identity changed", "access")
+        verify_budgets(state)
+        verify_collection_lock()
         try:
             response = _OPENER.open(
                 request, timeout=min(30, lifecycle_remaining())
             )
         except urllib.error.HTTPError as error:
             response = error
-        with response:
+        with publisher_response(response):
             retry = response.headers.get("Retry-After")
             retry_seconds = None
             if retry:
@@ -1034,9 +1363,13 @@ def request_bytes(
                 )
             return response.status, response.headers, body
     finally:
+        primary = budget_primary()
         budget["until"] = max(budget["until"], time.time() + budget["interval"])
         try:
             save_budget(state, budget)
+        except BaseException:
+            if primary is None:
+                raise
         finally:
             close_budget(state)
 
@@ -1698,6 +2031,7 @@ def download_publisher_artifact(identity, artifact):
 def restore_family_state():
     """Restore real family state; only the pinned robots403 hold may migrate."""
     global _STATE_TRUSTED
+    budget_available()
     latest = latest_family_attempt()
     _, _, run_id, attempt, head, source = latest
     result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
@@ -1764,54 +2098,68 @@ def restore_family_state():
 
 
 def export_family_state():
-    if not _STATE_TRUSTED:
-        return
-    run_id, attempt = current_run_identity()
-    files, budget = open_budget(SOURCE_URL)
     try:
-        save_budget(files, budget)
-    finally:
-        close_budget(files)
-    head = os.environ.get("GITHUB_SHA", "")
-    path, root = os.environ.get(
-        "SAIA_PACING_ARTIFACT_PATH", ""
-    ), os.environ.get("RUNNER_TEMP", "")
-    if (
-        not re.fullmatch(r"[0-9a-f]{40}", head)
-        or not root
-        or not os.path.isabs(root)
-        or os.path.dirname(os.path.abspath(path)) != os.path.realpath(root)
-    ):
-        raise AdapterError(
-            "Invalid family artifact destination/binding", "access"
-        )
-    envelope = {
-        "schema": 1,
-        "repository": "YouthOpps/data-pipeline",
-        "source": SOURCE_ID,
-        "run_id": run_id,
-        "run_attempt": attempt,
-        "head_sha": head,
-        "state": budget,
-    }
-    fd = os.open(
-        path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
-    )
-    with os.fdopen(fd, "w", encoding="utf-8") as output:
-        info = os.fstat(output.fileno())
+        budget_available()
+        if not _STATE_TRUSTED:
+            return
+        verify_collection_lock()
+        run_id, attempt = current_run_identity()
+        files, budget = open_budget(SOURCE_URL)
+        try:
+            save_budget(files, budget)
+        finally:
+            close_budget(files)
+        head = os.environ.get("GITHUB_SHA", "")
+        path, root = os.environ.get(
+            "SAIA_PACING_ARTIFACT_PATH", ""
+        ), os.environ.get("RUNNER_TEMP", "")
         if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_nlink != 1
-            or info.st_uid != os.getuid()
+            not re.fullmatch(r"[0-9a-f]{40}", head)
+            or not root
+            or not os.path.isabs(root)
+            or os.path.dirname(os.path.abspath(path)) != os.path.realpath(root)
         ):
-            raise AdapterError("Unsafe family artifact inode", "access")
-        json.dump(envelope, output)
-        output.flush()
-        os.fsync(output.fileno())
+            raise AdapterError(
+                "Invalid family artifact destination/binding", "access"
+            )
+        envelope = {
+            "schema": 1,
+            "repository": "YouthOpps/data-pipeline",
+            "source": SOURCE_ID,
+            "run_id": run_id,
+            "run_attempt": attempt,
+            "head_sha": head,
+            "state": budget,
+        }
+        write_budget_output(path, json.dumps(envelope))
+
+    except BaseException:
+        budget_failure()
+        raise
+
+
+def finish_family_state():
+    global _COLLECTION_LOCK, _COLLECTION_GUARD
+    primary = budget_primary()
+    try:
+        export_family_state()
+    except BaseException:
+        if primary is None:
+            raise
+    finally:
+        if _COLLECTION_GUARD is not None:
+            try:
+                close_budget_files([_COLLECTION_GUARD])
+            finally:
+                _COLLECTION_LOCK = _COLLECTION_GUARD = None
+                close_budget_output()
+        else:
+            close_budget_output()
 
 
 def prepare_collection():
-    global _COLLECTION_LOCK
+    global _COLLECTION_LOCK, _COLLECTION_GUARD
+    budget_available()
     if _COLLECTION_LOCK is None:
         files, budget = open_budget(SOURCE_URL)
         try:
@@ -1822,28 +2170,15 @@ def prepare_collection():
             )
         finally:
             close_budget(files)
-        fd = os.open(
-            os.path.join(directory, "collection.lock"),
-            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-            0o600,
-        )
-        info = os.fstat(fd)
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_nlink != 1
-            or info.st_mode & 0o077
-        ):
-            os.close(fd)
-            raise AdapterError("Unsafe family collection lock", "access")
+        lock = open_budget_file(directory, "collection.lock")
+        fd = lock.fileno()
+        acknowledge_budget(lock)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
-            raise AdapterError(
-                "Another local SAIA collection is active", "access"
-            ) from None
-        _COLLECTION_LOCK = fd
+        except BaseException:
+            close_budget_files([lock])
+            raise
+        _COLLECTION_LOCK, _COLLECTION_GUARD = fd, lock
 
 
 def github(method, path, payload=None, missing_ok=False):
@@ -2163,4 +2498,4 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     finally:
-        export_family_state()
+        finish_family_state()

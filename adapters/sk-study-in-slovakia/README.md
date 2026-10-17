@@ -83,3 +83,38 @@ Published metadata uses `display_name` = **SAIA** for the visible
 institution label. Existing source identifiers, legacy names and attribution
 notices remain unchanged. Both success and failure metadata emit this label;
 older snapshots without it remain valid.
+
+
+## Journal generation integrity (#295)
+
+The two sorted SAIA journal members retain their verified private directory,
+actual read/write descriptors and acknowledged byte generations across reopen.
+Both members are checked before either is modified and immediately before a
+publisher request. A replaced, changed, missing or read-only substituted journal
+fails closed instead of adopting a fresh budget or overwriting stronger history.
+Commits serialize in memory, verify both members, truncate to zero and fsync,
+complete short writes, truncate to exact length, fsync and verify exact readback. A partial two-member commit can leave invalid or unequal files;
+this accepted availability failure stops access and does not claim multi-file
+atomicity or recover through an older artifact.
+
+Uncertain storage invalidates process readiness and owned output through its
+retained verified descriptor before optional pathname cleanup. Collection-lock
+and journal cleanup preserve a body exception and never close a foreign reused
+descriptor. If the first identity query of a freshly acquired descriptor fails,
+that unverified descriptor remains open until process exit; independently verified
+parent descriptors are released. This bounded terminal failure preserves the
+primary exception and permits no retry, further publisher access or healthy owned
+export. Otherwise healthy close failures are fatal, including cleanup after
+export. Normal inventory, facts, IDs, expiry, legacy artifact decoding, source
+schedules and existing request/backoff limits are unchanged.
+
+This narrow IO maintenance is checked through actual functions on isolated
+private files with network denied, including both journal members, inert
+transport, owned exporters and lifetime cleanup. Historical genuine collection
+evidence is documented in merged PRs [#110](https://github.com/YouthOpps/data-pipeline/pull/110)
+and [#186](https://github.com/YouthOpps/data-pipeline/pull/186), as applicable to
+the source. Those public immutable review statements and unchanged normal
+code provide qualified provenance; expired raw captures are not replayed or
+represented as retained. This maintenance performs no publisher crawl, Action
+operation, actual journal mutation or data publication and establishes no fresh
+native or production success. Existing SAIA workflow holds remain in force.
