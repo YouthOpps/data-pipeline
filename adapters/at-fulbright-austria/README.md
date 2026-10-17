@@ -444,3 +444,10 @@ The present IO-only correction preserves all other decorated function AST and
 module constants. Original raw inputs are no longer available here, so these
 public historical qualifications and private IO controls do not establish a
 fresh native PASS, current full-input replay, or current publisher facts.
+
+Snapshot reads now recheck actual acquired collection/state locks and current
+parent/journal names after reading, before acknowledging a generation or
+mutating state during save or cleanup. A collection lock lost during read
+fails before another journal mutation. Ordinary private budget-only scopes
+still work when no collection lock has been acquired; this grants no source
+access and does not change the original collection/pre-opener gates.

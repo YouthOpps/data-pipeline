@@ -2572,6 +2572,44 @@ def load_budget():
         raise
 
 
+def journal_io_authority():
+    """Recheck acquired locks and current names without reading generation."""
+    try:
+        verify_state_directory()
+        named = os.stat(
+            "state.json", dir_fd=_STATE_DIR_FD, follow_symlinks=False
+        )
+        if (named.st_dev, named.st_ino) != _JOURNAL_ID:
+            raise AdapterError("Publisher journal name changed", "access")
+        held = list(_JOURNAL_LOCKS.items())
+        if _COLLECTION_LOCK_FD is not None:
+            held.append((_COLLECTION_LOCK_FD, _COLLECTION_LOCK_ID))
+        for descriptor, identity in held:
+            info = os.fstat(descriptor)
+            name = (
+                "collection.lock"
+                if descriptor == _COLLECTION_LOCK_FD
+                else "state.lock"
+            )
+            current = os.stat(name, dir_fd=_STATE_DIR_FD, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_nlink != 1
+                or (info.st_dev, info.st_ino) != identity
+                or (current.st_dev, current.st_ino) != identity
+                or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+                != os.O_RDWR
+            ):
+                raise AdapterError("Acquired publisher lock changed", "access")
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except BaseException:
+        journal_failure()
+        raise
+
+
 def journal_snapshot():
     """Read only the retained RW inode and one stable bounded generation."""
 
@@ -2589,8 +2627,10 @@ def journal_snapshot():
             raise AdapterError("Original RW journal changed", "access")
         return journal_version(info)
 
+    journal_io_authority()
     before = owned()
     raw = os.pread(_JOURNAL_FD, 16385, 0)
+    journal_io_authority()
     after = owned()
     if before != after or len(raw) != after[2] or len(raw) > 16384:
         raise AdapterError("Journal read generation changed", "access")
