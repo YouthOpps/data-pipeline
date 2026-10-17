@@ -143,3 +143,30 @@ qualify this change. Earlier genuine native evidence retains its original code
 and date attribution; no new publisher collection, current factual review,
 complete native replay or production run is claimed. The maintainer alone owns
 workflow/state coordination and the maintenance rollout for issue #328.
+
+## Retained journal generation — issue #295
+
+The local publisher journal now retains its original read/write descriptor and
+parent identity through the collection. Reads, reservations, commits and the
+last check before the publisher opener verify the complete acknowledged byte
+generation. A changed inode, directory, descriptor or stronger same-inode
+journal stops access instead of allowing a stale write. Only a complete owned
+in-place write, fsync and matching readback acknowledge a new generation.
+Original schemas, initialization rules, limits and source behavior are retained.
+
+Collection and output cleanup retain acquired descriptor identities, preserve a
+primary body error and refuse to close an unrelated recycled descriptor. An
+owned output descriptor remains available through lifecycle cleanup so a fatal
+journal or close failure can invalidate that original inode without mutating a
+replacement pathname. In-place interruption may sacrifice availability; these
+advisory identity checks are not filesystem compare-and-swap or authentication
+against arbitrary same-user mutation. The separate cross-restart limitations
+and pending-transaction work in #273 remain unchanged.
+
+This is a partial IO-only repair within #295. Private actual-function controls
+exercise healthy state, generation changes, retained output invalidation,
+partial and failed writes, descriptor reuse, primary errors, ordinary responses
+and the existing header-only 429 stop. They make no publisher request and do
+not establish a fresh native collection, current facts, complete body replay or
+production publication. Original raw captures were lost during a cloud
+replacement; historical native references retain their original qualifications.
