@@ -526,3 +526,33 @@ qualify this change. Earlier genuine native evidence retains its original code
 and date attribution; no new publisher collection, current factual review,
 complete native replay or production run is claimed. The maintainer alone owns
 workflow/state coordination and the maintenance rollout for issue #328.
+
+### Acknowledged journal mutations (#295)
+
+A dirty write no longer authorizes later writes or failure invalidation by
+itself. Each successful truncate, partial write, and fsync receives a stable
+readback matching the exact expected partial bytes. The next mutation checks
+the last acknowledged full metadata generation. Failure cleanup also checks
+that generation through the original writable descriptor, preserving an
+external stronger same-inode state. The existing 16 KiB journal bound remains.
+
+These are source-local IO fences, not filesystem compare-and-swap. A failed
+own partial write can leave an unavailable journal; the run fails closed.
+Normal policy, pending/MAX state, retries, discovery, parsing, identifiers,
+dates, expiry, publication, tests, and workflows are unchanged. Validation
+uses isolated actual IO functions with denied networking and explicitly
+synthetic admission metadata; it does not claim a new native collection.
+
+Historical native evidence remains attributed to source `e635dc69f2542b463ddc541a6fd7552203101dc90373c8f279bbda7d5ccf4bb0`
+and its [public qualification](https://github.com/YouthOpps/data-pipeline/issues/273#issuecomment-6205602169).
+The present IO-only correction preserves all other decorated function AST and
+module constants. Original raw inputs are no longer available here, so these
+public historical qualifications and private IO controls do not establish a
+fresh native PASS, current full-input replay, or current publisher facts.
+
+Snapshot reads now recheck actual acquired collection/state locks and current
+parent/journal names after reading, before acknowledging a generation or
+mutating state during save or cleanup. A collection lock lost during read
+fails before another journal mutation. Ordinary private budget-only scopes
+still work when no collection lock has been acquired; this grants no source
+access and does not change the original collection/pre-opener gates.

@@ -2855,6 +2855,87 @@ def load_budget():
         raise
 
 
+def journal_io_authority():
+    """Recheck acquired locks and current names without reading generation."""
+    try:
+        verify_state_directory()
+        named = os.stat(
+            "state.json", dir_fd=_STATE_DIR_FD, follow_symlinks=False
+        )
+        if (named.st_dev, named.st_ino) != _JOURNAL_ID:
+            raise AdapterError("Publisher journal name changed", "access")
+        held = list(_JOURNAL_LOCKS.items())
+        if _COLLECTION_LOCK_FD is not None:
+            held.append((_COLLECTION_LOCK_FD, _COLLECTION_LOCK_ID))
+        for descriptor, identity in held:
+            info = os.fstat(descriptor)
+            name = (
+                "collection.lock"
+                if descriptor == _COLLECTION_LOCK_FD
+                else "state.lock"
+            )
+            current = os.stat(name, dir_fd=_STATE_DIR_FD, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_nlink != 1
+                or (info.st_dev, info.st_ino) != identity
+                or (current.st_dev, current.st_ino) != identity
+                or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+                != os.O_RDWR
+            ):
+                raise AdapterError("Acquired publisher lock changed", "access")
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    except BaseException:
+        journal_failure()
+        raise
+
+
+def journal_snapshot():
+    """Read only the retained RW inode and one stable bounded generation."""
+
+    def owned():
+        info = os.fstat(_JOURNAL_FD)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink not in (0, 1)
+            or (info.st_dev, info.st_ino) != _JOURNAL_ID
+            or fcntl.fcntl(_JOURNAL_FD, fcntl.F_GETFL) & os.O_ACCMODE
+            != os.O_RDWR
+        ):
+            raise AdapterError("Original RW journal changed", "access")
+        return journal_version(info)
+
+    journal_io_authority()
+    before = owned()
+    raw = os.pread(_JOURNAL_FD, 16385, 0)
+    journal_io_authority()
+    after = owned()
+    if before != after or len(raw) != after[2] or len(raw) > 16384:
+        raise AdapterError("Journal read generation changed", "access")
+    return after, raw
+
+
+def journal_acknowledge(expected):
+    """Advance own authority only after exact expected-byte readback."""
+    global _JOURNAL_VERSION
+    generation, raw = journal_snapshot()
+    if raw != expected:
+        raise AdapterError("Own journal mutation was superseded", "access")
+    _JOURNAL_VERSION = generation
+
+
+def journal_unchanged():
+    """Failure cleanup requires the last ACK, with no dirty exemption."""
+    generation, _ = journal_snapshot()
+    if generation != _JOURNAL_VERSION:
+        raise AdapterError("Original journal generation changed", "access")
+
+
 def save_budget(state):
     """Commit through the held inode; interrupted rewrites fail closed."""
     global _STATE_INITIALIZING, _PUBLISHER_GATE_FAILED, _FAILED_BUDGET
@@ -2884,30 +2965,24 @@ def save_budget(state):
         verify_journal()
         _STATE_INITIALIZING = _JOURNAL_CREATED = False
         _JOURNAL_DIRTY = True
+        journal_unchanged()
         os.ftruncate(_JOURNAL_FD, 0)
+        journal_acknowledge(b"")
+        verify_journal()
         os.fsync(_JOURNAL_FD)
-        verify_journal(False)
+        journal_acknowledge(b"")
         offset = 0
         while offset < len(payload):
-            verify_journal(False)
+            verify_journal()
             count = os.pwrite(_JOURNAL_FD, payload[offset:], offset)
             if type(count) is not int or not 0 < count <= len(payload) - offset:
-                raise AdapterError(
-                    "Incomplete publisher journal write", "access"
-                )
+                raise AdapterError("Incomplete publisher state write", "access")
             offset += count
-            verify_journal(False)
+            journal_acknowledge(payload[:offset])
+        verify_journal()
         os.fsync(_JOURNAL_FD)
-        verify_journal(False)
-        before = verify_journal(False)
-        if os.pread(_JOURNAL_FD, len(payload) + 1, 0) != payload:
-            raise AdapterError("Publisher journal bytes changed", "access")
-        info = verify_journal(False)
-        if journal_version(before) != journal_version(info):
-            raise AdapterError(
-                "Publisher journal changed during commit read", "access"
-            )
-        _JOURNAL_VERSION = journal_version(info)
+        journal_acknowledge(payload)
+        verify_journal()
         _JOURNAL_DIRTY = False
     except BaseException:
         journal_failure()
@@ -3863,23 +3938,15 @@ def export_family_artifact():
 
 
 def invalidate_budget():
-    """Invalidate only the retained original FD, never a replacement name."""
+    """Invalidate only the original last-acknowledged generation."""
     if _JOURNAL_FD is None:
         return
-    info = os.fstat(_JOURNAL_FD)
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or info.st_uid != os.getuid()
-        or stat.S_IMODE(info.st_mode) != 0o600
-        or info.st_nlink not in (0, 1)
-        or (info.st_dev, info.st_ino) != _JOURNAL_ID
-        or not _JOURNAL_DIRTY
-        and info.st_nlink == 1
-        and journal_version(info) != _JOURNAL_VERSION
-    ):
-        raise AdapterError("Original publisher journal changed", "access")
+    journal_unchanged()
     os.ftruncate(_JOURNAL_FD, 0)
+    journal_acknowledge(b"")
+    journal_unchanged()
     os.fsync(_JOURNAL_FD)
+    journal_acknowledge(b"")
 
 
 def selected_robots_policies(groups):
