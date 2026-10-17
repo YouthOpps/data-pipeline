@@ -1976,6 +1976,47 @@ def load_budget():
         raise
 
 
+def journal_snapshot():
+    """Read only the retained RW inode and one stable bounded generation."""
+
+    def owned():
+        info = os.fstat(_JOURNAL_FD)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink not in (0, 1)
+            or (info.st_dev, info.st_ino) != _JOURNAL_ID
+            or fcntl.fcntl(_JOURNAL_FD, fcntl.F_GETFL) & os.O_ACCMODE
+            != os.O_RDWR
+        ):
+            raise AdapterError("Original RW journal changed", "access")
+        return journal_version(info)
+
+    before = owned()
+    raw = os.pread(_JOURNAL_FD, 16385, 0)
+    after = owned()
+    if before != after or len(raw) != after[2] or len(raw) > 16384:
+        raise AdapterError("Journal read generation changed", "access")
+    return after, raw
+
+
+def journal_acknowledge(expected):
+    """Advance own authority only after exact expected-byte readback."""
+    global _JOURNAL_VERSION
+    generation, raw = journal_snapshot()
+    if raw != expected:
+        raise AdapterError("Own journal mutation was superseded", "access")
+    _JOURNAL_VERSION = generation
+
+
+def journal_unchanged():
+    """Failure cleanup requires the last ACK, with no dirty exemption."""
+    generation, _ = journal_snapshot()
+    if generation != _JOURNAL_VERSION:
+        raise AdapterError("Original journal generation changed", "access")
+
+
 def save_budget(state):
     """Commit through the held inode; interrupted rewrites fail closed."""
     global _STATE_INITIALIZING, _PUBLISHER_GATE_FAILED, _FAILED_BUDGET
@@ -2006,25 +2047,22 @@ def save_budget(state):
         _STATE_INITIALIZING = _JOURNAL_CREATED = False
         _JOURNAL_DIRTY = True
         os.ftruncate(_JOURNAL_FD, 0)
+        journal_acknowledge(b"")
+        verify_journal()
         os.fsync(_JOURNAL_FD)
-        verify_journal(False)
+        journal_acknowledge(b"")
         offset = 0
         while offset < len(payload):
-            verify_journal(False)
+            verify_journal()
             count = os.pwrite(_JOURNAL_FD, payload[offset:], offset)
             if type(count) is not int or not 0 < count <= len(payload) - offset:
-                raise AdapterError(
-                    "Incomplete publisher journal write", "access"
-                )
+                raise AdapterError("Incomplete publisher state write", "access")
             offset += count
-            verify_journal(False)
+            journal_acknowledge(payload[:offset])
+        verify_journal()
         os.fsync(_JOURNAL_FD)
-        before = verify_journal(False)
-        raw = os.pread(_JOURNAL_FD, len(payload) + 1, 0)
-        info = verify_journal(False)
-        if raw != payload or journal_version(before) != journal_version(info):
-            raise AdapterError("Publisher journal bytes changed", "access")
-        _JOURNAL_VERSION = journal_version(info)
+        journal_acknowledge(payload)
+        verify_journal()
         _JOURNAL_DIRTY = False
     except BaseException:
         journal_failure()
@@ -2979,23 +3017,15 @@ def export_family_artifact():
 
 
 def invalidate_budget():
-    """Invalidate only the retained original FD, never a replacement name."""
+    """Invalidate only the original last-acknowledged generation."""
     if _JOURNAL_FD is None:
         return
-    info = os.fstat(_JOURNAL_FD)
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or info.st_uid != os.getuid()
-        or stat.S_IMODE(info.st_mode) != 0o600
-        or info.st_nlink not in (0, 1)
-        or (info.st_dev, info.st_ino) != _JOURNAL_ID
-        or not _JOURNAL_DIRTY
-        and info.st_nlink == 1
-        and journal_version(info) != _JOURNAL_VERSION
-    ):
-        raise AdapterError("Original publisher journal changed", "access")
+    journal_unchanged()
     os.ftruncate(_JOURNAL_FD, 0)
+    journal_acknowledge(b"")
+    journal_unchanged()
     os.fsync(_JOURNAL_FD)
+    journal_acknowledge(b"")
 
 
 def selected_robots_policies(groups):
