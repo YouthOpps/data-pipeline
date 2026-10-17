@@ -4319,28 +4319,24 @@ class JournalAuthorityChanged(AdapterError):
 
 
 
-def locked_journal_authority():
-    """Bind normal reads and writes to the still-locked current journal."""
-    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED
+def locked_journal_authority(check_generation=True):
+    """Bind each operation to the original locked RW byte generation."""
     try:
         collection_lock_authority()
         if len(_JOURNAL_LOCKS) != 1:
             raise ValueError("Exactly one original journal lock required")
         descriptor, identity = next(iter(_JOURNAL_LOCKS.items()))
         guard = _JOURNAL_GUARDS[descriptor]
-        parent = state_parent()
-        name = os.path.basename(_STATE_PATH)
         for held in (descriptor, guard):
-            info = validate_state_descriptor(held, parent, name)
+            info = journal_identity(held)
             if (info.st_dev, info.st_ino) != identity:
                 raise ValueError("Retained journal identity changed")
-        # Reacquiring an existing flock on its own open description is safe.
-        # A reused FD for another open description conflicts with the guard.
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if check_generation:
+            journal_verify()
         return guard
     except BaseException as error:
-        _STATE_TRUSTED = False
-        _PUBLISHER_GATE_FAILED = True
+        fail_publisher_cleanup()
         raise JournalAuthorityChanged(
             "Locked current publisher journal changed", "access"
         ) from error
@@ -4357,6 +4353,8 @@ def state_parent(directory=None):
     if not directory or not os.path.isabs(directory):
         raise AdapterError("Publisher state parent unavailable", "access")
     fresh = _STATE_PARENT_FD is None
+    named_before = os.stat(directory, follow_symlinks=False)
+    expected = (named_before.st_dev, named_before.st_ino)
     descriptor = (
         os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         if fresh
@@ -4373,6 +4371,7 @@ def state_parent(directory=None):
             or not stat.S_ISDIR(current.st_mode)
             or current.st_uid != os.getuid()
             or current.st_mode & 0o077
+            or identity != expected
             or identity != (current.st_dev, current.st_ino)
             or not fresh
             and (
@@ -4384,7 +4383,7 @@ def state_parent(directory=None):
         _STATE_TRUSTED = False
         _PUBLISHER_GATE_FAILED = True
         if fresh:
-            os.close(descriptor)
+            journal_close_directory(descriptor, expected)
         raise
     if fresh:
         _STATE_PARENT_FD = descriptor
@@ -4441,7 +4440,11 @@ def locked_budget():
     name = os.path.basename(_STATE_PATH)
     flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
     try:
-        if (
+        if _JOURNAL_RETAINED_FD is not None:
+            journal_verify()
+            fd = os.dup(_JOURNAL_RETAINED_FD)
+            _JOURNAL_NEW = False
+        elif (
             _INITIAL_DIRECTORY_PROVEN
             and not _RESTORED
             and _VERIFIED_REMOTE_CREATE is not None
@@ -4481,17 +4484,12 @@ def locked_budget():
     ):
         os.close(fd)
         raise AdapterError("Unsafe publisher journal", "access")
-    file = os.fdopen(fd, "r+", closefd=False)
     try:
-        fcntl.flock(file.fileno(), fcntl.LOCK_EX)
-        info = validate_state_descriptor(file.fileno(), parent, name)
-        return BudgetLock(file, info)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        info = validate_state_descriptor(fd, parent, name)
+        return BudgetLock(fd, info)
     except BaseException:
         fail_publisher_cleanup()
-        try:
-            file.close()
-        except BaseException:
-            pass
         try:
             close_retained_descriptor(fd, (info.st_dev, info.st_ino))
         except BaseException:
@@ -4501,31 +4499,22 @@ def locked_budget():
 
 
 def load_budget():
-    authority = locked_journal_authority()
-    parent = state_parent()
-    name = os.path.basename(_STATE_PATH)
-    fd = os.dup(authority)
-    with os.fdopen(fd, "rb") as file:
-        validate_state_descriptor(file.fileno(), parent, name)
-        file.seek(0)
-        raw = file.read(16385)
-        validate_state_descriptor(file.fileno(), parent, name)
-        locked_journal_authority()
-    if len(raw) > 16384:
-        raise AdapterError("Oversized publisher journal", "access")
+    """Read only the acknowledged current generation under its real lock."""
+    locked_journal_authority()
+    raw = journal_verify()
     if not raw and _JOURNAL_NEW and _VERIFIED_REMOTE_CREATE is not None:
         return validate_budget(copy.deepcopy(_VERIFIED_REMOTE_CREATE))
     try:
-        value = json.loads(raw)
-        return validate_budget(value)
-    except (ValueError, TypeError):
-        raise AdapterError("Corrupt publisher journal", "access") from None
+        return validate_budget(json.loads(raw))
+    except (ValueError, TypeError) as error:
+        fail_publisher_cleanup()
+        raise AdapterError("Corrupt publisher journal", "access") from error
 
 
 
 def write_budget(state):
-    """Latch and invalidate the original journal on persistence failure."""
-    global _STATE_TRUSTED, _PUBLISHER_GATE_FAILED, _LAST_KNOWN_STATE
+    """Latch before cleanup; never invalidate a stronger external generation."""
+    global _LAST_KNOWN_STATE
     if _PUBLISHER_GATE_FAILED:
         raise AdapterError("Publisher persistence gate failed", "access")
     try:
@@ -4535,15 +4524,10 @@ def write_budget(state):
             _LAST_KNOWN_STATE = merge_budget(_LAST_KNOWN_STATE, state)
         return write_budget_body(state)
     except BaseException as error:
-        _STATE_TRUSTED = False
-        _PUBLISHER_GATE_FAILED = True
-        if not isinstance(error, JournalAuthorityChanged):
-            try:
-                locked_journal_authority()
+        fail_publisher_cleanup()
+        if not isinstance(error, JournalAuthorityChanged) or _JOURNAL_WRITING:
+            with contextlib.suppress(BaseException):
                 invalidate_failed_journal()
-            except BaseException:
-                # Failed cleanup never replaces the original persistence error.
-                pass
         raise
 
 
@@ -4555,7 +4539,8 @@ def retained_descriptor_info(descriptor, identity):
         (info.st_dev, info.st_ino) != identity
         or not stat.S_ISREG(info.st_mode)
         or info.st_uid != os.getuid()
-        or info.st_mode & 0o077
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR
         or info.st_nlink not in (0, 1)
     ):
         raise AdapterError("Retained descriptor ownership changed", "access")
@@ -4640,18 +4625,27 @@ def close_collection_lock():
 
 
 class BudgetLock:
-    """Retain owned original descriptors without implicit foreign-FD close."""
+    """Keep one original RW authority across scopes and verified closes."""
 
-    def __init__(self, file, info):
-        self.file = file
-        self.descriptor = file.fileno()
+    def __init__(self, descriptor, info):
+        self.descriptor = descriptor
         self.identity = (info.st_dev, info.st_ino)
         self.guard = os.dup(self.descriptor)
         _JOURNAL_LOCKS[self.descriptor] = self.identity
         _JOURNAL_GUARDS[self.descriptor] = self.guard
+        try:
+            journal_retain(self.guard)
+            locked_journal_authority()
+        except BaseException:
+            _JOURNAL_LOCKS.pop(self.descriptor, None)
+            _JOURNAL_GUARDS.pop(self.descriptor, None)
+            with contextlib.suppress(BaseException):
+                close_retained_descriptor(self.guard, self.identity)
+            raise
 
-    def __getattr__(self, name):
-        return getattr(self.file, name)
+    def fileno(self):
+        locked_journal_authority()
+        return self.descriptor
 
     def __enter__(self):
         return self
@@ -4664,84 +4658,78 @@ class BudgetLock:
         if self.descriptor is None:
             return
         descriptor, guard = self.descriptor, self.guard
+        failure = None
+        try:
+            if not _PUBLISHER_GATE_FAILED:
+                locked_journal_authority()
+        except BaseException as error:
+            failure = error
         self.descriptor = self.guard = None
         _JOURNAL_LOCKS.pop(descriptor, None)
         _JOURNAL_GUARDS.pop(descriptor, None)
-        failure = None
-        safe = []
         for held in (guard, descriptor):
-            try:
-                retained_descriptor_info(held, self.identity)
-                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                safe.append(held)
-            except BaseException as error:
-                failure = failure or error
-        try:
-            # Flush the unused, non-owning wrapper before closing owned FDs.
-            # The wrapper cannot close a numeric FD even if it was reused.
-            self.file.close()
-        except BaseException as error:
-            failure = failure or error
-        for held in safe:
             try:
                 close_retained_descriptor(held, self.identity)
             except BaseException as error:
+                fail_publisher_cleanup()
                 failure = failure or error
-        if failure is not None:
+        try:
+            if _JOURNAL_RETAINED_FD is not None:
+                journal_identity(_JOURNAL_RETAINED_FD)
+                fcntl.flock(_JOURNAL_RETAINED_FD, fcntl.LOCK_UN)
+        except BaseException as error:
             fail_publisher_cleanup()
-            if not primary:
-                raise failure
+            failure = failure or error
+        if failure is not None and not primary:
+            raise failure
 
 
 
 def invalidate_failed_journal():
-    """Invalidate only original held inodes, never a newer named file."""
-    state_parent()
+    """Invalidate only a verified own commit, never an external generation."""
     if not _JOURNAL_LOCKS:
-        raise AdapterError(
-            "No retained journal descriptor after failure", "access"
-        )
-    held = []
-    for descriptor, identity in list(_JOURNAL_LOCKS.items()):
-        guard = _JOURNAL_GUARDS[descriptor]
-        # Validate every original object before mutating any descriptor.
-        for candidate in (guard, descriptor):
-            retained_descriptor_info(candidate, identity)
-            held.append((candidate, identity))
-    for descriptor, identity in held:
-        retained_descriptor_info(descriptor, identity)
-        os.ftruncate(descriptor, 0)
-        os.fsync(descriptor)
-        retained_descriptor_info(descriptor, identity)
+        raise AdapterError("Original journal lock unavailable", "access")
+    journal_verify()
+    locked_journal_authority()
+    journal_identity(_JOURNAL_RETAINED_FD)
+    os.ftruncate(_JOURNAL_RETAINED_FD, 0)
+    journal_acknowledge(b"")
+    locked_journal_authority()
+    os.fsync(_JOURNAL_RETAINED_FD)
+    journal_acknowledge(b"")
 
 
 
 def write_budget_body(state):
-    """Persist one validated state while its original journal lock is held."""
-    global _INITIAL_DIRECTORY_PROVEN
+    """Acknowledge each own mutation before allowing another mutation."""
+    global _INITIAL_DIRECTORY_PROVEN, _JOURNAL_WRITING
     state = validate_budget(state)
-    authority = locked_journal_authority()
-    parent = state_parent()
-    name = os.path.basename(_STATE_PATH)
-    fd = os.dup(authority)
-    with os.fdopen(fd, "r+") as file:
-        info = validate_state_descriptor(file.fileno(), parent, name)
+    payload = json.dumps(state, separators=(",", ":"), allow_nan=False).encode(
+        "utf-8"
+    )
+    if len(payload) > 16384:
+        raise AdapterError("Oversized publisher journal", "access")
+    locked_journal_authority()
+    _JOURNAL_WRITING = True
+    os.ftruncate(_JOURNAL_RETAINED_FD, 0)
+    journal_acknowledge(b"")
+    locked_journal_authority()
+    os.fsync(_JOURNAL_RETAINED_FD)
+    journal_acknowledge(b"")
+    offset = 0
+    while offset < len(payload):
         locked_journal_authority()
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_nlink != 1
-            or info.st_mode & 0o077
-        ):
-            raise AdapterError("Unsafe publisher journal write", "access")
-        file.seek(0)
-        json.dump(state, file, separators=(",", ":"))
-        file.truncate()
-        file.flush()
-        _INITIAL_DIRECTORY_PROVEN = False
-        os.fsync(file.fileno())
-        validate_state_descriptor(file.fileno(), parent, name)
-        locked_journal_authority()
+        count = os.pwrite(_JOURNAL_RETAINED_FD, payload[offset:], offset)
+        if type(count) is not int or not 0 < count <= len(payload) - offset:
+            raise AdapterError("Incomplete publisher journal write", "access")
+        offset += count
+        journal_acknowledge(payload[:offset])
+    locked_journal_authority()
+    os.fsync(_JOURNAL_RETAINED_FD)
+    journal_acknowledge(payload)
+    locked_journal_authority()
+    _JOURNAL_WRITING = False
+    _INITIAL_DIRECTORY_PROVEN = False
 
 
 
@@ -5323,7 +5311,7 @@ def source_file_digest():
 
 @contextlib.contextmanager
 def owned_artifact_directory(path):
-    """Pin the verified directory for all relative artifact operations."""
+    """Pin output parent operations and close only that original directory."""
     root, before = checked_artifact_path(path)
     descriptor = os.open(
         root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
@@ -5335,7 +5323,7 @@ def owned_artifact_directory(path):
         verify_artifact_directory(root, descriptor)
         yield root, descriptor
     finally:
-        os.close(descriptor)
+        journal_close_directory(descriptor, (before.st_dev, before.st_ino))
 
 
 
@@ -5383,20 +5371,18 @@ def same_owned_artifact(root, directory, expected):
 
 
 def workflow_output_signal(value):
-    """Append readiness only to a nonblocking, verified regular signal."""
+    """Retain verified readiness authority through all outer cleanup."""
+    if value == "true":
+        if _PUBLISHER_GATE_FAILED or not _STATE_TRUSTED:
+            raise AdapterError(
+                "Untrusted publisher cannot signal ready", "access"
+            )
+        journal_verify()
+    path = os.environ["GITHUB_OUTPUT"]
     descriptor = os.open(
-        os.environ["GITHUB_OUTPUT"],
-        os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
+        path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK
     )
-    with os.fdopen(descriptor, "a") as output:
-        info = os.fstat(output.fileno())
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_nlink != 1
-            or info.st_mode & 0o022
-        ):
-            raise AdapterError("Unsafe workflow output signal", "access")
+    with journal_output(descriptor, path, _JOURNAL_SIGNALS) as (output, _):
         output.write(f"pacing_ready={value}\n")
         output.flush()
         os.fsync(output.fileno())
@@ -5404,56 +5390,14 @@ def workflow_output_signal(value):
 
 
 def invalidate_owned_artifact(root, directory):
-    """Invalidate safe JSON before fallible signal and unlink operations."""
-    stale = owned_artifact_info(root, directory)
-    descriptor = None
-    if stale is not None:
-        descriptor = os.open(
-            "pacing-state.json",
-            os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-            dir_fd=directory,
-        )
-        try:
-            held = os.fstat(descriptor)
-            validate_owned_output(held)
-            if (held.st_dev, held.st_ino) != (stale.st_dev, stale.st_ino):
-                raise AdapterError("Owned artifact identity changed", "access")
-            same_owned_artifact(root, directory, stale)
-        except BaseException:
-            os.close(descriptor)
-            raise
-    errors = []
-    try:
-        if descriptor is not None:
-            try:
-                os.ftruncate(descriptor, 0)
-                os.fsync(descriptor)
-            except BaseException as error:
-                errors.append(error)
-        try:
-            workflow_output_signal("false")
-        except BaseException as error:
-            errors.append(error)
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-            try:
-                same_owned_artifact(root, directory, stale)
-                os.unlink("pacing-state.json", dir_fd=directory)
-            except BaseException as error:
-                errors.append(error)
-    if errors:
-        raise AdapterError("Owned state invalidation failed closed", "access")
+    """Invalidate original retained outputs before any failure signalling."""
+    journal_invalidate_outputs()
 
 
 
 def invalidate_family_artifact():
-    """Invalidate safely owned stale state before readiness signal IO."""
-    path = os.environ.get("HARNO_PACING_ARTIFACT_PATH")
-    if not path:
-        return
-    with owned_artifact_directory(path) as (root, directory):
-        invalidate_owned_artifact(root, directory)
+    """Never reopen a newer output pathname during failure cleanup."""
+    journal_invalidate_outputs()
 
 
 
@@ -5530,11 +5474,12 @@ def export_family_artifact():
             }
             if not re.fullmatch(r"[0-9a-f]{40}", envelope["head_sha"] or ""):
                 raise AdapterError("Invalid artifact source revision", "access")
+            payload = json.dumps(envelope).encode("utf-8")
             temporary = ".owned-pacing-" + os.urandom(16).hex()
             verify_artifact_directory(root, directory)
             descriptor = os.open(
                 temporary,
-                os.O_WRONLY
+                os.O_RDWR
                 | os.O_CREAT
                 | os.O_EXCL
                 | os.O_NOFOLLOW
@@ -5543,10 +5488,13 @@ def export_family_artifact():
                 dir_fd=directory,
             )
             temporary_info = os.fstat(descriptor)
-            with os.fdopen(descriptor, "w") as stream:
-                json.dump(envelope, stream)
+            with journal_output(
+                descriptor, os.path.join(root, temporary), _JOURNAL_EXPORTS
+            ) as (stream, pin):
+                stream.write(payload.decode("utf-8"))
                 stream.flush()
                 os.fsync(stream.fileno())
+            journal_verify()
             same_owned_artifact(root, directory, prior)
             os.replace(
                 temporary,
@@ -5555,24 +5503,35 @@ def export_family_artifact():
                 dst_dir_fd=directory,
             )
             temporary = None
+            pin["name"] = "pacing-state.json"
             same_owned_artifact(root, directory, temporary_info)
+            journal_verify_output_bytes(pin, payload)
+            journal_verify()
             workflow_output_signal("true")
         except BaseException:
-            invalidate_owned_artifact(root, directory)
+            fail_publisher_cleanup()
             raise
         finally:
+            primary = sys.exc_info()[0] is not None
             if temporary is not None and temporary_info is not None:
-                verify_artifact_directory(root, directory)
-                current = os.stat(
-                    temporary, dir_fd=directory, follow_symlinks=False
-                )
-                validate_owned_output(current)
-                if (current.st_dev, current.st_ino) != (
-                    temporary_info.st_dev,
-                    temporary_info.st_ino,
-                ):
-                    raise AdapterError("Temporary artifact changed", "access")
-                os.unlink(temporary, dir_fd=directory)
+                try:
+                    verify_artifact_directory(root, directory)
+                    current = os.stat(
+                        temporary, dir_fd=directory, follow_symlinks=False
+                    )
+                    validate_owned_output(current)
+                    if (current.st_dev, current.st_ino) != (
+                        temporary_info.st_dev,
+                        temporary_info.st_ino,
+                    ):
+                        raise AdapterError(
+                            "Temporary artifact changed", "access"
+                        )
+                    os.unlink(temporary, dir_fd=directory)
+                except BaseException:
+                    fail_publisher_cleanup()
+                    if not primary:
+                        raise
 
 
 
@@ -6433,7 +6392,13 @@ def execution():
         yield
     finally:
         try:
-            close_collection_lock()
+            try:
+                journal_finish()
+            finally:
+                try:
+                    close_collection_lock()
+                finally:
+                    journal_finish_outputs()
         finally:
             _RUN_END = _SOURCE_END = _PHASE_END = _PHASE_NAME = None
 
@@ -6895,6 +6860,413 @@ def header_rate_limit_response(response):
         with contextlib.suppress(BaseException):
             fail_publisher_cleanup()
         raise
+
+
+_JOURNAL_RETAINED_FD = _JOURNAL_RETAINED_ID = None
+_JOURNAL_GENERATION = None
+_JOURNAL_WRITING = False
+_JOURNAL_EXPORTS = []
+_JOURNAL_SIGNALS = []
+
+
+def journal_metadata(info):
+    """Identify the complete acknowledged metadata generation."""
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_uid,
+        stat.S_IMODE(info.st_mode),
+        info.st_nlink,
+    )
+
+
+def journal_identity(descriptor):
+    """Keep the original RW inode beneath its original verified parent."""
+    parent = state_parent()
+    info = validate_state_descriptor(
+        descriptor, parent, os.path.basename(_STATE_PATH)
+    )
+    if (
+        (info.st_dev, info.st_ino) != _JOURNAL_RETAINED_ID
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR
+    ):
+        raise JournalAuthorityChanged("Original RW journal changed", "access")
+    return info
+
+
+def journal_snapshot():
+    """Read the existing16KiB contract without adopting a post-read change."""
+    before = journal_identity(_JOURNAL_RETAINED_FD)
+    chunks = []
+    offset = 0
+    while offset <= 16384:
+        block = os.pread(_JOURNAL_RETAINED_FD, 16385 - offset, offset)
+        if not block:
+            break
+        chunks.append(block)
+        offset += len(block)
+    raw = b"".join(chunks)
+    after = journal_identity(_JOURNAL_RETAINED_FD)
+    if (
+        len(raw) > 16384
+        or len(raw) != after.st_size
+        or journal_metadata(before) != journal_metadata(after)
+    ):
+        raise JournalAuthorityChanged(
+            "Journal read generation changed", "access"
+        )
+    return (*journal_metadata(after), hashlib.sha256(raw).hexdigest()), raw
+
+
+
+def journal_acknowledge(expected):
+    """Advance own authority only after exact expected-byte readback."""
+    global _JOURNAL_GENERATION
+    generation, raw = journal_snapshot()
+    if raw != expected:
+        raise JournalAuthorityChanged(
+            "Own journal mutation was superseded", "access"
+        )
+    _JOURNAL_GENERATION = generation
+
+
+def journal_verify():
+    """Refuse changed bytes or metadata, including between lock scopes."""
+    try:
+        generation, raw = journal_snapshot()
+        if generation != _JOURNAL_GENERATION:
+            raise JournalAuthorityChanged(
+                "Journal generation changed", "access"
+            )
+        return raw
+    except BaseException as error:
+        fail_publisher_cleanup()
+        if isinstance(error, JournalAuthorityChanged):
+            raise
+        raise JournalAuthorityChanged(
+            "Journal authority unavailable", "access"
+        ) from error
+
+
+def journal_retain(descriptor):
+    """Retain the first actual journal; a later acquisition cannot rebase it."""
+    global _JOURNAL_RETAINED_FD, _JOURNAL_RETAINED_ID, _JOURNAL_GENERATION
+    if _JOURNAL_RETAINED_FD is not None:
+        journal_verify()
+        return
+    info = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_nlink != 1
+        or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR
+    ):
+        fail_publisher_cleanup()
+        raise JournalAuthorityChanged("Unsafe RW journal acquisition", "access")
+    retained = os.dup(descriptor)
+    identity = (info.st_dev, info.st_ino)
+    _JOURNAL_RETAINED_FD, _JOURNAL_RETAINED_ID = retained, identity
+    try:
+        generation, _ = journal_snapshot()
+        if (
+            _JOURNAL_GENERATION is not None
+            and generation != _JOURNAL_GENERATION
+        ):
+            raise JournalAuthorityChanged(
+                "Closed journal generation changed", "access"
+            )
+        _JOURNAL_GENERATION = generation
+    except BaseException:
+        fail_publisher_cleanup()
+        _JOURNAL_RETAINED_FD = None
+        with contextlib.suppress(BaseException):
+            close_retained_descriptor(retained, identity)
+        raise
+
+
+def journal_finish():
+    """Verify lifetime authority before releasing only the retained owned FD."""
+    global _JOURNAL_RETAINED_FD
+    if _JOURNAL_RETAINED_FD is None:
+        return
+    primary = sys.exc_info()[0] is not None
+    descriptor = _JOURNAL_RETAINED_FD
+    failure = None
+    try:
+        if not _PUBLISHER_GATE_FAILED:
+            journal_verify()
+    except BaseException as error:
+        failure = error
+    try:
+        close_retained_descriptor(descriptor, _JOURNAL_RETAINED_ID)
+    except BaseException as error:
+        fail_publisher_cleanup()
+        failure = failure or error
+    finally:
+        _JOURNAL_RETAINED_FD = None
+    if failure is not None and not primary:
+        raise failure
+
+
+def journal_output_info(pin, named=False):
+    """Verify a retained output without following a replacement pathname."""
+    info = os.fstat(pin["descriptor"])
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or (info.st_dev, info.st_ino) != pin["identity"]
+        or stat.S_IMODE(info.st_mode) != pin["mode"]
+        or info.st_nlink not in (0, 1)
+        or fcntl.fcntl(pin["descriptor"], fcntl.F_GETFL) & os.O_ACCMODE
+        not in (os.O_RDWR, os.O_WRONLY)
+    ):
+        raise AdapterError("Retained output authority changed", "access")
+    if pin["parent"] is not None:
+        parent = os.fstat(pin["parent"])
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or (parent.st_dev, parent.st_ino) != pin["parent_identity"]
+            or parent.st_uid != pin["parent_owner"]
+            or stat.S_IMODE(parent.st_mode) != pin["parent_mode"]
+        ):
+            raise AdapterError("Retained output parent changed", "access")
+    elif named:
+        raise AdapterError("Output parent was already released", "access")
+    if named:
+        parent = os.stat(pin["root"], follow_symlinks=False)
+        if (parent.st_dev, parent.st_ino) != pin["parent_identity"]:
+            raise AdapterError("Output parent pathname changed", "access")
+        current = os.stat(
+            pin["name"], dir_fd=pin["parent"], follow_symlinks=False
+        )
+        if (current.st_dev, current.st_ino) != pin["identity"]:
+            raise AdapterError("Output pathname changed", "access")
+    return info
+
+
+def journal_retain_output(descriptor, path, pins):
+    """Keep the original writable output and parent through outer cleanup."""
+    info = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_nlink != 1
+        or info.st_mode & 0o022
+        or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+        not in (os.O_RDWR, os.O_WRONLY)
+    ):
+        raise AdapterError("Unsafe output acquisition", "access")
+    root = os.path.dirname(path)
+    named_parent = os.stat(root, follow_symlinks=False)
+    parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    retained = None
+    try:
+        parent_info = os.fstat(parent)
+        if (parent_info.st_dev, parent_info.st_ino) != (
+            named_parent.st_dev,
+            named_parent.st_ino,
+        ):
+            raise AdapterError("Output parent acquisition changed", "access")
+        retained = os.dup(descriptor)
+        pin = dict(
+            descriptor=retained,
+            identity=(info.st_dev, info.st_ino),
+            mode=stat.S_IMODE(info.st_mode),
+            parent=parent,
+            root=root,
+            parent_identity=(parent_info.st_dev, parent_info.st_ino),
+            parent_owner=parent_info.st_uid,
+            parent_mode=stat.S_IMODE(parent_info.st_mode),
+            name=os.path.basename(path),
+        )
+        journal_output_info(pin, named=True)
+        pins.append(pin)
+        return pin
+    except BaseException:
+        if retained is not None:
+            with contextlib.suppress(BaseException):
+                held = os.fstat(retained)
+                if (held.st_dev, held.st_ino) == (info.st_dev, info.st_ino):
+                    os.close(retained)
+        journal_close_directory(
+            parent, (named_parent.st_dev, named_parent.st_ino)
+        )
+        raise
+
+
+class JournalOutput:
+    """Write immediately after identity checks; never buffer foreign-FD IO."""
+
+    def __init__(self, descriptor, pin):
+        self.descriptor = descriptor
+        self.pin = pin
+
+    def fileno(self):
+        journal_output_info(self.pin, named=True)
+        info = os.fstat(self.descriptor)
+        if (info.st_dev, info.st_ino) != self.pin["identity"] or fcntl.fcntl(
+            self.descriptor, fcntl.F_GETFL
+        ) & os.O_ACCMODE not in (os.O_RDWR, os.O_WRONLY):
+            raise AdapterError("Output FD was reused", "access")
+        return self.descriptor
+
+    def write(self, text):
+        raw = text.encode("utf-8")
+        offset = 0
+        while offset < len(raw):
+            count = os.write(self.fileno(), raw[offset:])
+            if type(count) is not int or not 0 < count <= len(raw) - offset:
+                raise AdapterError("Incomplete owned output write", "access")
+            offset += count
+        self.fileno()
+        return len(text)
+
+    def flush(self):
+        self.fileno()
+
+
+@contextlib.contextmanager
+def journal_output(descriptor, path, pins):
+    """Close only the acquired output while preserving any body exception."""
+    identity = None
+    try:
+        info = os.fstat(descriptor)
+        identity = (info.st_dev, info.st_ino)
+        pin = journal_retain_output(descriptor, path, pins)
+        output = JournalOutput(descriptor, pin)
+        yield output, pin
+        output.flush()
+    except BaseException:
+        fail_publisher_cleanup()
+        raise
+    finally:
+        primary = sys.exc_info()[0] is not None
+        try:
+            info = os.fstat(descriptor)
+            if identity is None:
+                named = os.stat(path, follow_symlinks=False)
+                if (
+                    stat.S_ISREG(info.st_mode)
+                    and info.st_uid == os.getuid()
+                    and (info.st_dev, info.st_ino)
+                    == (named.st_dev, named.st_ino)
+                ):
+                    identity = (info.st_dev, info.st_ino)
+            if (
+                identity is None
+                or (info.st_dev, info.st_ino) != identity
+                or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+                not in (os.O_RDWR, os.O_WRONLY)
+            ):
+                raise AdapterError("Output FD ownership changed", "access")
+            os.close(descriptor)
+        except BaseException:
+            fail_publisher_cleanup()
+            if not primary:
+                raise
+
+
+def journal_invalidate_outputs():
+    """Invalidate owned artifacts before fallible readiness signalling."""
+    errors = []
+    for pin in _JOURNAL_EXPORTS:
+        if pin["descriptor"] is None:
+            continue
+        try:
+            journal_output_info(pin)
+            os.ftruncate(pin["descriptor"], 0)
+            os.fsync(pin["descriptor"])
+        except BaseException as error:
+            errors.append(error)
+    for pin in _JOURNAL_SIGNALS:
+        if pin["descriptor"] is None:
+            continue
+        try:
+            journal_output_info(pin)
+            raw = b"pacing_ready=false\n"
+            offset = 0
+            while offset < len(raw):
+                journal_output_info(pin)
+                count = os.write(pin["descriptor"], raw[offset:])
+                if type(count) is not int or not 0 < count <= len(raw) - offset:
+                    raise AdapterError("Readiness write incomplete", "access")
+                offset += count
+            os.fsync(pin["descriptor"])
+        except BaseException as error:
+            errors.append(error)
+    if errors:
+        raise AdapterError("Retained output invalidation failed", "access")
+
+
+def journal_finish_outputs():
+    """Keep output authority through all earlier lifecycle closes."""
+    primary = sys.exc_info()[0] is not None
+    failures = []
+    for pin in _JOURNAL_SIGNALS + _JOURNAL_EXPORTS:
+        for key, identity in (
+            ("parent", pin["parent_identity"]),
+            ("descriptor", pin["identity"]),
+        ):
+            descriptor = pin[key]
+            if descriptor is None:
+                continue
+            try:
+                info = os.fstat(descriptor)
+                if (info.st_dev, info.st_ino) != identity:
+                    raise AdapterError("Output cleanup FD changed", "access")
+                os.close(descriptor)
+            except BaseException as error:
+                if key == "parent":
+                    pin[key] = None
+                fail_publisher_cleanup()
+                failures.append(error)
+            finally:
+                pin[key] = None
+    if failures and not primary:
+        raise failures[0]
+
+
+
+def journal_close_directory(descriptor, identity):
+    """Preserve foreign recycled parent FDs and the original body failure."""
+    primary = sys.exc_info()[0] is not None
+    try:
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid()
+            or (info.st_dev, info.st_ino) != identity
+        ):
+            raise AdapterError("Original directory FD changed", "access")
+        os.close(descriptor)
+    except BaseException:
+        fail_publisher_cleanup()
+        if not primary:
+            raise
+
+
+
+def journal_verify_output_bytes(pin, payload):
+    """Prove complete owned export bytes before signalling readiness."""
+    before = journal_output_info(pin, named=True)
+    chunks = []
+    offset = 0
+    while offset <= len(payload):
+        block = os.pread(pin["descriptor"], len(payload) + 1 - offset, offset)
+        if not block:
+            break
+        chunks.append(block)
+        offset += len(block)
+    after = journal_output_info(pin, named=True)
+    if b"".join(chunks) != payload or journal_metadata(
+        before
+    ) != journal_metadata(after):
+        raise AdapterError("Owned export readback differs", "access")
 
 
 if __name__ == "__main__":
