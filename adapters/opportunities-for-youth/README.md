@@ -289,3 +289,40 @@ qualify this change. Earlier genuine native evidence retains its original code
 and date attribution; no new publisher collection, current factual review,
 complete native replay or production run is claimed. The maintainer alone owns
 workflow/state coordination and the maintenance rollout for issue #328.
+
+
+## Retained journal generation — issue #295
+
+Journal access now retains the acquired read/write descriptor, parent identity,
+original named inode and full acknowledged byte generation across reservations,
+completion writes, pre-opener checks and owned export. A changed, missing,
+read-only or stronger current journal stops this process without replacing its
+bytes. Only a complete fsynced own write and exact readback advance the
+acknowledged generation. Short writes are completed; failed writes may leave
+invalid partial state and sacrifice availability rather than grant fresh access.
+Closure never intentionally closes a reused foreign descriptor; an existing
+body error remains primary, while a healthy closure failure is fatal. Fatal
+journal uncertainty invalidates only retained owned output descriptors and
+readiness. Owned output uses immediate identity-checked writes with no Python
+buffer; foreign descriptor reuse cannot flush buffered text during cleanup.
+These checks are advisory observations, not filesystem CAS or
+protection against arbitrary same-user code racing the process.
+
+Original state schemas, path formulas, collection locks, maturity/recovery seeds,
+retained refusals, pacing floors and caps remain unchanged. The private controls
+exercise the actual journal, transport, export and lifecycle functions with
+network disabled. Earlier complete native evidence retains its historical
+qualification above; original raw records are unavailable, and no new native
+collection, full-record replay, publisher request or production recovery is
+claimed. This IO-only maintenance does not implement the separate durable
+pending protocol, release any hold or authorize a workflow run.
+
+The original publisher journal leaf and distinct service budgets remain directly
+under the shared temporary parent; the private source directory still contains
+the maturity marker. The guard preserves these actual path formulas and the
+publisher's 16 KiB read bound. Service journals retain their original unbounded
+read contract and do not inherit a private-directory permission assumption.
+
+Owned artifact/readiness descriptors remain retained through the outer run's
+publication and service IO, after the inner collection lock is released. A later
+fatal journal error can therefore still invalidate that run's owned output.
