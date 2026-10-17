@@ -269,3 +269,34 @@ a newly observed publisher 429. Existing source/native evidence remains as
 documented above; this maintenance establishes no new complete upstream or
 current-facts evidence chain. No publisher request, genuine native test,
 workflow operation, actual namespace access or owned ZIP download is used.
+
+## Retained journal IO authority (#295)
+
+Publisher and service pacing retain their original read/write descriptors,
+private parent directory, named inode and fully acknowledged byte generation
+through reservation, response completion, hosted restore, bootstrap confirmation,
+export and final program cleanup. The separate collection lock retains its
+original descriptor, parent/name identity and write-only access mode through
+unlock and close, including a final request guard; its six-second entry and
+exit waits remain unchanged. A same-inode edit, replacement name, missing
+mature publisher journal, changed access mode or IO failure stops subsequent
+requests and writes instead of overwriting stronger state. Authenticated initial
+restoration and the existing reviewed first-publication bootstrap remain the
+only hosted initialization paths; an older artifact cannot repair missing
+known-mature local state. The original unbounded journal reader, publisher
+validator, service schema, six-second collection entry/exit waits and native
+request/backoff arithmetic remain unchanged.
+
+Commits serialize before mutation, verify authority, completely write, sync and
+read back the retained file before acknowledging its new generation. An
+uncertain partial write remains a failure. Failed authority latches before
+fallible cleanup and invalidates only a retained owned export inode; replacement
+paths and recycled foreign descriptors remain untouched. Request cleanup
+preserves a primary transport/body failure. Final cleanup failures are fatal
+on an otherwise successful run, including the real script's successful exit.
+
+Private actual-function controls exercise these IO paths, inert response IO and
+the original ZIP decoder without contacting publishers, reading an actual owned
+artifact, resetting a real namespace or invoking Actions. Existing documented
+native evidence qualifies unchanged collection behavior only; these controls
+are not a new native collection, publisher access grant or production result.
