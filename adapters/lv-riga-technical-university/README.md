@@ -273,3 +273,35 @@ failed on actual content403 and retained its owned blocked-state artifact.
 That hold remains controlling. No publisher request, new native collection,
 state reset, workflow enable/dispatch or production recovery accompanies this
 conditional maintenance. Source issue16 remains blocked independently.
+
+
+## Retained journal generation — issue #295
+
+Journal access now retains the acquired read/write descriptor, parent identity,
+original named inode and full acknowledged byte generation across reservations,
+completion writes, pre-opener checks and owned export. A changed, missing,
+read-only or stronger current journal stops this process without replacing its
+bytes. Only a complete fsynced own write and exact readback advance the
+acknowledged generation. Short writes are completed; failed writes may leave
+invalid partial state and sacrifice availability rather than grant fresh access.
+Closure never intentionally closes a reused foreign descriptor; an existing
+body error remains primary, while a healthy closure failure is fatal. Fatal
+journal uncertainty invalidates only retained owned output descriptors and
+readiness. Owned output uses immediate identity-checked writes with no Python
+buffer; foreign descriptor reuse cannot flush buffered text during cleanup.
+These checks are advisory observations, not filesystem CAS or
+protection against arbitrary same-user code racing the process.
+
+Original state schemas, path formulas, collection locks, maturity/recovery seeds,
+retained refusals, pacing floors and caps remain unchanged. The private controls
+exercise the actual journal, transport, export and lifecycle functions with
+network disabled. Earlier complete native evidence retains its historical
+qualification above; original raw records are unavailable, and no new native
+collection, full-record replay, publisher request or production recovery is
+claimed. This IO-only maintenance does not implement the separate durable
+pending protocol, release any hold or authorize a workflow run.
+
+The publisher leaf remains inside its original private source pacing directory,
+and its existing unbounded read contract is preserved. Preparation may initialize
+the genuinely new directory before acquiring the collection lock; missing or
+empty established state cannot become a fresh allowance.

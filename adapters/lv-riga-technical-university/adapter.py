@@ -849,43 +849,35 @@ def safe_error(error):
 
 @contextlib.contextmanager
 def locked_budget(url):
-    """Keep the original host budget and inode under its existing lock."""
-    host = (
-        (urllib.parse.urlsplit(url).hostname or "")
-        .lower()
-        .removeprefix("www.")
-    )
+    """Retain the original locked inode and acknowledged byte generation."""
+    host = ((urllib.parse.urlsplit(url).hostname or "")
+            .lower().removeprefix("www."))
     directory = os.path.join(
         tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
     )
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    information = os.lstat(directory)
-    if (
-        not os.path.isdir(directory)
-        or os.path.islink(directory)
-        or information.st_uid != os.getuid()
-        or information.st_mode & 0o077
-    ):
-        raise AdapterError("Unsafe publisher pacing directory", "access")
-    key = hashlib.sha256(host.encode()).hexdigest()
-    descriptor = os.open(
-        os.path.join(directory, key),
-        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-        0o600,
-    )
-    state = os.fdopen(descriptor, "r+", encoding="utf-8")
+    fresh = False
     try:
+        os.mkdir(directory, 0o700)
+        fresh = True
+    except FileExistsError:
+        pass
+    information = os.lstat(directory)
+    if (not stat.S_ISDIR(information.st_mode)
+            or information.st_uid != os.getuid()
+            or stat.S_IMODE(information.st_mode) != 0o700):
+        raise journal_failure()
+    path = os.path.join(directory, hashlib.sha256(host.encode()).hexdigest())
+    with journal_acquire(path, fresh, private=True) as state:
         fcntl.flock(state.fileno(), fcntl.LOCK_EX)
+        state.seek(0)
         raw = state.read()
-        budget = (
-            json.loads(raw)
-            if raw
-            else {"starts": [], "interval": 6, "until": 0}
-        )
-        budget = validate_budget(budget)
+        if not raw and not state.initializing:
+            raise journal_failure()
+        budget = validate_budget(json.loads(raw) if raw else
+                                 {"starts": [], "interval": 6, "until": 0})
         yield state, budget
-    finally:
-        state.close()
+
+
 
 
 def validate_budget(value):
@@ -1243,9 +1235,12 @@ def legacy_migration(runs):
 
 
 def prepare_pacing():
-    """Conserve native local state and restore the newest completed production state."""
+    """Preserve local state and restore the last completed production state."""
     global _STATE_TRUSTED, _COLLECTION_LOCK, _STARTUP_NOT_BEFORE
+    if _JOURNAL_FAILED:
+        raise journal_failure()
     if _STATE_TRUSTED:
+        journal_before_wire()
         return
     directory = os.path.join(
         tempfile.gettempdir(), SOURCE_ID + "-pacing-" + str(os.getuid())
@@ -1257,21 +1252,18 @@ def prepare_pacing():
         os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
         0o600,
     )
+    global _JOURNAL_COLLECTION
+    _JOURNAL_COLLECTION = PublisherJournal(
+        descriptor, os.path.join(directory, "collection.lock"), private=True
+    )
     try:
-        info = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(info.st_mode)
-            or info.st_uid != os.getuid()
-            or info.st_nlink != 1
-            or info.st_mode & 0o077
-        ):
-            raise AdapterError("Unsafe collection lock", "access")
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except Exception:
-        os.close(descriptor)
-        raise AdapterError(
-            "Another collector or unsafe collection lock", "access"
-        ) from None
+        fcntl.flock(_JOURNAL_COLLECTION.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BaseException:
+        try:
+            _JOURNAL_COLLECTION.close()
+        finally:
+            _JOURNAL_COLLECTION = None
+        raise
     _COLLECTION_LOCK = descriptor
     if os.environ.get("GITHUB_ACTIONS") == "true":
         runs = workflow_history()
@@ -1306,10 +1298,11 @@ def prepare_pacing():
 
 
 def export_pacing():
-    """Export only trusted finalized state and signal this step's fresh artifact."""
+    """Export trusted finalized state and signal this step's fresh artifact."""
     path = os.environ.get("RTU_PACING_ARTIFACT_PATH")
     if not path or not _STATE_TRUSTED:
         return
+    journal_before_wire()
     run_id, attempt = workflow_identity()
     head = os.environ.get("GITHUB_SHA", "")
     directory = os.environ.get("RUNNER_TEMP", "")
@@ -1332,20 +1325,26 @@ def export_pacing():
         }
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", dir=directory, delete=False
-        ) as file:
-            temporary = file.name
+        journal_export_parent(directory)
+        descriptor, temporary = tempfile.mkstemp(dir=directory)
+        with journal_output(descriptor, temporary) as file:
+            journal_retain_export(file.fileno())
             json.dump(envelope, file, separators=(",", ":"))
             file.flush()
             os.fsync(file.fileno())
-        os.replace(temporary, path)
+        journal_before_wire()
+        parent = journal_export_parent(directory)
+        os.replace(os.path.basename(temporary), os.path.basename(path),
+                   src_dir_fd=parent, dst_dir_fd=parent)
+        journal_export_parent(directory)
         temporary = None
         descriptor = os.open(
             os.environ["GITHUB_OUTPUT"],
             os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW,
         )
-        with os.fdopen(descriptor, "a") as output:
+        with journal_output(
+            descriptor, os.environ["GITHUB_OUTPUT"], append=True
+        ) as output:
             info = os.fstat(output.fileno())
             if (
                 not stat.S_ISREG(info.st_mode)
@@ -1353,10 +1352,23 @@ def export_pacing():
                 or info.st_nlink != 1
             ):
                 raise AdapterError("Unsafe workflow output file", "access")
+            global _JOURNAL_READY_ANCHOR
+            if _JOURNAL_READY_ANCHOR is not None:
+                journal_release_anchor("_JOURNAL_READY_ANCHOR")
+            _JOURNAL_READY_ANCHOR = (
+                os.dup(output.fileno()), (info.st_dev, info.st_ino)
+            )
+            journal_before_wire()
             output.write("pacing_ready=true\n")
+            output.flush()
+            journal_before_wire()
+    except BaseException:
+        journal_failure()
+        raise
     finally:
         if temporary:
-            os.unlink(temporary)
+            with contextlib.suppress(BaseException):
+                os.unlink(temporary)
 
 
 def pace(url, interval=12):
@@ -1404,11 +1416,9 @@ def pace(url, interval=12):
 
 
 def save_budget(state, budget):
-    state.seek(0)
-    json.dump(budget, state)
-    state.truncate()
-    state.flush()
-    os.fsync(state.fileno())
+    state.commit(budget)
+
+
 
 
 def request_bytes(
@@ -1426,6 +1436,7 @@ def request_bytes(
             headers={"User-Agent": _USER_AGENT, **(headers or {})},
         )
         try:
+            journal_before_wire()
             response = _OPENER.open(request, timeout=30)
         except urllib.error.HTTPError as error:
             response = error
@@ -1479,11 +1490,15 @@ def request_bytes(
             return response.status, response.headers, body
     finally:
         if manager is not None:
-            budget["completed_at"] = time.time()
+            primary = sys.exc_info()[1]
             try:
+                budget["completed_at"] = time.time()
                 save_budget(state, budget)
+            except BaseException:
+                if primary is None:
+                    raise
             finally:
-                manager.__exit__(None, None, None)
+                journal_context_exit(manager, primary)
 
 
 def fetch_source(url, min_interval=12):
@@ -2185,11 +2200,589 @@ def main():
     try:
         return run()
     finally:
+        primary = sys.exc_info()[1]
         try:
             export_pacing()
+        except BaseException:
+            if primary is None:
+                raise
         finally:
-            if _COLLECTION_LOCK is not None:
-                os.close(_COLLECTION_LOCK)
+            try:
+                if _JOURNAL_COLLECTION is not None:
+                    _JOURNAL_COLLECTION.close()
+            finally:
+                try:
+                    journal_finish()
+                finally:
+                    journal_finish_outputs()
+
+
+
+
+_JOURNAL_FAILED = False
+_JOURNAL_OWNERS = {}
+_JOURNAL_GENERATIONS = {}
+_JOURNAL_EXPORT_ANCHOR = None
+_JOURNAL_EXPORT_PARENT = None
+_JOURNAL_COLLECTION = None
+_JOURNAL_READY_ANCHOR = None
+
+
+def journal_failure():
+    """Latch IO uncertainty before error handling or cleanup can fail."""
+    global _JOURNAL_FAILED, _STATE_TRUSTED
+    _JOURNAL_FAILED = True
+    _STATE_TRUSTED = False
+    with contextlib.suppress(BaseException):
+        journal_invalidate_export()
+    with contextlib.suppress(BaseException):
+        journal_invalidate_ready()
+    return AdapterError("Publisher journal authority changed", "access")
+
+
+class PublisherJournal:
+    """Own one original RW inode, its parent and its acknowledged generation."""
+
+    def __init__(
+        self, descriptor, path, limit=None, private=False, parent=None
+    ):
+        self.initializing = False
+        self.limit = limit
+        self.private = private
+        self.descriptor = descriptor
+        self.name = path
+        self.parent = parent
+        self.identity = None
+        self.parent_identity = None
+        self.parent_mode = None
+        self.parent_owner = None
+        self.generation = None
+        self.offset = 0
+        try:
+            info = os.fstat(descriptor)
+            self.identity = (info.st_dev, info.st_ino)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_nlink != 1
+                or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+                != os.O_RDWR
+            ):
+                raise journal_failure()
+            if self.parent is None:
+                self.parent = os.open(
+                    os.path.dirname(path),
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                )
+            parent = os.fstat(self.parent)
+            self.parent_identity = (parent.st_dev, parent.st_ino)
+            self.parent_mode = stat.S_IMODE(parent.st_mode)
+            self.parent_owner = parent.st_uid
+            self.generation = self.snapshot()
+        except BaseException:
+            journal_failure()
+            # First-fstat failures still release only descriptors whose current
+            # identity agrees with the original acquisition name.
+            for attribute, name, directory in (
+                ("identity", self.name, False),
+                ("parent_identity", os.path.dirname(self.name), True),
+            ):
+                descriptor = self.parent if directory else self.descriptor
+                if getattr(self, attribute) is None and descriptor is not None:
+                    try:
+                        current = os.fstat(descriptor)
+                        named = os.stat(name, follow_symlinks=False)
+                        expected_type = (
+                            stat.S_ISDIR if directory else stat.S_ISREG
+                        )
+                        if (
+                            expected_type(current.st_mode)
+                            and current.st_uid == os.getuid()
+                            and (current.st_dev, current.st_ino)
+                            == (named.st_dev, named.st_ino)
+                        ):
+                            setattr(
+                                self,
+                                attribute,
+                                (current.st_dev, current.st_ino),
+                            )
+                    except BaseException:
+                        pass
+            self.release_owned()
+            raise
+
+    def named(self):
+        parent = os.fstat(self.parent)
+        current_parent = os.stat(
+            os.path.dirname(self.name), follow_symlinks=False
+        )
+        info = os.fstat(self.descriptor)
+        named = os.stat(
+            os.path.basename(self.name),
+            dir_fd=self.parent,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or parent.st_uid != self.parent_owner
+            or stat.S_IMODE(parent.st_mode) != self.parent_mode
+            or self.private and (
+                parent.st_uid != os.getuid()
+                or stat.S_IMODE(parent.st_mode) != 0o700
+            )
+            or (parent.st_dev, parent.st_ino) != self.parent_identity
+            or (current_parent.st_dev, current_parent.st_ino)
+            != self.parent_identity
+            or not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != os.getuid()
+            or fcntl.fcntl(self.descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+            != os.O_RDWR
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != self.identity
+            or (named.st_dev, named.st_ino) != self.identity
+        ):
+            raise journal_failure()
+        return info
+
+    def raw_bytes(self):
+        """Preserve the caller's original bounded or unbounded read contract."""
+        parts = []
+        offset = 0
+        while True:
+            size = 65536 if self.limit is None else self.limit + 1 - offset
+            if size <= 0:
+                break
+            block = os.pread(self.descriptor, size, offset)
+            if not block:
+                break
+            parts.append(block)
+            offset += len(block)
+        return b"".join(parts)
+
+    def snapshot(self):
+        before = self.named()
+        raw = self.raw_bytes()
+        after = self.named()
+        version = lambda info: (
+            info.st_dev,
+            info.st_ino,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+        )
+        if (
+            self.limit is not None and len(raw) > self.limit
+            or version(before) != version(after)
+        ):
+            raise journal_failure()
+        return (*version(after), hashlib.sha256(raw).hexdigest())
+
+    def verify(self):
+        try:
+            if _JOURNAL_FAILED or self.snapshot() != self.generation:
+                raise journal_failure()
+        except BaseException:
+            journal_failure()
+            raise
+
+    def fileno(self):
+        self.verify()
+        return self.descriptor
+
+    def seek(self, offset, whence=0):
+        self.verify()
+        if whence != 0 or offset != 0:
+            raise journal_failure()
+        self.offset = 0
+
+    def read(self, size=-1):
+        self.verify()
+        raw = self.raw_bytes()[self.offset:]
+        self.verify()
+        if size >= 0:
+            raw = raw[:size]
+        self.offset += len(raw)
+        return raw.decode("utf-8")
+
+    def commit(self, value):
+        try:
+            raw = json.dumps(
+                value, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+            if not raw or (self.limit is not None and len(raw) > self.limit):
+                raise journal_failure()
+            self.verify()
+            os.ftruncate(self.descriptor, 0)
+            os.fsync(self.descriptor)
+            offset = 0
+            while offset < len(raw):
+                written = os.pwrite(self.descriptor, raw[offset:], offset)
+                if written <= 0:
+                    raise journal_failure()
+                offset += written
+            os.fsync(self.descriptor)
+            self.named()
+            if self.raw_bytes() != raw:
+                raise journal_failure()
+            committed = self.snapshot()
+            if committed[-1] != hashlib.sha256(raw).hexdigest():
+                raise journal_failure()
+            self.generation = committed
+            self.initializing = False
+            self.offset = 0
+        except BaseException:
+            journal_failure()
+            raise
+
+    def release_owned(self):
+        error = None
+        for attribute, identity in (
+            ("descriptor", self.identity),
+            ("parent", self.parent_identity),
+        ):
+            descriptor = getattr(self, attribute)
+            if descriptor is None:
+                continue
+            setattr(self, attribute, None)
+            try:
+                info = os.fstat(descriptor)
+                if (
+                    identity is None
+                    or (info.st_dev, info.st_ino) != identity
+                    or (
+                        attribute == "descriptor"
+                        and fcntl.fcntl(descriptor, fcntl.F_GETFL)
+                        & os.O_ACCMODE
+                        != os.O_RDWR
+                    )
+                ):
+                    raise journal_failure()
+                os.close(descriptor)
+            except BaseException as failure:
+                journal_failure()
+                error = error or failure
+        if error is not None and sys.exc_info()[0] is None:
+            raise error
+
+    def close(self):
+        if self.descriptor is None:
+            return
+        primary = sys.exc_info()[0] is not None
+        failure = None
+        try:
+            self.verify()
+        except BaseException as error:
+            failure = error
+        try:
+            self.release_owned()
+        except BaseException as error:
+            failure = failure or error
+        if failure is not None and not primary:
+            raise failure
+
+    def __enter__(self):
+        self.verify()
+        return self
+
+    def __exit__(self, kind, error, traceback):
+        failure = None
+        try:
+            self.verify()
+        except BaseException as caught:
+            failure = caught
+        try:
+            info = os.fstat(self.descriptor)
+            if (info.st_dev, info.st_ino) != self.identity or (
+                fcntl.fcntl(self.descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+                != os.O_RDWR
+            ):
+                raise journal_failure()
+            fcntl.flock(self.descriptor, fcntl.LOCK_UN)
+        except BaseException as caught:
+            journal_failure()
+            failure = failure or caught
+        if failure is not None and kind is None:
+            raise failure
+        return False
+
+
+def journal_acquire(path, initializing, *, limit=None, private=False):
+    """Keep the original inode alive between reservations and the wire guard."""
+    if _JOURNAL_FAILED:
+        raise journal_failure()
+    if path in _JOURNAL_OWNERS:
+        journal = _JOURNAL_OWNERS[path]
+        journal.verify()
+        return journal
+    parent = None
+    parent_identity = None
+    transferred = False
+    try:
+        parent = os.open(
+            os.path.dirname(path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        info = os.fstat(parent)
+        parent_identity = (info.st_dev, info.st_ino)
+        if private and (info.st_uid != os.getuid()
+                        or stat.S_IMODE(info.st_mode) != 0o700):
+            raise journal_failure()
+        descriptor = os.open(
+            os.path.basename(path),
+            os.O_RDWR | os.O_NOFOLLOW | (os.O_CREAT if initializing else 0),
+            0o600, dir_fd=parent,
+        )
+        transferred = True
+        journal = PublisherJournal(descriptor, path, limit, private, parent)
+        previous = _JOURNAL_GENERATIONS.get(path)
+        if previous is not None and previous != (
+            journal.generation, journal.parent_identity
+        ):
+            try:
+                raise journal_failure()
+            finally:
+                journal.close()
+        journal.initializing = initializing
+        _JOURNAL_OWNERS[path] = journal
+        return journal
+    except BaseException:
+        journal_failure()
+        if parent is not None and not transferred:
+            with contextlib.suppress(BaseException):
+                current = os.fstat(parent)
+                named = os.stat(os.path.dirname(path), follow_symlinks=False)
+                identity = (current.st_dev, current.st_ino)
+                if (identity == parent_identity
+                        or parent_identity is None
+                        and identity == (named.st_dev, named.st_ino)):
+                    os.close(parent)
+        raise
+
+
+def journal_before_wire():
+    """Refuse changed generations after the policy lock is released."""
+    if _JOURNAL_FAILED:
+        raise journal_failure()
+    if _JOURNAL_COLLECTION is not None:
+        _JOURNAL_COLLECTION.verify()
+    for journal in _JOURNAL_OWNERS.values():
+        journal.verify()
+
+
+def journal_finish():
+    """Release original inodes independently, preserving a primary error."""
+    primary = sys.exc_info()[1]
+    failures = []
+    for path, journal in list(_JOURNAL_OWNERS.items()):
+        del _JOURNAL_OWNERS[path]
+        _JOURNAL_GENERATIONS[path] = (
+            journal.generation, journal.parent_identity
+        )
+        try:
+            journal.close()
+        except BaseException as error:
+            failures.append(error)
+    if failures and primary is None:
+        raise failures[0]
+
+
+class OwnedOutput:
+    """Write directly to one verified output FD without a destructor buffer."""
+
+    def __init__(self, descriptor, identity):
+        self.descriptor = descriptor
+        self.identity = identity
+
+    def verify(self):
+        info = os.fstat(self.descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_nlink > 1
+                or (info.st_dev, info.st_ino) != self.identity
+                or fcntl.fcntl(self.descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+                not in (os.O_RDWR, os.O_WRONLY)):
+            raise journal_failure()
+
+    def fileno(self):
+        self.verify()
+        return self.descriptor
+
+    def write(self, text):
+        raw = text.encode("utf-8")
+        offset = 0
+        while offset < len(raw):
+            self.verify()
+            written = os.write(self.descriptor, raw[offset:])
+            if written <= 0:
+                raise journal_failure()
+            offset += written
+        self.verify()
+        return len(text)
+
+    def flush(self):
+        self.verify()
+
+
+@contextlib.contextmanager
+def journal_output(descriptor, path, *, append=False):
+    """Close only the acquired output FD, preserving a primary write failure."""
+    identity = None
+    output = None
+    primary = None
+    try:
+        info = os.fstat(descriptor)
+        identity = (info.st_dev, info.st_ino)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_nlink != 1):
+            raise journal_failure()
+        output = OwnedOutput(descriptor, identity)
+        output.verify()
+        yield output
+        output.flush()
+    except BaseException as error:
+        primary = error
+        journal_failure()
+        raise
+    finally:
+        try:
+            current = os.fstat(descriptor)
+            if identity is None:
+                named = os.stat(path, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == (
+                    named.st_dev, named.st_ino
+                ):
+                    identity = (current.st_dev, current.st_ino)
+            if (identity is None or (current.st_dev, current.st_ino) != identity
+                    or current.st_uid != os.getuid()
+                    or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+                    not in (os.O_RDWR, os.O_WRONLY)):
+                raise journal_failure()
+            if output is not None:
+                output.verify()
+            os.close(descriptor)
+        except BaseException:
+            journal_failure()
+            if primary is None:
+                raise
+
+
+
+
+def journal_export_parent(directory):
+    """Bind owned artifact rename to its verified original directory."""
+    global _JOURNAL_EXPORT_PARENT
+    if _JOURNAL_EXPORT_PARENT is None:
+        descriptor = os.open(
+            directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        try:
+            info = os.fstat(descriptor)
+            _JOURNAL_EXPORT_PARENT = (
+                descriptor, (info.st_dev, info.st_ino), info.st_uid,
+                stat.S_IMODE(info.st_mode), directory,
+            )
+        except BaseException:
+            journal_failure()
+            with contextlib.suppress(BaseException):
+                info = os.fstat(descriptor)
+                named = os.stat(directory, follow_symlinks=False)
+                if (info.st_dev, info.st_ino) == (named.st_dev, named.st_ino):
+                    os.close(descriptor)
+            raise
+    descriptor, identity, owner, mode, original = _JOURNAL_EXPORT_PARENT
+    info = os.fstat(descriptor)
+    named = os.stat(directory, follow_symlinks=False)
+    if (original != directory or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid() or info.st_uid != owner
+            or stat.S_IMODE(info.st_mode) != mode or mode & 0o022
+            or (info.st_dev, info.st_ino) != identity
+            or (named.st_dev, named.st_ino) != identity):
+        raise journal_failure()
+    return descriptor
+
+
+def journal_retain_export(descriptor):
+    """Keep the exact output inode available for fail-closed invalidation."""
+    global _JOURNAL_EXPORT_ANCHOR
+    info = os.fstat(descriptor)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+        raise journal_failure()
+    if _JOURNAL_EXPORT_ANCHOR is not None:
+        journal_release_anchor("_JOURNAL_EXPORT_ANCHOR")
+    _JOURNAL_EXPORT_ANCHOR = (os.dup(descriptor), (info.st_dev, info.st_ino))
+
+
+def journal_anchor(name):
+    descriptor, identity = globals()[name]
+    info = os.fstat(descriptor)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_nlink > 1 or (info.st_dev, info.st_ino) != identity
+            or fcntl.fcntl(descriptor, fcntl.F_GETFL) & os.O_ACCMODE
+            not in (os.O_WRONLY, os.O_RDWR)):
+        raise AdapterError("Owned output descriptor changed", "access")
+    return descriptor
+
+
+def journal_invalidate_export():
+    if _JOURNAL_EXPORT_ANCHOR is not None:
+        descriptor = journal_anchor("_JOURNAL_EXPORT_ANCHOR")
+        os.ftruncate(descriptor, 0)
+        os.fsync(descriptor)
+
+
+def journal_invalidate_ready():
+    if _JOURNAL_READY_ANCHOR is not None:
+        descriptor = journal_anchor("_JOURNAL_READY_ANCHOR")
+        os.write(descriptor, b"pacing_ready=false\n")
+        os.fsync(descriptor)
+
+
+def journal_release_anchor(name):
+    if globals()[name] is None:
+        return
+    try:
+        os.close(journal_anchor(name))
+    except BaseException:
+        journal_failure()
+        raise
+    finally:
+        globals()[name] = None
+
+
+def journal_finish_outputs():
+    global _JOURNAL_EXPORT_PARENT
+    primary = sys.exc_info()[1]
+    errors = []
+    if _JOURNAL_EXPORT_PARENT is not None:
+        descriptor, identity, owner, mode, directory = _JOURNAL_EXPORT_PARENT
+        try:
+            current = os.fstat(descriptor)
+            if (current.st_dev, current.st_ino) != identity:
+                raise journal_failure()
+            os.close(descriptor)
+        except BaseException as error:
+            journal_failure()
+            errors.append(error)
+        finally:
+            _JOURNAL_EXPORT_PARENT = None
+    for name in ("_JOURNAL_READY_ANCHOR", "_JOURNAL_EXPORT_ANCHOR"):
+        try:
+            journal_release_anchor(name)
+        except BaseException as error:
+            errors.append(error)
+    if errors and primary is None:
+        raise errors[0]
+
+
+def journal_context_exit(manager, primary):
+    """Preserve a response/body error when completion persistence also fails."""
+    try:
+        manager.__exit__(type(primary) if primary else None, primary,
+                         primary.__traceback__ if primary else None)
+    except BaseException:
+        if primary is None:
+            raise
 
 
 if __name__ == "__main__":
