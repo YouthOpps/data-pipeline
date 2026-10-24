@@ -341,3 +341,24 @@ closed instead of continuing or truncating that update. These checks retain the
 existing 16 KiB journal bound, state schema, MAX restrictions and publication
 behavior. They detect observed generation changes; they are not filesystem
 compare-and-swap operations.
+
+
+### Workflow metadata diagnostics — issue #361
+
+Infrastructure failures report bounded reason codes, positive numeric run and
+attempt identifiers when validated, API route classes and available HTTP status.
+Reasons distinguish credentials, transport, HTTP status, JSON decoding, job
+inventory/identity/completion/pagination/bounds, run identity/start/chronology
+and malformed metadata shape. Messages omit API queries, credentials, signed
+URLs, headers, response bodies and arbitrary exception text.
+
+All existing identity, chronology, inventory and trust checks still fail closed.
+Request counts, retry bounds, pacing history, held restrictions, owned-artifact
+requirements and publication behavior are unchanged. These diagnostics make a
+future infrastructure failure actionable; they do not recover missing artifacts
+or establish the cause of the earlier generic failure.
+
+Private metadata controls exercise successful and rejected responses without
+publisher access, native collection or artifact downloads. Existing source-data
+evidence remains historical; this change does not claim new collection or
+production recovery.
