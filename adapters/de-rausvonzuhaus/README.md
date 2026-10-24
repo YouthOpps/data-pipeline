@@ -371,3 +371,17 @@ The original complete listing/parser/IDs, one daily14:33 UTC schedule, 30-minute
 job, permissions, normal publication/token and original test remain unchanged.
 Binding and private checks perform no actual source/API/namespace/ZIP/native or
 Action operation; production verification remains a separate subsequent step.
+
+## Exhausted connection retries
+
+This settlement applies only within the existing collection lifecycle. Other
+phases remain rejected by the original physical transport guard. An exhausted
+ordinary connection failure still fails collection. When the actual physical
+attempt durably recorded that it received no response, its exception
+carries the current transaction, request identity, and completion timestamp.
+Only an exact match to the healthy retained state permits terminal settlement
+and pacing export. This keeps the existing retry limit and all MAX timing
+constraints while allowing the next scheduled run to restore its actual state.
+Body-read, TLS, response-close, policy, and persistence failures remain pending
+and cannot use this settlement. This change does not reconstruct the missing
+state from the 21 October 2026 run or authorize an older-artifact fallback.
