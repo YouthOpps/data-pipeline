@@ -2691,6 +2691,32 @@ def pacing_not_ready():
         workflow_output_signal(False)
 
 
+def observe_current_run(expected):
+    """Bound transient run propagation without extending any job deadline."""
+    run_id, attempt, _, _ = expected
+    path = f"/actions/runs/{run_id}/attempts/{attempt}"
+    for observation in range(4):
+        check_deadline()
+        run = workflow_api(path)
+        validate_family_identity(run, expected)
+        status = run.get("status")
+        if status == "in_progress":
+            return run
+        if status not in {"queued", "requested", "waiting", "pending"}:
+            raise AdapterError(
+                "Current run is terminal or has an unknown status", "access"
+            )
+        if observation == 3:
+            raise AdapterError(
+                "Current run remained nonexecuting after four observations",
+                "access",
+            )
+        check_deadline()
+        time.sleep(2)
+        check_deadline()
+    raise AssertionError("Unreachable current run observation")
+
+
 def current_job_context():
     """Bind the executing source job and retain its actual30-minute deadline."""
     global _RUN_END
@@ -2699,8 +2725,7 @@ def current_job_context():
     run_id, attempt = current_run_identity()
     head = os.environ.get("GITHUB_SHA", "")
     expected = (run_id, attempt, SOURCE_ID, head)
-    run = workflow_api(f"/actions/runs/{run_id}/attempts/{attempt}")
-    validate_family_identity(run, expected)
+    run = observe_current_run(expected)
     if (
         run.get("status") != "in_progress"
         or os.environ.get("GITHUB_JOB") != "collect"

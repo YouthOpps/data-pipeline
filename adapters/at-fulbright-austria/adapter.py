@@ -1078,6 +1078,7 @@ def prove_publication_window():
     def invalid_constant(value):
         raise ValueError("Invalid job context constant")
 
+    proof_stage = "response time headers"
     try:
         dates = headers.get_all("Date", [])
         ages = headers.get_all("Age", [])
@@ -1100,6 +1101,7 @@ def prove_publication_window():
             raise ValueError("Stale or inconsistent server time")
         if len(body) > 65536:
             raise ValueError("Oversized job context")
+        proof_stage = "job response JSON"
         decoded = json.loads(
             body.decode("utf-8"),
             object_pairs_hook=unique_object,
@@ -1113,6 +1115,7 @@ def prove_publication_window():
             or len(decoded["jobs"]) != 1
         ):
             raise ValueError("Incomplete or ambiguous current jobs")
+        proof_stage = "exact running job identity"
         job = decoded["jobs"][0]
         if (
             not isinstance(job, dict)
@@ -1134,12 +1137,14 @@ def prove_publication_window():
             or not isinstance(job.get("started_at"), str)
         ):
             raise ValueError("Current running job identity mismatch")
+        proof_stage = "job start timestamp"
         clock_type = getattr(datetime, "datetime", datetime)
         started = clock_type.fromisoformat(
             job["started_at"].replace("Z", "+00:00")
         )
         if started.tzinfo is None or started.utcoffset().total_seconds() != 0:
             raise ValueError("Expected UTC job start")
+        proof_stage = "remaining job deadline"
         elapsed = server.timestamp() - started.timestamp()
         if not 0 <= elapsed < 1800:
             raise ValueError("Job time is inconsistent or exhausted")
@@ -1156,7 +1161,7 @@ def prove_publication_window():
         OSError,
     ):
         raise AdapterError(
-            "Unusable exact job deadline proof", "publish"
+            "Unusable exact job deadline proof: " + proof_stage, "publish"
         ) from None
     _PUBLICATION_IDENTITY = identity
     _PUBLICATION_WINDOW = {"write": end - 60, "read": end - 30, "job": end}
@@ -3917,6 +3922,32 @@ def pacing_not_ready():
         workflow_output_signal(False)
 
 
+def observe_current_run(expected):
+    """Bound transient run propagation without extending any job deadline."""
+    run_id, attempt, _, _ = expected
+    path = f"/actions/runs/{run_id}/attempts/{attempt}"
+    for observation in range(4):
+        check_deadline()
+        run = workflow_api(path)
+        validate_family_identity(run, expected)
+        status = run.get("status")
+        if status == "in_progress":
+            return run
+        if status not in {"queued", "requested", "waiting", "pending"}:
+            raise AdapterError(
+                "Current run is terminal or has an unknown status", "access"
+            )
+        if observation == 3:
+            raise AdapterError(
+                "Current run remained nonexecuting after four observations",
+                "access",
+            )
+        check_deadline()
+        time.sleep(2)
+        check_deadline()
+    raise AssertionError("Unreachable current run observation")
+
+
 def current_job_context():
     """Bind the executing source job and retain its actual30-minute deadline."""
     global _RUN_END
@@ -3925,8 +3956,7 @@ def current_job_context():
     run_id, attempt = current_run_identity()
     head = os.environ.get("GITHUB_SHA", "")
     expected = (run_id, attempt, SOURCE_ID, head)
-    run = workflow_api(f"/actions/runs/{run_id}/attempts/{attempt}")
-    validate_family_identity(run, expected)
+    run = observe_current_run(expected)
     if (
         run.get("status") != "in_progress"
         or os.environ.get("GITHUB_JOB") != "collect"

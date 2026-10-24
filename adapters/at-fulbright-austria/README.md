@@ -421,3 +421,20 @@ qualify this change. Earlier genuine native evidence retains its original code
 and date attribution; no new publisher collection, current factual review,
 complete native replay or production run is claimed. The maintainer alone owns
 workflow/state coordination and the maintenance rollout for issue #328.
+
+### Hosted job observation failures
+
+Before publisher-state restoration, the exact current run identity remains
+mandatory. A queued, requested, waiting or pending run is observed at most four
+times with two-second gaps using fresh GitHub metadata. Every observation must
+retain the expected source, workflow, run, attempt and commit identity; terminal
+or unknown statuses fail immediately. Existing execution and job-start deadlines
+are never extended. Job metadata is still validated exactly once; this change
+does not add retries to the separate publication deadline proof. The bounded
+run observation tolerates transient status propagation without claiming
+that the historical failed responses were captured or proven stale.
+
+Deadline-proof failures identify the rejected validation stage without logging
+credentials or response bodies. Missing newest pacing artifacts still fail
+closed; this change does not recover an earlier artifact, reset request history,
+clear publisher holds or certify production recovery. See issue #358.
