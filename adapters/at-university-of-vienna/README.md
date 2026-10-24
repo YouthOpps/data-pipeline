@@ -280,3 +280,21 @@ the new 429 branch. Existing genuine native evidence retains its original code
 and date attribution; this maintenance claims no new publisher collection,
 upstream factual review, full native replay or production run. Issue #328
 remains open after this three-source pilot.
+
+### Hosted job observation failures
+
+Before publisher-state restoration, the exact current run identity remains
+mandatory. A queued, requested, waiting or pending run is observed at most four
+times with two-second gaps using fresh GitHub metadata. Every observation must
+retain the expected source, workflow, run, attempt and commit identity; terminal
+or unknown statuses fail immediately. Existing execution and job-start deadlines
+are never extended. Job metadata is still validated exactly once; this change
+does not add retries to the separate publication deadline proof. The bounded
+run observation tolerates transient status propagation without claiming
+that the historical failed responses were captured or proven stale.
+
+Current-run failures distinguish an exhausted transient observation from a
+terminal or unknown status without logging credentials or response bodies.
+Missing newest pacing artifacts still fail
+closed; this change does not recover an earlier artifact, reset request history,
+clear publisher holds or certify production recovery. See issue #358.
