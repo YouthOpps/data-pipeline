@@ -94,6 +94,56 @@ class AdapterError(Exception):
         self.stage, self.status = stage, status
 
 
+class WorkflowMetadataError(AdapterError):
+    """Carry bounded infrastructure diagnostics without response contents."""
+
+    def __init__(
+        self, reason, *, identity=None, attempt=None, route=None, status=None
+    ):
+        reasons = {
+            "credentials", "transport", "http_status", "json",
+            "job_inventory", "job_identity", "job_completion",
+            "job_pagination", "job_bound", "run_identity", "run_start",
+            "run_chronology", "metadata_shape",
+        }
+        reason = reason if reason in reasons else "metadata_shape"
+        self.reason = reason
+        self.route = route
+        fields = ["reason=" + reason]
+        for name, value in (("run", identity), ("attempt", attempt)):
+            if type(value) is int and 0 < value < 2**63:
+                fields.append(f"{name}={value}")
+        if route in {"runs", "attempt", "attempt_jobs", "artifacts"}:
+            fields.append("route=" + route)
+        if type(status) is int and 100 <= status <= 599:
+            fields.append(f"http_status={status}")
+        else:
+            status = None
+        self.http_status = status
+        super().__init__(
+            "Workflow metadata rejected (" + ", ".join(fields) + ")",
+            "access",
+        )
+
+
+def workflow_metadata_route(path):
+    """Classify fixed API routes without exposing URLs or query strings."""
+    route = path.split("?", 1)[0]
+    if route == "/actions/runs":
+        return "runs"
+    if re.fullmatch(r"/actions/runs/[1-9][0-9]*/artifacts", route):
+        return "artifacts"
+    if re.fullmatch(
+        r"/actions/runs/[1-9][0-9]*/attempts/[1-9][0-9]*/jobs", route
+    ):
+        return "attempt_jobs"
+    if re.fullmatch(
+        r"/actions/runs/[1-9][0-9]*/attempts/[1-9][0-9]*", route
+    ):
+        return "attempt"
+    return None
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, file, code, message, headers, url):
         return None
@@ -936,9 +986,11 @@ def write_budget(state):
 
 def workflow_api(path):
     """Read authenticated workflow metadata without publication permissions."""
+    route = workflow_metadata_route(path)
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
-        raise AdapterError("Workflow state credentials missing", "access")
+        raise WorkflowMetadataError("credentials", route=route)
+    reason, status = "transport", None
     try:
         status, _, body = request_bytes(
             _WORKFLOW_GITHUB + path,
@@ -948,11 +1000,13 @@ def workflow_api(path):
             },
         )
         if status != 200:
+            reason = "http_status"
             raise ValueError("Workflow API status")
+        reason = "json"
         return json.loads(body)
     except Exception:
-        raise AdapterError(
-            ("Workflow pacing state unavailable"), ("access")
+        raise WorkflowMetadataError(
+            reason, route=route, status=status
         ) from None
 
 
@@ -997,7 +1051,9 @@ def attempt_completion(identity, attempt, head):
             or total is not None
             and total != count
         ):
-            raise ValueError("Incomplete exact-attempt job inventory")
+            raise WorkflowMetadataError(
+                "job_inventory", identity=identity, attempt=attempt
+            )
         total = count
         for job in jobs:
             if (
@@ -1012,23 +1068,38 @@ def attempt_completion(identity, attempt, head):
                 or job.get("head_sha") != head
                 or job.get("status") != "completed"
             ):
-                raise ValueError("Untrusted exact-attempt job")
+                raise WorkflowMetadataError(
+                    "job_identity", identity=identity, attempt=attempt
+                )
             jobs_seen.add(job["id"])
-            value = datetime.fromisoformat(
-                job["completed_at"].replace("Z", "+00:00")
-            )
+            try:
+                value = datetime.fromisoformat(
+                    job["completed_at"].replace("Z", "+00:00")
+                )
+            except Exception:
+                raise WorkflowMetadataError(
+                    "job_completion", identity=identity, attempt=attempt
+                ) from None
             if value.utcoffset() is None:
-                raise ValueError("Missing job completion timezone")
+                raise WorkflowMetadataError(
+                    "job_completion", identity=identity, attempt=attempt
+                )
             finished.append(value.timestamp())
         if len(jobs_seen) == total:
             return max(finished)
         if len(jobs_seen) > total or len(jobs) != 100:
-            raise ValueError("Truncated exact-attempt job inventory")
-    raise ValueError("Exact-attempt job inventory exceeds bound")
+            raise WorkflowMetadataError(
+                "job_pagination", identity=identity, attempt=attempt
+            )
+    raise WorkflowMetadataError(
+        "job_bound", identity=identity, attempt=attempt
+    )
 
 
 def completed_identity(run, expected=None, revision=None):
     """Bind a completed attempt and its chronological publisher interval."""
+    identity = attempt = None
+    reason = "run_identity"
     try:
         source = family_source(run)
         identity, attempt = run["id"], run["run_attempt"]
@@ -1052,19 +1123,30 @@ def completed_identity(run, expected=None, revision=None):
             and (identity, attempt, source) != expected
         ):
             raise ValueError("Untrusted completed attempt")
+        reason = "run_start"
         value = datetime.fromisoformat(
             run["run_started_at"].replace("Z", "+00:00")
         )
         if value.utcoffset() is None:
             raise ValueError("Missing attempt timezone")
         began = value.timestamp()
+        reason = "metadata_shape"
         finished = attempt_completion(identity, attempt, run["head_sha"])
+        reason = "run_chronology"
         if not 0 <= began <= finished <= time.time() + 1:
             raise ValueError("Invalid attempt chronology")
         return finished, began, identity, attempt, source
+    except WorkflowMetadataError as error:
+        raise WorkflowMetadataError(
+            error.reason,
+            identity=identity,
+            attempt=attempt,
+            route=error.route,
+            status=error.http_status,
+        ) from None
     except Exception:
-        raise AdapterError(
-            ("Untrusted completed family attempt"), ("access")
+        raise WorkflowMetadataError(
+            reason, identity=identity, attempt=attempt
         ) from None
 
 
