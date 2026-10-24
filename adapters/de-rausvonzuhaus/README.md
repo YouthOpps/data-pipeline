@@ -374,8 +374,10 @@ Action operation; production verification remains a separate subsequent step.
 
 ## Exhausted connection retries
 
-An exhausted ordinary connection failure still fails collection. When the actual
-physical attempt durably recorded that it received no response, its exception
+This settlement applies only within the existing collection lifecycle. Other
+phases remain rejected by the original physical transport guard. An exhausted
+ordinary connection failure still fails collection. When the actual physical
+attempt durably recorded that it received no response, its exception
 carries the current transaction, request identity, and completion timestamp.
 Only an exact match to the healthy retained state permits terminal settlement
 and pacing export. This keeps the existing retry limit and all MAX timing
