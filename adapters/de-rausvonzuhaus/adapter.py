@@ -3655,12 +3655,14 @@ def publisher_attempt(inventory=False):
     frame = {"started": False, "received": False, "assessed": False}
     _REQUEST_FRAMES.append(frame)
     ordinary_no_response = False
+    connection_error = None
     try:
         yield frame
     except PolicyStop:
         frame["assessed"] = True
         raise
     except (urllib.error.URLError, TimeoutError, OSError) as error:
+        connection_error = error
         ordinary_no_response = (
             frame["started"]
             and not frame["received"]
@@ -3709,6 +3711,13 @@ def publisher_attempt(inventory=False):
                         _INVENTORY_COMPLETED_MONOTONIC = time.monotonic()
                     # Physical completion NEVER clears the enclosing owner.
                     save_budget(state)
+                if ordinary_no_response:
+                    connection_error._youthopps_completion = (
+                        _ACTIVE_FLIGHT_ID,
+                        state["request_id"],
+                        state["request_started"],
+                        state["completed"],
+                    )
                 _ACTIVE_REQUEST_ID = None
             except BaseException:
                 fail_policy()
@@ -3944,6 +3953,42 @@ def request_bytes(
         return status, response_headers, body
 
 
+def assessed_connection_exhaustion(error):
+    """Accept only this exception's durably completed no-response attempt."""
+    receipt = getattr(error, "_youthopps_completion", None)
+    with locked_budget():
+        state = load_budget()
+        publisher_healthy(state)
+        expected = (
+            _ACTIVE_FLIGHT_ID,
+            state["request_id"],
+            state["request_started"],
+            state["completed"],
+        )
+        if (
+            _PHASE_NAME != "collection"
+            or not _STATE_TRUSTED
+            or _TRANSACTION_DEPTH < 1
+            or _ACTIVE_REQUEST_ID is not None
+            or not state["in_flight"]
+            or state["flight_id"] != _ACTIVE_FLIGHT_ID
+            or _ACTIVE_FLIGHT_ID is None
+            or state["request_id"] is None
+            or state["completed_request_id"] != state["request_id"]
+            or state["request_outcome"] != "no_response"
+            or state["completed"] < state["request_started"]
+            or receipt != expected
+            or not retryable_connection_error(error)
+            or isinstance(error, urllib.error.HTTPError)
+        ):
+            raise AdapterError(
+                "Publisher no-response completion is unverified", "access"
+            )
+    return PolicyStop(
+        "Publisher connection failed: " + safe_error(error), "fetch"
+    )
+
+
 @durable_transaction("policy")
 def fetch_source(url, min_interval=6, *, evidence=None, inventory=None):
     """Preserve original retry/hop bounds and complete response evidence."""
@@ -4044,9 +4089,7 @@ def fetch_source(url, min_interval=6, *, evidence=None, inventory=None):
             if _PUBLISHER_GATE_FAILED or not retryable_connection_error(error):
                 raise
             if attempt:
-                raise AdapterError(
-                    "Publisher connection failed: " + safe_error(error), "fetch"
-                ) from error
+                raise assessed_connection_exhaustion(error) from error
     raise AdapterError("Publisher could not be read", "fetch")
 
 
