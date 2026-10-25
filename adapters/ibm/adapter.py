@@ -235,6 +235,7 @@ _PROTOCOL_DEPTH = 0
 _PROTOCOL_FATAL = False
 _PROTOCOL_RAM = None
 _JOURNAL_FD = _JOURNAL_ID = _JOURNAL_VERSION = _JOURNAL_LOCK_ID = None
+_JOURNAL_BYTES = None
 _JOURNAL_DIRTY = False
 _JOURNAL_LOCKS = {}
 _JOURNAL_BOOTSTRAP = None
@@ -2038,7 +2039,7 @@ def protocol_commit_bridge(parent, state_fd, state):
     global _STATE_PATH, _STATE_DIR_FD, _STATE_DIR_ID, _STATE_INITIALIZING
     global _COLLECTION_LOCK_FD, _COLLECTION_LOCK_ID
     global _JOURNAL_FD, _JOURNAL_ID, _JOURNAL_VERSION
-    global _JOURNAL_LOCK_ID
+    global _JOURNAL_LOCK_ID, _JOURNAL_BYTES
     directory = _PROTOCOL_COMPAT_DIRECTORY[0]
     _STATE_PATH = os.path.join(directory, "state.json")
     _STATE_DIR_FD = os.dup(parent)
@@ -2067,6 +2068,13 @@ def protocol_commit_bridge(parent, state_fd, state):
     _JOURNAL_LOCK_ID = (lock_info.st_dev, lock_info.st_ino)
     _JOURNAL_LOCKS[state_lock] = _JOURNAL_LOCK_ID
     try:
+        generation, raw = journal_snapshot()
+        if (
+            generation != _JOURNAL_VERSION
+            or hashlib.sha256(raw).hexdigest() != _JOURNAL_BOOTSTRAP[2]
+        ):
+            raise AdapterError("Initial journal generation changed", "access")
+        _JOURNAL_BYTES = raw
         verify_journal()
         save_budget(state)
         verify_journal()
@@ -2421,6 +2429,8 @@ def verify_journal(check_generation=True):
             or (lock.st_dev, lock.st_ino) != _JOURNAL_LOCK_ID
         ):
             raise AdapterError("Publisher journal generation changed", "access")
+        if check_generation:
+            journal_unchanged()
         return info
     except BaseException:
         journal_failure()
@@ -2432,6 +2442,8 @@ def close_journal():
     global _JOURNAL_FD, _JOURNAL_ID, _JOURNAL_VERSION, _JOURNAL_LOCK_ID
     global _JOURNAL_DIRTY, _JOURNAL_BOOTSTRAP
     primary = sys.exc_info()[1]
+    global _JOURNAL_BYTES
+    _JOURNAL_BYTES = None
     descriptor, identity = _JOURNAL_FD, _JOURNAL_ID
     _JOURNAL_FD = _JOURNAL_ID = _JOURNAL_VERSION = _JOURNAL_LOCK_ID = None
     _JOURNAL_DIRTY = False
@@ -2562,7 +2574,7 @@ def load_budget():
             return load_budget()
     try:
         verify_journal()
-        raw = os.pread(_JOURNAL_FD, 16385, 0)
+        _, raw = journal_snapshot()
         verify_journal()
         if len(raw) > 16384:
             raise AdapterError("Oversized publisher state", "access")
@@ -2629,27 +2641,43 @@ def journal_snapshot():
 
     journal_io_authority()
     before = owned()
-    raw = os.pread(_JOURNAL_FD, 16385, 0)
-    journal_io_authority()
-    after = owned()
-    if before != after or len(raw) != after[2] or len(raw) > 16384:
-        raise AdapterError("Journal read generation changed", "access")
+    if before[2] > 16384:
+        raise AdapterError("Oversized publisher state", "access")
+    previous = None
+    for read_pass in range(2):
+        raw = b""
+        after = before
+        while len(raw) <= before[2]:
+            journal_io_authority()
+            if owned() != before:
+                raise AdapterError("Journal read generation changed", "access")
+            chunk = os.pread(_JOURNAL_FD, before[2] + 1 - len(raw), len(raw))
+            journal_io_authority()
+            after = owned()
+            if before != after:
+                raise AdapterError("Journal read generation changed", "access")
+            raw += chunk
+            if not chunk:
+                break
+        if len(raw) != after[2] or read_pass and raw != previous:
+            raise AdapterError("Journal read generation changed", "access")
+        previous = raw
     return after, raw
 
 
 def journal_acknowledge(expected):
     """Advance own authority only after exact expected-byte readback."""
-    global _JOURNAL_VERSION
+    global _JOURNAL_VERSION, _JOURNAL_BYTES
     generation, raw = journal_snapshot()
     if raw != expected:
         raise AdapterError("Own journal mutation was superseded", "access")
-    _JOURNAL_VERSION = generation
+    _JOURNAL_VERSION, _JOURNAL_BYTES = generation, raw
 
 
 def journal_unchanged():
     """Failure cleanup requires the last ACK, with no dirty exemption."""
-    generation, _ = journal_snapshot()
-    if generation != _JOURNAL_VERSION:
+    generation, raw = journal_snapshot()
+    if generation != _JOURNAL_VERSION or raw != _JOURNAL_BYTES:
         raise AdapterError("Original journal generation changed", "access")
 
 

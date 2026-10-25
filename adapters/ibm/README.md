@@ -556,3 +556,15 @@ mutating state during save or cleanup. A collection lock lost during read
 fails before another journal mutation. Ordinary private budget-only scopes
 still work when no collection lock has been acquired; this grants no source
 access and does not change the original collection/pre-opener gates.
+
+### Journal snapshot follow-up
+
+Each acknowledged journal generation retains its bounded exact bytes as well as
+its metadata. Reads, subsequent mutations, and failure cleanup reject changed
+bytes even when an equal-size write has colliding timestamp metadata. Initial
+acquisition captures that byte acknowledgement; closing the journal clears it.
+Snapshot reads accumulate legal short reads in two bounded matching passes,
+checking authority and generation before and after every read. This also detects
+a timestamp-colliding change to a prefix already read during the first pass.
+The 16 KiB size bound remains; these checks are not filesystem compare-and-swap. These private
+IO controls do not claim a fresh publisher collection or current source facts.
