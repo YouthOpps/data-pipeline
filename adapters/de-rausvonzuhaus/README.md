@@ -39,6 +39,13 @@ All cards are present in the public HTML; no pagination or external detail enric
 
 Programme badges include IJFD, weltwärts, workcamps, French-German and other volunteering, European Solidarity Corps, youth encounters, student internships and school exchanges. The adapter retains the publisher's German programme label in tags and classification evidence. Age bounds, publisher host label, project dates and application deadline come directly from each card. Two-letter host codes are a mapping of the explicit country label, including the commonly used `XK` for Kosovo. A host country does not establish citizenship eligibility: `eligible_countries` remains empty. Costs and benefits are unspecified in the list and are not guessed; a reviewed detail example requires a €3,200 contribution, so inclusion does not imply free participation.
 
+The explicit country label `Lesotho` maps to ISO 3166-1 alpha-2 `LS`.
+The scheduled [19 October 2026 run](https://github.com/YouthOpps/data-pipeline/actions/runs/39316412132)
+first exposed this missing label. Unsupported labels still stop collection;
+no country is inferred from a title, city, or programme name. This mapping
+repair does not reset publisher history or resolve a separate history-restoration
+failure.
+
 The publisher sometimes has a title/location disagreement, for example a Trento title beside a Germany host label. Preserve and attribute the structured label; do not infer a replacement host country from a place name in a title. Each record's classification evidence preserves the actual publisher host label for review. Titles are normalized for whitespace; image copyright credits are excluded.
 
 ## Dates and exclusions
