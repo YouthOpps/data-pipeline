@@ -418,3 +418,21 @@ transition governed by authenticated owner, history and current-job checks.
 Actual production delivery remains pending maintainer enable-before-merge and
 the sole automatic run, owned-artifact QA and website verification. No further
 native collection is claimed or authorized by this configuration change.
+
+
+### Mid-commit journal generation protection (#295)
+
+Each successful truncate or partial positional write is acknowledged only after
+reading back its exact expected complete bytes and stable inode generation.
+The next write, synchronization check and final readback require that last
+acknowledgement. A stronger same-inode update during a write is preserved:
+the process fails closed, and failure cleanup cannot truncate a changed
+generation merely because this writer previously started a commit. Interrupted
+owned bytes can still be invalidated through the retained verified descriptor.
+This is checked descriptor I/O, not a filesystem compare-and-swap guarantee.
+
+Private actual-function fault controls qualify this bounded I/O repair. Existing
+public native evidence retains its original revision and date; no new publisher
+requests, original expired raw-body replay, publication or production run are
+claimed. Collection, facts, identifiers, deadlines, expiry, state schema,
+pending transactions, MAX constraints and workflow behavior are unchanged.

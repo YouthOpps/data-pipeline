@@ -94,6 +94,56 @@ class AdapterError(Exception):
         self.stage, self.status = stage, status
 
 
+class WorkflowMetadataError(AdapterError):
+    """Carry bounded infrastructure diagnostics without response contents."""
+
+    def __init__(
+        self, reason, *, identity=None, attempt=None, route=None, status=None
+    ):
+        reasons = {
+            "credentials", "transport", "http_status", "json",
+            "job_inventory", "job_identity", "job_completion",
+            "job_pagination", "job_bound", "run_identity", "run_start",
+            "run_chronology", "metadata_shape",
+        }
+        reason = reason if reason in reasons else "metadata_shape"
+        self.reason = reason
+        self.route = route
+        fields = ["reason=" + reason]
+        for name, value in (("run", identity), ("attempt", attempt)):
+            if type(value) is int and 0 < value < 2**63:
+                fields.append(f"{name}={value}")
+        if route in {"runs", "attempt", "attempt_jobs", "artifacts"}:
+            fields.append("route=" + route)
+        if type(status) is int and 100 <= status <= 599:
+            fields.append(f"http_status={status}")
+        else:
+            status = None
+        self.http_status = status
+        super().__init__(
+            "Workflow metadata rejected (" + ", ".join(fields) + ")",
+            "access",
+        )
+
+
+def workflow_metadata_route(path):
+    """Classify fixed API routes without exposing URLs or query strings."""
+    route = path.split("?", 1)[0]
+    if route == "/actions/runs":
+        return "runs"
+    if re.fullmatch(r"/actions/runs/[1-9][0-9]*/artifacts", route):
+        return "artifacts"
+    if re.fullmatch(
+        r"/actions/runs/[1-9][0-9]*/attempts/[1-9][0-9]*/jobs", route
+    ):
+        return "attempt_jobs"
+    if re.fullmatch(
+        r"/actions/runs/[1-9][0-9]*/attempts/[1-9][0-9]*", route
+    ):
+        return "attempt"
+    return None
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, file, code, message, headers, url):
         return None
@@ -936,9 +986,11 @@ def write_budget(state):
 
 def workflow_api(path):
     """Read authenticated workflow metadata without publication permissions."""
+    route = workflow_metadata_route(path)
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
-        raise AdapterError("Workflow state credentials missing", "access")
+        raise WorkflowMetadataError("credentials", route=route)
+    reason, status = "transport", None
     try:
         status, _, body = request_bytes(
             _WORKFLOW_GITHUB + path,
@@ -948,11 +1000,13 @@ def workflow_api(path):
             },
         )
         if status != 200:
+            reason = "http_status"
             raise ValueError("Workflow API status")
+        reason = "json"
         return json.loads(body)
     except Exception:
-        raise AdapterError(
-            ("Workflow pacing state unavailable"), ("access")
+        raise WorkflowMetadataError(
+            reason, route=route, status=status
         ) from None
 
 
@@ -997,7 +1051,9 @@ def attempt_completion(identity, attempt, head):
             or total is not None
             and total != count
         ):
-            raise ValueError("Incomplete exact-attempt job inventory")
+            raise WorkflowMetadataError(
+                "job_inventory", identity=identity, attempt=attempt
+            )
         total = count
         for job in jobs:
             if (
@@ -1012,23 +1068,38 @@ def attempt_completion(identity, attempt, head):
                 or job.get("head_sha") != head
                 or job.get("status") != "completed"
             ):
-                raise ValueError("Untrusted exact-attempt job")
+                raise WorkflowMetadataError(
+                    "job_identity", identity=identity, attempt=attempt
+                )
             jobs_seen.add(job["id"])
-            value = datetime.fromisoformat(
-                job["completed_at"].replace("Z", "+00:00")
-            )
+            try:
+                value = datetime.fromisoformat(
+                    job["completed_at"].replace("Z", "+00:00")
+                )
+            except Exception:
+                raise WorkflowMetadataError(
+                    "job_completion", identity=identity, attempt=attempt
+                ) from None
             if value.utcoffset() is None:
-                raise ValueError("Missing job completion timezone")
+                raise WorkflowMetadataError(
+                    "job_completion", identity=identity, attempt=attempt
+                )
             finished.append(value.timestamp())
         if len(jobs_seen) == total:
             return max(finished)
         if len(jobs_seen) > total or len(jobs) != 100:
-            raise ValueError("Truncated exact-attempt job inventory")
-    raise ValueError("Exact-attempt job inventory exceeds bound")
+            raise WorkflowMetadataError(
+                "job_pagination", identity=identity, attempt=attempt
+            )
+    raise WorkflowMetadataError(
+        "job_bound", identity=identity, attempt=attempt
+    )
 
 
 def completed_identity(run, expected=None, revision=None):
     """Bind a completed attempt and its chronological publisher interval."""
+    identity = attempt = None
+    reason = "run_identity"
     try:
         source = family_source(run)
         identity, attempt = run["id"], run["run_attempt"]
@@ -1052,19 +1123,30 @@ def completed_identity(run, expected=None, revision=None):
             and (identity, attempt, source) != expected
         ):
             raise ValueError("Untrusted completed attempt")
+        reason = "run_start"
         value = datetime.fromisoformat(
             run["run_started_at"].replace("Z", "+00:00")
         )
         if value.utcoffset() is None:
             raise ValueError("Missing attempt timezone")
         began = value.timestamp()
+        reason = "metadata_shape"
         finished = attempt_completion(identity, attempt, run["head_sha"])
+        reason = "run_chronology"
         if not 0 <= began <= finished <= time.time() + 1:
             raise ValueError("Invalid attempt chronology")
         return finished, began, identity, attempt, source
+    except WorkflowMetadataError as error:
+        raise WorkflowMetadataError(
+            error.reason,
+            identity=identity,
+            attempt=attempt,
+            route=error.route,
+            status=error.http_status,
+        ) from None
     except Exception:
-        raise AdapterError(
-            ("Untrusted completed family attempt"), ("access")
+        raise WorkflowMetadataError(
+            reason, identity=identity, attempt=attempt
         ) from None
 
 
@@ -2349,6 +2431,7 @@ _GUARD_FD = _GUARD_ID = _GUARD_VERSION = None
 _GUARD_LOCK_ID = None
 _GUARD_LOCKS = {}
 _GUARD_CREATED = _GUARD_DIRTY = _GUARD_FATAL = False
+_GUARD_WRITE_ACK = None
 _GUARD_COLLECTION_ID = None
 _GUARD_NEW_DIRECTORY = False
 _GUARD_FAILED_STATE = None
@@ -2573,10 +2656,72 @@ def journal_read():
         raise
 
 
+def journal_snapshot():
+    """Observe bounded bytes and stat generation without adopting them."""
+    parent = journal_parent()
+    before = journal_owned(_GUARD_FD, _GUARD_ID)
+    current = os.stat(
+        os.path.basename(_STATE_PATH),
+        dir_fd=parent,
+        follow_symlinks=False,
+    )
+    if (
+        (current.st_dev, current.st_ino) != _GUARD_ID
+        or fcntl.fcntl(_GUARD_FD, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR
+    ):
+        raise AdapterError("Publisher journal identity changed", "access")
+    raw = os.pread(_GUARD_FD, 16385, 0)
+    after = journal_owned(_GUARD_FD, _GUARD_ID)
+    journal_parent()
+    latest = os.stat(
+        os.path.basename(_STATE_PATH),
+        dir_fd=parent,
+        follow_symlinks=False,
+    )
+    if (
+        (latest.st_dev, latest.st_ino) != _GUARD_ID
+        or len(raw) > 16384
+        or len(raw) != after.st_size
+        or journal_generation(before) != journal_generation(after)
+    ):
+        raise AdapterError("Publisher journal snapshot changed", "access")
+    for descriptor, identity in _GUARD_LOCKS.items():
+        journal_owned(descriptor, identity)
+    if _GUARD_LOCK_ID is not None:
+        lock = os.stat(
+            os.path.basename(_STATE_LOCK),
+            dir_fd=parent,
+            follow_symlinks=False,
+        )
+        if (lock.st_dev, lock.st_ino) != _GUARD_LOCK_ID:
+            raise AdapterError("Publisher journal lock changed", "access")
+    return journal_generation(after), raw
+
+
+def journal_require_write():
+    """Require the exact last acknowledged own mutation before another."""
+    journal_verify(False)
+    observed = journal_snapshot()
+    journal_verify(False)
+    if _GUARD_WRITE_ACK is None or observed != _GUARD_WRITE_ACK:
+        raise AdapterError("Publisher journal write changed", "access")
+
+
+def journal_acknowledge_write(expected):
+    """Adopt only the exact bytes produced by our completed syscall."""
+    global _GUARD_WRITE_ACK
+    journal_verify(False)
+    observed = journal_snapshot()
+    journal_verify(False)
+    if observed[1] != expected:
+        raise AdapterError("Publisher journal write changed", "access")
+    _GUARD_WRITE_ACK = observed
+
+
 def journal_commit(state):
-    """Rewrite only our held inode; interrupted bytes sacrifice availability."""
+    """Rewrite only acknowledged own bytes, checking each partial write."""
     global _GUARD_VERSION, _GUARD_CREATED, _GUARD_DIRTY
-    global _GUARD_FAILED_STATE
+    global _GUARD_FAILED_STATE, _GUARD_WRITE_ACK
     if _GUARD_FATAL:
         raise AdapterError("Publisher persistence gate failed", "access")
     try:
@@ -2586,15 +2731,21 @@ def journal_commit(state):
                 "Bounded locked publisher commit required", "access"
             )
         journal_verify()
+        _GUARD_WRITE_ACK = journal_snapshot()
+        if _GUARD_WRITE_ACK[0] != _GUARD_VERSION:
+            raise AdapterError("Publisher journal generation changed", "access")
         _GUARD_CREATED = False
         journal_mark_mature()
         _GUARD_DIRTY = True
+        journal_require_write()
         os.ftruncate(_GUARD_FD, 0)
+        journal_acknowledge_write(b"")
+        journal_require_write()
         os.fsync(_GUARD_FD)
-        journal_verify(False)
+        journal_require_write()
         offset = 0
         while offset < len(payload):
-            journal_verify(False)
+            journal_require_write()
             written = os.pwrite(_GUARD_FD, payload[offset:], offset)
             if (
                 type(written) is not int
@@ -2604,23 +2755,20 @@ def journal_commit(state):
                     "Incomplete publisher journal write", "access"
                 )
             offset += written
-            journal_verify(False)
+            journal_acknowledge_write(payload[:offset])
+        journal_require_write()
         os.fsync(_GUARD_FD)
-        before = journal_verify(False)
-        raw = os.pread(_GUARD_FD, len(payload) + 1, 0)
-        after = journal_verify(False)
-        if raw != payload or journal_generation(before) != journal_generation(
-            after
-        ):
-            raise AdapterError("Publisher journal readback changed", "access")
-        _GUARD_VERSION = journal_generation(after)
+        journal_require_write()
+        _GUARD_VERSION = _GUARD_WRITE_ACK[0]
         _GUARD_DIRTY = False
+        _GUARD_WRITE_ACK = None
     except BaseException:
         _GUARD_FAILED_STATE = json.loads(json.dumps(state))
         journal_failed()
         with contextlib.suppress(BaseException):
             journal_invalidate()
         raise
+
 
 
 def journal_invalidate():
@@ -2636,7 +2784,11 @@ def journal_invalidate():
     )
     if (current.st_dev, current.st_ino) != _GUARD_ID:
         return
-    if not _GUARD_DIRTY and journal_generation(info) != _GUARD_VERSION:
+    observed = journal_snapshot()
+    if _GUARD_DIRTY:
+        if _GUARD_WRITE_ACK is None or observed != _GUARD_WRITE_ACK:
+            return
+    elif observed[0] != _GUARD_VERSION:
         return
     os.ftruncate(_GUARD_FD, 0)
     os.fsync(_GUARD_FD)
