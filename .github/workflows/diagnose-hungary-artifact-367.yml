@@ -1,0 +1,81 @@
+name: Temporary read-only Hungary artifact courier 367
+on:
+  push:
+    branches: [issue/367-hungary-window]
+    paths: [.github/workflows/diagnose-hungary-artifact-367.yml]
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: issue-367-read-only-artifact-courier
+  cancel-in-progress: false
+jobs:
+  courier:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/issue/367-hungary-window'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read exact inert owned artifact without publisher access
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/YouthOpps/data-pipeline/actions/workflows/fetch-hu-fulbright-hungary.yml/runs?per_page=1 > "$RUNNER_TEMP/latest.json"
+          gh api repos/YouthOpps/data-pipeline/actions/artifacts/14082104039 > "$RUNNER_TEMP/artifact.json"
+          gh api repos/YouthOpps/data-pipeline/actions/artifacts/14082104039/zip > "$RUNNER_TEMP/pacing.zip"
+          python -B - <<'PY'
+          import base64
+          import hashlib
+          import importlib.util
+          import io
+          import json
+          import os
+          import pathlib
+          import stat
+          import sys
+          import zipfile
+
+          directory = pathlib.Path(os.environ['RUNNER_TEMP'])
+          latest = json.loads((directory / 'latest.json').read_text())
+          assert latest['workflow_runs'][0]['id'] == 43520502724
+          assert latest['workflow_runs'][0]['status'] == 'completed'
+          metadata = json.loads((directory / 'artifact.json').read_text())
+          digest = 'fc1129cd5531883f932a601805e0e6cfbbd8cc717198df2b33d098c92c708c13'
+          head = '5fd9fa82d5d2d5f0871aba653376765a6e00c897'
+          assert metadata['id'] == 14082104039
+          assert metadata['name'] == 'hu-fulbright-hungary-pacing-state-1'
+          assert metadata['expired'] is False
+          assert metadata['size_in_bytes'] == 639
+          assert metadata['digest'] == 'sha256:' + digest
+          owner = metadata['workflow_run']
+          assert owner['id'] == 43520502724
+          assert owner['head_branch'] == 'main'
+          assert owner['head_sha'] == head
+          assert owner['repository_id'] == 1163601208
+          assert owner['head_repository_id'] == 1163601208
+          raw = (directory / 'pacing.zip').read_bytes()
+          assert len(raw) == 639 and hashlib.sha256(raw).hexdigest() == digest
+          with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+              entries = archive.infolist()
+              assert len(entries) == 1 and not archive.comment
+              entry = entries[0]
+              assert entry.filename == 'pacing-state.json'
+              assert entry.file_size <= 16384 and not entry.flag_bits & 1
+              assert stat.S_IFMT(entry.external_attr >> 16) != stat.S_IFLNK
+              assert not entry.comment
+              envelope = json.loads(archive.read(entry))
+          assert set(envelope) == {'schema', 'repository', 'run_id', 'run_attempt', 'source', 'head_sha', 'state'}
+          assert type(envelope['schema']) is int and envelope['schema'] == 1
+          assert envelope['repository'] == 'YouthOpps/data-pipeline'
+          assert envelope['run_id'] == 43520502724 and envelope['run_attempt'] == 1
+          assert envelope['source'] == 'hu-fulbright-hungary' and envelope['head_sha'] == head
+          spec = importlib.util.spec_from_file_location('adapter', 'adapters/hu-fulbright-hungary/adapter.py')
+          adapter = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = adapter
+          spec.loader.exec_module(adapter)
+          adapter.validate_budget(envelope['state'])
+          assert envelope['state']['in_flight'] is False
+          print('HUNGARY367_ARTIFACT_SHA256=' + digest)
+          print('HUNGARY367_ARTIFACT_ZIP_BASE64=' + base64.b64encode(raw).decode('ascii'))
+          PY
