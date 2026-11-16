@@ -86,6 +86,7 @@ _ATTEMPT_HEADS = {}
 _NO_PUBLISHER_HEAD = "5fd9fa82d5d2d5f0871aba653376765a6e00c897"
 _NO_PUBLISHER_SOURCE_BLOB = "e11df51e9bae1ab1e79d987544540acaf9c94058"
 _NO_PUBLISHER_WORKFLOW_BLOB = "228722c1e547e906949aa74ea93bba44ef79dad4"
+_REVIEWED_PRODUCER_WORKFLOW_BLOB = "bc1817449992ddedeb8946b1654c28d9a374aa70"
 _NO_PUBLISHER_ATTEMPTS = {
     41110168149: (
         124250224562,
@@ -1291,6 +1292,67 @@ def reviewed_no_publisher_attempt(run, jobs):
     return True
 
 
+def proven_guarded_no_publisher_attempt(run, jobs):
+    """Recognize the current guarded producer or exact immutable old ghost."""
+    if (
+        protocol_purpose() != "hosted"
+        or run.get("status") != "completed"
+        or run.get("run_attempt") != 1
+        or run.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("status") != "completed"
+        or jobs[0].get("conclusion") != "failure"
+    ):
+        return False
+    elapsed = protocol_timestamp(jobs[0].get("completed_at")) - (
+        protocol_timestamp(jobs[0].get("started_at"))
+    )
+    if not 0 <= elapsed < 58:
+        return False
+    legacy_ghost = (
+        run.get("id") == 43097078558
+        and run.get("head_sha") == _NO_PUBLISHER_HEAD
+        and run.get("created_at") == "2026-11-11T20:36:43Z"
+    )
+    workflow = workflow_api(
+        "/contents/.github/workflows/fetch-ibm.yml?ref=" + run["head_sha"]
+    )
+    expected_workflow = (
+        _NO_PUBLISHER_WORKFLOW_BLOB if legacy_ghost
+        else _REVIEWED_PRODUCER_WORKFLOW_BLOB
+    )
+    if workflow.get("sha") != expected_workflow:
+        return False
+    with open(__file__, "rb") as source_file:
+        raw = source_file.read(1_000_001)
+    if len(raw) > 1_000_000:
+        raise AdapterError("Current source proof exceeds bound", "access")
+    prefix = b"blob " + str(len(raw)).encode("ascii") + b"\0"
+    current_blob = hashlib.sha1(prefix + raw, usedforsecurity=False).hexdigest()
+    source_blob = _NO_PUBLISHER_SOURCE_BLOB if legacy_ghost else current_blob
+    source = workflow_api(
+        "/contents/adapters/ibm/adapter.py?ref=" + run["head_sha"]
+    )
+    if source.get("sha") != source_blob:
+        return False
+    current = workflow_api(
+        "/contents/adapters/ibm/adapter.py?ref=" + os.environ["GITHUB_SHA"]
+    )
+    if current.get("sha") != current_blob:
+        raise AdapterError("Executing source provenance differs", "access")
+    result = workflow_api(
+        f"/actions/runs/{run['id']}/artifacts?per_page=100"
+    )
+    if (
+        type(result.get("total_count")) is not int
+        or not isinstance(result.get("artifacts"), list)
+        or result["total_count"] != len(result["artifacts"])
+    ):
+        raise AdapterError("Incomplete no-access artifact proof", "access")
+    return result["total_count"] == 0
+
+
 def jobless_without_publisher(run, current):
     """Allow a resolved reviewed ghost or same-definition queued sibling."""
     if current is None:
@@ -1464,6 +1526,11 @@ def protocol_fresh_history():
                 if reviewed_no_publisher_attempt(detail, jobs):
                     no_publisher_bounds[identity] = finished
                     continue
+                if attempt == 1 and proven_guarded_no_publisher_attempt(
+                    detail, jobs
+                ):
+                    no_publisher_bounds[identity] = finished
+                    continue
                 candidates.append((finished, identity, number, detail, jobs))
         if len(seen) == total:
             break
@@ -1514,7 +1581,7 @@ def protocol_fresh_history():
     artifact = matches[0]
     if (latest[1], latest[2]) == _NO_PUBLISHER_LAST_OWNER:
         if (
-            set(no_publisher_bounds) != set(_NO_PUBLISHER_ATTEMPTS)
+            not set(_NO_PUBLISHER_ATTEMPTS) <= set(no_publisher_bounds)
             or (artifact.get("id"), artifact.get("digest"))
             != _NO_PUBLISHER_LAST_ARTIFACT
         ):
@@ -1524,7 +1591,6 @@ def protocol_fresh_history():
         )
         if original.get("sha") != _NO_PUBLISHER_SOURCE_BLOB:
             raise AdapterError("No-publisher source proof changed", "access")
-        _NO_PUBLISHER_BOUND = max(no_publisher_bounds.values())
     owner = artifact.get("workflow_run", {})
     if (
         artifact.get("expired") is not False
@@ -1539,6 +1605,7 @@ def protocol_fresh_history():
         or owner.get("head_repository_id") != 1163601208
     ):
         raise AdapterError("Untrusted newest protocol artifact", "access")
+    _NO_PUBLISHER_BOUND = max(no_publisher_bounds.values(), default=0)
     return latest, artifact
 
 
