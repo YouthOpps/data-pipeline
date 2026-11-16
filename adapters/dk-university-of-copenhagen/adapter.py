@@ -802,22 +802,37 @@ def application_deadline(body, listing_date):
         remainder = text[match.end() : match.end() + 65]
         clock = re.match(
             r"\s*[,\s]*(?:at\s*)?(\d{1,2})[:.](\d{2})"
-            r"\s*(?:pm|PM)?\s*[([]?\s*"
+            r"\s*(am|pm)?\s*[([]?\s*"
             r"(CET|CEST|GMT\s*\+\s*[12]|UTC)",
             remainder,
+            re.I,
         )
         instant = None
         if clock:
             hour, minute = int(clock[1]), int(clock[2])
-            zone = re.sub(r"\s", "", clock[3].upper())
+            meridiem = (clock[3] or "").lower()
+            day = date
+            if minute > 59:
+                raise AdapterError("Invalid explicit deadline minute", "parse")
+            if meridiem:
+                if not 1 <= hour <= 12:
+                    raise AdapterError("Invalid explicit 12-hour deadline", "parse")
+                hour = hour % 12 + (12 if meridiem == "pm" else 0)
+            elif hour == 24 and minute == 0:
+                # Publisher 24:00 means the end of the stated calendar day.
+                day += timedelta(days=1)
+                hour = 0
+            elif hour > 23:
+                raise AdapterError("Invalid explicit deadline hour", "parse")
+            zone = re.sub(r"\s", "", clock[4].upper())
             offset = {"CET": 1, "CEST": 2, "GMT+1": 1, "GMT+2": 2, "UTC": 0}[
                 zone
             ]
             instant = (
                 datetime(
-                    date.year,
-                    date.month,
-                    date.day,
+                    day.year,
+                    day.month,
+                    day.day,
                     hour,
                     minute,
                     tzinfo=timezone(timedelta(hours=offset)),
@@ -928,8 +943,24 @@ def vacancy(row, root):
         if integrated
         else "The notice specifies relevant degree and academic requirements. "
     )
+    research_assistant = bool(re.search(r"\bresearch assistant\b", title, re.I))
+    if research_assistant:
+        route = (
+            "The initial appointment is as a research assistant; the notice "
+            "describes a possible subsequent PhD pathway. "
+        )
+        if "pending evaluation and mutual agreement" in text:
+            evidence.append(
+                "Transition to a funded PhD requires evaluation and mutual "
+                "agreement; it is not an immediate PhD appointment."
+            )
+        if "initially for 1 year as Research Assistant" in text:
+            evidence.append(
+                "The initial research assistant appointment is one year."
+            )
     summary = (
-        "Funded doctoral recruitment at "
+        ("Research assistant recruitment at "
+         if research_assistant else "Funded doctoral recruitment at ")
         + department
         + ", UCPH. "
         + route
@@ -971,9 +1002,12 @@ def vacancy(row, root):
     record = make_record(
         title,
         url,
-        ["fellowships", "jobs"],
+        ["jobs"] if research_assistant else ["fellowships", "jobs"],
         host_countries=["DK"],
-        method="official-funded-doctoral-vacancy",
+        method=(
+            "official-research-assistant-phd-pathway"
+            if research_assistant else "official-funded-doctoral-vacancy"
+        ),
         evidence=evidence,
     )
     record.update(

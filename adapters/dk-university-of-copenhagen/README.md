@@ -688,3 +688,29 @@ same-university all-vacancies route supplies the required inventory.
 The seven current detail pages require real observation and a separately
 reviewed complete native test before acceptance. No previous FAIL is relabelled
 as a pass, and no partial scholarship result replaces the published snapshot.
+
+
+### Current detail evidence and midnight deadlines
+
+The bounded same-publisher research pass obtained all seven actual current
+selected detail pages and retained their complete bodies privately in RAM.
+Six describe direct PhD recruitment. The seventh, `show=172290`, is an initial
+one-year research-assistant appointment with a possible funded PhD transition
+subject to evaluation and mutual agreement. It is classified as a job pathway,
+not an immediate fellowship; its own title and conditional-route evidence remain
+visible.
+
+That notice explicitly states `29 November 2026, 24:00 CET`. End-of-day 24:00
+is normalized to midnight of the following local day, then converted using the
+publisher's explicit offset: `2026-11-29T23:00:00.000Z`. Invalid hours/minutes
+are rejected; explicit AM/PM clocks are normalized before conversion. The
+listing's original calendar day remains the comparison date, so ordinary 24:00
+does not create a false date conflict. Unsupported zones are not invented.
+
+Combined offline replay of the complete actual scholarship page, complete
+37-row inventory and all seven selected detail responses yields 28 validated
+records. The actual current website consumer accepts all 28 raw and filtered
+records and a valid empty envelope. All 19 previously published doctoral ID
+formulas were checked against the actual old snapshot. This combined research
+replay is not an original native PASS; both earlier original FAILs remain
+unchanged and a separately reviewed complete native collection is still needed.
