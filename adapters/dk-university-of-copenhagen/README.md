@@ -592,3 +592,40 @@ Each successful truncate, short write, and fsync now receives an exact-byte
 readback acknowledgement before the next mutation. Failure invalidation also
 requires that last acknowledged full generation; an external stronger generation
 arriving during a partial write is preserved and makes the run fail closed.
+
+## Missing-state continuity recovery (#374)
+
+The 18 completed attempts from run `41063528294` through `43906352876`
+failed before publisher transport. Their complete job logs show the first
+`Untrusted completed family attempt` failure and 17 subsequent
+`Newest state missing; no older fallback` failures. Recovery pins every exact
+run, attempt, head, job ID, start/completion timestamp, source blob and workflow
+blob. It requires the entire contiguous reviewed set to reach owned run
+`40883890576/1`, artifact `12902046316`, ZIP SHA-256
+`c0183d9a1c12a7bc53bca75bbdb672eb2a1b64af0449bf74d8af19e9ec4fa166`.
+Every skipped run must still have a complete, empty artifact inventory.
+
+Future recovery is narrower than general artifact fallback: the failed run must
+be attempt 1, contain exactly one completed failed `collect` job lasting less
+than 58 seconds, and use the exact current adapter bytes plus the reviewed
+workflow blob. The actual publisher transport now waits at least 60 monotonic
+seconds after successful restoration, before reserving a publisher start; it
+checks that guard again immediately before opening the request. Wall-clock
+changes cannot shorten this first-access floor. Unknown revisions, reruns,
+longer jobs, unexpected artifacts and incomplete evidence stop collection.
+
+The original nine-field artifact envelope decoder remains authoritative,
+including producer source and state hashes. Restoring the selected owned state
+preserves all MAX constraints, pending/refusal flags and unknown history. Job
+completion only adds a conservative quiet bound, never fabricated request
+receipts. The last observed family identity and complete history remain those
+of the newest attempt, so the existing first-access recheck detects new work.
+
+This repair does not certify a successful collection. The last owned run
+reached the scholarship page but failed with `Reviewed funding inventory
+changed`; its journal is valid independently of that parser failure. The
+workflow is paused pending independent pre-run review and one fully observed
+native test. Any initial native failure and actual inputs must be retained for
+parser diagnosis before another separately reviewed attempt. Offline controls
+verify exact recovery, rejection cases, the original owned ZIP decoder, MAX
+preservation and the monotonic clock guard; they do not replace native evidence.

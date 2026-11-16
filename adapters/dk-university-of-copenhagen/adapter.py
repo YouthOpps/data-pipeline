@@ -2182,6 +2182,106 @@ _STATE_PATH = _STATE_LOCK = None
 _COLLECTION_LOCK_FD = _COLLECTION_LOCK_CONTEXT = None
 _COLLECTION_STARTED = None
 _LEGACY_COLLECTION_OBSERVATION = None
+# Issue #374: complete logs prove these exact 18 attempts failed before access.
+# Historical proof is finite; future proof additionally requires current code.
+_STARTUP_QUIET_UNTIL = None
+_RECOVERY_JOBS, _RECOVERY_RUNS, _HISTORY_COMPLETED = {}, {}, []
+_PREACCESS_ATTEMPTS = {41063528294: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               124088964387,
+               '2026-10-30T13:28:28Z',
+               '2026-10-30T13:28:56Z'),
+ 41203520457: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               124543912180,
+               '2026-10-31T12:59:37Z',
+               '2026-10-31T13:00:02Z'),
+ 41312673989: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               124866156361,
+               '2026-11-01T13:44:04Z',
+               '2026-11-01T13:44:31Z'),
+ 41481969758: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               125402361721,
+               '2026-11-02T16:29:29Z',
+               '2026-11-02T16:30:05Z'),
+ 41655466758: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               125984460048,
+               '2026-11-03T14:37:10Z',
+               '2026-11-03T14:37:40Z'),
+ 41851561644: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               126648931932,
+               '2026-11-04T14:50:23Z',
+               '2026-11-04T14:50:58Z'),
+ 42049734221: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               127322282243,
+               '2026-11-05T14:55:32Z',
+               '2026-11-05T14:56:04Z'),
+ 42235021935: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               127950287027,
+               '2026-11-06T14:33:50Z',
+               '2026-11-06T14:34:16Z'),
+ 42377177447: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               128417075576,
+               '2026-11-07T13:29:22Z',
+               '2026-11-07T13:29:49Z'),
+ 42486700762: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               128750032533,
+               '2026-11-08T13:48:30Z',
+               '2026-11-08T13:49:02Z'),
+ 42658481844: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               129303312821,
+               '2026-11-09T16:48:37Z',
+               '2026-11-09T16:49:23Z'),
+ 42841803438: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               129918705814,
+               '2026-11-10T15:11:47Z',
+               '2026-11-10T15:12:32Z'),
+ 43040709686: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               130591429388,
+               '2026-11-11T14:40:24Z',
+               '2026-11-11T14:41:05Z'),
+ 43249065915: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               131289578926,
+               '2026-11-12T15:33:27Z',
+               '2026-11-12T15:34:17Z'),
+ 43446837751: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               131958387016,
+               '2026-11-13T14:52:05Z',
+               '2026-11-13T14:52:43Z'),
+ 43601343453: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               132466546300,
+               '2026-11-14T13:45:20Z',
+               '2026-11-14T13:45:55Z'),
+ 43723372302: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               132839942369,
+               '2026-11-15T14:15:39Z',
+               '2026-11-15T14:16:12Z'),
+ 43906352876: (1,
+               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               133436133375,
+               '2026-11-16T16:20:20Z',
+               '2026-11-16T16:21:12Z')}
+_PREACCESS_SOURCE_BLOBS = {'5fd9fa82d5d2d5f0871aba653376765a6e00c897': 'e117a83f0f252c65c70802d8ff225abd0062f914'}
+_PREACCESS_WORKFLOW_BLOB = '46ebbf402db820d77d9f8e4aa6519d99469f496a'
+_RECOVERY_WORKFLOW_BLOBS = {_PREACCESS_WORKFLOW_BLOB}
+_PREACCESS_OWNER = (40883890576, 1, SOURCE_ID)
+_PREACCESS_ARTIFACT = (12902046316, 'sha256:c0183d9a1c12a7bc53bca75bbdb672eb2a1b64af0449bf74d8af19e9ec4fa166')
+
 _RESTORED = _PUBLISHING = _STATE_TRUSTED = False
 _RUN_END = _PHASE_END = _SOURCE_END = None
 _PHASE_NAME = None
@@ -3963,6 +4063,9 @@ def attempt_completion(identity, attempt, head):
                 or job.get("status") != "completed"
             ):
                 raise ValueError("Untrusted exact-attempt job")
+            _RECOVERY_JOBS.setdefault((identity, attempt), []).append(
+                copy.deepcopy(job)
+            )
             jobs_seen.add(job["id"])
             value = datetime.fromisoformat(
                 job["completed_at"].replace("Z", "+00:00")
@@ -4516,6 +4619,8 @@ def physical_request_bytes(
         collection_lock_authority()
     if publisher and _INVENTORY_ACTIVE and not robots:
         inventory_guard()
+    if publisher:
+        wait_startup_quiet()
     lock, state = pace(interval) if publisher else (None, None)
     attempted = response_received = response_constraints_saved = False
     retryable_connection_failure = False
@@ -4566,6 +4671,11 @@ def physical_request_bytes(
             collection_lock_authority()
             locked_journal_authority()
         try:
+            if publisher and (
+                _STARTUP_QUIET_UNTIL is None
+                or time.monotonic() < _STARTUP_QUIET_UNTIL
+            ):
+                raise AdapterError("Publisher startup quiet changed", "access")
             attempted = True
             response = _OPENER.open(request, timeout=timeout)
         except urllib.error.HTTPError as error:
@@ -4778,6 +4888,8 @@ def local_workflow_definition():
 def scan_family_history():
     """Read complete producer history and rank exact job completion."""
     global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
+    global _RECOVERY_JOBS, _RECOVERY_RUNS, _HISTORY_COMPLETED
+    _RECOVERY_JOBS, _RECOVERY_RUNS, _HISTORY_COMPLETED = {}, {}, []
     _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     current = current_run_identity() if hosted else (None, None)
@@ -4853,6 +4965,7 @@ def scan_family_history():
                             f"/actions/runs/{identity}/attempts/{number}"
                         )
                     )
+                    _RECOVERY_RUNS[(identity, number)] = copy.deepcopy(wrapper)
                     expected = (identity, number, expected_source)
                     revision = (run.get("head_sha"), workflow)
                     candidates.append(
@@ -4880,6 +4993,7 @@ def scan_family_history():
         raise AdapterError("Existing publisher history missing", "access")
     if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
         raise AdapterError("Ambiguous actual family completion", "access")
+    _HISTORY_COMPLETED = ordered
     return ordered[-1][2:]
 
 
@@ -5250,7 +5364,7 @@ def enter_phase(name, seconds):
 def execution():
     """Own one nonrenewing entry clock including all setup and cleanup work."""
     global _RUN_END, _SOURCE_END, _PHASE_END, _PHASE_NAME
-    global _COLLECTION_PREPARED, _TIMER_OWNED
+    global _COLLECTION_PREPARED, _TIMER_OWNED, _STARTUP_QUIET_UNTIL
     if (
         _RUN_END is not None
         or threading.current_thread() is not threading.main_thread()
@@ -5264,6 +5378,7 @@ def execution():
     _SOURCE_END = min(start + COLLECTION_TIMEOUT, _RUN_END - 390)
     _PHASE_END, _PHASE_NAME = min(start + 180, _SOURCE_END), "restore"
     _COLLECTION_PREPARED = False
+    _STARTUP_QUIET_UNTIL = None
     signal.signal(signal.SIGALRM, phase_alarm)
     _TIMER_OWNED = True
     try:
@@ -5478,10 +5593,150 @@ def reviewed_migration_state():
 
 
 
+def recovery_contents(path, head, cache):
+    """Read immutable source evidence once per revision during this scan."""
+    key = (path, head)
+    if key not in cache:
+        item = workflow_api(f"/contents/{path}?ref={head}")
+        try:
+            if (
+                item.get("encoding") != "base64"
+                or item.get("path") != path
+                or type(item.get("size")) is not int
+                or not 0 < item["size"] <= 5_000_000
+            ):
+                raise ValueError()
+            body = base64.b64decode(item["content"], validate=False)
+            blob = hashlib.sha1(
+                b"blob " + str(len(body)).encode() + b"\0" + body
+            ).hexdigest()
+            if item.get("sha") != blob or len(body) != item["size"]:
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise AdapterError("Incomplete no-access code evidence", "access")
+        cache[key] = (blob, body)
+    return cache[key]
+
+
+def prove_no_publisher_access(row, cache):
+    """Require a finite historical proof or the exact current quiet code."""
+    finished, _, run_id, attempt, source = row
+    exact = _RECOVERY_RUNS[(run_id, attempt)]
+    head = _ATTEMPT_HEADS[(run_id, attempt)]
+    jobs = _RECOVERY_JOBS.get((run_id, attempt), [])
+    try:
+        started = datetime.fromisoformat(
+            jobs[0]["started_at"].replace("Z", "+00:00")
+        )
+        if started.utcoffset() is None:
+            raise ValueError()
+        started = started.timestamp()
+    except (IndexError, KeyError, TypeError, ValueError):
+        raise AdapterError("Missing exact job start evidence", "access")
+    if (
+        attempt != 1
+        or exact.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("conclusion") != "failure"
+        or not 0 <= finished - started < 58
+    ):
+        raise AdapterError("Missing state has no no-access proof", "access")
+    source_blob, source_bytes = recovery_contents(
+        "adapters/dk-university-of-copenhagen/adapter.py", head, cache
+    )
+    workflow_blob, _ = recovery_contents(
+        ".github/workflows/fetch-dk-university-of-copenhagen.yml", head, cache
+    )
+    pin = _PREACCESS_ATTEMPTS.get(run_id)
+    if pin is not None:
+        actual = (
+            attempt, head, jobs[0]["id"], jobs[0]["started_at"],
+            jobs[0]["completed_at"],
+        )
+        if (
+            actual != pin
+            or source_blob != _PREACCESS_SOURCE_BLOBS.get(head)
+            or workflow_blob != _PREACCESS_WORKFLOW_BLOB
+        ):
+            raise AdapterError("Historical no-access proof changed", "access")
+        return
+    if (
+        hashlib.sha256(source_bytes).hexdigest() != source_file_digest()
+        or workflow_blob not in _RECOVERY_WORKFLOW_BLOBS
+    ):
+        raise AdapterError("Unreviewed artifactless source revision", "access")
+
+
+def restoration_owner(latest):
+    """Cross only positively proved no-access attempts, never unknown gaps."""
+    rows = list(reversed(_HISTORY_COMPLETED))
+    if not rows or rows[0][2:] != latest:
+        raise AdapterError("Restoration chronology changed", "access")
+    skipped, cache = [], {}
+    for row in rows:
+        identity = row[2:]
+        run_id, attempt, source = identity
+        result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        artifacts = result.get("artifacts")
+        if (
+            not isinstance(artifacts, list)
+            or len(artifacts) > 100
+            or type(result.get("total_count")) is not int
+            or result["total_count"] != len(artifacts)
+            or any(not isinstance(item, dict) for item in artifacts)
+        ):
+            raise AdapterError("Incomplete recovery artifact inventory", "access")
+        matches = [
+            item for item in artifacts
+            if item.get("name") == _ARTIFACT_NAME + "-" + str(attempt)
+        ]
+        if matches:
+            historical = {
+                item[2] for item in skipped if item[2] in _PREACCESS_ATTEMPTS
+            }
+            if (historical or identity == _PREACCESS_OWNER) and (
+                historical != set(_PREACCESS_ATTEMPTS)
+                or identity != _PREACCESS_OWNER
+                or len(matches) != 1
+                or (matches[0].get("id"), matches[0].get("digest"))
+                != _PREACCESS_ARTIFACT
+            ):
+                raise AdapterError("Incomplete historical recovery chain", "access")
+            return identity, result, max((item[0] for item in skipped), default=0)
+        if artifacts:
+            raise AdapterError("Unexpected artifactless attempt outputs", "access")
+        prove_no_publisher_access(row, cache)
+        skipped.append(row)
+    raise AdapterError("No actual owned publisher state remains", "access")
+
+
+def preserve_recovery_bounds(incoming, finished):
+    """Retain elapsed job bounds without fabricating publisher receipts."""
+    state = copy.deepcopy(validate_budget(incoming))
+    if finished:
+        state["until"] = max(
+            state["until"],
+            finished + max(state["interval"], state["page_gap"]),
+        )
+        state["observed_at"] = max(state["observed_at"], finished)
+    return validate_budget(state)
+
+
+def wait_startup_quiet():
+    """A wall-clock adjustment cannot shorten the first-access quiet floor."""
+    if _STARTUP_QUIET_UNTIL is None:
+        raise AdapterError("Publisher startup quiet is unproved", "access")
+    while time.monotonic() < _STARTUP_QUIET_UNTIL:
+        check_deadline()
+        time.sleep(max(0, min(1, _STARTUP_QUIET_UNTIL - time.monotonic())))
+
+
+
 def restore_family_artifact():
     """Exact reviewed zero-artifact ancestry, then strict newest owned state."""
     global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
-    global _VERIFIED_REMOTE_CREATE
+    global _VERIFIED_REMOTE_CREATE, _STARTUP_QUIET_UNTIL
     _STATE_TRUSTED = False
     latest = latest_family_run()
     run_id, attempt, source = latest
@@ -5518,7 +5773,8 @@ def restore_family_artifact():
                 )
         incoming = reviewed_migration_state()
     else:
-        value = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        owner, value, recovery_bound = restoration_owner(latest)
+        run_id, attempt, source = owner
         artifacts = value.get("artifacts")
         if (
             not isinstance(artifacts, list)
@@ -5548,7 +5804,10 @@ def restore_family_artifact():
             or not re.fullmatch(r"sha256:[0-9a-f]{64}", item.get("digest", ""))
         ):
             raise AdapterError("Newest artifact binding invalid", "access")
-        incoming = download_inert_artifact(latest, item["id"], item["digest"])
+        incoming = preserve_recovery_bounds(
+            download_inert_artifact(owner, item["id"], item["digest"]),
+            recovery_bound,
+        )
     _VERIFIED_REMOTE_CREATE = incoming
     try:
         with locked_budget():
@@ -5566,6 +5825,7 @@ def restore_family_artifact():
         copy.deepcopy(_SCANNED_JOB_DIGESTS),
         copy.deepcopy(_ATTEMPT_HEADS),
     )
+    _STARTUP_QUIET_UNTIL = time.monotonic() + 60
     _RESTORED = _STATE_TRUSTED = True
 
 
