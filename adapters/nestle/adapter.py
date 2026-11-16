@@ -54,13 +54,17 @@ BOOTSTRAP_EVIDENCE = "https://github.com/YouthOpps/data-pipeline/issues/372#issu
 RESEARCH_JOURNAL_SHA256 = "9ec1297b856fc4c22df2a4081d7fba92a8996912e60c893398b2f23948959990"
 RESEARCH_PROVENANCE = "First authorized research; no existing Nestle adapter or research journal found"
 WORKFLOW_SHA256 = "ba077f2d6119ad0caccf3a50c8d40fb6276ba06ff9ce17866fe139e709163215"
+NATIVE_EVIDENCE = "https://github.com/YouthOpps/data-pipeline/issues/372#issuecomment-6925723220"
+NATIVE_JOURNAL_SHA256 = "419dc23539dc7bc693b60d70abcb1e2f3ff00ebc7d5ea83c94f71f2d77ce4215"
+NATIVE_SOURCE_SHA256 = "b76da20d11bf4d500152d32dfd8c1c9615d03290cbddd89af27f39af38a77c6c"
+NATIVE_OBSERVER_SHA256 = "233fe9fd5ce2359ff0daa4b6022693df5c4dc0566295472624f9d1e9d008b83c"
 BOOTSTRAP_STATE = {
     'blocked': False,
-    'completed': 1794849735.4920633,
+    'completed': 1794854524.641252,
     'family': 'youthopps-nestle-publisher-research-v1',
-    'generation': 0,
+    'generation': 554,
     'interval': 12.2,
-    'inventory_completed': 1794849647.2996705,
+    'inventory_completed': 1794854524.641252,
     'not_before': 0,
     'page_interval': 30.0,
     'pending': None,
@@ -69,8 +73,10 @@ BOOTSTRAP_STATE = {
             'rules':
                 'User-agent: *\n'
                 'Disallow: /applybutton/\n'
-                'Disallow: /talentcommunity/\n'
-                'Disallow: /mobile/talentcommunity/\n'
+                'Disallow: '
+                '/talentcommunity/\n'
+                'Disallow: '
+                '/mobile/talentcommunity/\n'
                 'Disallow: /emailsubscribe/\n'
                 'Disallow: /email/image/\n'
                 'Disallow: /services/\n'
@@ -88,30 +94,40 @@ BOOTSTRAP_STATE = {
                 '#\r\n'
                 '# robots.txt\r\n'
                 '#\r\n'
-                '# This file is to prevent the crawling and indexing of '
-                'certain parts\r\n'
-                '# of your site by web crawlers and spiders run by '
-                'sites like Yahoo!\r\n'
-                '# and Google. By telling these "robots" where not to '
-                'go on your site,\r\n'
-                '# you save bandwidth and server resources.\r\n'
+                '# This file is to prevent the '
+                'crawling and indexing of certain '
+                'parts\r\n'
+                '# of your site by web crawlers and '
+                'spiders run by sites like '
+                'Yahoo!\r\n'
+                '# and Google. By telling these '
+                '"robots" where not to go on your '
+                'site,\r\n'
+                '# you save bandwidth and server '
+                'resources.\r\n'
                 '#\r\n'
-                '# This file will be ignored unless it is at the root '
-                'of your host:\r\n'
-                '# Used:    http://example.com/robots.txt\r\n'
-                '# Ignored: http://example.com/site/robots.txt\r\n'
+                '# This file will be ignored unless '
+                'it is at the root of your host:\r\n'
+                '# Used:    '
+                'http://example.com/robots.txt\r\n'
+                '# Ignored: '
+                'http://example.com/site/robots.txt\r\n'
                 '#\r\n'
-                '# For more information about the robots.txt standard, '
-                'see:\r\n'
-                '# http://www.robotstxt.org/robotstxt.html\r\n'
+                '# For more information about the '
+                'robots.txt standard, see:\r\n'
+                '# '
+                'http://www.robotstxt.org/robotstxt.html\r\n'
                 '\r\n'
                 'User-agent: *\r\n'
-                '# Content-Signal: declares how crawlers may use this '
-                'content - ai-train=no (no AI model training), '
-                'search=yes (allow search indexing), ai-input=yes '
-                '(allow use as input for AI features).\r\n'
-                'Content-Signal: ai-train=no, search=yes, '
-                'ai-input=yes\r\n'
+                '# Content-Signal: declares how '
+                'crawlers may use this content - '
+                'ai-train=no (no AI model '
+                'training), search=yes (allow '
+                'search indexing), ai-input=yes '
+                '(allow use as input for AI '
+                'features).\r\n'
+                'Content-Signal: ai-train=no, '
+                'search=yes, ai-input=yes\r\n'
                 '# CSS, JS, Images\r\n'
                 'Allow: /core/*.css$\r\n'
                 'Allow: /core/*.css?\r\n'
@@ -149,25 +165,33 @@ BOOTSTRAP_STATE = {
                 'Disallow: /user/logout/\r\n'
                 '# Paths (no clean URLs)\r\n'
                 'Disallow: /index.php/admin/\r\n'
-                'Disallow: /index.php/comment/reply/\r\n'
-                'Disallow: /index.php/filter/tips/\r\n'
+                'Disallow: '
+                '/index.php/comment/reply/\r\n'
+                'Disallow: '
+                '/index.php/filter/tips/\r\n'
                 'Disallow: /index.php/node/add/\r\n'
                 'Disallow: /index.php/search/\r\n'
-                'Disallow: /index.php/user/password/\r\n'
-                'Disallow: /index.php/user/register/\r\n'
-                'Disallow: /index.php/user/login/\r\n'
-                'Disallow: /index.php/user/logout/\r\n'
+                'Disallow: '
+                '/index.php/user/password/\r\n'
+                'Disallow: '
+                '/index.php/user/register/\r\n'
+                'Disallow: '
+                '/index.php/user/login/\r\n'
+                'Disallow: '
+                '/index.php/user/logout/\r\n'
                 'Disallow: /node/*\r\n'
                 'Disallow: /taxonomy/term/*\r\n'
                 '# Disallow Ajax loaded pages\r\n'
                 'Disallow: /feedback-form\r\n'
                 'Disallow: /report-concern\r\n'
                 '# Disallow brand search page\r\n'
-                'Disallow: /brands/brandssearchlist\r\n'
+                'Disallow: '
+                '/brands/brandssearchlist\r\n'
                 'Disallow: /cdn-cgi\r\n'
                 'Disallow: /node\n'
                 '# Simple sitemap\n'
-                'Sitemap: https://www.nestle.com/sitemap.xml',
+                'Sitemap: '
+                'https://www.nestle.com/sitemap.xml',
             'sha256':
                 '5a57587cee18376a2490e358325f978f8763c99d4f446fe06c077a3ba4c1269a',
             'status':
@@ -177,7 +201,34 @@ BOOTSTRAP_STATE = {
     'schema': 1,
     'starts': [
         1794849611.7576716, 1794849644.841143, 1794849668.8047931,
-        1794849681.595636, 1794849708.6015742, 1794849733.3677218
+        1794849681.595636, 1794849708.6015742, 1794849733.3677218,
+        1794852620.190699, 1794852633.9792414, 1794852669.247591,
+        1794852704.4948506, 1794852736.2832308, 1794852750.3400252,
+        1794852764.015265, 1794852777.719816, 1794852791.8585954,
+        1794852805.6699305, 1794853030.4091551, 1794853044.2543375,
+        1794853076.0879831, 1794853108.3306775, 1794853142.9404428,
+        1794853157.0565934, 1794853170.807741, 1794853184.5749042,
+        1794853198.433591, 1794853212.3168285, 1794853225.9264755,
+        1794853239.5254917, 1794853253.3035595, 1794853266.9975154,
+        1794853280.6418343, 1794853294.5473177, 1794853308.1320658,
+        1794853321.7730632, 1794853335.345374, 1794853349.2227502,
+        1794853362.846182, 1794853376.8895278, 1794853391.6097524,
+        1794853405.6562617, 1794853419.3313165, 1794853433.4596138,
+        1794853447.3940384, 1794853823.5415053, 1794853837.0825133,
+        1794853868.582056, 1794853901.0795722, 1794853936.0102327,
+        1794853949.9301293, 1794853963.9154844, 1794853977.9306638,
+        1794853991.9907496, 1794854005.8626425, 1794854019.4871426,
+        1794854033.3851328, 1794854047.02794, 1794854060.726264,
+        1794854074.5634942, 1794854088.21946, 1794854101.8415496,
+        1794854116.335453, 1794854130.7668343, 1794854144.8493438,
+        1794854158.876047, 1794854172.5723784, 1794854186.2052398,
+        1794854200.6163507, 1794854214.2163374, 1794854227.8278067,
+        1794854241.555331, 1794854255.2354968, 1794854268.85835,
+        1794854282.6688495, 1794854296.2725148, 1794854309.9626217,
+        1794854323.799138, 1794854337.4118352, 1794854351.0006716,
+        1794854365.368358, 1794854379.3261468, 1794854393.7876234,
+        1794854408.0887265, 1794854422.0082264, 1794854456.527725,
+        1794854487.8989182, 1794854519.6722522
     ],
     'strikes': 0,
     'unknown_history': True
@@ -1433,6 +1484,56 @@ def collect_catalog():
     return records
 
 
+def postal_location(shell, card):
+    """Read the actual nested PostalAddress; optional fields are never invented."""
+    addresses = shell.nodes(
+        lambda node: node.attrs.get("itemprop") == "address" and
+        "schema.org/PostalAddress" in node.attrs.get("itemtype", ""))
+    if len(addresses) != 1:
+        raise AdapterError("Nestle structured postal address is ambiguous")
+    fields = {}
+    names = {
+        "streetAddress", "addressLocality", "addressRegion", "addressCountry",
+        "postalCode"
+    }
+    for node in addresses[0].nodes(lambda n: n.attrs.get("itemprop") in names):
+        name = node.attrs["itemprop"]
+        if name == "addressCountry" and "schema.org/Country" in node.attrs.get(
+                "itemtype", ""):
+            values = node.nodes(lambda n: n.attrs.get("itemprop") == "name")
+            if len(values) != 1:
+                raise AdapterError("Nestle structured country is ambiguous")
+            value = values[0].attrs.get("content", values[0].text())
+        else:
+            value = node.attrs.get("content", node.text())
+        value = " ".join(value.split())
+        if name in fields and fields[name] != value:
+            raise AdapterError("Conflicting Nestle address components")
+        fields[name] = value
+    if fields.get("addressLocality") or fields.get("addressCountry"):
+        if not fields.get("addressLocality") or not fields.get(
+                "addressCountry"):
+            raise AdapterError("Incomplete Nestle locality/country facts")
+        location = ", ".join(fields[name]
+                             for name in ("addressLocality", "addressRegion",
+                                          "addressCountry", "postalCode")
+                             if fields.get(name))
+    else:
+        location = fields.get("streetAddress")
+    if not location or location != card["location"]:
+        raise AdapterError("Nestle detail location conflicts with catalogue")
+    countries = [
+        component.strip()
+        for component in location.split(",")
+        if re.fullmatch(r"[A-Z]{2}", component.strip())
+    ]
+    country = fields.get("addressCountry") or (countries[-1]
+                                               if countries else None)
+    if country and not re.fullmatch(r"[A-Z]{2}", country):
+        country = None
+    return location, country
+
+
 def parse_detail(text, card):
     root = Document(text).root
     shells = root.nodes(
@@ -1460,10 +1561,9 @@ def parse_detail(text, card):
         if key in fields and fields[key] != value:
             raise AdapterError("Conflicting Nestle structured facts")
         fields[key] = value
-    if not fields.get("streetAddress") or fields["streetAddress"] != card[
-            "location"] or not fields.get("hiringOrganization"):
-        raise AdapterError(
-            "Nestle detail location/employer missing or conflicting")
+    location, country = postal_location(shell, card)
+    if not fields.get("hiringOrganization"):
+        raise AdapterError("Nestle detail employer missing")
     posted = None
     if fields.get("datePosted"):
         try:
@@ -1475,17 +1575,19 @@ def parse_detail(text, card):
     deadline = None
     if fields.get("validThrough"):
         try:
-            parsed = datetime.fromisoformat(fields["validThrough"].replace(
-                "Z", "+00:00"))
+            try:
+                parsed = datetime.fromisoformat(fields["validThrough"].replace(
+                    "Z", "+00:00"))
+            except ValueError:
+                parsed = datetime.strptime(
+                    fields["validThrough"],
+                    "%a %b %d %H:%M:%S UTC %Y").replace(tzinfo=timezone.utc)
             if parsed.utcoffset() is None:
                 raise ValueError()
             deadline = parsed.isoformat().replace("+00:00", "Z")
         except ValueError:
             raise AdapterError(
                 "Unsupported Nestle structured closing date") from None
-    countries = re.findall(r"(?:^|,)\s*([A-Z]{2})(?:\s*,|\s*$)",
-                           fields["streetAddress"])
-    country = countries[-1] if countries else None
     title = card["title"]
     if re.search(
             r"\b(apprentice|apprenticeship|trainee|graduate program(?:me)?)\b",
@@ -1512,8 +1614,7 @@ def parse_detail(text, card):
         "category":
             category,
         "summary":
-            "Official Nestle university-career opportunity in " +
-            fields["streetAddress"] +
+            "Official Nestle university-career opportunity in " + location +
             ". Review the publisher's vacancy for requirements and application details.",
         "status":
             "open",
@@ -1524,7 +1625,7 @@ def parse_detail(text, card):
         "host_countries": [country] if country else [],
         "eligible_countries": [],
         "location":
-            fields["streetAddress"],
+            location,
         "employer":
             fields["hiringOrganization"],
         "publisher_country":

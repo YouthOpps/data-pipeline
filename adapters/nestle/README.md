@@ -44,8 +44,12 @@ The original research journal SHA-256 is
 `9ec1297b856fc4c22df2a4081d7fba92a8996912e60c893398b2f23948959990`;
 [the exact migration provenance](https://github.com/YouthOpps/data-pipeline/issues/372#issuecomment-6924734579)
 is also bound by source-local immutable constants.
-Bootstrap is solely for this previously unpublished source and will include the
-reviewed native-run MAX state before first publication. It is not a reset path.
+Bootstrap is solely for this previously unpublished source and contains the
+exact independently validated final native-run state: 86 retained starts,
+generation 554, all research/native MAX constraints and policy history. Its
+acknowledged journal SHA-256 is
+`419dc23539dc7bc693b60d70abcb1e2f3ff00ebc7d5ea83c94f71f2d77ce4215`.
+It is not a reset path.
 Actual job chronology and exact run/attempt/head-owned artifact digests determine
 the latest durable state; missing newer state fails closed. The only skip is a
 failed job shorter than 58 seconds whose immutable adapter/workflow bytes match
@@ -88,5 +92,22 @@ A failed first run creates no source folder. The data token is never sent to
 publisher hosts or redirected artifact hosts.
 
 Implementation tracking: [data-pipeline#372](https://github.com/YouthOpps/data-pipeline/issues/372).
-Native acceptance and independent QA are required before merge; research samples
-and offline controls alone do not certify full collection or production.
+## Accepted native evidence
+
+On 2026-11-16, the original nonpublishing test passed and independent QA checked
+all 34 raw records against all 34 detail bodies and both complete four-page
+inventories. All 43 HTTP responses were successful; all 4,355,999 returned bytes
+and 299 journal/RAM witnesses were retained privately in RAM. The actual minimum
+physical completion gap was 12.200781948 seconds, inventory gap 30.000918757
+seconds, and maximum rolling-minute starts five.
+
+The current website consumer accepted all 34 raw and 34 expiry-filtered records;
+there were no actually expired records. A separately derived valid-empty envelope
+also passed. This does not claim that empty source retrieval succeeded. Two prior
+original failures (explicit UTC deadline formatting and nested PostalAddress)
+remain recorded independently; their state is included in the retained MAX.
+
+[Exact code, observer and state provenance](https://github.com/YouthOpps/data-pipeline/issues/372#issuecomment-6925723220)
+binds this acceptance. The final bootstrap changes only retained state and
+provenance, without changing the tested collection/parser functions. Native
+acceptance is not a claim that production publication has already occurred.
