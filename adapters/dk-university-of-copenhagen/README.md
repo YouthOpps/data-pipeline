@@ -10,10 +10,11 @@ external provider websites, application systems and credentials are not used.
 The issue's historical studies.ku.dk redirect is legitimate: its current
 canonical scholarship leaf is
 https://www.ku.dk/studies/admission/scholarships-for-full-degree-students .
-The funded PhD inventory is https://employment.ku.dk/phd/ . Each notice has a
-public university URL with a numeric `show` identifier. All twenty notices
-were researched with the honest project User-Agent, normal TLS verification
-and the session proxy on 8 October 2026.
+The current funded PhD inventory is selected from the complete official table
+at https://employment.ku.dk/all-vacancies/ . Each notice has a public university
+URL with a numeric `show` identifier. The former `/phd/` category page no longer
+contains a vacancy table. Historical research of twenty notices on 8 October
+2026 does not establish the current count.
 
 The inspected www.ku.dk robots policy permits these public study routes.
 The employment and about subdomains return robots HTTP 404 (no published
@@ -138,11 +139,15 @@ including shared country anchors. A title change at the same linked canonical
 programme URL keeps the ID. An unmapped URL for an existing legacy name stops
 for identity review instead of silently replacing its published ID. Validation runs after final identity assignment.
 
-Every server-rendered PhD table row is collected, with all public detail pages;
-any explicit next-page links are followed within the same reviewed PhD path.
+Every server-rendered all-vacancies table row is validated, with all next-page
+links followed inside the reviewed `/all-vacancies/` path. Only titles explicitly
+identifying a PhD role are retained; professor, lecturer and postdoctoral titles
+are excluded. A research-assistant role explicitly offering PhD-fellowship
+continuation remains included. Every selected public detail page is collected.
 Missing, duplicate or malformed advertisements fail the collection rather than
-publish a partial inventory. Job identifiers use the canonical numeric `show`
-URL. Multiple places or regular/integrated degree routes within one
+publish a partial inventory. Job identifiers preserve the native numeric `show`
+identity: hashes continue to use the historical `/phd/?show=ID` identity while
+public URLs point to the actually linked `/all-vacancies/?show=ID` notice. Multiple places or regular/integrated degree routes within one
 advertisement remain one opportunity. Listing department and detail conditions
 are retained; host Denmark is not applicant nationality.
 
@@ -660,3 +665,26 @@ inventory. Offline replay of that complete page verifies the new 21-record
 scholarship subset, current consumer envelopes and stable retained identities.
 It does not certify the unvisited doctoral catalogue or a complete live test.
 A separate pre-run review is required before another genuine collection.
+
+
+### Official doctoral inventory route recovery
+
+The second original native test on source `8925bf0e` passed scholarship parsing
+but failed at the missing `/phd/` table. Its complete four-response capture and
+original FAIL remain separately preserved. A bounded research pass followed the
+already observed official `/all-vacancies/` link and found 37 complete table rows,
+including seven explicit doctoral titles, with no next-page link. All seven
+observed links carry the same native numeric `show` identity and the current
+`/all-vacancies/` route. This is a category-route change, not removal of doctoral
+coverage or proof that no doctoral opportunities exist.
+
+The old category page also links Jobnet. During scoped research, Jobnet's
+`robots.txt` returned a 307 redirect to an authentication route. The original
+robots-purpose guard stopped before that redirect; neither authentication nor
+Jobnet job content was requested. That research outcome and all pacing history
+are retained. Jobnet is not included in the delivered collector: the complete
+same-university all-vacancies route supplies the required inventory.
+
+The seven current detail pages require real observation and a separately
+reviewed complete native test before acceptance. No previous FAIL is relabelled
+as a pass, and no partial scholarship result replaces the published snapshot.

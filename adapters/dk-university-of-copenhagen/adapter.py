@@ -37,7 +37,7 @@ SOURCE_URL = (
     "scholarships-for-full-degree-students"
 )
 WEBSITE_URL = SOURCE_URL
-VACANCIES_URL = "https://employment.ku.dk/phd/"
+VACANCIES_URL = "https://employment.ku.dk/all-vacancies/"
 POLICY_URL = "https://about.ku.dk/cookies-and-privacy-policy/"
 LANGUAGE = "en"
 PUBLISHER_COUNTRY = "DK"
@@ -721,7 +721,7 @@ def scholarships(root):
 
 
 def vacancy_rows(root, url):
-    """Read the complete server-rendered official vacancy table."""
+    """Validate every row of the complete official all-vacancies table."""
     table = one(nodes(root, "table", "vacancies"), "PhD vacancy table")
     rows = []
     for row in nodes(table, "tr"):
@@ -736,7 +736,7 @@ def vacancy_rows(root, url):
         if (
             parsed.scheme != "https"
             or parsed.netloc != "employment.ku.dk"
-            or parsed.path != "/phd/"
+            or parsed.path != "/all-vacancies/"
             or parsed.fragment
             or not re.fullmatch(r"show=\d+", parsed.query)
         ):
@@ -983,11 +983,18 @@ def vacancy(row, root):
         location=department + ", Denmark",
     )
     record["tags"] = ["PhD", "University of Copenhagen"]
+    # The native show identifier survives the listing-route change. Preserve
+    # previously published IDs while linking to the actual current detail URL.
+    native = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["show"][0]
+    legacy_identity = "https://employment.ku.dk/phd/?show=" + native
+    record["id"] = hashlib.sha256(
+        (SOURCE_ID + "|" + legacy_identity).encode()
+    ).hexdigest()[:24]
     return record
 
 
 def vacancy_catalog():
-    """Read every authoritative listing page before comparing inventories."""
+    """Read all pages before selecting explicitly doctoral advertised roles."""
     pending, seen, rows, urls = [VACANCIES_URL], set(), [], set()
     while pending:
         url = pending.pop(0)
@@ -1009,7 +1016,7 @@ def vacancy_catalog():
             if (
                 parsed.scheme != "https"
                 or parsed.netloc != "employment.ku.dk"
-                or parsed.path != "/phd/"
+                or parsed.path != "/all-vacancies/"
                 or parsed.fragment
             ):
                 raise AdapterError("Unreviewed vacancy pagination", "parse")
@@ -1017,7 +1024,14 @@ def vacancy_catalog():
                 pending.append(target)
         if len(seen) > 30:
             raise AdapterError("Excessive vacancy pagination", "parse")
-    return rows, len(seen)
+    doctoral = [
+        row for row in rows
+        if re.search(r"\bPhD\b", row[1], re.I)
+        and not re.search(
+            r"\b(?:postdoc(?:toral)?|professor|lecturer)\b", row[1], re.I
+        )
+    ]
+    return doctoral, len(seen)
 
 
 
