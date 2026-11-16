@@ -298,3 +298,46 @@ terminal or unknown status without logging credentials or response bodies.
 Missing newest pacing artifacts still fail
 closed; this change does not recover an earlier artifact, reset request history,
 clear publisher holds or certify production recovery. See issue #358.
+
+## Recovery from pre-access infrastructure failures
+
+Issue [#371](https://github.com/YouthOpps/data-pipeline/issues/371) restores
+continuity across 24 exact failed attempts whose reviewed logs place their
+errors before any publisher request. The run, attempt, job, timestamps, source
+revision and workflow are pinned. The complete historical set and the exact
+last actual owned artifact must agree; an expired or missing owner cannot be
+replaced with another older artifact.
+
+For subsequent infrastructure failures, an artifactless attempt is eligible
+only when it is attempt one, has exactly one authenticated failed collection
+job, lasted less than 58 seconds, and ran the exact currently executing source
+with the reviewed workflow. The source now enforces a monotonic 60-second
+startup quiet period and checks it again immediately before its first physical
+request. Wall-clock changes cannot shorten that floor. Different code, changed
+workflows, reruns, longer jobs, partial inventories and unexpected artifacts
+remain blocked for review.
+
+Recovery preserves the actual owned state, unknown historical provenance,
+pending transactions, refusals and stronger MAX restrictions. Job completion
+times extend only conservative waiting/observation bounds; they never become
+invented publisher starts, policy observations or successful receipts. Full
+history remains available to the existing chronology checks.
+
+Local validation requires the canonical workflow to be disabled and the
+family to have no active sibling. An external observer may supply only the
+original, authenticated, digest-verified owned ZIP through its selected
+artifact transport boundary; all original metadata, ownership, ZIP and state
+checks remain in the adapter. Complete native input and consumer evidence are
+required before activation. The final local state must be MAX-merged into the
+reviewed maintenance seed before production resumes. Parsing, identities,
+expiry filtering and atomic publication behavior are unchanged.
+
+The 16 November 2026 native test passed with 90 actual allocations. Complete
+input replay and the current website consumer independently verified all 90
+raw records, four retained current allocations, and the valid empty case. The
+publisher explicitly marked the other 86 allocations currently closed. All
+15 physical requests respected completion-based pacing, the separate inventory
+guard and the monotonic startup floor. The original full local outcome and
+87-entry MAX maintenance seed are recorded in the
+[native evidence](https://github.com/YouthOpps/data-pipeline/issues/371#issuecomment-6924310590).
+Production recovery still requires a successful post-merge publication.
