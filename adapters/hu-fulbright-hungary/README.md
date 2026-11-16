@@ -42,6 +42,15 @@ Hungarian citizenship is recorded only when the official current award detail ex
 
 Hungarian and English deadlines without a verified UTC offset retain their calendar date. A published clock such as the actual FLTA `23:59` is preserved in a short factual summary note when its time zone is not stated; no Budapest zone or end-of-minute seconds are invented. Explicit numeric-offset or UTC timestamps retain their exact instant and stated minute/second precision. Date-only calls remain eligible through their UTC closing date, with unknown status on that day, and expire on the following UTC day. Homepage/detail selection, rolling-call selection and final cleanup use this same rule. Joint awards inherit the verified parent deadline and its closing-day status, including the parent's published-clock note where applicable. Rolling applications have no invented deadline. The U.S. Student Program's approximate April-to-mid-October window remains in its summary; its exact deadline stays null, boundary-month status stays unknown, and month selection uses UTC consistently. Publication and modification times are not inferred from unrelated dates.
 
+The Student Program window accepts the publisher's present-tense `is open`
+and future-tense `will be open` announcements. It requires one unambiguous
+Student Program window, consecutive academic-cycle years and chronological
+application years. Future windows remain excluded until their published start
+month; the collector does not hardcode the current year or turn a future
+announcement into an open call. On 14 November 2026, the publisher advertised
+the 2028-2029 cycle with an April-to-October 2027 application window. Other
+undated U.S. programme descriptions remain excluded.
+
 ## Run and test
 
 From the repository root:
@@ -55,7 +64,23 @@ The sole live test performs real non-publishing collection, validates every reco
 
 On 8 October 2026, author and independent live tests validated all ten records in memory, including unique identities and URLs, publisher evidence, countries and dates. Later collection may legitimately change as calls open or expire.
 
+The corrected sole native test on 14 November 2026 collected four current
+rolling grants. Complete raw and expiry-filtered records passed the current
+website consumer, as did its valid-empty envelope; no actual raw record had
+expired. The future 2027 Student Program window was excluded. The original
+parser failure and corrected passing run remain separate evidence in
+[#367](https://github.com/YouthOpps/data-pipeline/issues/367#issuecomment-6882943796).
+
 ## Publication
+
+The #367 maintenance literal preserves the original #278 approved state plus
+the newest settled local journal through the unchanged MAX merge. It retains
+all stronger constraints, pending ownership and unknown historical-rate
+provenance when combined with a later owned artifact. The source workflow was
+paused for the nonpublishing native runs and must remain paused until a
+separate maintainer activates the reviewed parser and maintenance seed. The
+temporary read-only artifact courier is disabled and absent from the delivered
+tree; no diagnostic publisher family or production identity was introduced.
 
 The matching `fetch-hu-fulbright-hungary.yml` workflow runs automatically on pushes to `main` affecting this adapter folder or its own workflow, including maintainer merges. Manual dispatch and a daily schedule (17:12 UTC) remain available. Repository/main guards, source-family publication concurrency and the existing GitHub App's data-source-only contents-write token scope remain enforced.
 

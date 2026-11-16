@@ -384,14 +384,24 @@ def us_student_call(root):
     """Preserve a concrete dated U.S. call without guessing its deadline day."""
     content = one(nodes(root, "div", "entry-content"), "U.S. awards content")
     text = content.text()
-    match = re.search(
-        r"The AY (20\d{2}-20\d{2}) Fulbright U\.S\. Student Program application is open between early April, (\d{4}) [–-] mid-October, (\d{4})",
-        text,
-    )
-    if not match:
-        raise AdapterError(
-            "U.S. student call application window changed", "parse"
+    windows = list(
+        re.finditer(
+            r"The\s+AY\s+(20\d{2}-20\d{2})\s+Fulbright\s+U\.S\.\s+"
+            r"Student\s+Program\s+application\s+(?:is|will\s+be)\s+open\s+"
+            r"between\s+early\s+April,\s*(20\d{2})\s*[–-]\s*"
+            r"mid-October,\s*(20\d{2})(?!\d)",
+            text,
         )
+    )
+    if len(windows) != 1:
+        raise AdapterError(
+            "U.S. student call application window changed or ambiguous",
+            "parse",
+        )
+    match = windows[0]
+    cycle_start, cycle_end = map(int, match[1].split("-"))
+    if cycle_end != cycle_start + 1 or int(match[3]) < int(match[2]):
+        raise AdapterError("Invalid U.S. student call dates", "parse")
     now = datetime.now(timezone.utc)
     start, end = (int(match[2]), 4), (int(match[3]), 10)
     current = (now.year, now.month)
@@ -2904,7 +2914,7 @@ def production_maintenance_state(incoming):
             or approval["family"] != FAMILY
             or not isinstance(approval["evidence"], str)
             or not re.fullmatch(
-                r"https://github\.com/YouthOpps/data-pipeline/issues/278"
+                r"https://github\.com/YouthOpps/data-pipeline/issues/(?:278|367)"
                 r"#issuecomment-[1-9][0-9]*",
                 approval["evidence"],
             )
