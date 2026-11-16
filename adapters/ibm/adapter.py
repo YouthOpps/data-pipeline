@@ -3,6 +3,7 @@
 import argparse
 import base64
 import contextlib
+import copy
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import fcntl
@@ -77,6 +78,103 @@ _PHASE_NAME = None
 
 
 _ATTEMPT_HEADS = {}
+
+
+# Exact no-publisher ancestry reviewed in issue #369. The original source
+# enforces sixty monotonic seconds before its first physical publisher start;
+# every pinned entire job below lasted less than that lower bound.
+_NO_PUBLISHER_HEAD = "5fd9fa82d5d2d5f0871aba653376765a6e00c897"
+_NO_PUBLISHER_SOURCE_BLOB = "e11df51e9bae1ab1e79d987544540acaf9c94058"
+_NO_PUBLISHER_ATTEMPTS = {
+    41110168149: (
+        124250224562,
+        "2026-10-30T18:49:29Z",
+        "2026-10-30T18:49:50Z",
+    ),
+    41226820178: (
+        124612592383,
+        "2026-10-31T17:54:58Z",
+        "2026-10-31T17:55:31Z",
+    ),
+    41337167556: (
+        124939325956,
+        "2026-11-01T18:32:45Z",
+        "2026-11-01T18:33:15Z",
+    ),
+    41537467406: (
+        125592862431,
+        "2026-11-02T22:27:50Z",
+        "2026-11-02T22:28:23Z",
+    ),
+    41711023124: (
+        126178772447,
+        "2026-11-03T20:16:23Z",
+        "2026-11-03T20:17:03Z",
+    ),
+    41907503441: (
+        126845985412,
+        "2026-11-04T20:32:05Z",
+        "2026-11-04T20:32:33Z",
+    ),
+    42106933829: (
+        127524097579,
+        "2026-11-05T20:49:23Z",
+        "2026-11-05T20:50:01Z",
+    ),
+    42285165558: (
+        128123981020,
+        "2026-11-06T20:04:26Z",
+        "2026-11-06T20:04:59Z",
+    ),
+    42400514581: (
+        128487042649,
+        "2026-11-07T18:17:10Z",
+        "2026-11-07T18:17:39Z",
+    ),
+    42510253733: (
+        128821572664,
+        "2026-11-08T18:29:29Z",
+        "2026-11-08T18:30:06Z",
+    ),
+    42717986037: (
+        129504350708,
+        "2026-11-09T23:08:36Z",
+        "2026-11-09T23:09:18Z",
+    ),
+    42896889111: (
+        130112224404,
+        "2026-11-10T20:36:04Z",
+        "2026-11-10T20:36:48Z",
+    ),
+    43306742429: (
+        131491908729,
+        "2026-11-12T21:05:28Z",
+        "2026-11-12T21:05:36Z",
+    ),
+    43503415689: (
+        132154768894,
+        "2026-11-13T20:38:30Z",
+        "2026-11-13T20:38:39Z",
+    ),
+    43628835627: (
+        132550677241,
+        "2026-11-14T18:50:38Z",
+        "2026-11-14T18:50:47Z",
+    ),
+    43752509469: (
+        132929371802,
+        "2026-11-15T19:27:23Z",
+        "2026-11-15T19:27:39Z",
+    ),
+}
+_NO_PUBLISHER_LAST_OWNER = (40937889032, 1)
+_NO_PUBLISHER_LAST_ARTIFACT = (
+    12926650363,
+    "sha256:81f559b0af050d307e74f79b6408135848461b354852ff50aa337ce88663a28f",
+)
+_NO_PUBLISHER_BOUND = 0
+
+
 _PAGE_COMPLETED = None
 
 
@@ -1171,8 +1269,80 @@ def protocol_timestamp(value):
         ) from None
 
 
+def reviewed_no_publisher_attempt(run, jobs):
+    """Recognize only the finite authenticated pre-wire failure ancestry."""
+    pin = _NO_PUBLISHER_ATTEMPTS.get(run["id"])
+    if pin is None or run["run_attempt"] != 1:
+        return False
+    if (
+        run["head_sha"] != _NO_PUBLISHER_HEAD
+        or run.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("conclusion") != "failure"
+        or jobs[0].get("name") != "collect"
+        or (jobs[0]["id"], jobs[0]["started_at"], jobs[0]["completed_at"])
+        != pin
+    ):
+        raise AdapterError("Reviewed no-publisher attempt changed", "access")
+    elapsed = protocol_timestamp(pin[2]) - protocol_timestamp(pin[1])
+    if not 0 <= elapsed < 60:
+        raise AdapterError("No-publisher timing proof changed", "access")
+    return True
+
+
+def jobless_without_publisher(run, current):
+    """Allow a resolved reviewed ghost or same-definition queued sibling."""
+    if current is None:
+        return False
+    reviewed = (
+        run.get("id") == 43097078558
+        and run.get("run_attempt") == 1
+        and run.get("head_sha") == _NO_PUBLISHER_HEAD
+        and run.get("created_at") == "2026-11-11T20:36:43Z"
+    )
+    queued = run.get("status") == "queued"
+    cancelled = (
+        run.get("status") == "completed"
+        and run.get("conclusion") == "cancelled"
+    )
+    same_definition = run.get("head_sha") == os.environ.get("GITHUB_SHA")
+    if not (queued and (reviewed or same_definition) or cancelled and reviewed):
+        return False
+    result = workflow_api(
+        f"/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs"
+        "?per_page=100"
+    )
+    if (
+        type(result.get("total_count")) is not int
+        or result["total_count"] != 0
+        or result.get("jobs") != []
+    ):
+        raise AdapterError("Jobless sibling gained publisher ownership", "access")
+    if reviewed and queued:
+        raise AdapterError("Legacy queued publisher must be resolved", "access")
+    return True
+
+
+def preserve_no_publisher_bounds(incoming):
+    """Retain conservative job bounds without inventing physical receipts."""
+    if not _NO_PUBLISHER_BOUND:
+        return incoming
+    state = copy.deepcopy(validate_budget(incoming))
+    state["not_before"] = max(
+        state["not_before"],
+        _NO_PUBLISHER_BOUND + max(state["interval"], state["page_interval"]),
+    )
+    state["observed_at"] = max(state["observed_at"], _NO_PUBLISHER_BOUND)
+    state["legacy_rate_history_unknown"] = True
+    state["legacy_policy_history_unknown"] = True
+    return validate_budget(state)
+
+
 def protocol_fresh_history():
     """Check current coordination and exact completion chronology."""
+    global _NO_PUBLISHER_BOUND
+    _NO_PUBLISHER_BOUND = 0
+    no_publisher_bounds = {}
     purpose = protocol_purpose()
     protocol_approval(purpose)
     pins = _LEGACY_PROTOCOL_PINS
@@ -1225,6 +1395,10 @@ def protocol_fresh_history():
             if identity in seen or attempt <= 0:
                 raise AdapterError("Duplicate protocol run", "access")
             seen.add(identity)
+            if (identity, attempt) != current and jobless_without_publisher(
+                run, current
+            ):
+                continue
             if (identity, attempt) != current and run.get(
                 "status"
             ) != "completed":
@@ -1244,6 +1418,9 @@ def protocol_fresh_history():
                         "Unfinished prior protocol attempt", "access"
                     )
                 jobs, finished = protocol_exact_jobs(detail)
+                if reviewed_no_publisher_attempt(detail, jobs):
+                    no_publisher_bounds[identity] = finished
+                    continue
                 candidates.append((finished, identity, number, detail, jobs))
         if len(seen) == total:
             break
@@ -1279,6 +1456,19 @@ def protocol_fresh_history():
     if len(matches) != 1:
         raise AdapterError("Newest protocol artifact required", "access")
     artifact = matches[0]
+    if (latest[1], latest[2]) == _NO_PUBLISHER_LAST_OWNER:
+        if (
+            set(no_publisher_bounds) != set(_NO_PUBLISHER_ATTEMPTS)
+            or (artifact.get("id"), artifact.get("digest"))
+            != _NO_PUBLISHER_LAST_ARTIFACT
+        ):
+            raise AdapterError("No-publisher ancestry is incomplete", "access")
+        original = workflow_api(
+            "/contents/adapters/ibm/adapter.py?ref=" + _NO_PUBLISHER_HEAD
+        )
+        if original.get("sha") != _NO_PUBLISHER_SOURCE_BLOB:
+            raise AdapterError("No-publisher source proof changed", "access")
+        _NO_PUBLISHER_BOUND = max(no_publisher_bounds.values())
     owner = artifact.get("workflow_run", {})
     if (
         artifact.get("expired") is not False
@@ -1934,6 +2124,7 @@ def protocol_prepare_compatibility():
     incoming = download_inert_artifact(
         (latest[1], latest[2], SOURCE_ID), artifact["id"], artifact["digest"]
     )
+    incoming = preserve_no_publisher_bounds(incoming)
     try:
         descriptors, parent, state_fd, state = protocol_open_namespace(incoming)
         _PROTOCOL_COMPAT_FDS = descriptors

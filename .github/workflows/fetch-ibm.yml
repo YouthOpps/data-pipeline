@@ -1,14 +1,14 @@
-name: Fetch IBM early-career programme information
+name: Temporary nonpublishing IBM continuity diagnostic
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - adapters/ibm/**
-      - .github/workflows/fetch-ibm.yml
-  schedule:
-    - cron: '39 13 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Nonpublishing native test only; production stays paused
+        type: choice
+        options: [diagnostic]
+        default: diagnostic
+        required: true
 
 permissions:
   contents: read
@@ -23,7 +23,9 @@ jobs:
   collect:
     if: >-
       github.repository == 'YouthOpps/data-pipeline' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'diagnostic'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -31,24 +33,152 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Authenticate data-source publication
-        id: token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.WEBSITE_APP_ID }}
-          private-key: ${{ secrets.WEBSITE_APP_PRIVATE_KEY }}
-          owner: YouthOpps
-          repositories: data-source
-          permission-contents: write
-      - name: Collect and publish reviewed source
+      - name: Run original native test without publication credentials
         id: collect
-        run: python -B adapters/ibm/adapter.py --publish
         env:
-          DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          IBM_PACING_BOOTSTRAP: '{"schema":1,"family":"youthopps-ibm-careers-publisher-v1","not_before":1791661127.125106,"evidence":"https://github.com/YouthOpps/data-pipeline/issues/120#issuecomment-6101430692"}'
           IBM_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
-      - name: Preserve inert publisher pacing state
+        run: |
+          set -euo pipefail
+          python -B - <<'PY'
+          import contextlib
+          import copy
+          import hashlib
+          import io
+          import json
+          import os
+          import pathlib
+          import runpy
+          import sys
+          import time
+          import urllib.error
+          import urllib.parse
+
+          root = pathlib.Path('adapters/ibm').resolve()
+          sys.path.insert(0, str(root))
+          import adapter
+
+          assert 'DATA_SOURCE_TOKEN' not in os.environ
+          capture = {'requests': [], 'persistence': [], 'observer_errors': []}
+          original_open = adapter._OPENER.open
+          original_save = adapter.save_budget
+          original_execution = adapter.execution
+
+          def observe_response(response, entry):
+              entry['status'] = response.status
+              entry['response_headers'] = list(response.headers.items())
+              original_read, original_close = response.read, response.close
+              def read(*args, **kwargs):
+                  try:
+                      segment = original_read(*args, **kwargs)
+                  except BaseException as error:
+                      partial = getattr(error, 'partial', b'')
+                      if isinstance(partial, bytes):
+                          entry['segments'].append(partial)
+                      entry['read_error'] = type(error).__name__
+                      raise
+                  entry['segments'].append(segment)
+                  return segment
+              def close(*args, **kwargs):
+                  try:
+                      return original_close(*args, **kwargs)
+                  finally:
+                      if entry['completion'] is None:
+                          entry['completion'] = time.monotonic()
+              response.read, response.close = read, close
+
+          def open_observed(request, *args, **kwargs):
+              publisher = urllib.parse.urlsplit(request.full_url).hostname in {
+                  'ibm.com', 'www.ibm.com'}
+              if not publisher:
+                  return original_open(request, *args, **kwargs)
+              entry = {'url': request.full_url, 'start': time.monotonic(),
+                       'completion': None, 'segments': [],
+                       'request_headers': dict(request.header_items())}
+              capture['requests'].append(entry)
+              try:
+                  response = original_open(request, *args, **kwargs)
+              except urllib.error.HTTPError as error:
+                  observe_response(error, entry)
+                  raise
+              except BaseException as error:
+                  entry['completion'] = time.monotonic()
+                  entry['error'] = type(error).__name__
+                  raise
+              observe_response(response, entry)
+              return response
+
+          def save_observed(state):
+              event = {'before': copy.deepcopy(state)}
+              capture['persistence'].append(event)
+              try:
+                  result = original_save(state)
+              except BaseException as error:
+                  event['error'] = type(error).__name__
+                  raise
+              event['after'] = copy.deepcopy(state)
+              try:
+                  if adapter._JOURNAL_FD is not None:
+                      event['journal'] = os.pread(adapter._JOURNAL_FD, 16385, 0)
+              except BaseException as error:
+                  capture['observer_errors'].append(type(error).__name__)
+              return result
+
+          @contextlib.contextmanager
+          def execution_observed():
+              with original_execution():
+                  try:
+                      yield
+                  finally:
+                      primary = sys.exc_info()[0] is not None
+                      try:
+                          with adapter.phase('export', adapter.EXPORT_TIMEOUT):
+                              adapter.export_family_artifact()
+                      except BaseException:
+                          if not primary:
+                              raise
+                          print('Owned-state export also failed', file=sys.stderr)
+
+          adapter._OPENER.open = open_observed
+          adapter.save_budget = save_observed
+          adapter.execution = execution_observed
+          stdout, stderr = io.StringIO(), io.StringIO()
+          with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+              try:
+                  runpy.run_path(str(root / 'test_adapter.py'), run_name='__main__')
+              except SystemExit as error:
+                  outcome = error.code
+              except BaseException as error:
+                  outcome = type(error).__name__
+                  print(type(error).__name__, file=sys.stderr)
+              else:
+                  outcome = 0
+          print(stderr.getvalue(), file=sys.stderr, end='')
+          # Original stdout is retained whole in RAM and made recoverable as one
+          # bounded factual-record document. Publisher bodies remain RAM-only.
+          if outcome == 0:
+              records = json.loads(stdout.getvalue())
+              adapter.validate_records(records)
+              print('IBM369_RECORDS=' + json.dumps(records, ensure_ascii=False))
+          else:
+              print(stdout.getvalue(), end='')
+          ledger = []
+          for request in capture['requests']:
+              ledger.append({key: value for key, value in request.items()
+                             if key not in {'segments', 'response_headers',
+                                            'request_headers'}})
+          print('IBM369_OBSERVER=' + json.dumps({
+              'native_outcome': outcome, 'requests': ledger,
+              'persistence_attempts': len(capture['persistence']),
+              'observer_errors': capture['observer_errors'],
+              'adapter_sha256': hashlib.sha256(
+                  (root / 'adapter.py').read_bytes()).hexdigest(),
+              'test_sha256': hashlib.sha256(
+                  (root / 'test_adapter.py').read_bytes()).hexdigest(),
+              'capture_lifetime': 'RAM for this complete native process only'}))
+          raise SystemExit(0 if outcome == 0 and not capture['observer_errors'] else 1)
+          PY
+      - name: Preserve exact diagnostic-owned publisher pacing state
         if: always() && steps.collect.outputs.pacing_ready == 'true'
         uses: actions/upload-artifact@v4
         with:

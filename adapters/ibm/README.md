@@ -54,12 +54,49 @@ read; unreviewed redirects stop before following their destination.
 
 True POSIX alarms enforce a single 1,290-second run: prepublication at most 900 seconds, publication and conditional failure handling at most 180 seconds each, with the final 30 seconds reserved for trusted timing export. Nonexport work is clipped at the original 1,260-second deadline. Socket timeouts do not replace the wall-clock bound. Failure reconciliation protects a newer atomic data/metadata pair. A hard process kill cannot guarantee artifact export.
 
-The workflow has one application command, `python -B adapters/ibm/adapter.py
---publish`, a 30-minute job limit, a restricted data-source App token minted
-immediately before collection and a queued family concurrency group. This
-mature family requires the newest exact owned pacing artifact before local or
-hosted access. The old first-family bootstrap environment value grants no
+The temporary #369 workflow is manual and diagnostic-only, with a 30-minute
+job limit and the unchanged queued family concurrency group. It runs the sole
+native test without an App secret or data-source publication token. The
+original owned-state exporter runs before original execution cleanup even
+when the native test fails; only a healthy finalized envelope is eligible for
+upload. Complete actual record JSON and bounded timing diagnostics are
+recoverable from the job log; publisher response bodies and persistence
+snapshots remain in RAM for the diagnostic process lifetime. There are no push
+or schedule triggers during this diagnostic phase. Restoring normal automated
+publication requires a separate reviewed activation after genuine native and
+current-consumer validation; this enabling change claims no source recovery.
+
+The finite continuity exception in #369 authenticates sixteen exact failed
+attempts under immutable source head `5fd9fa82`, including their single job
+identities and complete execution times. Every entire job lasted 8-44 seconds;
+the audited source enforces at least sixty monotonic seconds before its first
+publisher opener. The original source blob is checked against that immutable
+head. Those attempts therefore introduced no new physical publisher outcome.
+Only with that complete proof may restoration select the exact last actual
+owned artifact `12926650363` from run `40937889032`, preserving its restrictions
+and unknown provenance. Job completions add conservative not-before bounds,
+never invented physical starts, policy receipts or cleared pending state.
+Other missing artifacts remain errors; this is not an older-state fallback.
+
+The exact previously queued zero-job attempt `43097078558` is recognized only
+with its reviewed identity and still stops access while queued. Only its
+verified cancelled zero-job outcome may be ignored. A same-commit queued
+sibling can also be treated as
+not yet owning publisher access after a complete zero-job check because its
+immutable workflow has the same concurrency group. Different-head unknown
+owners, running jobs and changed inventories remain errors. The reviewed
+legacy ghost must be prevented from executing its old publication workflow
+before enabling diagnostic access. The old bootstrap value grants no generic
 fallback if history or state is missing.
+
+As of 16 November 2026, the IBM workflow remains disabled because GitHub
+reports that ghost as queued with no jobs or artifacts, but both cancellation
+operations returned HTTP 409 and deletion returned HTTP 403 despite confirmed
+repository administrator access. See the [administrative evidence](https://github.com/YouthOpps/data-pipeline/issues/369#issuecomment-6922996300).
+This draft has no new native collection, consumer or production success claim.
+Before any diagnostic release, resolve the old execution hazard and complete
+the observer's in-process source coverage, full timing and actual consumer
+checks while its complete response capture is still available.
 
 Publication changes only `datas/ibm/data.json` and `datas/ibm/metadata.json` atomically. Before first success, failure creates no source folder. Later failure preserves the validated last-good data and its success/check timestamps when safe metadata publication is possible. Source metadata credits IBM and clearly describes the programme-information scope.
 
