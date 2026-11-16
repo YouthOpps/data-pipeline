@@ -56,7 +56,7 @@ COLLECTION_TIMEOUT = 900
 RUN_TIMEOUT = 1290
 EXPORT_TIMEOUT = 30
 _STATE_SCHEMA = 4
-_ARTIFACT_NAME = "ibm-pacing-state"
+_ARTIFACT_NAME = "ibm-pacing-state-v2"
 _STATE_PATH = _STATE_LOCK = None
 _STATE_DIR_FD = _STATE_DIR_ID = None
 _STATE_INITIALIZING = False
@@ -85,6 +85,7 @@ _ATTEMPT_HEADS = {}
 # every pinned entire job below lasted less than that lower bound.
 _NO_PUBLISHER_HEAD = "5fd9fa82d5d2d5f0871aba653376765a6e00c897"
 _NO_PUBLISHER_SOURCE_BLOB = "e11df51e9bae1ab1e79d987544540acaf9c94058"
+_NO_PUBLISHER_WORKFLOW_BLOB = "228722c1e547e906949aa74ea93bba44ef79dad4"
 _NO_PUBLISHER_ATTEMPTS = {
     41110168149: (
         124250224562,
@@ -1306,6 +1307,8 @@ def jobless_without_publisher(run, current):
         and run.get("conclusion") == "cancelled"
     )
     same_definition = run.get("head_sha") == os.environ.get("GITHUB_SHA")
+    if run.get("id") == 43097078558 and not reviewed:
+        raise AdapterError("Reviewed legacy queue identity changed", "access")
     if not (queued and (reviewed or same_definition) or cancelled and reviewed):
         return False
     result = workflow_api(
@@ -1318,9 +1321,42 @@ def jobless_without_publisher(run, current):
         or result.get("jobs") != []
     ):
         raise AdapterError("Jobless sibling gained publisher ownership", "access")
-    if reviewed and queued:
-        raise AdapterError("Legacy queued publisher must be resolved", "access")
     return True
+
+
+def verify_legacy_publisher_fence(completed):
+    """Old code cannot restore the newest barrier without a v1 artifact."""
+    if not completed:
+        raise AdapterError("Legacy publisher fence has no barrier", "access")
+    barrier = max(completed, key=lambda row: row[:3])
+    if (barrier[1], barrier[2]) == _NO_PUBLISHER_LAST_OWNER:
+        raise AdapterError("Legacy publisher fence lost its barrier", "access")
+    result = workflow_api(
+        f"/actions/runs/{barrier[1]}/artifacts?per_page=100"
+    )
+    values = result.get("artifacts")
+    if (
+        not isinstance(values, list)
+        or type(result.get("total_count")) is not int
+        or result["total_count"] != len(values)
+        or any(not isinstance(value, dict) for value in values)
+        or any(
+            value.get("name") == f"ibm-pacing-state-{barrier[2]}"
+            for value in values
+        )
+    ):
+        raise AdapterError(
+            "Legacy publisher artifact fence is absent", "access"
+        )
+    for path, expected in (
+        ("adapters/ibm/adapter.py", _NO_PUBLISHER_SOURCE_BLOB),
+        (".github/workflows/fetch-ibm.yml", _NO_PUBLISHER_WORKFLOW_BLOB),
+    ):
+        original = workflow_api(
+            "/contents/" + path + "?ref=" + _NO_PUBLISHER_HEAD
+        )
+        if original.get("sha") != expected:
+            raise AdapterError("Legacy publisher fence proof changed", "access")
 
 
 def preserve_no_publisher_bounds(incoming):
@@ -1343,6 +1379,8 @@ def protocol_fresh_history():
     global _NO_PUBLISHER_BOUND
     _NO_PUBLISHER_BOUND = 0
     no_publisher_bounds = {}
+    completed_attempts = []
+    legacy_ghost_queued = False
     purpose = protocol_purpose()
     protocol_approval(purpose)
     pins = _LEGACY_PROTOCOL_PINS
@@ -1398,6 +1436,8 @@ def protocol_fresh_history():
             if (identity, attempt) != current and jobless_without_publisher(
                 run, current
             ):
+                if identity == 43097078558 and run.get("status") == "queued":
+                    legacy_ghost_queued = True
                 continue
             if (identity, attempt) != current and run.get(
                 "status"
@@ -1418,6 +1458,9 @@ def protocol_fresh_history():
                         "Unfinished prior protocol attempt", "access"
                     )
                 jobs, finished = protocol_exact_jobs(detail)
+                completed_attempts.append(
+                    (finished, identity, number, detail, jobs)
+                )
                 if reviewed_no_publisher_attempt(detail, jobs):
                     no_publisher_bounds[identity] = finished
                     continue
@@ -1435,6 +1478,8 @@ def protocol_fresh_history():
     if len(candidates) > 1 and candidates[-1][0] == candidates[-2][0]:
         raise AdapterError("Ambiguous protocol completion chronology", "access")
     latest = candidates[-1]
+    if legacy_ghost_queued:
+        verify_legacy_publisher_fence(completed_attempts)
     if (
         workflow_api("/actions/workflows/" + pins["workflow_file"])
         != definition
@@ -1444,14 +1489,25 @@ def protocol_fresh_history():
         )
     result = workflow_api(f"/actions/runs/{latest[1]}/artifacts?per_page=100")
     artifacts = result.get("artifacts")
-    if not isinstance(artifacts, list) or result.get("total_count") != len(
-        artifacts
+    if (
+        not isinstance(artifacts, list)
+        or type(result.get("total_count")) is not int
+        or result["total_count"] != len(artifacts)
+        or any(not isinstance(value, dict) for value in artifacts)
     ):
         raise AdapterError("Incomplete protocol artifact inventory", "access")
+    legacy_owner = (latest[1], latest[2]) == _NO_PUBLISHER_LAST_OWNER
+    expected_name = (
+        f"ibm-pacing-state-{latest[2]}"
+        if legacy_owner else f"{_ARTIFACT_NAME}-{latest[2]}"
+    )
+    if not legacy_owner and any(
+        value.get("name") == f"ibm-pacing-state-{latest[2]}"
+        for value in artifacts
+    ):
+        raise AdapterError("Legacy artifact alias defeats the fence", "access")
     matches = [
-        a
-        for a in artifacts
-        if a.get("name") == SOURCE_ID + "-pacing-state-" + str(latest[2])
+        value for value in artifacts if value.get("name") == expected_name
     ]
     if len(matches) != 1:
         raise AdapterError("Newest protocol artifact required", "access")

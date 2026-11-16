@@ -78,25 +78,42 @@ and unknown provenance. Job completions add conservative not-before bounds,
 never invented physical starts, policy receipts or cleared pending state.
 Other missing artifacts remain errors; this is not an older-state fallback.
 
-The exact previously queued zero-job attempt `43097078558` is recognized only
-with its reviewed identity and still stops access while queued. Only its
-verified cancelled zero-job outcome may be ignored. A same-commit queued
-sibling can also be treated as
-not yet owning publisher access after a complete zero-job check because its
-immutable workflow has the same concurrency group. Different-head unknown
-owners, running jobs and changed inventories remain errors. The reviewed
-legacy ghost must be prevented from executing its old publication workflow
-before enabling diagnostic access. The old bootstrap value grants no generic
-fallback if history or state is missing.
+The legacy queue is isolated by an artifact-generation fence rather than by
+assuming cancellation succeeded. The immutable old adapter requires
+`ibm-pacing-state-<attempt>` and has no newer-state fallback. New diagnostic
+and production runs upload only `ibm-pacing-state-v2-<attempt>`, with the same
+schema, source family, workflow ID, main provenance and concurrency group.
+The v1 name is accepted only for the exact approved last actual owner above.
+A v1 alias on any new owner is rejected because it would defeat this fence.
 
-As of 16 November 2026, the IBM workflow remains disabled because GitHub
-reports that ghost as queued with no jobs or artifacts, but both cancellation
-operations returned HTTP 409 and deletion returned HTTP 403 despite confirmed
-repository administrator access. See the [administrative evidence](https://github.com/YouthOpps/data-pipeline/issues/369#issuecomment-6922996300).
-This draft has no new native collection, consumer or production success claim.
-Before any diagnostic release, resolve the old execution hazard and complete
-the observer's in-process source coverage, full timing and actual consumer
-checks while its complete response capture is still available.
+Before continuing past the exact queued zero-job attempt `43097078558`, the
+new reader rechecks complete authenticated jobless ownership, the immutable
+old source/workflow blobs and a later completed barrier with no v1 artifact.
+Before the first v2 result, the old source therefore encounters the retained
+failed-attempt barrier; during a newer run it rejects the active sibling;
+afterward it cannot restore that newer owner's v2-only artifact. It never
+obtains publisher access in these cases. The old queue may remain visible;
+this is not a fabricated cancelled outcome. Running or changed ghost jobs and
+unknown completed gaps still stop collection for explicit evidence review.
+Never publish v1 aliases or remove every post-owner barrier while the ghost
+remains pending. Same-commit queued siblings retain the identical immutable
+workflow concurrency and require a complete zero-job inventory.
+
+GitHub cancellation and force-cancellation returned HTTP 409 and deletion
+returned HTTP 403 despite verified administrator access; the
+[administrative evidence](https://github.com/YouthOpps/data-pipeline/issues/369#issuecomment-6922996300)
+is retained. The artifact fence does not bypass those permissions or invoke
+private administration endpoints. Inert controls execute the actual original
+reader before, during and after the v2 transition, plus a positive v1-alias
+escape control that the new reader rejects.
+
+The diagnostic process retains every response segment/header and persistence
+snapshot privately in RAM until full graph replay, source-frontier and
+provenance checks, physical/inventory/rolling timing assertions and actual
+raw/filtered/valid-empty website-consumer checks finish. The consumer is pinned
+to its reviewed current revision. Full factual records and bounded coverage
+results remain recoverable from logs; publisher bodies are not logged. Native
+and production acceptance remain separate from the offline enabling review.
 
 Publication changes only `datas/ibm/data.json` and `datas/ibm/metadata.json` atomically. Before first success, failure creates no source folder. Later failure preserves the validated last-good data and its success/check timestamps when safe metadata publication is possible. Source metadata credits IBM and clearly describes the programme-information scope.
 
