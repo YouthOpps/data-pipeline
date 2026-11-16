@@ -883,7 +883,571 @@ def parse_inventory(pages):
     return records
 
 
+# No scope decision is implied by implementing this disabled repair path.
+_REVIEWED_WBI_AUTHORIZATIONS = {}
+_WBI_HELD_JOURNAL_SHA256 = (
+    "aa544101765e65c7f3126501cce8e67881062ccbefec77fb1930cd5efab26e0c"
+)
+_WBI_REMOVED_BODY_SHA256 = (
+    "befd4e4a843a70b415e8b99d479820598a322e4b404c8c63e2464e2babe6d917"
+)
+_WBI_REMOVED_SLUG = (
+    "offre-stage-centre-international-recherche-cancer-circ"
+)
+_WBI_DYNAMIC_ROOTS = (
+    "https://www.wbi.be/en/bourses",
+    "https://www.wbi.be/fr/appels-a-projets",
+)
+_WBI_MONTHS = {
+    "janvier": 1, "février": 2, "mars": 3, "avril": 4,
+    "mai": 5, "juin": 6, "juillet": 7, "août": 8,
+    "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12,
+}
+
+
+def wbi_reviewed_authorization(raw, purpose):
+    """Require an exact separately reviewed authorization; none exists yet."""
+    if not isinstance(raw, str) or not 0 < len(raw.encode()) <= 16384:
+        raise AdapterError("WBI repair authorization missing", "access")
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    approved = _REVIEWED_WBI_AUTHORIZATIONS.get((purpose, digest))
+    if approved is None:
+        raise AdapterError("WBI repair scope has not been approved", "access")
+    try:
+        value = json.loads(raw)
+        if (
+            value != approved
+            or set(value) != {
+                "schema", "source", "purpose", "evidence",
+                "journal_sha256", "response_sha256", "inventory_roots",
+            }
+            or type(value["schema"]) is not int
+            or value["schema"] != 1
+            or value["source"] != SOURCE_ID
+            or value["purpose"] != purpose
+            or value["journal_sha256"] != _WBI_HELD_JOURNAL_SHA256
+            or value["response_sha256"] != _WBI_REMOVED_BODY_SHA256
+            or value["inventory_roots"] != list(_WBI_DYNAMIC_ROOTS)
+            or not re.fullmatch(
+                r"https://github\.com/YouthOpps/data-pipeline/issues/373"
+                r"#issuecomment-[1-9][0-9]*", value["evidence"]
+            )
+        ):
+            raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        raise AdapterError("Invalid WBI repair authorization", "access")
+    return copy.deepcopy(value)
+
+
+def wbi_retired_resource(url):
+    """Deny known aliases independently of caller purpose or URL encoding."""
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if host not in {"wbi.be", "www.wbi.be"}:
+        return False
+    path = parsed.path
+    for _ in range(4):
+        if re.search(r"%(?![0-9a-fA-F]{2})", path):
+            return True
+        try:
+            decoded = urllib.parse.unquote(path, errors="strict")
+        except UnicodeError:
+            return True
+        if decoded == path:
+            break
+        path = decoded
+    if (
+        "%" in path or "\\" in path or ";" in path
+        or any(part in (".", "..") for part in path.split("/"))
+    ):
+        return True
+    path = path.rstrip("/").lower()
+    return (
+        path.rsplit("/", 1)[-1] == _WBI_REMOVED_SLUG
+        or bool(re.search(r"(?:^|/)node/0*25108$", path))
+    )
+
+
+def wbi_route_retention_plan(journal_raw, response_body, authorization):
+    """Return an inert proposal; never write, settle or activate held state."""
+    approval = wbi_reviewed_authorization(authorization, "route-retention")
+    if (
+        not isinstance(journal_raw, bytes)
+        or len(journal_raw) > 16384
+        or hashlib.sha256(journal_raw).hexdigest()
+        != approval["journal_sha256"]
+        or not isinstance(response_body, bytes)
+        or hashlib.sha256(response_body).hexdigest()
+        != approval["response_sha256"]
+    ):
+        raise AdapterError("WBI migration evidence changed", "access")
+    try:
+        state = validate_budget(json.loads(journal_raw))
+        if state["blocked"] is not True or state["in_flight"] is not False:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise AdapterError("WBI held journal invalid", "access")
+    return {
+        "schema": 1,
+        "source": SOURCE_ID,
+        "status": "proposal_only_no_runtime_migration",
+        "authorization": approval,
+        "original_journal_base64": base64.b64encode(journal_raw).decode(),
+        "original_journal_sha256": approval["journal_sha256"],
+        "retained_state": copy.deepcopy(state),
+        "restrictions": [{
+            "kind": "content_refusal",
+            "url": PAGES["circ-call"],
+            "status": 403,
+            "body_sha256": approval["response_sha256"],
+            "completed": state["completed"],
+            "resource_slug": _WBI_REMOVED_SLUG,
+            "known_node": 25108,
+            "origins": ["https://wbi.be", "https://www.wbi.be"],
+            "deny": True,
+        }],
+        "effective_global_hold": True,
+    }
+
+
+# Only an independently accepted, committed source decision can populate this.
+_WBI_SCOPE_DECISION = {
+    "schema": 1,
+    "source": "be-wbi",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/373"
+        "#issuecomment-6925600137"
+    ),
+    "held_sha256": (
+        "aa544101765e65c7f3126501cce8e67881062ccbefec77fb1930cd5efab26e0c"
+    ),
+    "response_sha256": (
+        "befd4e4a843a70b415e8b99d479820598a322e4b404c8c63e2464e2babe6d917"
+    ),
+    "native_revision": (
+        "06cc8b0de832b4f055c34a47bf16c435dc75365d0260ee260cd37a8766034086"
+    ),
+    "migration_revision": "wbi373-content-scope-v1",
+    "paths": [
+        "/robots.txt", "/en/bourses", "/en/taxonomy/term/843",
+        "/en/taxonomy/term/844", "/en/taxonomy/term/846",
+        "/en/taxonomy/term/847", "/fr/appels-a-projets", "/actualites",
+        "/fr/actualites", "/fr/rss-feeds",
+    ],
+    "detail_prefixes": ["/fr/actualites/", "/fr/aide-service/"],
+}
+_WBI_NATIVE_REVISION = (
+    "06cc8b0de832b4f055c34a47bf16c435dc75365d0260ee260cd37a8766034086"
+)
+_WBI_SCOPE_PATHS = (
+    "/robots.txt", "/en/bourses", "/en/taxonomy/term/843",
+    "/en/taxonomy/term/844", "/en/taxonomy/term/846",
+    "/en/taxonomy/term/847", "/fr/appels-a-projets", "/actualites",
+    "/fr/actualites", "/fr/rss-feeds",
+)
+
+
+def wbi_scope_decision():
+    """No environment value or parser result can approve refusal scope."""
+    value = _WBI_SCOPE_DECISION
+    if value is None:
+        raise AdapterError(
+            "WBI refusal scope awaits independent review", "access"
+        )
+    if (
+        not isinstance(value, dict)
+        or set(value) != {
+            "schema", "source", "evidence", "held_sha256",
+            "response_sha256", "native_revision", "migration_revision",
+            "paths", "detail_prefixes",
+        }
+        or type(value["schema"]) is not int or value["schema"] != 1
+        or value["source"] != SOURCE_ID
+        or value["held_sha256"] != _WBI_HELD_JOURNAL_SHA256
+        or value["response_sha256"] != _WBI_REMOVED_BODY_SHA256
+        or value["native_revision"] != _WBI_NATIVE_REVISION
+        or value["migration_revision"] != "wbi373-content-scope-v1"
+        or value["paths"] != list(_WBI_SCOPE_PATHS)
+        or value["detail_prefixes"] != [
+            "/fr/actualites/", "/fr/aide-service/",
+        ]
+        or not isinstance(value["evidence"], str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/373"
+            r"#issuecomment-[1-9][0-9]*", value["evidence"]
+        )
+    ):
+        raise AdapterError("Invalid WBI committed scope decision", "access")
+    return copy.deepcopy(value)
+
+
+def wbi_initial_refusal(state):
+    """Keep the exact failed native event without rewriting its outcome."""
+    return {
+        "url": PAGES["circ-call"], "status": 403,
+        "body_sha256": _WBI_REMOVED_BODY_SHA256,
+        "completed": state["completed"],
+        "native_revision": _WBI_NATIVE_REVISION,
+        "resource_slug": _WBI_REMOVED_SLUG, "node_id": 25108,
+        "origins": ["https://wbi.be", "https://www.wbi.be"],
+    }
+
+
+def wbi_migrate_scope(raw):
+    """Derive a scope-aware journal, retaining exact held bytes and history."""
+    decision = wbi_scope_decision()
+    if (
+        not isinstance(raw, bytes) or len(raw) > 16384
+        or hashlib.sha256(raw).hexdigest() != _WBI_HELD_JOURNAL_SHA256
+    ):
+        raise AdapterError("Unreviewed WBI held journal generation", "access")
+    state = validate_budget(json.loads(raw))
+    if state["schema"] != 3 or not state["blocked"] or state["in_flight"]:
+        raise AdapterError("WBI held event is incomplete", "access")
+    original = copy.deepcopy(state)
+    state["schema"] = 4
+    state["refusal_scope"] = {
+        "decision": decision,
+        "original_journal_base64": base64.b64encode(raw).decode(),
+        "initial_refusal": wbi_initial_refusal(original),
+        "additional_holds": [],
+    }
+    return validate_budget(state)
+
+
+def wbi_validate_scope(state):
+    """Reject detached provenance, weakened MAX state and unreviewed events."""
+    scope = state.get("refusal_scope")
+    try:
+        if (
+            not isinstance(scope, dict)
+            or set(scope) != {
+                "decision", "original_journal_base64", "initial_refusal",
+                "additional_holds",
+            }
+            or scope["decision"] != wbi_scope_decision()
+            or state["blocked"] is not True
+            or not isinstance(scope["original_journal_base64"], str)
+        ):
+            raise ValueError()
+        raw = base64.b64decode(scope["original_journal_base64"], validate=True)
+        if hashlib.sha256(raw).hexdigest() != _WBI_HELD_JOURNAL_SHA256:
+            raise ValueError()
+        original = json.loads(raw)
+        if original.get("schema") != 3:
+            raise ValueError()
+        validate_budget(original)
+        if scope["initial_refusal"] != wbi_initial_refusal(original):
+            raise ValueError()
+        for key in (
+            "interval", "page_gap", "until", "completed",
+            "inventory_completed", "rate_limit_until",
+            "observed_429_since_transition",
+        ):
+            if state[key] < original[key]:
+                raise ValueError()
+        for key in (
+            "legacy_hold_history", "legacy_access_history_unknown",
+            "legacy_access_observations", "legacy_429_history",
+            "research_provenance",
+        ):
+            if state[key] != original[key]:
+                raise ValueError()
+        holds = scope["additional_holds"]
+        if not isinstance(holds, list):
+            raise ValueError()
+        for item in holds:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"kind", "url", "status", "observed_at"}
+                or item["kind"] not in {
+                    "content_status", "visible_refusal", "robots_disallow",
+                    "unattributed_held_state",
+                }
+                or not isinstance(item["url"], str)
+                or not item["url"]
+                or type(item["status"]) is not int
+                or not 0 <= item["status"] <= 599
+                or not numeric(item["observed_at"])
+                or item["observed_at"] > state["observed_at"]
+            ):
+                raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        raise AdapterError("Invalid WBI retained refusal scope", "access")
+
+
+def wbi_scope_admission(state, url, method="GET"):
+    """Admit only reviewed unrelated public routes; retain every denial."""
+    if state["schema"] != 4 or state["in_flight"]:
+        raise AdapterError("Unreviewed or pending WBI access state", "access")
+    wbi_validate_scope(state)
+    if state["refusal_scope"]["additional_holds"]:
+        raise AdapterError("Additional WBI refusal remains global", "access")
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        method != "GET" or parsed.scheme != "https"
+        or parsed.hostname != "www.wbi.be"
+        or parsed.username or parsed.password or parsed.port or parsed.fragment
+        or "%" in parsed.path or "\\" in parsed.path
+        or "//" in parsed.path or ";" in parsed.path
+        or any(part in (".", "..") for part in parsed.path.split("/"))
+        or wbi_retired_resource(url)
+    ):
+        raise AdapterError("WBI resource identity not admitted", "access")
+    path = parsed.path
+    detail = any(
+        path.startswith(prefix)
+        and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", path[len(prefix):])
+        for prefix in state["refusal_scope"]["decision"]["detail_prefixes"]
+    )
+    if path not in _WBI_SCOPE_PATHS and not detail:
+        raise AdapterError("WBI route outside reviewed scope", "access")
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    if parsed.query and (
+        detail or path in ("/robots.txt", "/fr/rss-feeds")
+        or set(query) != {"page"} or len(query["page"]) != 1
+        or not re.fullmatch(r"0|[1-9][0-9]*", query["page"][0])
+    ):
+        raise AdapterError("Unreviewed WBI query scope", "access")
+
+
+def wbi_retain_new_hold(state, url, status, kind):
+    """A later real refusal is globally restrictive, never auto-reclassified."""
+    state["blocked"] = True
+    state["observed_at"] = time.time()
+    if state["schema"] == 4:
+        event = {
+            "kind": kind, "url": url, "status": status,
+            "observed_at": state["observed_at"],
+        }
+        holds = state["refusal_scope"]["additional_holds"]
+        if event not in holds:
+            holds.append(event)
+
+
+def wbi_merge_scope(result, left, right):
+    """Union events; an unproved blocked input retains a global veto."""
+    scopes = [s["refusal_scope"] for s in (left, right) if s["schema"] == 4]
+    if not scopes:
+        return
+    result["schema"] = 4
+    result["refusal_scope"] = copy.deepcopy(scopes[0])
+    holds = result["refusal_scope"]["additional_holds"]
+    for scope in scopes[1:]:
+        for key in ("decision", "original_journal_base64", "initial_refusal"):
+            if scope[key] != result["refusal_scope"][key]:
+                raise AdapterError("Conflicting WBI scope provenance", "access")
+        for event in scope["additional_holds"]:
+            if event not in holds:
+                holds.append(copy.deepcopy(event))
+    original = json.loads(base64.b64decode(
+        result["refusal_scope"]["original_journal_base64"]
+    ))
+    for state in (left, right):
+        if state["schema"] == 3 and state["blocked"] and state != original:
+            event = {
+                "kind": "unattributed_held_state", "url": WEBSITE_URL,
+                "status": 0, "observed_at": state["observed_at"],
+            }
+            if event not in holds:
+                holds.append(event)
+    holds.sort(key=lambda item: json.dumps(item, sort_keys=True))
+
+
+def wbi_canonical_url(base, href):
+    """Resolve public source links without accepting alternate access paths."""
+    url = urllib.parse.urljoin(base, href)
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "www.wbi.be"
+        or parsed.username or parsed.password or parsed.port
+        or parsed.fragment
+        or re.search(r"/(?:search|recherche|user|admin|node)/", parsed.path)
+    ):
+        raise AdapterError("Unsupported WBI public inventory link", "parse")
+    return url
+
+
+def wbi_inventory_page(root, url):
+    """Parse supported public catalogue cards and every advertised pager."""
+    cards = nodes(root, class_name="search-result")
+    if not cards:
+        raise AdapterError("Unverified WBI inventory structure", "parse")
+    candidates = set()
+    for card in cards:
+        links = {
+            wbi_canonical_url(url, node.attrs["href"])
+            for node in nodes(card, "a")
+            if node.attrs.get("href")
+            and re.search(
+                r"/(?:aide-service|actualites)/", node.attrs["href"]
+            )
+        }
+        if len(links) != 1:
+            raise AdapterError("Ambiguous WBI inventory card", "parse")
+        candidates.update(links)
+    pagers = nodes(root, "nav", "pager")
+    if len(pagers) > 1:
+        raise AdapterError("Ambiguous WBI pager", "parse")
+    targets = set()
+    base = urllib.parse.urlsplit(url)
+    for nav in pagers:
+        for node in nodes(nav, "a"):
+            if not node.attrs.get("href"):
+                raise AdapterError("Incomplete WBI pager link", "parse")
+            target = wbi_canonical_url(url, node.attrs["href"])
+            parsed = urllib.parse.urlsplit(target)
+            query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            if (
+                parsed.path != base.path
+                or set(query) not in (set(), {"page"})
+                or (query and (len(query["page"]) != 1
+                    or not re.fullmatch(
+                        r"0|[1-9][0-9]*", query["page"][0]
+                    )))
+            ):
+                raise AdapterError("Unverified WBI pagination scope", "parse")
+            if not query or query["page"] == ["0"]:
+                target = urllib.parse.urlunsplit(
+                    (parsed.scheme, parsed.netloc, parsed.path, "", "")
+                )
+            targets.add(target)
+    return sorted(candidates), sorted(targets)
+
+
+def wbi_expiry_disposition(url, checked_at):
+    """Exclude only the exact previously validated expired CIRC call."""
+    if not wbi_retired_resource(url):
+        return None
+    profile = one(
+        [item for item in PROFILES if item["track"] == "circ-see"],
+        "reviewed CIRC deadline",
+    )
+    if profile["deadline"] != "2026-11-13":
+        raise AdapterError("CIRC expiry provenance changed", "validate")
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.utcoffset() is None:
+        raise AdapterError("WBI expiry requires aware time", "validate")
+    # A full extra UTC day avoids guessing the original midnight timezone.
+    if checked.astimezone(timezone.utc).date().isoformat() <= "2026-11-14":
+        raise AdapterError("CIRC expiry boundary not established", "validate")
+    return {
+        "url": PAGES["circ-call"], "deadline": profile["deadline"],
+        "disposition": "expired_known_call_do_not_fetch",
+        "body_sha256": _WBI_REMOVED_BODY_SHA256,
+    }
+
+
+def wbi_explicit_deadline(text):
+    """Read one explicit application date; never synthesize recurring years."""
+    months = "|".join(_WBI_MONTHS)
+    pattern = (
+        r"(?:candidatures?[^.!?]{0,120}?|dossier[^.!?]{0,120}?)"
+        r"(?:pour|avant|jusqu'au)\s+(?:le\s+)?(?:(?:lundi|mardi|mercredi|jeudi|"
+        r"vendredi|samedi|dimanche)\s+)?(\d{1,2})\s+(" + months
+        + r")\s+(20\d{2})"
+    )
+    matches = {
+        datetime(int(year), _WBI_MONTHS[month], int(day)).date().isoformat()
+        for day, month, year in re.findall(pattern, text.lower())
+    }
+    if len(matches) > 1:
+        raise AdapterError("Multiple WBI application deadlines", "parse")
+    return next(iter(matches), None)
+
+
+def wbi_dynamic_record(root, url):
+    """Parse minimal current facts; unsupported multi-call pages fail closed."""
+    title = one(nodes(root, "h1"), "WBI opportunity title").text().strip()
+    body = content(root).text()
+    if not title or not body:
+        raise AdapterError("Missing WBI current factual body", "parse")
+    if re.search(r"\b(?:trois|deux|[2-9])\s+(?:offres|stages|bourses)", body,
+                 re.IGNORECASE):
+        raise AdapterError("WBI multi-call extraction needs review", "parse")
+    lowered = title.lower()
+    if "stage" in lowered:
+        category = "internships"
+    elif "bourse" in lowered:
+        category = "scholarships"
+    elif "enseignant" in lowered or "formateur" in lowered:
+        category = "jobs"
+    else:
+        raise AdapterError("Unverified WBI opportunity classification", "parse")
+    if not re.search(r"candidature|dossier|demande", body, re.IGNORECASE):
+        raise AdapterError("Missing WBI application evidence", "parse")
+    profiles = [p for p in PROFILES if PAGES[p["key"]] == url]
+    if len(profiles) > 1:
+        raise AdapterError("WBI multi-programme identity needs review", "parse")
+    record = make_record(
+        title, url, [category], method="official-structured-facts",
+        evidence=[ATTRIBUTION, "Current publisher application instructions"],
+    )
+    if profiles:
+        record["id"] = hashlib.sha256(
+            (SOURCE_ID + "|" + profiles[0]["track"]).encode()
+        ).hexdigest()[:24]
+    record["deadline"] = wbi_explicit_deadline(body)
+    record["summary"] = "Application information published by WBI."
+    record["status"] = "unknown"
+    validate_records([record])
+    return record
+
+
+def collect_dynamic_wbi(authorization):
+    """Require reviewed source scope and access before dynamic collection."""
+    approval = wbi_reviewed_authorization(authorization, "dynamic-inventory")
+    # This gate does not alter the original global hold or transport admission.
+    pending = list(approval["inventory_roots"])
+    visited, fingerprints, candidates = set(), {}, set()
+    while pending:
+        url = pending.pop(0)
+        if url in visited:
+            continue
+        root = fetch_inventory_page(page, url)
+        details, following = wbi_inventory_page(root, url)
+        fingerprint = hashlib.sha256(
+            json.dumps([details, following], sort_keys=True).encode()
+        ).hexdigest()
+        fingerprint_key = (urllib.parse.urlsplit(url).path, fingerprint)
+        prior = fingerprints.get(fingerprint_key)
+        if prior is not None and prior != url:
+            raise AdapterError("Repeated WBI inventory page", "parse")
+        fingerprints[fingerprint_key] = url
+        visited.add(url)
+        candidates.update(details)
+        pending.extend(target for target in following if target not in visited)
+    for root_url in approval["inventory_roots"]:
+        path = urllib.parse.urlsplit(root_url).path
+        indices = {
+            int(urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+                .get("page", ["0"])[0])
+            for url in visited if urllib.parse.urlsplit(url).path == path
+        }
+        if indices != set(range(max(indices) + 1)):
+            raise AdapterError("Incomplete WBI page sequence", "parse")
+    records, dispositions = [], []
+    checked_at = utc_now()
+    for url in sorted(candidates):
+        expired = wbi_expiry_disposition(url, checked_at)
+        if expired is not None:
+            dispositions.append(expired)
+            continue
+        records.append(wbi_dynamic_record(page(url), url))
+    validate_records(records)
+    print(json.dumps({
+        "event": "dynamic_inventory_complete",
+        "inventory_pages": len(visited), "candidates": len(candidates),
+        "expired_exclusions": dispositions, "records": len(records),
+    }), file=sys.stderr)
+    return records
+
+
 def collect_body():
+    authorization = os.environ.get("WBI_DYNAMIC_INVENTORY_APPROVAL")
+    if authorization is not None:
+        return collect_dynamic_wbi(authorization)
     return parse_inventory(read_pages())
 
 
@@ -2020,6 +2584,153 @@ _JOURNAL_WRITE_ACK = None
 _OWNED_EXPORT = None
 _VERIFIED_REMOTE_CREATE = None
 _SCANNED_HISTORY = {}
+
+# Reviewed complete pre-access failure ancestry; unknown gaps remain fatal.
+_STARTUP_QUIET_UNTIL = None
+_HISTORY_COMPLETED = []
+_RECOVERY_JOBS = {}
+_PREACCESS_OWNER = (40889063854, 1, SOURCE_ID)
+_PREACCESS_ARTIFACT = (
+    12903619139,
+    "sha256:10f6fe52c39de27726595d551d4adfeab74685983bc5db204db1583adeeb2028",
+)
+_PREACCESS_WORKFLOW_BLOB = "8769177f6248acfbb5f21ebd3213475136d57f61"
+_RECOVERY_WORKFLOW_BLOBS = {_PREACCESS_WORKFLOW_BLOB}
+_PREACCESS_SOURCE_BLOBS = {
+    "5fd9fa82d5d2d5f0871aba653376765a6e00c897":
+        "46ced66a5c36476d3bd5abb8cf38003b0a7285fe",
+    "dd15bee13fc772ecbf6d72fa19ea02f0f6ffd31a":
+        "46ced66a5c36476d3bd5abb8cf38003b0a7285fe",
+}
+_PREACCESS_ATTEMPTS = {
+    41068492690: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124106100773,
+        '2026-10-30T14:03:38Z',
+        '2026-10-30T14:04:07Z',
+    ),
+    41206274937: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124551869581,
+        '2026-10-31T13:35:41Z',
+        '2026-10-31T13:36:07Z',
+    ),
+    41315187976: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124873612758,
+        '2026-11-01T14:14:24Z',
+        '2026-11-01T14:14:45Z',
+    ),
+    41486816367: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        125419262871,
+        '2026-11-02T16:59:43Z',
+        '2026-11-02T17:00:21Z',
+    ),
+    41659664520: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        125999206152,
+        '2026-11-03T15:02:18Z',
+        '2026-11-03T15:02:52Z',
+    ),
+    41856931986: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        126667982712,
+        '2026-11-04T15:21:52Z',
+        '2026-11-04T15:22:30Z',
+    ),
+    42054804796: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        127340152709,
+        '2026-11-05T15:25:23Z',
+        '2026-11-05T15:25:49Z',
+    ),
+    42238597392: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        127962645577,
+        '2026-11-06T14:57:47Z',
+        '2026-11-06T14:58:19Z',
+    ),
+    42379195981: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        128423023353,
+        '2026-11-07T13:55:56Z',
+        '2026-11-07T13:56:25Z',
+    ),
+    42488886990: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        128756677411,
+        '2026-11-08T14:15:15Z',
+        '2026-11-08T14:15:36Z',
+    ),
+    42664449837: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        129324235607,
+        '2026-11-09T17:25:22Z',
+        '2026-11-09T17:25:52Z',
+    ),
+    42845199694: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        129930700435,
+        '2026-11-10T15:31:25Z',
+        '2026-11-10T15:32:12Z',
+    ),
+    43044964741: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        130606359485,
+        '2026-11-11T15:06:16Z',
+        '2026-11-11T15:06:56Z',
+    ),
+    43253123702: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        131304063725,
+        '2026-11-12T15:56:04Z',
+        '2026-11-12T15:56:40Z',
+    ),
+    43451305232: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        131973871948,
+        '2026-11-13T15:18:40Z',
+        '2026-11-13T15:19:22Z',
+    ),
+    43603011847: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        132471602690,
+        '2026-11-14T14:05:17Z',
+        '2026-11-14T14:05:54Z',
+    ),
+    43725816277: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        132847385837,
+        '2026-11-15T14:42:31Z',
+        '2026-11-15T14:43:04Z',
+    ),
+    43913201360: (
+        1,
+        'dd15bee13fc772ecbf6d72fa19ea02f0f6ffd31a',
+        133460313386,
+        '2026-11-16T16:57:41Z',
+        '2026-11-16T16:58:27Z',
+    ),
+}
+
 _SCANNED_JOB_DIGESTS = {}
 _ATTEMPT_HEADS = {}
 _INVENTORY_ACTIVE = False
@@ -3338,10 +4049,12 @@ def validate_budget(state):
     if not isinstance(state, dict):
         raise AdapterError("Invalid publisher state", "access")
     expected = set(empty_budget(0))
+    if state.get("schema") == 4:
+        expected.add("refusal_scope")
     if (
         set(state) != expected
         or type(state["schema"]) is not int
-        or state["schema"] != 3
+        or state["schema"] not in (3, 4)
         or state["family"] != FAMILY
         or any(
             not numeric(state[k])
@@ -3391,6 +4104,8 @@ def validate_budget(state):
         or not supported_epoch(time.time() + state["page_gap"])
     ):
         raise AdapterError("Unsupported retained clock magnitude", "access")
+    if state["schema"] == 4:
+        wbi_validate_scope(state)
     return state
 
 
@@ -3909,6 +4624,7 @@ def merge_budget(left, right):
     )
     result["blocked"] = left["blocked"] or right["blocked"]
     result["in_flight"] = left["in_flight"] or right["in_flight"]
+    wbi_merge_scope(result, left, right)
     return validate_budget(result)
 
 
@@ -3919,7 +4635,7 @@ def remaining():
 
 
 
-def pace(interval=12.2):
+def pace(interval=12.2, *, target_url=None, method="GET"):
     """Hold the physical journal lock through the response completion."""
     lock = locked_budget()
     try:
@@ -3927,7 +4643,9 @@ def pace(interval=12.2):
         if state["in_flight"]:
             raise AdapterError("Unsettled publisher request retained", "access")
         if state["blocked"]:
-            raise AdapterError("Retained actual publisher refusal", "access")
+            if target_url is None:
+                raise AdapterError("Retained actual publisher refusal", "access")
+            wbi_scope_admission(state, target_url, method)
         if state["observed_429_since_transition"] >= 100:
             raise AdapterError(
                 "Unsupported retained429 history; no traffic", "access"
@@ -4131,6 +4849,7 @@ def attempt_completion(identity, attempt, head):
     """Use exact-attempt job completion rather than mutable run updates."""
     total, jobs_seen = None, set()
     finished = []
+    retained_jobs = []
     for page in range(1, 101):
         result = workflow_api(
             f"/actions/runs/{identity}/attempts/{attempt}/jobs"
@@ -4177,6 +4896,7 @@ def attempt_completion(identity, attempt, head):
                 or job.get("status") != "completed"
             ):
                 raise ValueError("Untrusted exact-attempt job")
+            retained_jobs.append(copy.deepcopy(job))
             jobs_seen.add(job["id"])
             value = datetime.fromisoformat(
                 job["completed_at"].replace("Z", "+00:00")
@@ -4185,6 +4905,7 @@ def attempt_completion(identity, attempt, head):
                 raise ValueError("Missing job completion timezone")
             finished.append(value.timestamp())
         if len(jobs_seen) == total:
+            _RECOVERY_JOBS[(identity, attempt)] = (None, retained_jobs)
             return max(finished)
         if len(jobs_seen) > total or len(jobs) != 100:
             raise ValueError("Truncated exact-attempt job inventory")
@@ -4240,6 +4961,9 @@ def completed_identity(run, expected=None, revision=None):
         if not 0 <= began <= finished <= time.time() + 1:
             raise ValueError("Invalid attempt chronology")
         _ATTEMPT_HEADS[(identity, attempt)] = run["head_sha"]
+        _RECOVERY_JOBS[(identity, attempt)] = (
+            copy.deepcopy(run), _RECOVERY_JOBS[(identity, attempt)][1]
+        )
         return finished, began, identity, attempt, source
     except Exception:
         raise AdapterError(
@@ -4902,8 +5626,7 @@ def apply_robots_policy(text, url, state=None):
     try:
         delay = robots_policy(text, url)
     except RobotsDisallow:
-        state["blocked"] = True
-        state["observed_at"] = time.time()
+        wbi_retain_new_hold(state, url, 0, "robots_disallow")
         write_budget(state)
         raise
     state["interval"] = max(state["interval"], delay)
@@ -4942,6 +5665,8 @@ def physical_request_bytes(
         raise AdapterError(
             "Robots purpose requires literal robots.txt", "access"
         )
+    if wbi_retired_resource(url):
+        raise AdapterError("Retained WBI resource refusal", "access")
     host = (urllib.parse.urlsplit(url).hostname or "").lower()
     publisher = host in _PUBLISHER_HOSTS
     if not publisher and not infrastructure:
@@ -4960,9 +5685,13 @@ def physical_request_bytes(
         )
     if publisher:
         collection_lock_authority()
+        wait_startup_quiet()
     if publisher and _INVENTORY_ACTIVE and not robots:
         inventory_guard()
-    lock, state = pace(interval) if publisher else (None, None)
+    lock, state = (
+        pace(interval, target_url=url, method=method)
+        if publisher else (None, None)
+    )
     attempted = response_received = response_constraints_saved = False
     retryable_connection_failure = False
     try:
@@ -4993,6 +5722,11 @@ def physical_request_bytes(
         if publisher:
             collection_lock_authority()
             locked_journal_authority()
+            if (_STARTUP_QUIET_UNTIL is None
+                    or time.monotonic() < _STARTUP_QUIET_UNTIL):
+                raise AdapterError(
+                    "Publisher startup quiet shortened", "access"
+                )
         try:
             attempted = True
             response = _OPENER.open(request, timeout=timeout)
@@ -5057,7 +5791,9 @@ def physical_request_bytes(
                         state["rate_limit_until"], state["until"]
                     )
                 if status in (401, 403, 451) and not robots:
-                    state["blocked"] = True
+                    wbi_retain_new_hold(
+                        state, url, status, "content_status"
+                    )
                 state["observed_at"] = time.time()
                 write_budget(state)
                 if status == 429:
@@ -5106,7 +5842,9 @@ def physical_request_bytes(
             if challenge:
                 response_constraints_saved = True
                 if not robots or status == 429:
-                    state["blocked"] = True
+                    wbi_retain_new_hold(
+                        state, url, status, "visible_refusal"
+                    )
                 raise AdapterError(
                     "Visible publisher verification or refusal", "access"
                 )
@@ -5211,6 +5949,8 @@ def local_workflow_definition():
 def scan_family_history():
     """Read complete producer history and rank exact job completion."""
     global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
+    global _HISTORY_COMPLETED, _RECOVERY_JOBS
+    _HISTORY_COMPLETED, _RECOVERY_JOBS = [], {}
     _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     current = current_run_identity() if hosted else (None, None)
@@ -5338,6 +6078,7 @@ def scan_family_history():
         raise AdapterError("Existing publisher history missing", "access")
     if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
         raise AdapterError("Ambiguous actual family completion", "access")
+    _HISTORY_COMPLETED = ordered
     return ordered[-1][2:]
 
 
@@ -5695,7 +6436,7 @@ def enter_phase(name, seconds):
 def execution():
     """Freeze admission once; publication owns its original HTTP alarms."""
     global _RUN_END, _SOURCE_END, _PHASE_END, _PHASE_NAME
-    global _COLLECTION_PREPARED
+    global _COLLECTION_PREPARED, _STARTUP_QUIET_UNTIL
     if _RUN_END is not None:
         raise AdapterError("Nested execution refused", "access")
     _RUN_END = time.monotonic() + RUN_TIMEOUT
@@ -5704,6 +6445,7 @@ def execution():
         min(time.monotonic() + 180, _SOURCE_END - 30), "restore"
     )
     _COLLECTION_PREPARED = False
+    _STARTUP_QUIET_UNTIL = None
     try:
         yield
     finally:
@@ -5903,12 +6645,165 @@ def reviewed_migration_state():
 
 
 
+def recovery_contents(path, head, cache):
+    """Read immutable source evidence once per revision during this scan."""
+    key = (path, head)
+    if key not in cache:
+        item = workflow_api(f"/contents/{path}?ref={head}")
+        try:
+            if item.get("encoding") != "base64":
+                raise ValueError()
+            body = base64.b64decode(item["content"])
+            blob = hashlib.sha1(
+                b"blob " + str(len(body)).encode() + b"\0" + body
+            ).hexdigest()
+            if (item.get("sha") != blob or not body
+                or item.get("path") != path
+                or type(item.get("size")) is not int
+                or item["size"] != len(body)
+                or len(body) > 5_000_000):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise AdapterError("Incomplete no-access code evidence", "access")
+        cache[key] = (blob, body)
+    return cache[key]
+
+
+def prove_no_publisher_access(row, cache):
+    """Require a finite historical proof or the exact current quiet code."""
+    finished, _, run_id, attempt, source = row
+    head = _ATTEMPT_HEADS[(run_id, attempt)]
+    exact, jobs = _RECOVERY_JOBS[(run_id, attempt)]
+    if len(jobs) != 1:
+        raise AdapterError("Missing exact single collect job", "access")
+    try:
+        start = datetime.fromisoformat(
+            jobs[0]["started_at"].replace("Z", "+00:00")
+        )
+        end = datetime.fromisoformat(
+            jobs[0]["completed_at"].replace("Z", "+00:00")
+        )
+        if start.utcoffset() is None or end.utcoffset() is None:
+            raise ValueError()
+        duration = end.timestamp() - start.timestamp()
+    except (KeyError, TypeError, ValueError):
+        raise AdapterError("Invalid exact job interval", "access")
+    if (
+        attempt != 1
+        or exact.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("conclusion") != "failure"
+        or not 0 <= duration < 58
+    ):
+        raise AdapterError("Missing state has no no-access proof", "access")
+    source_blob, source_bytes = recovery_contents(
+        "adapters/be-wbi/adapter.py", head, cache
+    )
+    workflow_blob, _ = recovery_contents(
+        ".github/workflows/fetch-be-wbi.yml", head, cache
+    )
+    pin = _PREACCESS_ATTEMPTS.get(run_id)
+    if pin is not None:
+        actual = (
+            attempt, head, jobs[0]["id"], jobs[0]["started_at"],
+            jobs[0]["completed_at"],
+        )
+        if (
+            actual != pin
+            or source_blob != _PREACCESS_SOURCE_BLOBS.get(head)
+            or workflow_blob != _PREACCESS_WORKFLOW_BLOB
+        ):
+            raise AdapterError("Historical no-access proof changed", "access")
+        return
+    if (
+        hashlib.sha256(source_bytes).hexdigest()
+        != source_file_digest()
+        or workflow_blob not in _RECOVERY_WORKFLOW_BLOBS
+    ):
+        raise AdapterError("Unreviewed artifactless source revision", "access")
+
+
+def restoration_owner(latest):
+    """Cross only positively proved no-access attempts, never unknown gaps."""
+    rows = list(reversed(_HISTORY_COMPLETED))
+    if not rows or rows[0][2:] != latest:
+        raise AdapterError("Restoration chronology changed", "access")
+    skipped, cache = [], {}
+    for row in rows:
+        identity = row[2:]
+        run_id, attempt, source = identity
+        result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        artifacts = result.get("artifacts")
+        if (
+            not isinstance(artifacts, list)
+            or len(artifacts) > 100
+            or type(result.get("total_count")) is not int
+            or result["total_count"] != len(artifacts)
+            or any(not isinstance(item, dict) for item in artifacts)
+        ):
+            raise AdapterError(
+                "Incomplete recovery artifact inventory", "access"
+            )
+        matches = [item for item in artifacts if item.get("name") ==
+                   _ARTIFACT_NAME + "-" + str(attempt)]
+        if matches:
+            historical = {
+                item[2] for item in skipped if item[2] in _PREACCESS_ATTEMPTS
+            }
+            if (historical or identity == _PREACCESS_OWNER) and (
+                historical != set(_PREACCESS_ATTEMPTS)
+                or identity != _PREACCESS_OWNER
+                or len(matches) != 1
+                or (matches[0].get("id"), matches[0].get("digest"))
+                != _PREACCESS_ARTIFACT
+            ):
+                raise AdapterError(
+                    "Incomplete historical recovery chain", "access"
+                )
+            return (
+                identity, result,
+                max((item[0] for item in skipped), default=0),
+            )
+        if artifacts:
+            raise AdapterError(
+                "Unexpected artifactless attempt outputs", "access"
+            )
+        prove_no_publisher_access(row, cache)
+        skipped.append(row)
+    raise AdapterError("No actual owned publisher state remains", "access")
+
+
+def preserve_recovery_bounds(incoming, finished):
+    """Retain elapsed job bounds without fabricating publisher receipts."""
+    state = copy.deepcopy(validate_budget(incoming))
+    if finished:
+        state["until"] = max(
+            state["until"],
+            finished + max(state["interval"], state["page_gap"]),
+        )
+        state["observed_at"] = max(state["observed_at"], finished)
+    return validate_budget(state)
+
+
+def wait_startup_quiet():
+    """A wall-clock adjustment cannot shorten the first-access quiet floor."""
+    if _STARTUP_QUIET_UNTIL is None:
+        raise AdapterError("Publisher startup quiet is unproved", "access")
+    while time.monotonic() < _STARTUP_QUIET_UNTIL:
+        check_deadline()
+        time.sleep(max(0, min(1, _STARTUP_QUIET_UNTIL - time.monotonic())))
+
+
+
 def restore_family_artifact():
     """Exact reviewed zero-artifact ancestry, then strict newest owned state."""
     global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
-    global _VERIFIED_REMOTE_CREATE
+    global _VERIFIED_REMOTE_CREATE, _STARTUP_QUIET_UNTIL
     _STATE_TRUSTED = False
+    _STARTUP_QUIET_UNTIL = None
     latest = latest_family_run()
+    raw_latest = latest
     run_id, attempt, source = latest
     if run_id in _LEGACY_ATTEMPTS:
         expected = {
@@ -5942,7 +6837,8 @@ def restore_family_artifact():
                 )
         incoming = reviewed_migration_state()
     else:
-        value = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        latest, value, recovery_bound = restoration_owner(latest)
+        run_id, attempt, source = latest
         artifacts = value.get("artifacts")
         if (
             not isinstance(artifacts, list)
@@ -5972,11 +6868,17 @@ def restore_family_artifact():
             or not re.fullmatch(r"sha256:[0-9a-f]{64}", item.get("digest", ""))
         ):
             raise AdapterError("Newest artifact binding invalid", "access")
-        incoming = download_inert_artifact(latest, item["id"], item["digest"])
+        incoming = preserve_recovery_bounds(
+            download_inert_artifact(latest, item["id"], item["digest"]),
+            recovery_bound,
+        )
     _VERIFIED_REMOTE_CREATE = incoming
     try:
         with locked_budget():
             local = load_budget()
+            if (local["schema"] == 3 and local["blocked"]
+                    and _WBI_SCOPE_DECISION is not None):
+                local = wbi_migrate_scope(_JOURNAL_ACK[1])
             combined = merge_budget(local, incoming)
             combined["until"] = max(combined["until"], time.time() + 60)
             write_budget(combined)
@@ -5984,12 +6886,13 @@ def restore_family_artifact():
                 raise AdapterError("Unsettled newest publisher state", "access")
     finally:
         _VERIFIED_REMOTE_CREATE = None
-    _RESTORED_LATEST = latest
+    _RESTORED_LATEST = raw_latest
     _RESTORED_HISTORY = (
         copy.deepcopy(_SCANNED_HISTORY),
         copy.deepcopy(_SCANNED_JOB_DIGESTS),
         copy.deepcopy(_ATTEMPT_HEADS),
     )
+    _STARTUP_QUIET_UNTIL = time.monotonic() + 60
     _RESTORED = _STATE_TRUSTED = True
 
 

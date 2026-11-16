@@ -445,3 +445,156 @@ ASTs, source facts, IDs, expiry rules, workflows and publication contract.
 Historical native results retain their original code/date attribution in the
 preceding sections; their raw input RAM is no longer available in this session.
 No fresh publisher collection, native replay or production run is claimed here.
+
+## Proven pre-access continuity — issue #373
+
+The 18 completed attempts from run `41068492690/1` through
+`43913201360/1` failed before publisher access. Review of all 18 job logs
+identified the first completed-history validation failure and the following
+17 missing-newest-state failures. Each failed single `collect` job completed
+within 47 seconds. Recovery pins their exact attempts, revisions, job IDs,
+start/completion timestamps, original source blob and workflow blob. Their
+complete artifact inventories must be empty. The complete chain must lead to
+actual owner `40889063854/1`, artifact `12903619139`, SHA-256
+`10f6fe52c39de27726595d551d4adfeab74685983bc5db204db1583adeeb2028`.
+The original nine-field envelope, producer digest, state digest, expiry and
+owned-state validation remain mandatory.
+
+Future artifactless failures are eligible only when authenticated source bytes
+match this exact running implementation, the workflow matches the reviewed
+blob, and attempt one has exactly one failed `collect` job lasting less than
+58 seconds. Successful restoration establishes a 60-second monotonic startup
+floor before every publisher transport can proceed. Wall-clock changes cannot
+shorten this floor. A missing artifact alone never proves absence of access;
+unknown code, reruns, longer jobs, extra outputs and incomplete historical
+chains stop recovery.
+
+Skipped job completions supply conservative timing bounds only. Actual starts,
+completion receipts, pending state, refusals, adaptive gaps and unknown legacy
+history remain intact, and stronger local constraints still merge by MAX. The
+local first-access rescan compares against the actual newest history, including
+all proven skipped attempts. The original business parser, sole native test,
+publication contract and workflow are unchanged.
+
+Private offline controls exercised all 18 actual job/revision proofs, the
+original actual ZIP decoder, invalid-chain/code/job/artifact negatives,
+stronger hold/pending/backoff preservation, and a forward wall-clock jump.
+Synthetic future-current-code controls demonstrate the guard algorithm only;
+they are not actual hosted-run evidence. No new publisher collection or
+production success is claimed by these controls. Independent pre-run review,
+a complete RAM capture and the existing genuine native test remain required
+before enabling publication. The last owned run failed on a publisher read
+timeout, so recovered continuity alone does not establish publisher health.
+
+### First original native result — November 16, 2026
+
+The single independently approved original native run failed after 211.946
+seconds on producer SHA-256
+`06cc8b0de832b4f055c34a47bf16c435dc75365d0260ee260cd37a8766034086`
+and private observer SHA-256
+`5b0fd6a67d063aa5b243fb74b73c581dcad2c9119dce2a3f2959906bfdf7a8ff`.
+Owned-state recovery succeeded through the original decoder. The three actual
+publisher responses were robots 200, Louisiana call 200, and CIRC call 403.
+The last URL was
+`https://www.wbi.be/fr/actualites/offre-stage-centre-international-recherche-cancer-circ`.
+Its captured publisher Drupal page says “Oups! Page introuvable” and
+“Cette page n’existe plus ou a été déplacée”. No visible bot challenge was
+identified in that response. The retained CIRC call deadline was November 13;
+this evidence suggests a removed or unpublished call, without proving the
+publisher's reason for returning HTTP 403.
+
+Complete private RAM evidence contains all 135,891 response bytes and all 14
+raw journal persistence witnesses, with zero observer errors. Exact bot
+identification, the monotonic startup floor, a minimum 12.206-second
+completion-to-next-start gap and at most three starts per rolling minute were
+independently verified. Only one of 28 required source pages completed. No
+normalized collection, actual consumer acceptance or production success is
+claimed. The healthy final journal retains `blocked=true`, `in_flight=false`;
+it is not a permission to retry. The workflow remains disabled, with no second
+publisher attempt or publication. Source expiry and the removed-page behavior
+require a separately reviewed repair or permitted access route before further
+collection. This failed native result supersedes the earlier pending-native
+status for issue #373; the offline controls remain offline evidence only.
+
+### Disabled offline repair implementation
+
+A subsequent offline-only extension adds a concrete dynamic inventory path and
+an inert route-retention proposal builder. `_REVIEWED_WBI_AUTHORIZATIONS` is
+empty: no environment value can activate either path. No workflow supplies an
+authorization. The proposal builder validates the exact held journal and actual
+403 body hashes, retains the original raw journal bytes and every state field,
+and returns `effective_global_hold=true`. It neither writes a migrated journal
+nor authorizes an opener. Known CIRC slug, apex/www and node-25108 aliases have
+an additional unconditional prewire denial.
+
+The gated inventory path follows all advertised supported catalogue pager
+links, normalizes the first-page alias, checks contiguous page indices, and
+uses the existing inventory and physical transport guards. It excludes only
+the precisely identified previously validated expired CIRC call; unknown or
+ambiguous deadlines are retained. Supported single-call pages extract a minimal
+current factual record and explicit application deadline, preserving reviewed
+existing IDs. Missing structures, multiple awards and unverified categories
+fail closed instead of supplying stale manual descriptions.
+
+This extension is incomplete for production. Current complete call inventory
+markup, multi-award programmes and the three UNESCO calls have not been fully
+captured or implemented. It must not be merged or enabled as a working source.
+Offline controls replay the actual Louisiana page and removed CIRC page, and
+use clearly labelled synthetic inventories solely for pagination/exclusion
+controls. They prove neither complete current discovery nor a passing native
+collection. The original live test and workflow remain unchanged. No publisher
+requests or actual state changes accompanied this extension.
+
+The local adapter contract's content-403 rule and robots-only hold migration
+exception remain applicable. A maintainer scope decision must explicitly
+resolve that rule boundary before any effective route-scoped migration; an
+approval string is not a policy change. Broad repair authority supports the
+concrete proposal and review, but does not make the current robots-only text
+cover this content response. No publisher-wide indexing prohibition is inferred.
+
+### Retained-refusal runtime migration awaiting source review
+
+Workspace rules PR #37 now permits a separately reviewed effective refusal
+scope; the preceding robots-only limitation describes the earlier rule state.
+No WBI source decision is yet activated: `_WBI_SCOPE_DECISION` remains `None`.
+Migration revision `wbi373-content-scope-v1` is proposed for independent review.
+It binds the exact original held journal, CIRC response body and failed-native
+revision documented above. Schema 4 retains the complete original schema-3
+journal bytes and the original refusal event. The `blocked` Boolean stays true.
+Exact-schema validation and the original artifact envelope remain mandatory.
+
+The proposed unrelated public scope is HTTPS on `www.wbi.be`, GET only:
+`/robots.txt`, `/en/bourses`, the already reviewed taxonomy terms 843, 844, 846
+and 847, `/fr/appels-a-projets`, `/actualites`, `/fr/actualites`, `/fr/rss-feeds`,
+and plain-slug details under `/fr/actualites/` and `/fr/aide-service/`.
+Only a single nonnegative `page` query is admitted on inventory paths; detail
+queries, fragments, percent-encoded or dot-segment paths, alternative origins,
+authentication routes, unknown endpoints and known CIRC aliases fail closed.
+An advertised new feed endpoint still requires additional scope review. This
+scope proposal does not permit any request before independent acceptance.
+
+Restoration migrates only the exact reviewed held journal generation while
+holding the original journal descriptor. All original constraints and unknown
+history survive; merge uses MAX and refusal-event union in the same family.
+An unproved blocked input adds a globally restrictive event. New content
+401/403/451, visible refusals and robots denials append additional events;
+these cannot inherit the CIRC event's reviewed scope. Any additional event
+stops subsequent access globally. Interrupted writes latch the original
+failure gate closed. The exact original artifact decoder is unchanged.
+
+Offline controls exercise migration/admission/event union, denied and ambiguous
+aliases, original durable writes in private directories, and interrupted
+migration persistence. A separate actual-transport control receives a synthetic
+403, observes the new event durably before reading its body, and proves a fresh
+module with the same old approval cannot open another request. These controls
+perform no publisher requests and do not alter the actual held journal. The
+new source scope, complete dynamic inventory, multi-call parsing, genuine native
+collection and production handoff still require their respective reviews.
+
+The maintainer's exact source-scope decision is now recorded at
+https://github.com/YouthOpps/data-pipeline/issues/373#issuecomment-6925600137
+and embedded in `_WBI_SCOPE_DECISION`. It supersedes the earlier pending-decision
+status and permits only independently reviewed bounded research within the
+named scope, after the committed-decision recheck. Dynamic inventory remains
+separately gated and incomplete; this decision supplies no complete native or
+production acceptance. The original failure and refused CIRC event remain.
