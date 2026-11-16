@@ -2394,7 +2394,7 @@ _PREACCESS_ATTEMPTS = {
 }
 _PREACCESS_SOURCE_BLOBS = {'5fd9fa82d5d2d5f0871aba653376765a6e00c897': 'e117a83f0f252c65c70802d8ff225abd0062f914'}
 _PREACCESS_WORKFLOW_BLOB = '46ebbf402db820d77d9f8e4aa6519d99469f496a'
-_RECOVERY_WORKFLOW_BLOBS = {_PREACCESS_WORKFLOW_BLOB}
+_RECOVERY_WORKFLOW_BLOBS = {"728770075187da1e7e802c50771f4f49a5f82863"}
 _PREACCESS_OWNER = (40883890576, 1, SOURCE_ID)
 _PREACCESS_ARTIFACT = (12902046316, 'sha256:c0183d9a1c12a7bc53bca75bbdb672eb2a1b64af0449bf74d8af19e9ec4fa166')
 
@@ -5849,6 +5849,83 @@ def wait_startup_quiet():
 
 
 
+_NATIVE_HANDOFF_SHA256 = (
+    "9d5353f1eab6cf3bc76edf9f371d0ec616477bf7aa39a0221d5c6877d326e08f"
+)
+_NATIVE_HANDOFF_BINDING = {
+    "schema": 1,
+    "repository": "YouthOpps/data-pipeline",
+    "source": "dk-university-of-copenhagen",
+    "family": "youthopps-dk-university-of-copenhagen-publisher-v1",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/"
+        "374#issuecomment-6925929088"
+    ),
+    "native_source_sha256": (
+        "acf5aaa62dad84f3d7731d8fec957a7767b5cfedfad37d053112ec3242b9f813"
+    ),
+    "native_test_sha256": (
+        "7f617ecc1518907486589529f1e13c36210eae5df2490fcfdcd3e0de1e6169ab"
+    ),
+    "native_final_state_sha256": (
+        "cab9b31ea7fd997b0dd7f6a0058034c85ab851bc0c73a744100791c6689abcef"
+    ),
+    "base_owner": [
+        40883890576,
+        1,
+        "dk-university-of-copenhagen"
+    ],
+    "base_artifact": {
+        "id": 12902046316,
+        "digest": (
+            "sha256:"
+            "c0183d9a1c12a7bc53bca75bbdb672eb2a1b64af0449bf74d8af19e9ec4fa166"
+        ),
+    },
+    "state_sha256": "db54ed71544a88bb07a1b60eff7ebea6fe5fda8de234334488faba075cecca99"
+}
+
+def production_maintenance_state(incoming):
+    """MAX-merge the exact reviewed native handoff after owned ZIP decoding."""
+    raw = os.environ.get("UCPH_PACING_MAINTENANCE", "")
+    if not raw:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise AdapterError(
+                "Reviewed modern native MAX handoff missing", "access"
+            )
+        return incoming
+    try:
+        encoded = raw.encode("utf-8")
+        if (
+            len(encoded) > 16384
+            or hashlib.sha256(encoded).hexdigest() != _NATIVE_HANDOFF_SHA256
+        ):
+            raise ValueError("Native handoff binding changed")
+        approval = json.loads(raw)
+        if (
+            not isinstance(approval, dict)
+            or set(approval) != set(_NATIVE_HANDOFF_BINDING) | {"state"}
+            or type(approval.get("schema")) is not int
+            or any(
+                approval.get(key) != value
+                for key, value in _NATIVE_HANDOFF_BINDING.items()
+            )
+        ):
+            raise ValueError("Invalid native handoff provenance")
+        state = validate_budget(approval["state"])
+        canonical = json.dumps(
+            state, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+        if hashlib.sha256(canonical).hexdigest() != approval["state_sha256"]:
+            raise ValueError("Native handoff state digest changed")
+        return merge_budget(incoming, state)
+    except (ValueError, TypeError, KeyError, AdapterError) as error:
+        raise AdapterError(
+            "Invalid reviewed modern native MAX handoff", "access"
+        ) from error
+
+
+
 def restore_family_artifact():
     """Exact reviewed zero-artifact ancestry, then strict newest owned state."""
     global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
@@ -5857,6 +5934,11 @@ def restore_family_artifact():
     latest = latest_family_run()
     run_id, attempt, source = latest
     if (run_id, attempt) in _LEGACY_ATTEMPTS:
+        if (
+            os.environ.get("GITHUB_ACTIONS") == "true"
+            or os.environ.get("UCPH_PACING_MAINTENANCE")
+        ):
+            raise AdapterError("Modern handoff requires an owned artifact", "access")
         expected = {
             identity: (value["head_sha"], value["workflow_id"])
             for identity, value in _LEGACY_ATTEMPTS.items()
@@ -5924,6 +6006,7 @@ def restore_family_artifact():
             download_inert_artifact(owner, item["id"], item["digest"]),
             recovery_bound,
         )
+        incoming = production_maintenance_state(incoming)
     _VERIFIED_REMOTE_CREATE = incoming
     try:
         with locked_budget():

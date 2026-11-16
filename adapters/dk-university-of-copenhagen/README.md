@@ -714,3 +714,52 @@ records and a valid empty envelope. All 19 previously published doctoral ID
 formulas were checked against the actual old snapshot. This combined research
 replay is not an original native PASS; both earlier original FAILs remain
 unchanged and a separately reviewed complete native collection is still needed.
+
+
+## Accepted native result and modern production handoff (#374)
+
+The third original nonpublishing test passed on source SHA-256
+`acf5aaa62dad84f3d7731d8fec957a7767b5cfedfad37d053112ec3242b9f813`
+in 323.623 seconds. Independent QA accepted all 28 records: 21 programme
+overviews, six direct doctoral roles and one research-assistant job with a
+conditional PhD pathway. Every one of the 37 inventory rows and all seven
+selected details was covered. Complete input replay matched substantive output;
+the current website consumer accepted exact raw28/current28/valid-empty0 IDs.
+No actual records in that successful collection were expired. The earlier two
+original FAILs remain distinct and preserved.
+
+The complete 11-response ledger and 35 persistence attempts passed independent
+checks: at least 12.201670 seconds after completion before the next request,
+at most five starts per rolling minute, and 30.004168 seconds between the two
+inventory requests after completion. Crawler identity, startup quiet, journal
+bytes and retained MAX/unknown flags passed without observer errors. See the
+[accepted native evidence](https://github.com/YouthOpps/data-pipeline/issues/374#issuecomment-6925929088).
+
+The matching workflow supplies `UCPH_PACING_MAINTENANCE`, a byte-exact,
+SHA-256-pinned modern handoff envelope. It binds that accepted source and
+original test, the real final-state file, the original modern owner
+`40883890576/1`, artifact `12902046316`, and the canonical approved state digest
+`db54ed71544a88bb07a1b60eff7ebea6fe5fda8de234334488faba075cecca99`.
+The seed retains all five native/research final MAX states, their observed durable
+reservations and all 28 actual physical starts: 58 distinct timestamps. It adds
+no fabricated requests. Settled final outcomes determine pending/refusal flags;
+intermediate pending reservations are not mistaken for unresolved requests.
+The robots-only Jobnet authentication redirect remains documented above and in
+retained research evidence; Jobnet is not a runtime publisher for this adapter.
+
+The original nine-field owned-artifact decoder must succeed before this seed is
+considered. The loader then uses only the existing MAX, union and OR merge, so
+stronger remote constraints, refusals, pending state and unknown history survive.
+Missing or altered hosted approval fails before publisher access. A legacy-only
+history cannot replace the required modern owned artifact. The finite original
+18-attempt proof keeps its historical workflow binding; future short-attempt
+proofs accept only the reviewed workflow that includes this seed.
+
+The accepted native source is preserved byte-for-byte outside the repository.
+Collection, publisher transport, parsing, expiry, metadata and publication
+functions remain unchanged by this handoff. Focused offline controls cover the
+new loader through the actual original ZIP decoder, corrupt ownership/seed
+refusals, stronger state, pending-state refusal and unchanged local behavior.
+This qualifies the accepted native evidence for reuse without another publisher
+run. Final configuration review and the authorized post-merge publication remain
+separate from the successful nonpublishing test.
