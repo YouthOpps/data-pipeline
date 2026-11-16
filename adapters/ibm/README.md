@@ -54,17 +54,12 @@ read; unreviewed redirects stop before following their destination.
 
 True POSIX alarms enforce a single 1,290-second run: prepublication at most 900 seconds, publication and conditional failure handling at most 180 seconds each, with the final 30 seconds reserved for trusted timing export. Nonexport work is clipped at the original 1,260-second deadline. Socket timeouts do not replace the wall-clock bound. Failure reconciliation protects a newer atomic data/metadata pair. A hard process kill cannot guarantee artifact export.
 
-The temporary #369 workflow is manual and diagnostic-only, with a 30-minute
-job limit and the unchanged queued family concurrency group. It runs the sole
-native test without an App secret or data-source publication token. The
-original owned-state exporter runs before original execution cleanup even
-when the native test fails; only a healthy finalized envelope is eligible for
-upload. Complete actual record JSON and bounded timing diagnostics are
-recoverable from the job log; publisher response bodies and persistence
-snapshots remain in RAM for the diagnostic process lifetime. There are no push
-or schedule triggers during this diagnostic phase. Restoring normal automated
-publication requires a separate reviewed activation after genuine native and
-current-consumer validation; this enabling change claims no source recovery.
+The production workflow again runs one application command,
+`python -B adapters/ibm/adapter.py --publish`, after creating a source-scoped
+App token for data-source. Its original push/manual/daily schedule, canonical
+main guard, 30-minute job limit and queued family concurrency are preserved.
+Only the v2 artifact name is uploaded; the temporary native controller, extra
+consumer checkout and Node setup have been removed from production.
 
 The finite continuity exception in #369 authenticates sixteen exact failed
 attempts under immutable source head `5fd9fa82`, including their single job
@@ -76,6 +71,17 @@ Only with that complete proof may restoration select the exact last actual
 owned artifact `12926650363` from run `40937889032`, preserving its restrictions
 and unknown provenance. Job completions add conservative not-before bounds,
 never invented physical starts, policy receipts or cleared pending state.
+For later benign infrastructure failures, a first attempt can be omitted
+only when it has one failed completed `collect` job lasting strictly less than
+58 seconds, the exact reviewed producer workflow blob, the same immutable
+adapter bytes as the authenticated current main collector, and a complete
+zero-artifact inventory. The two-second margin is below the mandatory
+60-second first-wire quiet. Changed source/workflow bytes, reruns, long jobs,
+multiple jobs and unknown artifact outcomes are not inferred safe. The latest
+actual v2 MAX remains authoritative; omitted job completions add conservative
+bounds without new physical starts or receipts. The exact old ghost can use
+this timing proof only with its separately pinned original source/workflow.
+Changing the first-wire implementation requires renewed independent proof.
 Other missing artifacts remain errors; this is not an older-state fallback.
 
 The legacy queue is isolated by an artifact-generation fence rather than by
@@ -94,7 +100,7 @@ failed-attempt barrier; during a newer run it rejects the active sibling;
 afterward it cannot restore that newer owner's v2-only artifact. It never
 obtains publisher access in these cases. The old queue may remain visible;
 this is not a fabricated cancelled outcome. Running or changed ghost jobs and
-unknown completed gaps still stop collection for explicit evidence review.
+unproved completed gaps still stop collection for explicit evidence review.
 Never publish v1 aliases or remove every post-owner barrier while the ghost
 remains pending. Same-commit queued siblings retain the identical immutable
 workflow concurrency and require a complete zero-job inventory.
@@ -120,6 +126,23 @@ Publication changes only `datas/ibm/data.json` and `datas/ibm/metadata.json` ato
 New records use attempt START for creation, first-seen and last-seen, and successful END for last-checked. Material changes advance updated-at to END; unchanged records retain their earlier updated-at and original creation/first-seen values. Tests never receive publication credentials or publish.
 
 ## Validation status
+
+The canonical nonpublishing [diagnostic 43920411208](https://github.com/YouthOpps/data-pipeline/actions/runs/43920411208)
+passed the original sole native test on 16 November 2026 with five genuine
+programme records and all existing identities preserved. Its ten physical
+HTTP200 responses covered the complete nine-document graph. Captured graph
+replay, provenance, actual bot identity and full pacing assertions passed;
+physical completion gaps were at least 12.205275528 seconds, inventory gaps
+at least 30.005248737 seconds and rolling starts at most five per minute.
+The actual consumer at `10041c786d9542e2bbfebd41ac47449ef94ad457` accepted all
+five raw and filtered records plus its valid-empty envelope, with no observer
+errors. No actual raw record had expired. Full input stayed private in RAM
+through these checks; no data-source publication was performed by the test.
+Independent actual native/state acceptance and the exact v2 snapshot digest
+are recorded in [#369 evidence](https://github.com/YouthOpps/data-pipeline/issues/369#issuecomment-6924808055).
+The future no-access classification is checked separately with inert metadata
+and failure controls; it changes neither publisher parsing nor first-wire
+behavior. Production recovery is verified separately after activation.
 
 The sole live test is `python -B adapters/ibm/test_adapter.py`. It rejects `DATA_SOURCE_TOKEN` before collection, validates every real record and emits the complete actual JSON only on stdout; diagnostics go to stderr. There are no fixtures, publication calls, dataset files or fixed record-count assertions. Read-only `GITHUB_TOKEN` handling for workflow pacing restoration is unchanged. Run the test sequentially with any other IBM collection, preserving its durable pacing state.
 
