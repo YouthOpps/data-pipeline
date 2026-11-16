@@ -54,12 +54,66 @@ read; unreviewed redirects stop before following their destination.
 
 True POSIX alarms enforce a single 1,290-second run: prepublication at most 900 seconds, publication and conditional failure handling at most 180 seconds each, with the final 30 seconds reserved for trusted timing export. Nonexport work is clipped at the original 1,260-second deadline. Socket timeouts do not replace the wall-clock bound. Failure reconciliation protects a newer atomic data/metadata pair. A hard process kill cannot guarantee artifact export.
 
-The workflow has one application command, `python -B adapters/ibm/adapter.py
---publish`, a 30-minute job limit, a restricted data-source App token minted
-immediately before collection and a queued family concurrency group. This
-mature family requires the newest exact owned pacing artifact before local or
-hosted access. The old first-family bootstrap environment value grants no
-fallback if history or state is missing.
+The temporary #369 workflow is manual and diagnostic-only, with a 30-minute
+job limit and the unchanged queued family concurrency group. It runs the sole
+native test without an App secret or data-source publication token. The
+original owned-state exporter runs before original execution cleanup even
+when the native test fails; only a healthy finalized envelope is eligible for
+upload. Complete actual record JSON and bounded timing diagnostics are
+recoverable from the job log; publisher response bodies and persistence
+snapshots remain in RAM for the diagnostic process lifetime. There are no push
+or schedule triggers during this diagnostic phase. Restoring normal automated
+publication requires a separate reviewed activation after genuine native and
+current-consumer validation; this enabling change claims no source recovery.
+
+The finite continuity exception in #369 authenticates sixteen exact failed
+attempts under immutable source head `5fd9fa82`, including their single job
+identities and complete execution times. Every entire job lasted 8-44 seconds;
+the audited source enforces at least sixty monotonic seconds before its first
+publisher opener. The original source blob is checked against that immutable
+head. Those attempts therefore introduced no new physical publisher outcome.
+Only with that complete proof may restoration select the exact last actual
+owned artifact `12926650363` from run `40937889032`, preserving its restrictions
+and unknown provenance. Job completions add conservative not-before bounds,
+never invented physical starts, policy receipts or cleared pending state.
+Other missing artifacts remain errors; this is not an older-state fallback.
+
+The legacy queue is isolated by an artifact-generation fence rather than by
+assuming cancellation succeeded. The immutable old adapter requires
+`ibm-pacing-state-<attempt>` and has no newer-state fallback. New diagnostic
+and production runs upload only `ibm-pacing-state-v2-<attempt>`, with the same
+schema, source family, workflow ID, main provenance and concurrency group.
+The v1 name is accepted only for the exact approved last actual owner above.
+A v1 alias on any new owner is rejected because it would defeat this fence.
+
+Before continuing past the exact queued zero-job attempt `43097078558`, the
+new reader rechecks complete authenticated jobless ownership, the immutable
+old source/workflow blobs and a later completed barrier with no v1 artifact.
+Before the first v2 result, the old source therefore encounters the retained
+failed-attempt barrier; during a newer run it rejects the active sibling;
+afterward it cannot restore that newer owner's v2-only artifact. It never
+obtains publisher access in these cases. The old queue may remain visible;
+this is not a fabricated cancelled outcome. Running or changed ghost jobs and
+unknown completed gaps still stop collection for explicit evidence review.
+Never publish v1 aliases or remove every post-owner barrier while the ghost
+remains pending. Same-commit queued siblings retain the identical immutable
+workflow concurrency and require a complete zero-job inventory.
+
+GitHub cancellation and force-cancellation returned HTTP 409 and deletion
+returned HTTP 403 despite verified administrator access; the
+[administrative evidence](https://github.com/YouthOpps/data-pipeline/issues/369#issuecomment-6922996300)
+is retained. The artifact fence does not bypass those permissions or invoke
+private administration endpoints. Inert controls execute the actual original
+reader before, during and after the v2 transition, plus a positive v1-alias
+escape control that the new reader rejects.
+
+The diagnostic process retains every response segment/header and persistence
+snapshot privately in RAM until full graph replay, source-frontier and
+provenance checks, physical/inventory/rolling timing assertions and actual
+raw/filtered/valid-empty website-consumer checks finish. The consumer is pinned
+to its reviewed current revision. Full factual records and bounded coverage
+results remain recoverable from logs; publisher bodies are not logged. Native
+and production acceptance remain separate from the offline enabling review.
 
 Publication changes only `datas/ibm/data.json` and `datas/ibm/metadata.json` atomically. Before first success, failure creates no source folder. Later failure preserves the validated last-good data and its success/check timestamps when safe metadata publication is possible. Source metadata credits IBM and clearly describes the programme-information scope.
 

@@ -1,14 +1,14 @@
-name: Fetch IBM early-career programme information
+name: Temporary nonpublishing IBM continuity diagnostic
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - adapters/ibm/**
-      - .github/workflows/fetch-ibm.yml
-  schedule:
-    - cron: '39 13 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Nonpublishing native test only; production stays paused
+        type: choice
+        options: [diagnostic]
+        default: diagnostic
+        required: true
 
 permissions:
   contents: read
@@ -23,7 +23,9 @@ jobs:
   collect:
     if: >-
       github.repository == 'YouthOpps/data-pipeline' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'diagnostic'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -31,28 +33,298 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Authenticate data-source publication
-        id: token
-        uses: actions/create-github-app-token@v2
+      - uses: actions/setup-node@v4
         with:
-          app-id: ${{ vars.WEBSITE_APP_ID }}
-          private-key: ${{ secrets.WEBSITE_APP_PRIVATE_KEY }}
-          owner: YouthOpps
-          repositories: data-source
-          permission-contents: write
-      - name: Collect and publish reviewed source
+          node-version: '22'
+      - name: Read the pinned current website consumer
+        uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 10041c786d9542e2bbfebd41ac47449ef94ad457
+          path: .ibm-diagnostic-consumer
+          persist-credentials: false
+          submodules: false
+      - name: Run original native test without publication credentials
         id: collect
-        run: python -B adapters/ibm/adapter.py --publish
         env:
-          DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          IBM_PACING_BOOTSTRAP: '{"schema":1,"family":"youthopps-ibm-careers-publisher-v1","not_before":1791661127.125106,"evidence":"https://github.com/YouthOpps/data-pipeline/issues/120#issuecomment-6101430692"}'
+          IBM369_CONSUMER_FILE: ${{ github.workspace }}/.ibm-diagnostic-consumer/scripts/data.mjs
           IBM_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
-      - name: Preserve inert publisher pacing state
+        run: |
+          set -euo pipefail
+          python -B - <<'PY'
+          import contextlib
+          import copy
+          import hashlib
+          import io
+          import json
+          import os
+          import pathlib
+          import runpy
+          import subprocess
+          import sys
+          import time
+          import urllib.error
+          import urllib.parse
+
+          root = pathlib.Path('adapters/ibm').resolve()
+          sys.path.insert(0, str(root))
+          import adapter
+
+          assert 'DATA_SOURCE_TOKEN' not in os.environ
+          capture = {'requests': [], 'persistence': [], 'observer_errors': [],
+                     'purposes': [], 'fetches': {}, 'inventory': None}
+          original_open = adapter._OPENER.open
+          original_save = adapter.save_budget
+          original_execution = adapter.execution
+          original_request = adapter.request_bytes
+          original_fetch = adapter.fetch_public
+          original_pages = adapter.read_pages
+
+
+          def observe_response(response, entry):
+              entry['status'] = response.status
+              entry['response_headers'] = list(response.headers.items())
+              original_read, original_close = response.read, response.close
+              def read(*args, **kwargs):
+                  try:
+                      segment = original_read(*args, **kwargs)
+                  except BaseException as error:
+                      partial = getattr(error, 'partial', b'')
+                      if isinstance(partial, bytes):
+                          entry['segments'].append(partial)
+                      entry['read_error'] = type(error).__name__
+                      raise
+                  entry['segments'].append(segment)
+                  return segment
+              def close(*args, **kwargs):
+                  try:
+                      return original_close(*args, **kwargs)
+                  finally:
+                      if entry['completion'] is None:
+                          entry['completion'] = time.monotonic()
+              response.read, response.close = read, close
+
+
+          def open_observed(request, *args, **kwargs):
+              publisher = urllib.parse.urlsplit(request.full_url).hostname in {
+                  'ibm.com', 'www.ibm.com'}
+              if not publisher:
+                  return original_open(request, *args, **kwargs)
+              purpose = capture['purposes'][-1] if capture['purposes'] else None
+              entry = {'url': request.full_url, 'start': time.monotonic(),
+                       'completion': None, 'segments': [], 'purpose': purpose,
+                       'request_headers': dict(request.header_items())}
+              capture['requests'].append(entry)
+              try:
+                  response = original_open(request, *args, **kwargs)
+              except urllib.error.HTTPError as error:
+                  observe_response(error, entry)
+                  raise
+              except BaseException as error:
+                  entry['completion'] = time.monotonic()
+                  entry['error'] = type(error).__name__
+                  raise
+              observe_response(response, entry)
+              return response
+
+
+          def request_observed(url, *args, **kwargs):
+              capture['purposes'].append({
+                  'publisher': kwargs.get('publisher', False),
+                  'inventory': kwargs.get('inventory', False),
+                  'robots': kwargs.get('robots', False)})
+              try:
+                  return original_request(url, *args, **kwargs)
+              finally:
+                  capture['purposes'].pop()
+
+
+          def fetch_observed(url, *args, **kwargs):
+              result = original_fetch(url, *args, **kwargs)
+              capture['fetches'][url] = result
+              return result
+
+
+          def pages_observed():
+              result = original_pages()
+              capture['inventory'] = result
+              return result
+
+
+          def save_observed(state):
+              event = {'before': copy.deepcopy(state)}
+              capture['persistence'].append(event)
+              try:
+                  result = original_save(state)
+              except BaseException as error:
+                  event['error'] = type(error).__name__
+                  raise
+              event['after'] = copy.deepcopy(state)
+              try:
+                  if adapter._JOURNAL_FD is not None:
+                      event['journal'] = os.pread(adapter._JOURNAL_FD, 16385, 0)
+              except BaseException as error:
+                  capture['observer_errors'].append(type(error).__name__)
+              return result
+
+
+          @contextlib.contextmanager
+          def execution_observed():
+              with original_execution():
+                  try:
+                      yield
+                  finally:
+                      primary = sys.exc_info()[0] is not None
+                      try:
+                          with adapter.phase('export', adapter.EXPORT_TIMEOUT):
+                              adapter.export_family_artifact()
+                      except BaseException:
+                          if not primary:
+                              raise
+                          print('Owned-state export also failed', file=sys.stderr)
+
+
+          adapter._OPENER.open = open_observed
+          adapter.request_bytes = request_observed
+          adapter.fetch_public = fetch_observed
+          adapter.read_pages = pages_observed
+          adapter.save_budget = save_observed
+          adapter.execution = execution_observed
+          stdout, stderr = io.StringIO(), io.StringIO()
+          with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+              try:
+                  runpy.run_path(str(root / 'test_adapter.py'), run_name='__main__')
+              except SystemExit as error:
+                  outcome = error.code
+              except BaseException as error:
+                  outcome = type(error).__name__
+                  print(type(error).__name__, file=sys.stderr)
+              else:
+                  outcome = 0
+          print(stderr.getvalue(), file=sys.stderr, end='')
+          summary = {}
+          if outcome == 0:
+              records = json.loads(stdout.getvalue())
+              adapter.validate_records(records)
+              # Retain the entire original factual result even if an observer fails;
+              # consumer-only corrections can use this data without a source retake.
+              print('IBM369_RECORDS=' + json.dumps(records, ensure_ascii=False))
+              try:
+                  requests = capture['requests']
+                  assert requests and all(
+                      r['completion'] is not None for r in requests), (
+                      'Incomplete physical response ledger')
+                  assert all(r['completion'] >= r['start'] for r in requests), (
+                      'Nonmonotonic physical completion')
+                  assert all(r['purpose'] and r['purpose']['publisher']
+                             for r in requests), (
+                      'Unknown physical publisher purpose')
+                  assert all({k.lower(): v for k, v in r['request_headers'].items()}
+                             .get('user-agent') == adapter._USER_AGENT
+                             for r in requests), (
+                      'Incorrect actual bot identity')
+                  gaps = [right['start'] - left['completion']
+                          for left, right in zip(requests, requests[1:])]
+                  maximum = max(sum(point['start'] - 60 < r['start'] <= point['start']
+                                    for r in requests) for point in requests)
+                  inventory_requests = [r for r in requests if r['purpose']['inventory']]
+                  page_gaps = [right['start'] - left['completion'] for left, right in
+                               zip(inventory_requests, inventory_requests[1:])]
+                  assert all(gap >= 12.2 for gap in gaps) and maximum <= 5, (
+                      'Physical pacing or rolling allowance violation')
+                  assert all(gap >= 30 for gap in page_gaps), 'Inventory pacing violation'
+                  inventory = capture['inventory']
+                  assert inventory and set(r['url'] for r in records) == set(
+                      inventory['programmes']), 'Incomplete actual programme frontier'
+                  assert all(url in capture['fetches']
+                             for url in inventory['documents']), (
+                      'Uncaptured actual source document')
+                  assert all(doc['url'] in inventory['documents'] for record in records
+                             for doc in record['source_documents']), (
+                      'Missing actual record provenance')
+                  original_clock = adapter.utc_now
+                  adapter.utc_now = lambda: records[0]['last_checked_at']
+                  try:
+                      replay = adapter.parse_inventory(inventory)
+                  finally:
+                      adapter.utc_now = original_clock
+                  temporal = {'created_at', 'updated_at', 'first_seen_at', 'last_seen_at',
+                              'last_checked_at'}
+                  material = lambda rows: {row['id']: {key: value for key, value in
+                              row.items() if key not in temporal} for row in rows}
+                  assert material(replay) == material(records), (
+                      'Captured graph replay differs from native output')
+                  consumer = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ibm-consumer.mjs'
+                  consumer.write_text(r'''import fs from 'node:fs/promises';
+          import {pathToFileURL} from 'node:url';
+          const consumerUrl=pathToFileURL(process.env.IBM369_CONSUMER_FILE);
+          const {loadData}=await import(consumerUrl);
+          let input=''; for await (const part of process.stdin) input += part;
+          const value=JSON.parse(input), source='ibm', base='/ram/datas';
+          if(value.metadata.source!==source || value.records.some(r=>r.source!==source))
+            throw new Error('Observer source identity mismatch');
+          const files=new Map([
+            [`${base}/${source}/data.json`,JSON.stringify(value.records)],
+            [`${base}/${source}/metadata.json`,JSON.stringify(value.metadata)]]);
+          fs.lstat=async file=>{
+            if(file!==base&&!files.has(file))throw Error('Unexpected path');
+            return {isSymbolicLink:()=>false};};
+          fs.readdir=async file=>{if(file!==base)throw Error('Unexpected root');
+            return [{name:source,isSymbolicLink:()=>false,isDirectory:()=>true}];};
+          fs.readFile=async file=>{if(!files.has(file))throw Error('Missing input');
+            return files.get(file);};
+          const result=await loadData(base);
+          const ids=result.opportunities.map(r=>r.id).sort();
+          if(JSON.stringify(ids)!==JSON.stringify(value.records.map(r=>r.id).sort()))
+            throw Error('Incomplete consumer IDs');
+          console.log(JSON.stringify({count:ids.length,ids}));
+          ''')
+                  stamp = adapter.utc_now()
+                  filtered = adapter.remove_expired_records(records, stamp)
+                  results = {}
+                  for name, rows in [('raw', records), ('filtered', filtered),
+                                     ('valid_empty', [])]:
+                      adapter.validate_records(rows, allow_empty=not rows)
+                      envelope = {'records': rows, 'metadata': adapter.metadata(
+                          stamp, {}, rows, checked_at=stamp)}
+                      result = subprocess.run(['node', str(consumer)],
+                          input=json.dumps(envelope), text=True, capture_output=True,
+                          timeout=30)
+                      assert result.returncode == 0, result.stderr[-500:]
+                      results[name] = json.loads(result.stdout)
+                  summary = {'consumer': results, 'expired_actual_count':
+                      len(records) - len(filtered), 'source_documents': sorted(
+                      inventory['documents']), 'complete_graph_replay': True,
+                      'minimum_physical_completion_gap': min(gaps) if gaps else None,
+                      'maximum_starts_rolling60': maximum,
+                      'minimum_inventory_completion_gap': min(page_gaps)
+                      if page_gaps else None, 'actual_bot_identity_verified': True}
+              except BaseException as error:
+                  capture['observer_errors'].append(
+                      type(error).__name__ + ': ' + str(error))
+          else:
+              print(stdout.getvalue(), end='')
+          ledger = [{key: value for key, value in request.items() if key not in {
+              'segments', 'response_headers', 'request_headers'}}
+              for request in capture['requests']]
+          print('IBM369_OBSERVER=' + json.dumps({
+              'native_outcome': outcome, 'requests': ledger,
+              'persistence_attempts': len(capture['persistence']),
+              'observer_errors': capture['observer_errors'], 'checks': summary,
+              'consumer_revision': '10041c786d9542e2bbfebd41ac47449ef94ad457',
+              'adapter_sha256': hashlib.sha256(
+                  (root / 'adapter.py').read_bytes()).hexdigest(),
+              'test_sha256': hashlib.sha256(
+                  (root / 'test_adapter.py').read_bytes()).hexdigest(),
+              'capture_lifetime': 'RAM through complete graph and consumer validation'}))
+          raise SystemExit(0 if outcome == 0 and not capture['observer_errors'] else 1)
+          PY
+      - name: Preserve exact diagnostic-owned publisher pacing state
         if: always() && steps.collect.outputs.pacing_ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: ibm-pacing-state-${{ github.run_attempt }}
+          name: ibm-pacing-state-v2-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pacing-state.json
           if-no-files-found: error
           retention-days: 90
