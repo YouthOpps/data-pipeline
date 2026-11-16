@@ -409,6 +409,60 @@ _FUNDING_PROGRAMMES = {
     ),
 }
 
+# Preserve published legacy IDs through canonical programme URLs. New records
+# use their actual linked programme URL, never mutable display headings.
+_PROGRAMME_IDENTITIES = {
+    (
+        "http://www.conicyt.cl/becas-conicyt/sobre-becas-conicyt/"
+        "que-es-becas-conicyt/"
+    ): "18e34dfa9c34d5f035340372",
+    "https://brightsparks.com.sg/profile/sfa/scholarships.php": (
+        "b62448b32fe5e62370812d9e"
+    ),
+    (
+        "https://bursaries.firstrand.co.za/Bursary/"
+        "FirstRandLaurieDippenaarScholarship"
+    ): "1fa24ef224fe662833eadd0e",
+    "https://educationglobal.ru/en/general_program_information/": (
+        "1b39739bd1f125c2bac9a07b"
+    ),
+    "https://inlaksfoundation.org/": "7df73f49d959864eec6631fe",
+    "https://jeanmonnet.org.tr/en/about-scholarship-programme/": (
+        "8002013c16d3a7f6b336dbde"
+    ),
+    "https://jntataendowment.org/loan-scholarship-process/": (
+        "ea6f56fa784d63f3ea50662e"
+    ),
+    "https://johnmonash.com/": "9df94cc0fdd9691fe5aa352f",
+    "https://mkingscholarships.ca/": "b5b27b69a1dfd61cedcde521",
+    "https://qalaascholarships.org/index.html": "741fad7c9c8cd4f1aeae2be6",
+    (
+        "https://scholarships.uq.edu.au/scholarship/"
+        "conacyt-mexican-scholarship-program"
+    ): "5b834808c3933e6e994a2122",
+    "https://the.akdn/en/how-we-work/our-agencies/aga-khan-foundation": (
+        "d045d8c8715daad6975fa1e7"
+    ),
+    "https://www.colfuturo.org/": "4b2ecf6f18ec52b24a440d7f",
+    (
+        "https://www.daad.de/en/studying-in-germany/scholarships/"
+        "daad-scholarships/"
+    ): "72dc4bff9f591eaebc61ff98",
+    "https://www.fes.de/de/": "e9ef78fb492ef91810d5675e",
+    "https://www.funedmx.org/": "29a5c21fefd810cf89c5af19",
+    (
+        "https://www.mastersportal.com/scholarships/148/"
+        "the-tamim-bin-hamad-scholarship.html"
+    ): "6df9bc28ec0a9ce5164c5ddb",
+    "https://www.rotary.org/en/our-programs/scholarships": (
+        "f24444ce3faab8d324c2a7e2"
+    ),
+    (
+        "https://www.tatatrusts.org/our-work/individual-grants-programme/"
+        "education-grants"
+    ): "b141f7f45a5c6f44191ffd60",
+}
+
 _EXCLUDED_FUNDING = {
     "The International Scholarships Program (ISP)": "programme database",
     "Fulbright Commission": "duplicate of the detailed UCPH Fulbright route",
@@ -443,7 +497,10 @@ def additional_programmes(main):
     found = set()
     records = []
     for section in sections:
-        for item in nodes(section, "div", "accordion-item"):
+        items = nodes(section, "div", "accordion-item")
+        if not items:
+            raise AdapterError("Funding section has no programme blocks", "parse")
+        for item in items:
             heading = one(nodes(item, "h2"), "funding accordion heading")
             body = one(nodes(item, "div", "accordion-body"), "funding body")
             blocks = []
@@ -451,28 +508,62 @@ def additional_programmes(main):
                 current = None
                 for child in body.walk():
                     if child.tag == "h3":
-                        current = [child.text(), []]
+                        current = [child.text(), [], []]
                         blocks.append(current)
                     elif child.tag == "p" and current is not None:
                         current[1].append(child.text())
+                    elif child.tag == "a" and current is not None:
+                        current[2].append(child.attrs.get("href", ""))
             else:
-                blocks.append([heading.text(), [body.text()]])
-            for name, paragraphs in blocks:
+                blocks.append([
+                    heading.text(), [body.text()],
+                    [link.attrs.get("href", "") for link in nodes(body, "a")],
+                ])
+            for name, paragraphs, links in blocks:
                 if name in found:
                     raise AdapterError("Repeated funding identity", "parse")
                 found.add(name)
                 if name in _EXCLUDED_FUNDING:
                     continue
-                if name not in _FUNDING_PROGRAMMES:
-                    raise AdapterError("Unreviewed named funding programme")
-                title, summary, required, countries, tags = _FUNDING_PROGRAMMES[
-                    name
-                ]
-                text = " ".join(paragraphs)
-                if any(fact not in text for fact in required):
+                targets = set()
+                for link in links:
+                    target = urllib.parse.urljoin(SOURCE_URL, link)
+                    parsed = urllib.parse.urlsplit(target)
+                    if (
+                        parsed.scheme not in ("http", "https")
+                        or not parsed.hostname
+                        or parsed.username
+                        or parsed.password
+                        or not link.strip()
+                    ):
+                        raise AdapterError("Invalid funding identity link", "parse")
+                    targets.add(urllib.parse.urldefrag(target)[0])
+                canonical = one(list(targets), "canonical funding programme link")
+                if (
+                    name in _FUNDING_PROGRAMMES
+                    and canonical not in _PROGRAMME_IDENTITIES
+                ):
                     raise AdapterError(
-                        "Reviewed funding conditions changed: " + name
+                        "Legacy programme canonical identity changed", "parse"
                     )
+                text = " ".join(paragraphs).strip()
+                if not name or len(name) > 300 or len(text) < 20:
+                    raise AdapterError("Incomplete named funding block", "parse")
+                reviewed = _FUNDING_PROGRAMMES.get(name)
+                supported = reviewed is not None and all(
+                    fact in text for fact in reviewed[2]
+                )
+                if supported:
+                    title, summary, _, countries, tags = reviewed
+                else:
+                    title = name
+                    summary = (
+                        "UCPH lists " + name + " among its external funding "
+                        "options for prospective students. Consult the official "
+                        "university entry for current programme and "
+                        "administrator information."
+                    )
+                    countries, tags = [], []
                 record = programme(
                     title,
                     heading.attrs["id"],
@@ -481,17 +572,24 @@ def additional_programmes(main):
                         "UCPH-published programme identity: " + name,
                         "External administrator; only this university's "
                         "published conditions are collected.",
-                        "No current dated application call is given here.",
+                        "Application terms are described in the official "
+                        "university entry.",
                     ],
                     countries=countries,
                 )
-                record["id"] = hashlib.sha256(
-                    (SOURCE_ID + "|programme|" + name).encode()
-                ).hexdigest()[:24]
+                record["id"] = _PROGRAMME_IDENTITIES.get(canonical) or (
+                    hashlib.sha256(
+                        (SOURCE_ID + "|programme-url|" + canonical).encode()
+                    ).hexdigest()[:24]
+                )
                 record["tags"] = tags
                 record["host_countries"] = []
                 record["location"] = None
-                if "University of Copenhagen" in text:
+                if not supported:
+                    record["classification"]["method"] = (
+                        "official-programme-listing"
+                    )
+                elif "University of Copenhagen" in text:
                     record["host_countries"] = ["DK"]
                     record["location"] = "University of Copenhagen, Denmark"
                 elif name == "Mackenzie King Open Scholarship":
@@ -507,8 +605,11 @@ def additional_programmes(main):
                         "other European destinations are unspecified."
                     )
                 records.append(record)
-    if found != set(_FUNDING_PROGRAMMES) | set(_EXCLUDED_FUNDING):
-        raise AdapterError("Reviewed funding inventory changed", "parse")
+    # This is a complete current inventory, not a permanent membership list.
+    # Retire removed programmes. New names and changed conditions retain
+    # minimal supported facts; both sections must remain substantive.
+    if not records:
+        raise AdapterError("Current named funding inventory is empty", "parse")
     return records
 
 
@@ -525,116 +626,45 @@ def scholarships(root):
     )
     text = government.text()
     required = (
+        "full tuition fee waivers",
+        "basic living expenses for 22 months",
         "automatically",
         "non-EU/EEA",
+        "outside the EU, EEA",
+        "Switzerland",
+        "admitted to a master’s degree programme",
         "time-limited residence permit",
-        "Faculty of Health and Medical Sciences",
-        "Faculty of Humanities",
-        "Faculty of Social Sciences",
-        "Faculty of Science",
-        "Faculty of Theology",
-        "22 months",
-        "90%",
-        "60 ECTS",
-        "GPA of 10 or higher",
-        "maximum three with the same nationality",
-        "less than four per year",
-        "generally 2-3 per year",
-        "September intake",
+        "rights of Danish citizens",
+        "State Educational Grant and Loan Scheme (SU)",
+        "§9c",
+        "§9m",
+        "financial need is not taken into consideration",
+        "Each year the University Management will decide which programmes",
+        "do not submit an individual application",
     )
     if any(term not in text for term in required):
         raise AdapterError("Reviewed scholarship conditions changed", "parse")
-    health = one(
-        [
-            n
-            for n in nodes(government, "div", "accordion-item")
-            if n.text().startswith("Faculty of Health and Medical Sciences")
-        ],
-        "Health scholarship conditions",
-    )
-    science = one(
-        [
-            n
-            for n in nodes(government, "div", "accordion-item")
-            if n.text().startswith("Faculty of Science")
-        ],
-        "Science scholarship conditions",
-    )
-    if not all(
-        "Scholarship for 2" in n.text() and "year students" in n.text()
-        for n in (health, science)
-    ):
-        raise AdapterError("Second-year scholarship cohorts missing", "parse")
     records = [
         programme(
             "UCPH Danish Government Scholarship for MA/MSc admission",
             "danish-government-scholarships",
-            "Automatic academic-merit consideration for eligible master's "
-            "applicants from outside the EU, EEA and Switzerland with a "
-            "time-limited study residence permit. "
-            "Awards provide tuition waivers and/or living support. Faculty "
-            "rules "
-            "vary; SCIENCE requires a first-priority application and "
-            "bachelor's "
-            "GPA above 90%. No separate scholarship application or dated call "
-            "is "
-            "published here; financial need does not determine selection.",
+            "Eligible master's applicants from outside the EU, EEA and "
+            "Switzerland are considered automatically for a limited number "
+            "of academic-merit scholarships. Awards cover full tuition and "
+            "basic living expenses for 22 months. UCPH selects participating "
+            "programmes annually; financial need is not a selection factor. "
+            "No separate scholarship application or current dated call is "
+            "published on this page.",
             [
                 "Eligibility: citizenship outside EU, EEA and Switzerland; "
-                "UCPH master's admission and temporary study residence permit.",
+                "UCPH master's admission and a temporary study residence "
+                "permit.",
                 "Exclusions: Danish-citizen rights, SU eligibility and the "
                 "specified Aliens Act section 9c/9m residence exception.",
-                "HEALTH: academically outstanding applicants; either tuition "
-                "alone or tuition and living costs; living support may be "
-                "taxed.",
-                "HUMANITIES: automatic consideration of eligible MA "
-                "applicants.",
-                "SOCIAL SCIENCES: September intake only; usually 2–3 "
-                "awards/year.",
-                "SCIENCE: first-priority MSc admission; bachelor's GPA above "
-                "90%; "
-                "tuition and living expenses for 22 months. 2025 minimum 98% "
-                "is historical.",
-                "THEOLOGY: partial tuition waiver only, usually fewer than "
-                "4/year; "
-                "fees must be paid before possible later reimbursement.",
-                "Yearless admission calendars are not scholarship deadlines.",
-            ],
-        ),
-        programme(
-            "UCPH HEALTH second-year master's scholarship",
-            one(nodes(health, "h2"), "Health heading").attrs["id"],
-            "Automatic annual consideration for fee-paying master's students "
-            "who completed their first year at UCPH HEALTH. Very limited "
-            "one-year awards; the best student may receive tuition and living "
-            "support. The faculty expects GPA 10 or higher on the Danish scale "
-            "and notifies recipients around mid-September/early October. "
-            "No exact current deadline is stated.",
-            [
-                "Distinct continuing-student cohort, not an admission award.",
-                "Publisher expects approximately 2 second-year awards/year; "
-                "capacity "
-                "does not create separate opportunities.",
-                "Source conditions: " + SOURCE_URL + "#" + health.attrs["id"],
-            ],
-        ),
-        programme(
-            "UCPH SCIENCE second-year master's scholarship",
-            one(nodes(science, "h2"), "Science heading").attrs["id"],
-            "Fee-paying UCPH SCIENCE students may receive second-year tuition "
-            "and living support after excellent first-year results. At least "
-            "60 ECTS must be registered by 1 September; exchange grades "
-            "receive "
-            "individual assessment. No more than 3 recipients share a "
-            "nationality. "
-            "Selected students are contacted in early September; fees already "
-            "paid for semester 3 are refunded. No dated application call is "
-            "stated.",
-            [
-                "Distinct continuing-student cohort, not an admission award.",
-                "2025 recipient GPA 11 or higher is historical, not a current "
-                "cutoff.",
-                "Source conditions: " + SOURCE_URL + "#" + science.attrs["id"],
+                "Programme selection is determined annually by University "
+                "Management; admission does not guarantee a scholarship.",
+                "A recipient must accept by the deadline in their offer; "
+                "this is not a public application deadline.",
             ],
         ),
     ]
@@ -2186,96 +2216,134 @@ _LEGACY_COLLECTION_OBSERVATION = None
 # Historical proof is finite; future proof additionally requires current code.
 _STARTUP_QUIET_UNTIL = None
 _RECOVERY_JOBS, _RECOVERY_RUNS, _HISTORY_COMPLETED = {}, {}, []
-_PREACCESS_ATTEMPTS = {41063528294: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               124088964387,
-               '2026-10-30T13:28:28Z',
-               '2026-10-30T13:28:56Z'),
- 41203520457: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               124543912180,
-               '2026-10-31T12:59:37Z',
-               '2026-10-31T13:00:02Z'),
- 41312673989: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               124866156361,
-               '2026-11-01T13:44:04Z',
-               '2026-11-01T13:44:31Z'),
- 41481969758: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               125402361721,
-               '2026-11-02T16:29:29Z',
-               '2026-11-02T16:30:05Z'),
- 41655466758: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               125984460048,
-               '2026-11-03T14:37:10Z',
-               '2026-11-03T14:37:40Z'),
- 41851561644: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               126648931932,
-               '2026-11-04T14:50:23Z',
-               '2026-11-04T14:50:58Z'),
- 42049734221: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               127322282243,
-               '2026-11-05T14:55:32Z',
-               '2026-11-05T14:56:04Z'),
- 42235021935: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               127950287027,
-               '2026-11-06T14:33:50Z',
-               '2026-11-06T14:34:16Z'),
- 42377177447: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               128417075576,
-               '2026-11-07T13:29:22Z',
-               '2026-11-07T13:29:49Z'),
- 42486700762: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               128750032533,
-               '2026-11-08T13:48:30Z',
-               '2026-11-08T13:49:02Z'),
- 42658481844: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               129303312821,
-               '2026-11-09T16:48:37Z',
-               '2026-11-09T16:49:23Z'),
- 42841803438: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               129918705814,
-               '2026-11-10T15:11:47Z',
-               '2026-11-10T15:12:32Z'),
- 43040709686: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               130591429388,
-               '2026-11-11T14:40:24Z',
-               '2026-11-11T14:41:05Z'),
- 43249065915: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               131289578926,
-               '2026-11-12T15:33:27Z',
-               '2026-11-12T15:34:17Z'),
- 43446837751: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               131958387016,
-               '2026-11-13T14:52:05Z',
-               '2026-11-13T14:52:43Z'),
- 43601343453: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               132466546300,
-               '2026-11-14T13:45:20Z',
-               '2026-11-14T13:45:55Z'),
- 43723372302: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               132839942369,
-               '2026-11-15T14:15:39Z',
-               '2026-11-15T14:16:12Z'),
- 43906352876: (1,
-               '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
-               133436133375,
-               '2026-11-16T16:20:20Z',
-               '2026-11-16T16:21:12Z')}
+_PREACCESS_ATTEMPTS = {
+    41063528294: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124088964387,
+        '2026-10-30T13:28:28Z',
+        '2026-10-30T13:28:56Z',
+    ),
+    41203520457: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124543912180,
+        '2026-10-31T12:59:37Z',
+        '2026-10-31T13:00:02Z',
+    ),
+    41312673989: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124866156361,
+        '2026-11-01T13:44:04Z',
+        '2026-11-01T13:44:31Z',
+    ),
+    41481969758: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        125402361721,
+        '2026-11-02T16:29:29Z',
+        '2026-11-02T16:30:05Z',
+    ),
+    41655466758: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        125984460048,
+        '2026-11-03T14:37:10Z',
+        '2026-11-03T14:37:40Z',
+    ),
+    41851561644: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        126648931932,
+        '2026-11-04T14:50:23Z',
+        '2026-11-04T14:50:58Z',
+    ),
+    42049734221: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        127322282243,
+        '2026-11-05T14:55:32Z',
+        '2026-11-05T14:56:04Z',
+    ),
+    42235021935: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        127950287027,
+        '2026-11-06T14:33:50Z',
+        '2026-11-06T14:34:16Z',
+    ),
+    42377177447: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        128417075576,
+        '2026-11-07T13:29:22Z',
+        '2026-11-07T13:29:49Z',
+    ),
+    42486700762: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        128750032533,
+        '2026-11-08T13:48:30Z',
+        '2026-11-08T13:49:02Z',
+    ),
+    42658481844: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        129303312821,
+        '2026-11-09T16:48:37Z',
+        '2026-11-09T16:49:23Z',
+    ),
+    42841803438: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        129918705814,
+        '2026-11-10T15:11:47Z',
+        '2026-11-10T15:12:32Z',
+    ),
+    43040709686: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        130591429388,
+        '2026-11-11T14:40:24Z',
+        '2026-11-11T14:41:05Z',
+    ),
+    43249065915: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        131289578926,
+        '2026-11-12T15:33:27Z',
+        '2026-11-12T15:34:17Z',
+    ),
+    43446837751: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        131958387016,
+        '2026-11-13T14:52:05Z',
+        '2026-11-13T14:52:43Z',
+    ),
+    43601343453: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        132466546300,
+        '2026-11-14T13:45:20Z',
+        '2026-11-14T13:45:55Z',
+    ),
+    43723372302: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        132839942369,
+        '2026-11-15T14:15:39Z',
+        '2026-11-15T14:16:12Z',
+    ),
+    43906352876: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        133436133375,
+        '2026-11-16T16:20:20Z',
+        '2026-11-16T16:21:12Z',
+    ),
+}
 _PREACCESS_SOURCE_BLOBS = {'5fd9fa82d5d2d5f0871aba653376765a6e00c897': 'e117a83f0f252c65c70802d8ff225abd0062f914'}
 _PREACCESS_WORKFLOW_BLOB = '46ebbf402db820d77d9f8e4aa6519d99469f496a'
 _RECOVERY_WORKFLOW_BLOBS = {_PREACCESS_WORKFLOW_BLOB}

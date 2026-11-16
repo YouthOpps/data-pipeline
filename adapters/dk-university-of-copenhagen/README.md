@@ -34,22 +34,22 @@ metadata; each record carries its source ID, canonical URL and evidence.
 
 ## Inventory and identifiers
 
-The government MA/MSc admission scholarship is one programme. Its HEALTH,
-HUMANITIES, SOCIAL SCIENCES, SCIENCE and THEOLOGY conditions do not create
-five duplicate awards. Faculty restrictions remain in classification evidence.
-Two separate second-year HEALTH and SCIENCE cohorts have different eligibility
-and annual allocation, so each has its own programme record. The detailed UCPH
-Fulbright study route is collected from this university's own page, not from
-the external administrator. Programme identifiers use canonical page anchors.
+The government MA/MSc admission scholarship is one central programme. The
+16 November captured university page replaces the former faculty-specific
+admission conditions and second-year HEALTH/SCIENCE cohorts with centralized
+selection, full tuition and 22 months of basic living support. It specifies
+eligible citizenship, master's admission and study residence, automatic
+consideration and annual university selection of participating programmes.
+The removed cohorts and their former GPA/faculty claims are not emitted.
+The detailed Fulbright study route is collected from this university's own
+page, not from the external administrator.
 
 | University programme/cohort | Actual anchor |
 |---|---|
 | Danish Government MA/MSc admission scholarship | danish-government-scholarships |
-| HEALTH second-year master's scholarship | accordion-heading-3850 |
-| SCIENCE second-year master's scholarship | accordion-heading-3851 |
 | Fulbright full-degree/guest study route | fulbright-scholarship |
 
-The same university page also publishes 22 substantive named external funding
+The same university page currently publishes 19 substantive named external funding
 programmes. They remain attributed to UCPH's own guidance, with external
 administration stated explicitly. No external provider endpoint is fetched.
 Their application dates and active call status are unknown here; that is not
@@ -73,7 +73,6 @@ accordion's country label.
 | Inlaks Shivdasani | accordion-heading-3831 | Indian citizen with undergraduate degree; tuition, living costs and one-way travel |
 | J. N. Tata Endowment | accordion-heading-3831 | Indian national; one-time repayable postgraduate/PhD/postdoctoral loan scholarship |
 | Lady Meherbai D. Tata | accordion-heading-3831 | Female Indian graduates; recognised home/overseas institution; may await admission |
-| Indonesian Education Scholarship | accordion-heading-3833 | Indonesian citizens; overseas master's; UCPH listed target |
 | CONACYT Mexican Scholarship | accordion-heading-3834 | Mexican citizens; monthly overseas graduate award, amount unspecified |
 | FUNED | accordion-heading-3834 | Mexican citizens; overseas master's in listed fields; funding terms unspecified |
 | Tamim bin Hamad | accordion-heading-3835 | Qatari citizens; overseas study; UCPH approved university |
@@ -82,14 +81,11 @@ accordion's country label.
 | FirstRand Laurie Dippenaar | accordion-heading-3838 | South African citizens; postgraduate study outside South Africa |
 | Jean Monnet | accordion-heading-3839 | Graduate study on Turkey's EU harmonisation/EU acquis; citizenship not stated |
 | Aga Khan Foundation | accordion-heading-3841 | Outstanding postgraduate applicants, selected developing countries, financial need; 50% grant/50% loan |
-| Women Techmakers | accordion-heading-3842 | Female identity; CS/engineering/related field; academic, leadership and community selection |
-| OFID Scholarship | accordion-heading-3843 | Developing-country students; development-related master's; tuition and monthly allowance |
 | Rotary Global Grants | accordion-heading-3844 | Local club nomination; generally rolling with possible local club deadlines |
 
-Source-supported host destinations are deliberately sparse. The Indonesian
-paragraph says "The University of Copenhagen is a listed target university."
-The Qatari paragraph says "University of Copenhagen is included in the list of
-approved universities." These explicitly support Denmark. Mackenzie King
+Source-supported host destinations are deliberately sparse. The Qatari
+paragraph says "University of Copenhagen is included in the list of
+approved universities." This explicitly supports Denmark. Mackenzie King
 allows "graduate studies in Canada or abroad"; Canada is a known possible host,
 with other overseas destinations unspecified. FES supports "postgraduate
 studies in Germany but also at European universities"; Germany is a known
@@ -118,10 +114,29 @@ Exclusions are complete for the inspected funding sections:
 | Scholarship databases section | section heading | Search/directory advice, not an award |
 | Funding-your-studies section | section heading | Budget/tuition guidance, not an award |
 
-The researched complete inventory is 26 programme records and 20 funded PhD
-advertisements (46 total). This is a checked current inventory, not a fallback
-or a hardcoded list of jobs. Changed/unreviewed funding blocks fail safely so
-new or changed programmes receive review rather than silent omission.
+The complete scholarship page captured on 16 November yields 21 programme
+overviews. This is partial source evidence: the original failed test stopped
+before collecting the current PhD inventory. The older 46-record research count
+is not a current completeness claim.
+
+Every named block in both substantive funding sections is enumerated. Reviewed
+conditions provide optional enrichment only while their supporting text remains
+present. New or changed blocks retain minimal original factual prose and unknown
+eligibility, host countries and deadlines rather than invented terms. Missing
+programmes retire from the next successful full replacement. Empty sections,
+missing substantive blocks, duplicate identities or missing/ambiguous programme
+links fail safely. Explicit directory, generic-lender and inactive-programme
+exclusions above remain in place.
+
+External programme IDs use their actual linked programme URL (without text
+fragments), never a new display-name hash. A fixed canonical-URL mapping preserves
+all 19 retained legacy IDs, verified against the previously published 45-record
+snapshot, Git blob `c7832532dd8536e65edae52c186d7c6d2f842441`. The legacy
+algorithm hashed source plus programme name; this repair does not silently
+migrate those existing IDs. University anchors remain the public record URLs,
+including shared country anchors. A title change at the same linked canonical
+programme URL keeps the ID. An unmapped URL for an existing legacy name stops
+for identity review instead of silently replacing its published ID. Validation runs after final identity assignment.
 
 Every server-rendered PhD table row is collected, with all public detail pages;
 any explicit next-page links are followed within the same reviewed PhD path.
@@ -155,7 +170,7 @@ source-specific overrides.
 
 Programme descriptions with no dated current application call retain null
 deadlines and unknown status. Academic-merit, citizenship, study residence,
-faculty enrolment and fee-paying conditions come from the publisher. The
+and any currently supported programme conditions come from the publisher. The
 Danish Government award excludes citizenship in EU, EEA and Switzerland;
 no arbitrary positive country list is invented from that exclusion.
 
@@ -629,3 +644,19 @@ native test. Any initial native failure and actual inputs must be retained for
 parser diagnosis before another separately reviewed attempt. Offline controls
 verify exact recovery, rejection cases, the original owned ZIP decoder, MAX
 preservation and the monotonic clock guard; they do not replace native evidence.
+
+
+### First recovery native outcome and semantic repair
+
+The first original test on source SHA-256
+`c91bdeafe8d9d2bd3037d487b2d2b7770838a98cd374d0e9d4cbc4f977b20da9`
+failed after two successful publisher responses with
+`Reviewed scholarship conditions changed`. Its original FAIL is immutable;
+complete response bodies, headers, physical timings, eight persistence attempts
+and stdout/stderr remain in the private RAM observer. No observer error occurred.
+The actual page revealed the central scholarship policy change and removal of
+Indonesian Education Scholarship, OFID and Women Techmakers from the external
+inventory. Offline replay of that complete page verifies the new 21-record
+scholarship subset, current consumer envelopes and stable retained identities.
+It does not certify the unvisited doctoral catalogue or a complete live test.
+A separate pre-run review is required before another genuine collection.
