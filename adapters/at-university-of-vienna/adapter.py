@@ -1287,6 +1287,123 @@ _ROBOTS = {}
 _REP_TARGETS = {}
 
 
+# Issue #371: exact pre-access failures retain the actual last owned state.
+_STARTUP_QUIET_UNTIL = None
+_RECOVERY_JOBS = {}
+_PREACCESS_WORKFLOW_BLOB = "46ee4ddba204f7e8d40991aebebcacd662364ba8"
+_RECOVERY_WORKFLOW_BLOBS = {"25e93bda8b0735e94e2e6bd00d89141de1a83821"}
+_PREACCESS_OWNER = (
+    39841138973, 1, "at-university-of-vienna",
+    "46fe9e001ccd2f684b6d4941dbb69bcbc63f598b",
+)
+_PREACCESS_ARTIFACT = (
+    12453611095,
+    "sha256:2688898d3538c8a8c351b55da2ba259eb3ae8a57463d5f3e2c0369b0ab7e9b2c",
+)
+_PREACCESS_SOURCE_BLOBS = {
+    "46fe9e001ccd2f684b6d4941dbb69bcbc63f598b": "7b8f70598c4648e1109b395ac9b9a958c58d012f",
+    "5fd9fa82d5d2d5f0871aba653376765a6e00c897": "cc9da6580240943fd8bb6a88ac6f0ac7ef45f030",
+}
+_PREACCESS_ATTEMPTS = {
+    40012430834: (
+        1, "46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", 120615917286,
+        "2026-10-23T19:34:15Z", "2026-10-23T19:34:23Z",
+    ),
+    40120431909: (
+        1, "46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", 120950585459,
+        "2026-10-24T18:22:54Z", "2026-10-24T18:23:16Z",
+    ),
+    40221853215: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 121254926071,
+        "2026-10-25T18:33:59Z", "2026-10-25T18:34:19Z",
+    ),
+    40398541837: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 121837930110,
+        "2026-10-26T20:45:59Z", "2026-10-26T20:46:20Z",
+    ),
+    40576370259: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 122443773620,
+        "2026-10-27T20:15:17Z", "2026-10-27T20:15:46Z",
+    ),
+    40764797847: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 123085924825,
+        "2026-10-28T20:36:33Z", "2026-10-28T20:36:53Z",
+    ),
+    40951107758: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 123719145375,
+        "2026-10-29T20:40:22Z", "2026-10-29T20:40:47Z",
+    ),
+    41121177209: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 124287569690,
+        "2026-10-30T20:10:54Z", "2026-10-30T20:11:07Z",
+    ),
+    41234847164: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 124636335020,
+        "2026-10-31T19:34:21Z", "2026-10-31T19:34:49Z",
+    ),
+    41344101294: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 124960114298,
+        "2026-11-01T19:54:32Z", "2026-11-01T19:54:53Z",
+    ),
+    41543750293: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 125614055312,
+        "2026-11-02T23:13:40Z", "2026-11-02T23:14:09Z",
+    ),
+    41720384056: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 126211277264,
+        "2026-11-03T21:17:09Z", "2026-11-03T21:17:42Z",
+    ),
+    41917253004: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 126880089841,
+        "2026-11-04T21:33:54Z", "2026-11-04T21:34:29Z",
+    ),
+    42114053871: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 127548851368,
+        "2026-11-05T21:35:44Z", "2026-11-05T21:36:08Z",
+    ),
+    42293899521: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 128154048747,
+        "2026-11-06T21:06:06Z", "2026-11-06T21:06:30Z",
+    ),
+    42407306474: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 128507677201,
+        "2026-11-07T19:39:55Z", "2026-11-07T19:40:27Z",
+    ),
+    42517776901: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 128844475755,
+        "2026-11-08T19:59:34Z", "2026-11-08T19:59:57Z",
+    ),
+    42723836817: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 129524272065,
+        "2026-11-09T23:51:49Z", "2026-11-09T23:52:19Z",
+    ),
+    42905118563: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 130140981168,
+        "2026-11-10T21:26:51Z", "2026-11-10T21:27:25Z",
+    ),
+    43110705529: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 130825644325,
+        "2026-11-11T22:18:56Z", "2026-11-11T22:19:43Z",
+    ),
+    43315007692: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 131520594309,
+        "2026-11-12T21:55:38Z", "2026-11-12T21:56:19Z",
+    ),
+    43512784390: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 132186966739,
+        "2026-11-13T21:40:32Z", "2026-11-13T21:41:20Z",
+    ),
+    43635933527: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 132572617631,
+        "2026-11-14T20:09:06Z", "2026-11-14T20:09:45Z",
+    ),
+    43759029367: (
+        1, "5fd9fa82d5d2d5f0871aba653376765a6e00c897", 132949391181,
+        "2026-11-15T20:36:25Z", "2026-11-15T20:37:08Z",
+    ),
+}
+
+
 _HISTORY_COMPLETED = []
 
 
@@ -1445,11 +1562,13 @@ def execution():
     global _INITIAL_SNAPSHOT_ATTEMPTED, _COLLECTION_LOCK_FD
     global _COLLECTION_LOCK_ID
     global _RESTORED, _STATE_TRUSTED, _LOCAL_FIRST_WIRE_VERIFIED
+    global _STARTUP_QUIET_UNTIL
     if _RUN_END is not None:
         raise AdapterError("Nested execution context refused", "access")
     if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
         raise AdapterError("Existing process alarm refused", "access")
     _RESTORED = _STATE_TRUSTED = _LOCAL_FIRST_WIRE_VERIFIED = False
+    _STARTUP_QUIET_UNTIL = None
     _ROBOTS.clear()
     _REP_TARGETS.clear()
     _REP_PROVENANCE.clear()
@@ -2480,7 +2599,7 @@ def production_maintenance_state(incoming):
             or approval["family"] != FAMILY
             or not isinstance(approval["evidence"], str)
             or not re.fullmatch(
-                r"https://github\.com/YouthOpps/data-pipeline/issues/320"
+                r"https://github\.com/YouthOpps/data-pipeline/issues/(?:320|371)"
                 r"#issuecomment-[1-9][0-9]*",
                 approval["evidence"],
             )
@@ -2491,6 +2610,130 @@ def production_maintenance_state(incoming):
         raise AdapterError(
             "Invalid full-native University of Vienna approval", "access"
         ) from None
+
+
+def recovery_contents(path, head, cache):
+    """Read immutable source evidence once per revision during this scan."""
+    key = (path, head)
+    if key not in cache:
+        item = workflow_api(f"/contents/{path}?ref={head}")
+        try:
+            if item.get("encoding") != "base64":
+                raise ValueError()
+            body = base64.b64decode(item["content"])
+            blob = hashlib.sha1(
+                b"blob " + str(len(body)).encode() + b"\0" + body
+            ).hexdigest()
+            if item.get("sha") != blob or not body:
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise AdapterError("Incomplete no-access code evidence", "access")
+        cache[key] = (blob, body)
+    return cache[key]
+
+
+def prove_no_publisher_access(row, cache):
+    """Require a finite historical proof or the exact current quiet code."""
+    finished, started, run_id, attempt, source, head = row
+    exact, jobs = _RECOVERY_JOBS[(run_id, attempt)]
+    if (
+        attempt != 1
+        or exact.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("conclusion") != "failure"
+        or not 0 <= finished - started < 58
+    ):
+        raise AdapterError("Missing state has no no-access proof", "access")
+    source_blob, source_bytes = recovery_contents(
+        "adapters/at-university-of-vienna/adapter.py", head, cache
+    )
+    workflow_blob, _ = recovery_contents(
+        ".github/workflows/fetch-at-university-of-vienna.yml", head, cache
+    )
+    pin = _PREACCESS_ATTEMPTS.get(run_id)
+    if pin is not None:
+        actual = (
+            attempt, head, jobs[0]["id"], jobs[0]["started_at"],
+            jobs[0]["completed_at"],
+        )
+        if (
+            actual != pin
+            or source_blob != _PREACCESS_SOURCE_BLOBS.get(head)
+            or workflow_blob != _PREACCESS_WORKFLOW_BLOB
+        ):
+            raise AdapterError("Historical no-access proof changed", "access")
+        return
+    with open(__file__, "rb") as source_file:
+        current_bytes = source_file.read()
+    if (
+        source_bytes != current_bytes
+        or workflow_blob not in _RECOVERY_WORKFLOW_BLOBS
+    ):
+        raise AdapterError("Unreviewed artifactless source revision", "access")
+
+
+def restoration_owner(latest):
+    """Cross only positively proved no-access attempts, never unknown gaps."""
+    rows = list(reversed(_HISTORY_COMPLETED))
+    if not rows or rows[0][2:] != latest:
+        raise AdapterError("Restoration chronology changed", "access")
+    skipped, cache = [], {}
+    for row in rows:
+        identity = row[2:]
+        run_id, attempt, source, head = identity
+        result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        artifacts = result.get("artifacts")
+        if (
+            not isinstance(artifacts, list)
+            or len(artifacts) > 100
+            or type(result.get("total_count")) is not int
+            or result["total_count"] != len(artifacts)
+            or any(not isinstance(item, dict) for item in artifacts)
+        ):
+            raise AdapterError("Incomplete recovery artifact inventory", "access")
+        matches = [item for item in artifacts if item.get("name") ==
+                   _ARTIFACT_NAME + "-" + str(attempt)]
+        if matches:
+            historical = {
+                item[2] for item in skipped if item[2] in _PREACCESS_ATTEMPTS
+            }
+            if (historical or identity == _PREACCESS_OWNER) and (
+                historical != set(_PREACCESS_ATTEMPTS)
+                or identity != _PREACCESS_OWNER
+                or len(matches) != 1
+                or (matches[0].get("id"), matches[0].get("digest"))
+                != _PREACCESS_ARTIFACT
+            ):
+                raise AdapterError("Incomplete historical recovery chain", "access")
+            return identity, result, max((item[0] for item in skipped), default=0)
+        if artifacts:
+            raise AdapterError("Unexpected artifactless attempt outputs", "access")
+        prove_no_publisher_access(row, cache)
+        skipped.append(row)
+    raise AdapterError("No actual owned publisher state remains", "access")
+
+
+def preserve_recovery_bounds(incoming, finished):
+    """Retain elapsed job bounds without fabricating publisher receipts."""
+    state = copy.deepcopy(validate_budget(incoming))
+    if finished:
+        state["not_before"] = max(
+            state["not_before"],
+            finished + max(state["interval"], state["page_interval"]),
+        )
+        state["observed_at"] = max(state["observed_at"], finished)
+    return validate_budget(state)
+
+
+def wait_startup_quiet():
+    """A wall-clock adjustment cannot shorten the first-access quiet floor."""
+    if _STARTUP_QUIET_UNTIL is None:
+        raise AdapterError("Publisher startup quiet is unproved", "access")
+    while time.monotonic() < _STARTUP_QUIET_UNTIL:
+        check_deadline()
+        time.sleep(max(0, min(1, _STARTUP_QUIET_UNTIL - time.monotonic())))
+
 
 
 def restored_state():
@@ -2507,8 +2750,8 @@ def restored_state():
         for row in _HISTORY_COMPLETED
     ):
         return production_maintenance_state(legacy_transition_state())
+    latest, result, recovery_bound = restoration_owner(latest)
     run_id, attempt, source, head = latest
-    result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
     artifacts = result.get("artifacts")
     if (
         not isinstance(artifacts, list)
@@ -2544,11 +2787,15 @@ def restored_state():
             "Invalid University of Vienna artifact binding", "access"
         )
     return production_maintenance_state(
-        download_inert_artifact(latest, artifact["id"], artifact["digest"])
+        preserve_recovery_bounds(
+            download_inert_artifact(latest, artifact["id"], artifact["digest"]),
+            recovery_bound,
+        )
     )
 
 
 def prepare_collection():
+    global _STARTUP_QUIET_UNTIL
     global _COLLECTION_STARTED, _STATE_TRUSTED, _COLLECTION_LOCK_FD, _RESTORED
     global _COLLECTION_LOCK_ID
     if _PUBLISHER_GATE_FAILED:
@@ -2593,6 +2840,7 @@ def prepare_collection():
         combined = merge_budgets(local, incoming, now)
         combined["not_before"] = max(combined["not_before"], now + 60)
         save_budget(combined)
+    _STARTUP_QUIET_UNTIL = time.monotonic() + 60
     _RESTORED = _STATE_TRUSTED = True
 
 
@@ -3413,6 +3661,7 @@ def request_bytes(
     if inventory:
         wait_inventory_page()
     pace()
+    wait_startup_quiet()
     request_headers = {
         k: v for k, v in (headers or {}).items() if k.lower() != "user-agent"
     }
@@ -3430,6 +3679,13 @@ def request_bytes(
         try:
             verify_journal()
             verify_collection()
+            if (
+                _STARTUP_QUIET_UNTIL is None
+                or time.monotonic() < _STARTUP_QUIET_UNTIL
+            ):
+                raise AdapterError(
+                    "Publisher startup quiet has not elapsed", "access"
+                )
             frame["started"] = True
             response = _OPENER.open(request, timeout=request_timeout(True))
         except urllib.error.HTTPError as error:
@@ -3816,12 +4072,14 @@ def completed_identity(run, expected=None):
         raise AdapterError(
             "Untrusted completed family jobs", "access"
         ) from None
+    _RECOVERY_JOBS[(run_id, attempt)] = (exact, jobs)
     return max(finished), min(began), *identity
 
 
 def scan_family_history():
-    global _HISTORY_COMPLETED, _HISTORY_JOBLESS
+    global _HISTORY_COMPLETED, _HISTORY_JOBLESS, _RECOVERY_JOBS
     _HISTORY_JOBLESS = []
+    _RECOVERY_JOBS = {}
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     current = current_run_identity() if hosted else None
     candidates, seen = [], set()
