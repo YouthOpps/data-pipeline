@@ -3143,8 +3143,54 @@ def secure_file(name, flags):
         raise
 
 
+def http_date_patterns():
+    """Complete HTTP date forms, including obsolete RFC850 and asctime."""
+    day = r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)"
+    weekday = r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+    month = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    clock = r"[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    return (
+        day + r", *[0-9]{2} " + month + r" [0-9]{4,} " + clock + r" GMT",
+        weekday + r", *[0-9]{2}-" + month + r"-[0-9]{2} " + clock + r" GMT",
+        day + " " + month + r" (?:[0-9]{2}| [0-9]) " + clock
+        + r" [0-9]{4,}",
+    )
+
+
+def parse_http_date(value, now):
+    """Reject email-parser prefixes; only HTTP asctime may imply UTC."""
+    form = next((index for index, pattern in enumerate(http_date_patterns())
+                 if re.fullmatch(pattern, value, re.I)), None)
+    if form is None:
+        return None
+    parsed = parsedate_to_datetime(value)
+    if form == 1:
+        year = int(re.search(r"-([0-9]{2}) ", value)[1])
+        reference = datetime.fromtimestamp(now, timezone.utc)
+        year += reference.year // 100 * 100
+        parsed = parsed.replace(year=year)
+        if (parsed.year, parsed.month, parsed.day, parsed.hour,
+                parsed.minute, parsed.second) <= (
+                    reference.year - 50, reference.month, reference.day,
+                    reference.hour, reference.minute, reference.second):
+            parsed = parsed.replace(year=year + 100)
+        if (parsed.year, parsed.month, parsed.day, parsed.hour,
+                parsed.minute, parsed.second) > (
+                    reference.year + 50, reference.month, reference.day,
+                    reference.hour, reference.minute, reference.second):
+            parsed = parsed.replace(year=parsed.year - 100)
+    if parsed.utcoffset() is None:
+        if form != 2:
+            return None
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed.utcoffset() != timedelta(0):
+        return None
+    return parsed
+
+
+
 def retry_after_until(value, now):
-    """Accept only a finite supported positive delay or aware future date."""
+    """Accept a finite positive delay or complete supported HTTP-date."""
     if not isinstance(value, str):
         return None
     try:
@@ -3152,11 +3198,10 @@ def retry_after_until(value, now):
         if re.fullmatch(r"[0-9]+", value):
             if len(value) > 10:
                 return None
-            delay = int(value)
-            until = now + delay
+            until = now + int(value)
         else:
-            parsed = parsedate_to_datetime(value)
-            if parsed.utcoffset() is None:
+            parsed = parse_http_date(value, now)
+            if parsed is None:
                 return None
             until = parsed.timestamp()
         if not numeric(until) or not now < until <= 253402300799:
@@ -3164,6 +3209,7 @@ def retry_after_until(value, now):
         return until
     except (ValueError, TypeError, OverflowError):
         return None
+
 
 
 def retain_publisher_hold():
@@ -4892,19 +4938,16 @@ def record_retry_after(value, status=None):
                     raise AdapterError("Unrepresentable rate hold", "access")
             header_error = None
             supported = []
-            date_pattern = (
-                r"[A-Za-z]{3},\s*[0-9]{1,2}\s+[A-Za-z]{3}\s+"
-                r"[0-9]{4}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+GMT"
-            )
+            date_pattern = "(?:" + "|".join(http_date_patterns()) + ")"
             for raw in values:
                 if isinstance(raw, str) and "," in raw and not re.fullmatch(
-                    date_pattern, raw.strip()
+                    date_pattern, raw.strip(), re.I
                 ):
                     # Preserve every independently recognized positive MAX,
                     # while ambiguous framing still prevents settlement.
                     supported.extend(match[1] for match in re.finditer(
                         r"(?:^|,\s*)(" + date_pattern
-                        + r"|[0-9]+)(?=\s*(?:,|$))", raw.strip()
+                        + r"|[0-9]+)(?=\s*(?:,|$))", raw.strip(), re.I
                     ))
                     header_error = AdapterError(
                         "Ambiguous Retry-After list", "access"
@@ -4928,13 +4971,12 @@ def record_retry_after(value, status=None):
                             )
                     else:
                         until = retry_after_until(text, now)
-                        if until is None and re.match(
-                            r"^[A-Za-z]{3},\s*[0-9]{1,2}\s+[A-Za-z]{3}\s+"
-                            r"[0-9]{4,}\s+[0-9:]+\s+GMT$", text
+                        if until is None and re.fullmatch(
+                            date_pattern, text, re.I
                         ):
                             try:
-                                parsed = parsedate_to_datetime(text)
-                                if parsed.utcoffset() is None:
+                                parsed = parse_http_date(text, now)
+                                if parsed is None:
                                     raise ValueError()
                                 parsed.timestamp()
                             except (ValueError, TypeError, OverflowError):
@@ -6254,11 +6296,11 @@ def journal_export_envelope(path, envelope, atomic=False, signal=False):
         output_identity(guard, identity)
         if (current.st_dev, current.st_ino) != identity:
             raise AdapterError("Final pacing artifact was replaced", "access")
-    except BaseException:
+    except BaseException as error:
+        primary = error
         journal_failure()
         raise
     finally:
-        primary = sys.exc_info()[1]
         errors = []
         failed = primary is not None or _PUBLISHER_GATE_FAILED
         if failed:
