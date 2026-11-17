@@ -329,8 +329,9 @@ The original failure in run41240102691 is supported by the exact owned guard
 from run41132970149 and the immutable pre-request admission callgraph. Later
 missing-artifact attempts require their own exact finite continuity proof.
 This correction alone does not authorize older-artifact fallback, real state
-initialization, publisher requests, workflow activation or publication. The
-current hosted handoff is OFF; historical and current native evidence retain
+initialization, publisher requests, workflow activation or publication. That
+correction alone left hosted handoff OFF; the separately reviewed final producer
+decision below authorizes transfer. Historical and current native evidence retain
 their own source/date attribution. No production or current-index success is
 claimed by an offline control.
 
@@ -389,7 +390,7 @@ The primary failure and pending state survive a secondary close failure; no
 assessment or completion is invented. The exclusive local initializer applies
 the same parent metadata safety and continuity checks before any state creation.
 
-### Actual native and OFF hosted transfer (#408)
+### Actual native and reviewed hosted transfer (#408)
 
 The first original test failed in owned-artifact restoration before any
 publisher request or journal write. Its unchanged3740-byte initial state and
