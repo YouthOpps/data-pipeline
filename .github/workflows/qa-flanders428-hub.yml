@@ -1,0 +1,36 @@
+name: Study in Flanders bounded diagnostic
+
+on:
+  push:
+    branches: [qa/428-flanders-hub]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: youthopps-studyinflanders-publisher-v1
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && !github.event.deleted && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Capture only robots and the admitted existing scholarship hub
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/flanders428/capture.py
+      - name: Retain exact diagnostics and carry-forward evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flanders428-bounded-research-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/flanders428-research/
+          if-no-files-found: error
+          retention-days: 7
