@@ -4,7 +4,7 @@ Standalone `pl-frse` adapter for [Fundacja Rozwoju Systemu Edukacji](https://www
 
 ## Discovery and coverage
 
-Each collection exhausts the advertised pages of the public [funding](https://www.frse.org.pl/finansowanie-projektow), [events](https://www.frse.org.pl/wydarzenia-i-szkolenia) and [competitions](https://www.frse.org.pl/konkursy) catalogues using their public history queries. Repeated, empty or excessive pagination fails collection. Funding and event details, current homepage call announcements, related call announcements and linked HTML rules are read dynamically. The general news archive and external aggregators are not enumerated.
+Each collection exhausts the advertised pages of the public [funding](https://www.frse.org.pl/finansowanie-projektow) and [competitions](https://www.frse.org.pl/konkursy) catalogues using their public history queries. The [events](https://www.frse.org.pl/wydarzenia-i-szkolenia) catalogue uses one consistent all-filter public calendar frontier, described below. Repeated, empty or excessive pagination fails collection. Funding and event details, current homepage call announcements, related call announcements and linked HTML rules are read dynamically. The general news archive and external aggregators are not enumerated.
 
 Jobs are separated by actual FRSE recruitment reference. Named competition anchors become separate opportunities, including the four [Erasmus+ anniversary calls](https://erasmusplus.org.pl/konkursy-40-lat-erasmus), with their independently applicable conditions and dates. Supporting catalogues and regulations are attached to actual calls rather than published as duplicate opportunities. Nomination-only awards, winner pages, charity activities and generic celebrations are excluded with diagnostics. The two available WorldSkills HTML overviews are retained with explicit external-condition limits; no WorldSkills origin is accessed.
 
@@ -158,8 +158,8 @@ stale, malformed or out-of-range 429 timing is not a new access hold, on any
 status. Genuine content refusals remain independent hard holds; valid longer
 timing is retained on every status.
 
-The optional schema-1 rate fields extend trusted older state without changing
-its family or clearing its blocked flag, starts, interval or embargo. A missing
+The finite schema-1 migration described below preserves the known owned
+state without clearing its blocked flag, starts, interval or embargo. A missing
 new-event count means no events observed **since this change**, not proof that
 no historical 429 occurred. The durable `legacy_rate_history_unknown` boolean
 defaults to true for old/missing state and merges with logical OR through
@@ -309,31 +309,55 @@ claim a fresh full-body replay from expired RAM or a new publisher request.
 
 Reference: https://github.com/YouthOpps/data-pipeline/issues/295
 
-These existing schemas do not add a durable pending-transaction marker here.
-If both the restrictive write and original-inode invalidation fail, a restart
-still needs the separate #273 protocol correction. This journal-ownership patch
-does not claim to resolve that broader historical persistence limitation.
+## Complete calendar frontier and durable continuity (#384)
 
+The implicit events HTML page and the explicit all-filter calendar do not have
+the same first page. Mixing the implicit first page with explicit subsequent
+pages repeated real cards and correctly failed completeness. Collection now
+reads the actual `PioroMyCalendar2` configuration and filter inputs, then starts
+at page 1 of that public GET calendar with the same parameters for every page.
+It follows the advertised contiguous frontier dynamically; active-page identity,
+filter context, total pages and unique card URLs must reconcile. The entry's
+separate static programme cards remain included. New advertised pages require
+no fixed-count update. Research reconciled 17 calendar links across five pages
+and 15 static programme links; those counts are evidence, not production caps.
 
-## Header-only HTTP 429 stop — issue #328
+The calendar request uses the declared YouthOppsBot identity and ordinary
+same-origin AJAX headers. Only unexpired anonymous session cookies actually
+issued by the public entry are held in RAM and sent to its exact calendar
+endpoint. No application/login route, constructor token, XSRF token, private API
+or browser identity is used. Redirects cannot forward the cookie elsewhere.
+Funding, competitions, governing materials, stable URL-derived identities,
+factual parsers and expiry/publication rules remain in scope.
 
-A received publisher HTTP 429 now stops after the existing header constraints
-are retained, before reading any response body. The response must close
-successfully before this intentional stop is assessed. A close or persistence
-failure follows the existing failure handling; they cannot establish a healthy
-collection. Previously retained holds, numeric MAX constraints, Retry-After
-and unknown history remain. An unread 429 body provides no new challenge
-classification.
+Schema 3 persists `in_flight=true` before every physical publisher request and
+before cached REP policy application. Full body assessment and successful
+response closure are required before settlement. TLS, incomplete body, unsafe
+policy parsing, storage or closure failures retain pending state or invalidate
+the original owned journal; another process cannot restore an older healthy
+artifact over that uncertainty. Current and legacy REP identities, genuine
+refusals, unknown historical access/rate provenance, all stronger MAX constraints
+and rolling physical history remain effective. Independent descriptor probes
+verify locks during their held scopes without hiding accidental unlocks by
+reacquiring them. The collection lifecycle lock remains continuously held.
 
-This paragraph supersedes earlier 429 body-inspection descriptions. This
-conditional repair preserves non-429 responses, REP selection, the full
-collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
-caps, workflow, state schema and finite migration markers. It does not add
-missing pending ownership or upgrade a legacy source to a modern continuity
-protocol.
+A received 429 first durably increases its physical/page gaps, event count and
+cooldown, then assesses at most 64 KiB of actual response evidence. A visible
+challenge retains an access hold as well as the timer. Ordinary assessed 429
+stops without another request; incomplete reading or closure remains pending.
+This replaces the header-only healthy settlement introduced by #328, which
+could not classify a challenge in an unread body.
 
-Private ordinary transport/state controls and protected normal-AST comparisons
-qualify this change. Earlier genuine native evidence retains its original code
-and date attribution; no new publisher collection, current factual review,
-complete native replay or production run is claimed. The maintainer alone owns
-workflow/state coordination and the maintenance rollout for issue #328.
+Only the exact six-key owned artifact 14252313258 from run 43918525358/1,
+including its ZIP, producer head and state digest, may use the legacy decoder.
+The local migration likewise requires the exact settled research journal bytes.
+The reviewed research transition conservatively unions all 22 actual starts,
+58 journal observations and existing owned constraints, including reservation
+history, and retains the separately assessed closed HTTP 500 provenance. Its
+historical failed research guard is never cleared. No unknown pending state is
+converted into permission. Future artifacts use the strict nine-key envelope
+with immutable producer head, source digest and canonical state digest.
+
+Validation and production handoff for #384 remain pending until the original
+complete native test, actual consumer/expiry checks and independent review have
+accepted the final implementation. Inert fault controls are not publisher runs.
