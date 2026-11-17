@@ -1517,13 +1517,20 @@ _REVIEWED_PRODUCER_WORKFLOW_BLOB = "975382b0944037179bb0f2afa04f7c52ff427592"
 # Actual complete job log in issue #377: workflow_api escaped main's restore
 # before run_body; hosted publisher paths never invoke workflow_api. The 66s
 # job is NOT eligible through the generic short-job proof.
-_RESTORE_FAILURE_PIN = (
-    44037339739, 133883275366,
-    "2026-11-17T07:15:50Z", "2026-11-17T07:16:56Z",
-    "a7848b58f5f94aaab04793e51898a2cfc711c5de",
-    "773765061f007e091baa9f246378a39ad46da7d7",
-    "975382b0944037179bb0f2afa04f7c52ff427592",
-)
+_RESTORE_FAILURE_PINS = {
+    44037339739: (
+        133883275366, "2026-11-17T07:15:50Z", "2026-11-17T07:16:56Z",
+        "a7848b58f5f94aaab04793e51898a2cfc711c5de",
+        "773765061f007e091baa9f246378a39ad46da7d7",
+        "975382b0944037179bb0f2afa04f7c52ff427592",
+    ),
+    44039351512: (
+        133889875506, "2026-11-17T07:31:26Z", "2026-11-17T07:32:28Z",
+        "c853a8fb2b44ccd2634ccd1d0d91dff0428bee05",
+        "c575d3fac782d3ec6335138e136cd42122de46dc",
+        "975382b0944037179bb0f2afa04f7c52ff427592",
+    ),
+}
 _NO_ACCESS_ATTEMPTS = {
     41114084843: (
         124263659344,
@@ -3195,9 +3202,11 @@ def workflow_api(path):
     # Never include query strings, response bodies, signed URLs or credentials.
     route = re.sub(r"[^a-zA-Z0-9_./-]", "?", route)[:160]
     detail = "transport unavailable"
+    final_status = None
     for attempt in range(3):
         check_deadline()
         retry = False
+        final_status = None
         delay = attempt + 1
         try:
             separator = "&" if "?" in path else "?"
@@ -3205,6 +3214,7 @@ def workflow_api(path):
                 _WORKFLOW_GITHUB + path + separator + "_fresh="
                 + str(time.time_ns()), headers=headers,
             )
+            final_status = status
             detail = "HTTP " + str(status)
             for key in ("X-RateLimit-Remaining", "X-RateLimit-Reset"):
                 value = response_headers.get(key, "")
@@ -3237,7 +3247,7 @@ def workflow_api(path):
         time.sleep(delay)
     raise AdapterError(
         "Workflow pacing state unavailable: " + route + " " + detail,
-        "access",
+        "access", final_status,
     )
 
 
@@ -4900,7 +4910,9 @@ def main():
                 export_family_artifact()
 
 
-def verified_code_identity(head, source_blob, workflow_blob):
+def verified_code_identity(
+    head, source_blob, workflow_blob, *, optional=False
+):
     """Bind immutable source and the sole reviewed production command."""
     key = (head, source_blob, workflow_blob)
     if key in _IMMUTABLE_CODE_PROOFS:
@@ -4909,7 +4921,14 @@ def verified_code_identity(head, source_blob, workflow_blob):
         ("adapters/bg-feba-alumni/adapter.py", source_blob),
         (".github/workflows/fetch-bg-feba-alumni.yml", workflow_blob),
     ):
-        value = workflow_api("/contents/" + path + "?ref=" + head)
+        try:
+            value = workflow_api("/contents/" + path + "?ref=" + head)
+        except AdapterError as error:
+            if optional and error.status == 404:
+                # An absent historical file cannot establish this proof.
+                # Keep the run in ancestry; never omit it or select fallback.
+                return False
+            raise
         if value.get("sha") != expected:
             return False
     _IMMUTABLE_CODE_PROOFS.add(key)
@@ -4929,10 +4948,10 @@ def proven_no_access_attempt(run, jobs):
     ):
         return False
     pin = _NO_ACCESS_ATTEMPTS.get(run["id"])
-    restore_failure = run["id"] == _RESTORE_FAILURE_PIN[0]
+    restore_failure = _RESTORE_FAILURE_PINS.get(run["id"])
     if restore_failure:
-        _, job_id, start, end, head, source_blob, workflow_blob = (
-            _RESTORE_FAILURE_PIN
+        job_id, start, end, head, source_blob, workflow_blob = (
+            restore_failure
         )
         if (
             run["head_sha"] != head
@@ -4974,7 +4993,8 @@ def proven_no_access_attempt(run, jobs):
             prefix + raw, usedforsecurity=False
         ).hexdigest()
         if not verified_code_identity(
-            run["head_sha"], current_blob, _REVIEWED_PRODUCER_WORKFLOW_BLOB
+            run["head_sha"], current_blob, _REVIEWED_PRODUCER_WORKFLOW_BLOB,
+            optional=True,
         ):
             return False
         current = workflow_api(
