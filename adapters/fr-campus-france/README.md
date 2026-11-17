@@ -295,7 +295,25 @@ both taxonomy guards and conservative peers, all three HTTP-date forms, framing,
 transport/body/close/persistence faults, original main proof/restore/export,
 source-bound one-use initialization and outside success/launch boundaries.
 Current website-consumer positive, empty, expired and wrong-source readiness
-uses explicitly synthetic records. Such controls authorize no live initializer,
-native test, workflow activation or publication. A fresh original native with
-complete retained output/body replay and independent review remains a separate
-gate before production recovery.
+initially used explicitly synthetic records. The first original test invocation
+stopped on extra harness arguments before its test method could run. The
+unchanged source and sole test were then exercised with the corrected observer,
+which tracked the adapter module imported by the test itself.
+
+The original non-publishing test on 17 November 2026 collected 379 records in
+eight complete physical responses and five logical reads. The website consumer
+accepted all 379 current records. Full replay of the captured logical bodies
+reproduced the material records, and all 19 acknowledged journal writes matched
+their requested bytes. No actual record in this collection was expired; the
+observer also exercised the valid empty consumer case. The minimum physical and
+inventory gaps were 12.206 and 30.009 seconds, with at most five starts in a
+rolling minute.
+
+The hosted floor preserves 63 distinct observations: the prior 47, eight
+durable reservations, and eight actual physical starts. The retained local
+journal has four rolling starts after pruning; it is not the source of the full
+history by itself. This floor retains existing unknown history, the strongest
+scalar constraints and the last settled owner. The local initializer grant is
+disabled in the hosted change. Production requires a separate maintainer
+decision and the usual oldest-to-newest ownership checks against the latest
+authenticated predecessor.
