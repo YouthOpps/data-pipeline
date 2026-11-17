@@ -1,0 +1,26 @@
+{
+  "first_attempt": 1,
+  "inputs": {
+    ".github/workflows/qa-google407-native.yml": "efa6750a230b9cb9f1bec6333b18e275ee954e1bc16574237248e0c64a8ab4b2",
+    "adapters/google/test_adapter.py": "a2b9bd3968a995c0f906fc790ab2ad70ab5469eeba17da7a755a42ed9d6bf718",
+    "qa/google407/consumer.mjs": "46df266915222a1b37a2b07dd8d4e1b7634f157b2e69458af61e57bb8547641f",
+    "qa/google407/observer.py": "829de58293e494d21d8218594c55096f91ed4ff05561b8b80b974ad40eb814d2",
+    "qa/google407/producer-history.json": "90fb5508168b77b7721774c273c0fc5e1a4dab3c248ab71f2f764cd245024f6a",
+    "qa/google407/reviewer.pem": "ce84819165a40aaff50de4af170885c58425416dec1a91eeceeb83acae179252",
+    "qa/google407/runner.py": "f58577973ca06e07c1a1bc15297b314d8280c3033da41230751060ea3ad13eaf",
+    "qa/google407/settlement-witness.json": "ea943e2190dcf8cd8ad2d23fa55794bd8ba79a8253ee8a052c94a3882dcbc49e"
+  },
+  "issue": 407,
+  "maintainer_account": 12278069,
+  "observations": 126,
+  "original_native3_packet_sha256": "a431a40b69b08aafa7f680ac19fdab5becc67805894aa174cfac00ed9d5b5be2",
+  "original_producer_artifact": 14284968983,
+  "original_producer_attempts": 42,
+  "original_producer_run": 43985597132,
+  "original_producer_workflow": 380770427,
+  "original_producer_zip_sha256": "5867da89e99ad5b2271766ca81461a3b0cf3990e0510a26ea311adeb37b92403",
+  "ref": "refs/heads/qa/google407-native",
+  "repository": "YouthOpps/data-pipeline",
+  "settled_state_sha256": "51baddd79def7327680acd9045cb2ecd4f5557088860c6d3546c2f26dc235bf1",
+  "website_revision": "4050f1787492d39943dfbdc479e99f443f6380d0"
+}

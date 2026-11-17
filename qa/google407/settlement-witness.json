@@ -1,0 +1,11 @@
+{
+  "child_exit": 0,
+  "logical_owner": "e1aeb891132854a02ca52caa96bbe976",
+  "observations": 126,
+  "physical_receipt": "f6d914f92dc3028a0943d1a8face61ff",
+  "proof_sha256": "86089d0d3aa73ec5b8b75d6fc9781d8f2cbaad31af1e7103a1fd657cca94347d",
+  "publisher_http": 0,
+  "qualified_success": true,
+  "root_witness_sha256": "bfb35c34119027ac7e848a9c7aa880ef747f43151a4859192cdf3f1ecfb7e18f",
+  "state_sha256": "51baddd79def7327680acd9045cb2ecd4f5557088860c6d3546c2f26dc235bf1"
+}
