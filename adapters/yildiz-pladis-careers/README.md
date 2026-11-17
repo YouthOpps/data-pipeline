@@ -302,3 +302,24 @@ completion timestamp or pacing receipt. In particular, GitHub can populate
 `run_started_at` for an actually jobless queued run, so that field is not used as
 proof of publisher execution. The observed IBM queued metadata established only
 API shape; it grants no access or history exception to this Workday source.
+
+### First production failure diagnostics
+
+Automatic run `44077427023` failed before its first source publication. Its
+verified owned artifact `14325167809` retains state digest
+`39d0a7f13d0f30d13b614cb65eebb9a41f21e36090bff0902b0c8b2498deb870`:
+settled pending flag, no additional refusal events, and all original restrictions.
+No data or failure metadata pair existed. The original generic error concealed
+the collection exception; these facts do not establish a particular HTTP or
+parsing cause. This artifact, rather than the older local native state, remains
+the authoritative hosted continuation input.
+
+Failures now emit one bounded JSON diagnostic to stderr even before the first
+successful publication. It identifies the phase, exception class, authored
+validation message, and (when a source request exists) native job ID, URL digest,
+actual HTTP status and bounded response-body digest. External exception messages,
+raw bodies, URLs, authorization values and signed artifact links are withheld.
+Failed refresh metadata uses the same safe error details when last-good data
+exists. No partial first snapshot is published; the original exception still
+fails the job and the owned pacing export runs unchanged. Diagnostics add no
+requests, retries, state reset or continuation exception.

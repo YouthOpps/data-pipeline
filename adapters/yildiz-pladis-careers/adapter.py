@@ -78,6 +78,38 @@ def require(condition, message):
         raise ScopeError(message)
 
 
+def failure_details(error):
+    """Expose authored validation messages, never external exception payloads."""
+    kind = type(error).__name__
+    if re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,63}', kind) is None:
+        kind = 'Exception'
+    message = 'External exception details withheld'
+    if type(error) is ScopeError:
+        value = str(error)
+        secrets = [
+            os.environ.get(name, '')
+            for name in ('GITHUB_TOKEN', 'DATA_SOURCE_TOKEN', 'GH_TOKEN')
+        ]
+        if (re.fullmatch(r'[A-Za-z][A-Za-z0-9 /;.,()-]{0,239}', value) and
+                not any(secret and secret in value for secret in secrets)):
+            message = value
+        else:
+            message = 'Validation details withheld'
+    return {'type': kind, 'message': message}
+
+
+def report_failure(stage, error, transport=None):
+    """One bounded JSON stderr line; stdout remains the native result only."""
+    report = {
+        'event': 'refresh_failed',
+        'stage': stage,
+        **failure_details(error)
+    }
+    if transport is not None:
+        report['request'] = getattr(transport, 'diagnostic', None)
+    print(json.dumps(report, ensure_ascii=True), file=sys.stderr, flush=True)
+
+
 def finite(value):
     return type(value) in (float, int) and math.isfinite(value) and value >= 0
 
@@ -566,6 +598,14 @@ class Transport:
         self.check()
         state = self.journal.load()
         admit(state, url)
+        self.diagnostic = {
+            'url_sha256': digest(url.encode()),
+            'status': None,
+            'body_sha256': None
+        }
+        native_id = re.search(r'_(JR[0-9]+(?:-[0-9]+)?)$', url)
+        if native_id and len(native_id.group(1)) <= 80:
+            self.diagnostic['native_id'] = native_id.group(1)
         robots = url == ORIGIN + '/robots.txt'
         inventory = url == SITEMAP
         prior = copy.deepcopy(state)
@@ -633,6 +673,8 @@ class Transport:
 
                 with Closure():
                     status = response.status
+                    self.diagnostic['status'] = status if type(
+                        status) is int else None
                     now = self.time.time()
                     state['observed_at'] = now
                     if status == 429:
@@ -669,6 +711,7 @@ class Transport:
                         len(body) <= 4194304 and
                         (declared is None or len(body) == declared),
                         'Incomplete/oversized response remains pending')
+                    self.diagnostic['body_sha256'] = digest(body)
                     text = body.decode('utf-8', errors='strict')
                     if visible_refusal(text,
                                        human_only=(robots and
@@ -1140,13 +1183,17 @@ def successful_refresh(fresh, previous, now):
 
 def collect_body(transport):
     """Read every advertised job, then reconcile inventory before returning."""
+    transport.collection_stage = 'robots'
     transport.request(ORIGIN + '/robots.txt')
+    transport.collection_stage = 'opening_inventory'
     _, inventory = transport.request(SITEMAP)
     urls = sitemap_urls(inventory, transport.journal.load())
     records = []
     observed = {}
     for url in urls:
+        transport.collection_stage = 'detail_request'
         _, text = transport.request(url)
+        transport.collection_stage = 'detail_parse'
         checked_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         identifier, record = parse_job(text, url, checked_at)
         # Multiple URLs with one native ID require publisher-level evidence;
@@ -1156,6 +1203,7 @@ def collect_body(transport):
         observed[identifier.lower()] = url
         if record is not None:
             records.append(record)
+    transport.collection_stage = 'closing_inventory'
     _, closing = transport.request(SITEMAP)
     closing_urls = sitemap_urls(closing, transport.journal.load())
     require(
@@ -1527,11 +1575,12 @@ def metadata(records, attempt, previous=None, error=None):
                       last_success_at=attempt,
                       error=None)
         result.pop('failure_stage', None)
+        result.pop('error_type', None)
     else:
         result.update(status='fail',
                       message='Refresh failed; last-good data retained',
-                      error=(str(error)[:240] if isinstance(error, ScopeError)
-                             else type(error).__name__),
+                      error=failure_details(error)['message'],
+                      error_type=failure_details(error)['type'],
                       failure_stage='collection')
     return result
 
@@ -2334,7 +2383,12 @@ def publish():
     http = HostedHTTP(time.monotonic() + 3300)
     workflow_output(False)
     owned = OwnedExport()
-    transport, history = prepare_hosted(http)
+    try:
+        transport, history = prepare_hosted(http)
+    except Exception as error:
+        report_failure('hosted_preparation', error)
+        raise ScopeError(
+            'Hosted preparation failed; see safe diagnostic') from None
     snapshot = None
     stage = 'publication_snapshot'
     attempt = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -2353,6 +2407,7 @@ def publish():
         stage = 'collection'
         fresh = collect_body(transport)
         now = datetime.datetime.now(datetime.timezone.utc)
+        stage = 'normalization'
         records = successful_refresh(fresh, previous, now)
         status = metadata(records, attempt, previous_meta)
         stage = 'publication'
@@ -2364,6 +2419,9 @@ def publish():
                     json.dumps(status, ensure_ascii=False, indent=2) + '\n'
             })
     except Exception as error:
+        if stage == 'collection':
+            stage = getattr(transport, 'collection_stage', stage)
+        report_failure(stage, error, transport)
         if snapshot is not None and snapshot['files']['data.json'] is not None:
             try:
                 previous_meta = json.loads(snapshot['files']['metadata.json'])
@@ -2379,9 +2437,8 @@ def publish():
                             json.dumps(status, ensure_ascii=False, indent=2) +
                             '\n'
                     })
-            except Exception:
-                print('Refresh failed; durable failure status was not saved',
-                      file=sys.stderr)
+            except Exception as status_error:
+                report_failure('failure_metadata_publication', status_error)
         raise ScopeError('Refresh failed; last-good data retained') from None
     finally:
         # Valid unresolved/held states are exported too: the next run must stop
