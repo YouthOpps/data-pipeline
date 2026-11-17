@@ -2573,6 +2573,13 @@ def physical_request_bytes(
         raise AdapterError("Explicit infrastructure transport required",
                            "access")
     if infrastructure:
+        infrastructure_url(url)
+        if host != "api.github.com":
+            if method != "GET" or payload is not None:
+                raise AdapterError("Signed artifact requires public GET",
+                                   "access")
+            headers = {key: value for key, value in (headers or {}).items()
+                       if key.lower() != "authorization"}
         if publisher:
             raise AdapterError("Publisher cannot use metadata purpose",
                                "access")
@@ -3400,18 +3407,7 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                 raise ValueError("Expected artifact redirect")
             destination = response.headers.get("Location", "")
             response.read(1001)
-        parsed = urllib.parse.urlsplit(destination)
-        if (parsed.scheme != "https" or not parsed.hostname or
-                parsed.username or parsed.password or parsed.port or
-                "." not in parsed.hostname or parsed.hostname.endswith(
-                    (".local", ".internal", ".localhost"))):
-            raise ValueError("Unsafe artifact URL")
-        try:
-            ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            pass
-        else:
-            raise ValueError("Literal artifact address")
+        infrastructure_url(destination, storage_only=True)
         status, _, body = request_bytes(destination, byte_limit=32768)
         if (status != 200 or len(body) > 32768 or not isinstance(digest, str) or
                 not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or
@@ -3609,6 +3605,30 @@ def prepare_collection():
     restore_family_artifact()
 
 
+def infrastructure_url(value, *, storage_only=False):
+    """Admit only GitHub API or its supported signed artifact storage."""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        host = parsed.hostname or ""
+        labels = host.split(".")
+        storage = host.endswith((
+            ".blob.core.windows.net", ".actions.githubusercontent.com"))
+        if (parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.netloc.lower() != host
+                or parsed.port is not None or parsed.fragment
+                or re.search(r"[\x00-\x20\\]", value)
+                or any(not re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?", label)
+                       for label in labels)
+                or not (storage or not storage_only
+                        and host == "api.github.com")):
+            raise ValueError("Untrusted infrastructure destination")
+    except (ValueError, TypeError):
+        raise AdapterError("Untrusted GitHub infrastructure destination",
+                           "access") from None
+    return value
+
+
 def infrastructure_request_bytes(url,
                                  method="GET",
                                  headers=None,
@@ -3616,13 +3636,16 @@ def infrastructure_request_bytes(url,
                                  byte_limit=30000000):
     """Retain the existing bounded GitHub API and signed-ZIP transport."""
     headers = {"User-Agent": _USER_AGENT, **(headers or {})}
-    current = url
+    current = infrastructure_url(url)
+    storage_only = urllib.parse.urlsplit(current).hostname != "api.github.com"
+    if storage_only:
+        if method != "GET" or payload is not None:
+            raise AdapterError("Signed artifact requires public GET", "access")
+        headers = {key: value for key, value in headers.items()
+                   if key.lower() != "authorization"}
     for redirect in range(6):
         check_deadline()
-        if (urllib.parse.urlsplit(current).hostname or "").rstrip(".") in (
-                _PUBLISHER_HOSTS):
-            raise AdapterError("Publisher cannot use infrastructure transport",
-                               "access")
+        infrastructure_url(current, storage_only=storage_only)
         request = urllib.request.Request(current,
                                          data=payload,
                                          headers=headers,
@@ -3650,20 +3673,10 @@ def infrastructure_request_bytes(url,
         if status in (301, 302, 303, 307, 308):
             if not location or redirect == 5:
                 raise AdapterError("Invalid redirect chain", "access")
-            destination = urllib.parse.urljoin(current, location)
-            old, new = urllib.parse.urlsplit(current), urllib.parse.urlsplit(
-                destination)
-            if new.scheme != "https" or new.username or new.password:
-                raise AdapterError("Unsafe authenticated redirect", "publish")
-            if new.netloc != old.netloc:
-                headers = {
-                    k: v
-                    for k, v in headers.items()
-                    if k.lower() != "authorization"
-                }
-            if urllib.parse.urlsplit(url).hostname == "api.github.com":
+            if not storage_only:
                 raise AdapterError("Unexpected GitHub API redirect", "publish")
-            current = destination
+            destination = urllib.parse.urljoin(current, location)
+            current = infrastructure_url(destination, storage_only=True)
             continue
         return status, response_headers, body
     raise AdapterError("Unresolved infrastructure redirect", "access")

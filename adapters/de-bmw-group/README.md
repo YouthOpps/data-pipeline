@@ -94,6 +94,14 @@ complete capture digests remain in provenance. Missing historical access,
 hold and 429 information stays explicitly unknown. No unknown owner, missing
 artifact, different legacy journal or pending modern state receives a fallback.
 
+The artifact API redirect is accepted only to an HTTPS subdomain of
+`blob.core.windows.net` or `actions.githubusercontent.com`. Every subsequent
+storage hop must remain within those supported signed-storage families.
+Credentials, explicit ports, trailing-dot hosts, deceptive suffixes and other
+public publisher hosts are rejected before their destination request. Ordinary
+infrastructure API calls use only `api.github.com` and cannot follow redirects.
+Storage requests carry no API authorization header.
+
 New owned artifacts have nine strict keys: the existing ownership fields plus
 producer head, adapter digest and state digest. Restoring them authenticates
 both the immutable producer source and the complete state. Partial writes,
