@@ -133,6 +133,20 @@ Excluded with source provenance:
 
 Unexpected changes to reviewed programme conditions or inventory fail parsing
 rather than publishing outdated amounts/eligibility or silently dropping awards.
+
+The international scholarship page uses a reviewed set of 16 programme and
+information cards. The adapter checks each card's facts and linked destinations,
+and validates the 14 existing programme records against their own cards. Card
+placement, generic link captions and known publication timestamps can change
+independently of the facts. Changes to shared guidance, eligibility, award
+amounts, application destinations or card membership require review. Review
+occurs during page reads so a changed page stops the remaining collection.
+
+The Japanese and Visegrad information cards refer to programmes already
+represented through the dedicated detail and foundation routes. The IWM,
+Gerda Henkel and Open Society Fund cards point to broader funding information.
+The Baden-Württemberg-Stipendium card identifies a scholarship overview with
+no dated call. The reviewed records from this page retain their existing scope.
 The factual summaries are protected by hashes of their actual scoped publisher
 content (tracking/navigation excluded; changing footer timestamps ignored).
 Changing a funding condition requires a fresh source review and adapter update.
