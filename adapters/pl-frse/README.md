@@ -404,3 +404,16 @@ the named journal with a valid older file or modifying its contents in place
 cannot make restoration adopt weaker state. The failure remains sticky and
 leaves the replacement untouched; existing pending state refuses before any
 metadata request.
+
+The complete captured discovery graph requires 106 content requests and six
+origin robots checks. Replaying all captured inputs yields 69 raw records,
+61 current records and eight expired records. This is offline evidence, not a
+successful complete native run: the earlier observable native stopped at its
+remaining-budget guard after 96 responses; the first attempt is unverifiable.
+Measured response durations, unchanged 12.2-second request spacing and
+30-second inventory spacing predict about 1,900 seconds including startup.
+Collection now has a 2,400-second bound; the whole run has 2,790 seconds,
+retaining the existing publication, failure-state and export reserves. The
+Actions job allows 55 minutes. The 120-second physical-request reserve, all
+pacing constraints and complete-frontier rejection remain unchanged. These
+bounds do not permit truncation or guarantee success if the source grows.
