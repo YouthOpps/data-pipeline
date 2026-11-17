@@ -1,0 +1,44 @@
+name: qa-tartu419-native
+on:
+  push:
+    branches: [qa/tartu419-native]
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: youthopps-ee-university-of-tartu-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  native:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/tartu419-native' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: fe54fa839233f34973991584567408acae269487
+          path: qa-website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run unchanged original Tartu collection without publication
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/tartu419/runner.py
+      - name: Retain distinct QA state and derived checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tartu-native-qa-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/tartu-native-qa/
+          if-no-files-found: error
+          retention-days: 30
