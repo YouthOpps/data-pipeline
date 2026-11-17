@@ -391,7 +391,18 @@ verification challenge retains a durable access hold as well as the cooldown.
 Body-read and response-close failures retain the pending owner and cannot enter
 the connection retry. The embargo
 includes at least 1,800 seconds, exponentially increased for observed repeat
-strikes, any longer valid header and all stronger retained constraints.
+strikes, the maximum of every observed Retry-After field and all stronger
+retained constraints. Known status restrictions are saved before header parsing;
+positive unrepresentable timing retains pending state. Successful robots200
+requires one explicit plain-text representation and no HTML body, including
+valid-looking policy lines embedded in HTML. Valid empty and comment-only plain
+policies remain supported. Local collection requires an existing retained family
+namespace; whole-directory loss cannot bootstrap an older remote budget.
+The original journal inode and byte generation remain pinned across metadata
+restoration; replacement or in-place modification stops before publisher access.
+Infrastructure traffic is restricted to the GitHub API and supported signed
+artifact-storage origins. Artifact targets are checked before any destination
+request, and storage requests carry neither API authorization nor cookies.
 Technical body, TLS, storage or policy assessment failures retain unresolved
 pending state and prevent a retry or healthy export. Ordinary typed
 pre-response connection failures retain the original two-attempt bound. A
