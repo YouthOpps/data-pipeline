@@ -24,7 +24,9 @@ A successful refresh atomically replaces only `datas/youth-for-europe/data.json`
 
 ## Run and validate
 
-Python 3.12+, standard library only; the folder can be copied and run independently.
+Python 3.12+ and the standard library are sufficient for the standalone adapter.
+Run live publisher collection and the original test through the reviewed
+GitHub Actions workflow.
 
 ```sh
 python -B adapters/youth-for-europe/test_adapter.py
@@ -111,23 +113,32 @@ match the first exact native IDs, titles, URLs and types. Count/page consistency
 duplicates or changed closing coverage fail rather than publish a partial index.
 No safe incremental cursor is established, so every run reconciles the full scope.
 
-The approved bounded research on 15 October 2026 fetched only current robots and
-one global browse page (both 200), confirming one page with six distinct projects
-and a native page size of 20. These are observations, never hardcoded limits.
-The complete current path is approximately nine base requests: robots, both
-browse frontiers and all six details. Future counts and pages are read from the
-publisher; stronger retained timing and complete remaining traversal must fit
-the phase budget before proceeding.
+The 15 October 2026 research recorded six distinct projects. The 17 November
+2026 [hosted frontier diagnostic](https://github.com/YouthOpps/data-pipeline/actions/runs/44192484351)
+recorded one global page, twelve distinct projects and a native page size of
+twenty. That observed inventory requires fifteen base requests including
+robots, both browse passes and all twelve detail pages. Each refresh derives
+counts and URLs from the publisher and checks the whole frontier with the
+current retained physical and inventory pacing.
 
-The nonrenewable whole runtime is 45 minutes, collection 25 minutes, each publication
-phase 180 seconds and final trusted-state export 30 seconds. Normal publisher calls
-retain the existing 90 second timeout within the remaining phase; GitHub reads
-are bounded separately. The unchanged 180 minute job is an outer infrastructure
-cap, not a token lifetime. These internal deadlines keep the current measured
-frontier comfortably within the pre-minted one-hour App token; no late-token
-staging, scope reduction or job-cap increase is introduced. Slow/repeated-failure
-or enlarged frontiers fail safely when full work cannot fit. Daily 05:40 UTC is
-unchanged. Local and hosted publisher work must be serialized across machines.
+The application has a nonrenewable 45-minute deadline. Collection has a
+29-minute phase, ancillary phases retain 180-second limits, and trusted-state
+export retains 30 seconds. The frontier estimate uses the existing 90-second
+publisher socket timeout per request, adds physical completion pacing and any
+inventory gap that the request order does not already cover, and reserves 120
+seconds. Hard application and phase deadlines still bound elapsed time.
+The pre-minted App token has its existing one-hour lifetime and the outer job
+has its existing 180-minute cap. The adapter fails a refresh when complete work
+cannot fit, recording required and remaining time and the outstanding inventory
+and detail counts. Daily refresh remains at 05:40 UTC.
+
+Detail documents are collected through checked transport and held in memory.
+The complete closing browse must agree with the opening inventory before
+record validation begins. A malformed detail fails the refresh after the full
+safely available input is captured. An access refusal or unsafe transport
+response stops requests immediately. The heading comparison excludes a single
+corroborated publisher verification badge, while checking the native title,
+post ID, type, canonical URL and required field markup against the source.
 
 Every 429 stops the current collection after persisting at least 30 minutes of
 cooldown, exponentially increasing for new repeated observations, with any
@@ -313,3 +324,22 @@ closed instead of continuing or truncating that update. These checks retain the
 existing 16 KiB journal bound, state schema, MAX restrictions and publication
 behavior. They detect observed generation changes; they are not filesystem
 compare-and-swap operations.
+
+## Reviewed hosted recovery and next production owner
+
+The unchanged original live test and the pinned website consumer passed on
+[GitHub Actions](https://github.com/YouthOpps/data-pipeline/actions/runs/44200113341).
+The recorder verified all fifteen HTTP 200 response bodies and closures,
+opening and closing roster equality, a minimum 12.202-second elapsed
+response-to-next-start gap and the original journal acknowledgments. The
+original test returned twelve valid records. The current website consumer
+accepted all twelve raw records and 10 after deadline filtering.
+
+The first reviewed production continuation restores the exact newest known
+production pacing archive, then authenticates the retired successful QA run,
+job, immutable source and owned artifact and carries forward all stronger
+publisher restrictions and 76 known timing observations. Later refreshes
+restore their newest authentic production artifact. They require the exact
+already-reviewed continuation on that owner's immutable source and refuse
+lost timing state. The first handoff uses the separate maintainer approval
+that bound this source and its genuine QA lineage.

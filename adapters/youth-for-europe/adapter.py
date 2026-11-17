@@ -1,6 +1,7 @@
 """Collect Youth for Europe's complete native public opportunity inventory."""
 
 import argparse
+import ast
 import base64
 import contextlib
 import datetime
@@ -551,11 +552,12 @@ def browse_inventory(kind="general", *, closing=False):
     total, pages = first["found_posts"], first["max_num_pages"]
     page_size = first["posts_per_page"]
     expected_pages = (total + page_size - 1) // page_size
-    check_inventory_budget(
-        max(pages - 1, 0) + (0 if closing else pages), 0 if closing else total
-    )
     if pages != expected_pages:
         raise AdapterError("Inconsistent native inventory pagination totals")
+    if closing:
+        check_inventory_budget(0, 0, max(pages - 1, 0))
+    else:
+        check_inventory_budget(max(pages - 1, 0), total, pages)
     for page in range(2, pages + 1):
         _, result, more = explore_page(kind, page)
         if (
@@ -571,19 +573,69 @@ def browse_inventory(kind="general", *, closing=False):
     return config, cards
 
 
-def detail_record(identifier, card):
+def verified_badge_image(node):
+    """Recognize a verification image without loading its asset."""
+    return (isinstance(node, Element) and node.tag == "img"
+            and "verified-listing" in node.attrs.get("class", "").split()
+            and node.attrs.get("alt") == "Verified listing")
+
+
+def verified_heading_badge(node):
+    """Recognize the publisher's decorative verification control."""
+    if (not isinstance(node, Element) or node.tag != "span"
+            or not {"verified-badge", "tooltip-element"} <=
+                set(node.attrs.get("class", "").split())):
+        return False
+    children = [child for child in node.children
+                if isinstance(child, Element) or child.strip()]
+    if len(children) not in (2, 3) or not all(isinstance(child, Element) for child in children):
+        return False
+    image, *fallback, tooltip = children
+    if (not verified_badge_image(image) or tooltip.tag != "span"
+            or "tooltip-container" not in tooltip.attrs.get("class", "").split()
+            or clean_text(tooltip.text()) != "Verified listing"):
+        return False
+    if not fallback:
+        return True
+    noscript = fallback[0]
+    if noscript.tag != "noscript":
+        return False
+    content = [child for child in noscript.children
+               if isinstance(child, Element) or child.strip()]
+    lazy_source = image.attrs.get("data-lazy-src")
+    return (len(content) == 1 and verified_badge_image(content[0])
+            and bool(lazy_source)
+            and (image.attrs.get("src") or "").startswith("data:image/")
+            and content[0].attrs.get("src") == lazy_source)
+
+
+def detail_heading_text(heading, body_classes):
+    """Include all heading text except one corroborated verification badge."""
+    badges = [child for child in heading.children if verified_heading_badge(child)]
+    if "c27-verified" not in body_classes or len(badges) != 1:
+        return clean_text(heading.text())
+    return clean_text(" ".join(
+        child.text() if isinstance(child, Element) else child
+        for child in heading.children if child is not badges[0]
+    ))
+
+
+def detail_record(identifier, card, *, document=None):
     """Normalize factual labeled fields from the actual publisher detail."""
-    tree = PublicHtml(source_text(card["url"])).root
+    if document is None:
+        document = source_text(card["url"])
+    tree = PublicHtml(document).root
     bodies = tree.find(lambda node: node.tag == "body")
-    if (len(bodies) != 1 or "postid-" + identifier not in
-            bodies[0].attrs.get("class", "").split() or
-            "type-" + card["type"] not in
-            bodies[0].attrs.get("class", "").split()):
+    if len(bodies) != 1:
+        raise AdapterError("Opportunity detail identity/type mismatch")
+    body_classes = bodies[0].attrs.get("class", "").split()
+    if ("postid-" + identifier not in body_classes
+            or "type-" + card["type"] not in body_classes):
         raise AdapterError("Opportunity detail identity/type mismatch")
     headings = tree.find(lambda node: node.tag == "h1" and
                          "case27-primary-text" in
                          node.attrs.get("class", "").split())
-    if len(headings) != 1 or clean_text(headings[0].text()) != card["title"]:
+    if len(headings) != 1 or detail_heading_text(headings[0], body_classes) != card["title"]:
         raise AdapterError("Opportunity detail title differs from native card")
     links = tree.find(lambda node: node.tag == "link" and
                      node.attrs.get("rel") == "canonical")
@@ -690,13 +742,18 @@ def collect_inventory():
     page_count = config["ListingTypes"]["general"]["prefetched_results"][
         "max_num_pages"
     ]
-    check_inventory_budget(page_count, len(cards))
-    records = [
-        detail_record(identifier, card) for identifier, card in cards.items()
-    ]
+    check_inventory_budget(0, len(cards), page_count)
+    documents = {
+        identifier: source_text(card["url"])
+        for identifier, card in cards.items()
+    }
     _, closing = browse_inventory(closing=True)
     if closing != cards:
         raise AdapterError("Closing complete native inventory changed", "parse")
+    records = [
+        detail_record(identifier, card, document=documents[identifier])
+        for identifier, card in cards.items()
+    ]
     validate_records(records)
     return sorted(
         records, key=lambda record: record["published_at"] or "", reverse=True
@@ -1055,7 +1112,10 @@ FAMILY = "youthopps-youth-for-europe-publisher-v1"
 FAMILY_SOURCES = {SOURCE_ID}
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
 _ARTIFACT_NAME = "yfe-pacing-state"
-COLLECTION_TIMEOUT = 1500
+COLLECTION_TIMEOUT = 1740
+FIRST_CAPACITY_HANDOFF = {'evidence': 'https://github.com/YouthOpps/data-pipeline/issues/365#issuecomment-6964252886', 'minimum_state': {'completed': 1794958580.4154499, 'interval': 12.2, 'inventory_completed': 1794958580.4154499, 'observed_429_since_transition': 0, 'observed_at': 1794958580.4154499, 'page_gap': 30, 'rate_limit_until': 0, 'until': 1794958371.5214932}, 'qa_artifact': {'digest': 'sha256:3c1e432bedb65424d056795baaa4d0780820c8b6206b0f675bc5e1e2e1d74b1f', 'id': 14380574102, 'size_in_bytes': 466}, 'qa_job_completed_at': '2026-11-17T23:36:27Z', 'qa_owner': [44200113341, 1, 'cd79fbd2140673af3b60582095326113c137a305', 421993201, 134451707109], 'qa_source_sha256': '1467b05f3447a4297f317e469aeedd94be99a57cd7a1a02090ab6352f82cde12', 'qa_state_sha256': 'ee25746af253e113d520b283cfee5ecbaa42e65c993eba0cee0a59c31827846f', 'qa_workflow_sha256': '8338e1270dcb8348a19d8e208a755d3f9c54930c533472634a70afcb53d88741', 'supplementary_starts': [1794927088.1677175, 1794927088.16976, 1794927100.6817563, 1794927100.683682, 1794955363.5624373, 1794955363.5656853, 1794955376.0595891, 1794955376.0630865, 1794956021.011247, 1794956021.0136116, 1794956033.700837, 1794956033.703196, 1794956048.740699, 1794956048.7428298, 1794956061.6355479, 1794956061.6377199, 1794957587.3951287, 1794957587.396823, 1794957599.8918064, 1794957599.8936582, 1794957616.1303632, 1794957616.1320963, 1794957629.314395, 1794957629.3161955, 1794957642.451538, 1794957642.453812, 1794957655.5345118, 1794957655.537121, 1794957668.54881, 1794957668.5607977, 1794957681.7918558, 1794957681.8207881, 1794957695.2569873, 1794957695.2588933, 1794957708.4383411, 1794957708.445696, 1794957722.3424559, 1794957722.34442, 1794957736.8267643, 1794957736.828724, 1794957750.022539, 1794957750.0243866, 1794957763.0035663, 1794957763.0054789, 1794957776.2088735, 1794957776.2107532, 1794958384.1683707, 1794958384.1701424, 1794958396.4838367, 1794958396.4858506, 1794958412.524655, 1794958412.5271785, 1794958425.6870215, 1794958425.6894505, 1794958438.6771135, 1794958438.679187, 1794958454.7701557, 1794958454.7723963, 1794958467.871416, 1794958467.873771, 1794958480.8802006, 1794958480.88216, 1794958494.0306153, 1794958494.0335145, 1794958507.9799576, 1794958507.9821491, 1794958521.1726825, 1794958521.1748762, 1794958534.4373045, 1794958534.439316, 1794958549.9001005, 1794958549.9030375, 1794958563.680097, 1794958563.6823473, 1794958576.855619, 1794958576.8577542], 'transfer_state_sha256': '10e5aecb4dd6b66372d7bedcff6619fdf1be8b0f88e96fc692cddcf2dc7a0237'}
+PUBLISHER_REQUEST_TIMEOUT = 90
+FRONTIER_RESERVE = 120
 RUN_TIMEOUT = 2700
 EXPORT_TIMEOUT = 30
 _STATE_PATH = _STATE_LOCK = None
@@ -1346,7 +1406,7 @@ def pace(interval=12.2):
                 recent[-1] + state["interval"] if recent else now,
                 recent[-5] + 60 if len(recent) >= 5 else now,
             )
-            if ready - now + 90 >= remaining():
+            if ready - now + PUBLISHER_REQUEST_TIMEOUT >= remaining():
                 raise AdapterError(
                     "Retained pacing exceeds remaining collection budget",
                     "access",
@@ -1580,7 +1640,7 @@ def inventory_guard():
         wait = state["inventory_completed"] + state["page_gap"] - time.time()
         if wait <= 0:
             return
-        if wait + 90 >= remaining():
+        if wait + PUBLISHER_REQUEST_TIMEOUT >= remaining():
             raise AdapterError(
                 "Page guard exceeds remaining collection budget", "access"
             )
@@ -1597,15 +1657,33 @@ def fetch_inventory_page(fetch, *args, **kwargs):
         _INVENTORY_ACTIVE = previous
 
 
-def check_inventory_budget(pages, details):
+def frontier_seconds(opening_pages, details, closing_pages, state):
+    """Estimate the ordered base frontier after the preceding inventory page."""
+    interval, page_gap = state["interval"], state["page_gap"]
+    requests = opening_pages + details + closing_pages
+    estimate = requests * (interval + PUBLISHER_REQUEST_TIMEOUT)
+    adjacent = opening_pages + max(0, closing_pages - 1)
+    inventory_extra = max(0, page_gap - interval)
+    estimate += adjacent * inventory_extra
+    if closing_pages:
+        # The detail sequence already waits its own physical gaps. Only the
+        # remaining inventory wait matters at the start of the closing pass.
+        estimate += max(0, page_gap - (details + 1) * interval)
+    return estimate + FRONTIER_RESERVE
+
+
+def check_inventory_budget(opening_pages, details, closing_pages):
     with locked_budget():
         state = load_budget()
-    requests = pages + details
-    physical = requests * (state["interval"] + 90)
-    pagination = max(0, pages - 1) * state["page_gap"]
-    if max(physical, pagination) + 120 >= remaining():
+    estimate = frontier_seconds(opening_pages, details, closing_pages, state)
+    time_left = remaining()
+    if estimate >= time_left:
         raise AdapterError(
-            "Complete remaining frontier cannot fit retained timing", "access"
+            "Complete remaining frontier cannot fit retained timing: "
+            f"{opening_pages} opening pages, {details} details, "
+            f"{closing_pages} closing pages; "
+            f"{estimate:.1f}s estimated, {time_left:.1f}s available",
+            "access",
         )
 
 
@@ -1670,6 +1748,8 @@ def collect():
     """One complete actual native collection with bounded exclusive access."""
     if _RUN_END is None:
         with execution():
+            with phase("restore", 180):
+                prepare_collection()
             return collect()
     with phase("collection", COLLECTION_TIMEOUT):
         prepare_collection()
@@ -1725,7 +1805,7 @@ def request_timeout(publisher=False):
     remaining = min(_PHASE_END, _RUN_END) - time.monotonic()
     if remaining <= 0:
         raise PhaseExpired()
-    return min(90 if publisher else 15, remaining)
+    return min(PUBLISHER_REQUEST_TIMEOUT if publisher else 15, remaining)
 
 
 def alarm_expired(signum, frame):
@@ -2597,6 +2677,114 @@ _LEGACY_JOB_DIGESTS = {
 }
 
 
+def capacity_state_sha(state):
+    return hashlib.sha256(json.dumps(
+        state, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()).hexdigest()
+
+
+def capacity_immutable_file(head, path):
+    if not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+        raise AdapterError("Invalid capacity continuation source head", "access")
+    item = workflow_api(f"/contents/{path}?ref={head}")
+    if item.get("path") != path or item.get("type") != "file" or item.get("encoding") != "base64":
+        raise AdapterError("Invalid immutable capacity continuation source", "access")
+    return base64.b64decode("".join(item["content"].splitlines()), validate=True)
+
+
+def capacity_handoff(latest, incoming):
+    """Require the reviewed next owner before resuming the paused producer."""
+    approval = FIRST_CAPACITY_HANDOFF
+    if not isinstance(approval, dict) or not re.fullmatch(
+        r"https://github\.com/YouthOpps/data-pipeline/issues/365#issuecomment-[1-9][0-9]*",
+        approval.get("evidence", ""),
+    ):
+        raise AdapterError("Reviewed Youth for Europe production continuation is OFF", "access")
+    source_path = "adapters/youth-for-europe/adapter.py"
+    if latest != (44107433490, 1, SOURCE_ID):
+        # Normal subsequent refreshes only adopt the genuine newest producer.
+        # Its immutable source must already include this exact continuation.
+        previous_head = _ATTEMPT_HEADS.get(latest[:2])
+        source = capacity_immutable_file(previous_head, source_path)
+        try:
+            markers = [
+                node.value for node in ast.parse(source).body
+                if isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "FIRST_CAPACITY_HANDOFF"
+            ]
+            continued = len(markers) == 1 and ast.literal_eval(markers[0]) == approval
+        except (SyntaxError, ValueError):
+            continued = False
+        if not continued:
+            raise AdapterError("Newest producer lacks the reviewed prior continuation", "access")
+        if any(incoming[key] < floor for key, floor in approval["minimum_state"].items()):
+            raise AdapterError("Newest producer lost reviewed capacity timing", "access")
+        return incoming
+
+    run, attempt, head, workflow_id, job_id = approval["qa_owner"]
+    branch = "qa/yfe-365-verified-recovery"
+    path = ".github/workflows/yfe-verified-recovery.yml"
+    expected = {"id": run, "run_attempt": attempt, "head_sha": head,
+                "head_branch": branch, "path": path, "workflow_id": workflow_id,
+                "status": "completed", "conclusion": "success", "event": "push"}
+    workflow = workflow_api(f"/actions/workflows/{workflow_id}")
+    prior_workflows = {
+        421955363: ".github/workflows/yfe-frontier-research.yml",
+        421963534: ".github/workflows/yfe-complete-qa.yml",
+        421982978: ".github/workflows/yfe-exact-evidence.yml",
+    }
+    predecessors = [workflow_api(f"/actions/workflows/{identity}")
+                    for identity in prior_workflows]
+    if (workflow.get("id") != workflow_id or workflow.get("path") != path
+            or workflow.get("state") != "disabled_manually"
+            or any(row.get("id") != identity or row.get("path") != prior_workflows[identity]
+                   or row.get("state") != "disabled_manually"
+                   for identity, row in zip(prior_workflows, predecessors))):
+        raise AdapterError("Prior capacity workflows must remain retired", "access")
+    inventory = workflow_api(f"/actions/workflows/{workflow_id}/runs?per_page=100")
+    actual = workflow_api(f"/actions/runs/{run}/attempts/{attempt}")
+    if inventory["total_count"] != len(inventory["workflow_runs"]) or inventory["total_count"] != 1:
+        raise AdapterError("Complete native QA history differs", "access")
+    if any(not all(row.get(k) == v for k, v in expected.items())
+           or any(row.get(k, {}).get("full_name") != "YouthOpps/data-pipeline"
+                  for k in ("repository", "head_repository"))
+           for row in (actual, inventory["workflow_runs"][0])):
+        raise AdapterError("Exact complete native QA owner differs", "access")
+    jobs = workflow_api(f"/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
+    if jobs["total_count"] != len(jobs["jobs"]) or jobs["total_count"] != 1:
+        raise AdapterError("Exact complete native QA job inventory differs", "access")
+    job = jobs["jobs"][0]
+    if any(job.get(k) != v for k, v in {
+        "id": job_id, "run_id": run, "run_attempt": attempt, "head_sha": head,
+        "name": "observe", "status": "completed", "conclusion": "success",
+        "completed_at": approval["qa_job_completed_at"],
+    }.items()):
+        raise AdapterError("Exact complete native QA job differs", "access")
+    for file, field in ((path, "qa_workflow_sha256"), (source_path, "qa_source_sha256")):
+        if hashlib.sha256(capacity_immutable_file(head, file)).hexdigest() != approval[field]:
+            raise AdapterError("Exact complete native QA executable differs", "access")
+
+    artifacts = workflow_api(f"/actions/runs/{run}/artifacts?per_page=100")
+    rows = artifacts["artifacts"]
+    candidates = [item for item in rows if item["name"] == f"yfe-verified-pacing-state-{attempt}"]
+    if artifacts["total_count"] != len(rows) or len(candidates) != 1:
+        raise AdapterError("Exact complete native QA archive missing", "access")
+    artifact = candidates[0]
+    if (any(artifact.get(k) != v for k, v in approval["qa_artifact"].items())
+            or artifact.get("expired") is not False
+            or artifact["workflow_run"]["id"] != run
+            or artifact["workflow_run"]["head_sha"] != head):
+        raise AdapterError("Exact complete native QA archive differs", "access")
+    state = download_inert_artifact((run, attempt, SOURCE_ID), artifact["id"], artifact["digest"])
+    if capacity_state_sha(state) != approval["qa_state_sha256"]:
+        raise AdapterError("Exact complete native QA original state differs", "access")
+    carried = dict(state, starts=sorted(set(state["starts"]) | set(approval["supplementary_starts"])))
+    if capacity_state_sha(carried) != approval["transfer_state_sha256"]:
+        raise AdapterError("Exact complete native QA timing transfer differs", "access")
+    return merge_budget(incoming, validate_budget(carried))
+
+
 def restore_family_artifact():
     """Require exact history for the reviewed legacy state handoff."""
     global _RESTORED, _STATE_TRUSTED
@@ -2698,6 +2886,7 @@ def restore_family_artifact():
         incoming = download_inert_artifact(
             latest, matches[0]["id"], matches[0]["digest"]
         )
+    incoming = capacity_handoff(latest, incoming)
     with journal_restore_scope(incoming), locked_budget():
         local = load_budget()
         combined = merge_budget(local, incoming)
