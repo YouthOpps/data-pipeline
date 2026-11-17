@@ -4492,35 +4492,24 @@ def authenticate_hosted_run():
 
 
 def require_existing_local_state():
-    """A mature local namespace cannot be recreated from an older artifact."""
+    """Retain the exact mature local journal across remote metadata reads."""
     directory = os.path.join(tempfile.gettempdir(),
                              FAMILY + "-" + str(os.getuid()))
-    descriptor = info = None
     try:
-        # Retain this parent through subsequent startup, preventing a race
-        # from turning a removed directory into a new initialization grant.
-        parent = state_parent(directory)
-        descriptor = os.open("state.json",
-                             os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
-                             dir_fd=parent)
-        info = os.fstat(descriptor)
-        validate_state_descriptor(descriptor, parent, "state.json")
-        if not 0 < info.st_size <= 16384:
-            raise AdapterError("Existing local journal is empty or oversized",
-                               "access")
+        # Pin the existing parent before budget_file can consider creation.
+        state_parent(directory)
+        budget_file()
+        # Keep the original RW descriptor and acknowledged generation after
+        # this scope releases its flock. Later restoration cannot adopt an
+        # older named replacement or a changed in-place generation.
+        with locked_budget():
+            state = load_budget()
+            if state["in_flight"]:
+                raise AdapterError("Local publisher request is unsettled",
+                                   "access")
     except BaseException:
         fail_publisher_cleanup()
         raise
-    finally:
-        if descriptor is not None and info is not None:
-            primary = sys.exc_info()[0] is not None
-            try:
-                close_retained_descriptor(descriptor,
-                                          (info.st_dev, info.st_ino))
-            except BaseException:
-                fail_publisher_cleanup()
-                if not primary:
-                    raise
 
 
 def prepare_collection():

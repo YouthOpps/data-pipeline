@@ -397,3 +397,10 @@ new initialization allowance. A wholly missing local namespace, missing/empty
 journal, or lost pending/MAX state cannot be recreated from an older artifact.
 Fresh hosted runners retain their separately verified owned-artifact path;
 this protection does not initialize or reset local state.
+
+The local precheck also retains the original RW journal descriptor and its
+acknowledged byte/metadata generation across workflow metadata reads. Replacing
+the named journal with a valid older file or modifying its contents in place
+cannot make restoration adopt weaker state. The failure remains sticky and
+leaves the replacement untouched; existing pending state refuses before any
+metadata request.
