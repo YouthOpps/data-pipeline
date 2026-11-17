@@ -1,0 +1,47 @@
+name: Youth for Europe bounded frontier research
+on:
+  push:
+    branches: [research/yfe-365-current-frontier]
+    paths: [.github/workflows/yfe-frontier-research.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: youthopps-youth-for-europe-publisher-v1
+  cancel-in-progress: false
+jobs:
+  observe:
+    if: github.event.created && github.event.before == '0000000000000000000000000000000000000000' && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/research/yfe-365-current-frontier' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run bounded nonpublishing observation
+        id: observe
+        run: python -B .github/yfe-frontier-research.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          YFE_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+      - name: Retain exact successor pacing state
+        if: always() && steps.observe.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: yfe-frontier-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Retain encrypted complete observation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yfe-frontier-observations-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/yfe-frontier.cms
+            ${{ runner.temp }}/yfe-frontier.json
+          retention-days: 3
+          if-no-files-found: error
