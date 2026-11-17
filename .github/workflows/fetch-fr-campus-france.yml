@@ -45,31 +45,6 @@ jobs:
         env:
           DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          CAMPUS_FRANCE_PACING_BOOTSTRAP: >-
-            {
-              "schema": 1,
-              "family": "youthopps-campus-france-publisher-v1",
-              "not_before": 1792073067.5784223,
-              "evidence": "https://github.com/YouthOpps/data-pipeline/issues/30#issuecomment-6194222528",
-              "state": {
-                "schema": 1,
-                "family": "youthopps-campus-france-publisher-v1",
-                "observed_at": 1792073007.5784223,
-                "not_before": 1792072893.4701095,
-                "starts": [
-                  1792072947.1247087,
-                  1792072961.0327752,
-                  1792072974.048758,
-                  1792073006.3641808
-                ],
-                "blocked": false,
-                "interval": 12.2,
-                "page_interval": 30,
-                "rate_limit_strikes": 0,
-                "rate_limit_until": 0,
-                "completed": 1792073007.5784223
-              }
-            }
           CAMPUS_FRANCE_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
       - name: Preserve inert publisher pacing state
         if: always()
