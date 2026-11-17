@@ -18,16 +18,19 @@ named exchange destination must have a matching explicitly dated detail;
 ENLIGHT heading links expand into individual course records, with duplicate
 and full-link coverage checks. Unknown current-call routes or changed content
 boundaries fail instead of publishing a partial inventory.
+The current section may be titled “Competitions currently open” or “Application
+rounds currently open.” The publisher's four-dash row explicitly reports zero
+open rounds. This outcome keeps the last-good records and success timestamp
+and reports zero open rounds through the existing failure metadata flow.
 
 Stable IDs hash the source slug and exchange title/year identity or ENLIGHT
 course URL, truncated to 24 hex characters. The parent deadline and dated
-partner heading must agree; ENLIGHT's abbreviated closing year comes from
-its article publication year. The complete actual current hub and ENLIGHT
-article state 15 November, with the article dated 8 October 2026; neither
-primary content states a closing clock or timezone. The adapter therefore
-publishes `2026-11-15` as a calendar date rather than inventing a Tallinn
-microsecond cutoff. Date-only status and cleanup use the shared index's UTC
-closing-calendar-day convention, not a claim about the publisher's clock.
+partner heading must agree. ENLIGHT's abbreviated closing year comes from
+its article publication year. The previously listed ENLIGHT round gave a
+15 November deadline in its 8 October 2026 article and the open-calls table.
+The adapter represents that deadline as the calendar date `2026-11-15`.
+The shared index applies its UTC closing-calendar-day convention to date-only
+deadlines.
 University student affiliation is not citizenship: eligible-country arrays
 remain empty. Exchange host countries come from explicit destination headings;
 ENLIGHT named host institutions remain attributed summary evidence without
@@ -299,3 +302,73 @@ qualify this change. Earlier genuine native evidence retains its original code
 and date attribution; no new publisher collection, current factual review,
 complete native replay or production run is claimed. The maintainer alone owns
 workflow/state coordination and the maintenance rollout for issue #328.
+
+## Reviewed continuity repair — issue #419 (activation OFF)
+
+This revision supersedes the header-only 429 behavior described above. Every
+received publisher body, including robots and 429 responses, is bounded and
+assessed before a matching physical receipt can settle its owner. Current 429
+count, minimum 1800-second embargo and doubling of the retained interval/page
+gap are committed before fallible Retry-After parsing or historical exponential
+floors. All three complete HTTP-date forms are supported. Ambiguous combined
+Retry-After fields retain the positive MAX and leave the transaction pending.
+Duplicate Content-Length, conflicting transfer framing, unsupported coding,
+truncated bodies, unknown response outcomes and close/IO failures remain barriers.
+Ordinary robots 403 unavailability differs from an explicit human challenge.
+
+The finite recovery covers exactly nineteen proved pre-request missing-owner
+attempts, October 30 through November 17, following owned attempt 40927206756/1.
+It authenticates the complete forty-five-attempt ancestry, exact jobs, immutable
+producer source/workflow and each missing artifact inventory, then decodes the
+real nine-key artifact 12921456341 (1059-byte ZIP). An unexpected missing owner
+still stops restoration. This does not identify or claim to fix the hidden
+metadata subcause of the first historical failure.
+
+The explicit schema-3 transition preserves the full original research
+provenance, all forty-six known historical/native timing observations and every
+retained MAX/OR constraint. Job completion bounds extend administrative quiet
+and observation time only; they are not physical request starts or receipts.
+`legacy_429_history=unknown`, `legacy_hold_history=unlogged_fields_unknown` and
+unlogged historical owner/receipt uncertainty remain explicit. No old UUID or
+completed receipt is invented. Schema 4 gives only newly admitted physical,
+policy and logical work exact owners and matching receipts. Every intended
+compiled competition semantic guard may settle its own logical owner only when
+all physical/policy work is assessed and no persistence/refusal barrier exists.
+The parser, record schema, competition frontier and publication behavior remain
+unchanged; a changed current-call table still fails collection.
+
+A narrowly typed metadata transport/status/JSON failure may produce a distinct
+no-effect artifact after clean execution closure. It contains no pacing state
+or allowance. Its exact run/head/source code and original artifact digest are
+authenticated before traversal to the preceding owned state. Untrusted metadata,
+pending/stronger state, any existing output/family namespace, any publisher entry,
+journal commit or cleanup fault cannot be covered by that receipt. Exclusive
+flock authority, the original temporary root/private parent and exact journal
+bytes are checked around access/persistence/export; foreign generations remain
+untouched.
+
+The local family was absent at audit. Ordinary startup cannot bootstrap it.
+Initializer, first-native and hosted-producer approval markers are all `None`.
+The explicit initializer requires a reviewed machine/source/state-bound packet,
+refuses an existing family or retained outside authority, and preserves a one-use
+native claim. A fixed sibling authority retains the original temporary parent,
+family, journal, initializer receipt and lifecycle-lock identities. Moving the
+family and copying its initial bytes cannot create another allowance. A separate
+one-use controller records the original initializer subprocess exit and complete
+JSON before an outside success proof; healthy files after a failed close are not
+success. The maintainer supplies that exact observed proof digest to a separately
+PID-gated native launcher. Its outside one-use claim and pipe-delivered original
+claim identity survive a family move. Source and observer preflight verify this
+authority before metadata, claims and every wire. An independent localhost RAM
+observer must match the exact source/test/controller and process before native
+access. Its external controller records full response segments,
+physical owners, journal acknowledgments, logical inputs, original stdout and
+final durable bytes, and survives success or failure. It never initializes state.
+
+Private controls exercise the authentic ZIP through both returned and raised
+302 branches, full finite bridge drift negatives, real retained-FD faults, all
+sixteen original semantic guards, long restore/main/export boundaries, typed
+receipt barriers, initializer/readiness negatives and RAM failure lifetime. The
+original live test is unchanged and has **not** been run for this revision.
+Publisher access, initialization, workflow activation and merge require the
+maintainer's separate readiness decision for [issue #419](https://github.com/YouthOpps/data-pipeline/issues/419).
