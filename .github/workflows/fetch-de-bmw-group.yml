@@ -45,29 +45,6 @@ jobs:
         env:
           DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          BMW_GROUP_PACING_BOOTSTRAP: >-
-            {
-              "schema": 1,
-              "family": "youthopps-bmw-group-publisher-v1",
-              "not_before": 1792071376.7676826,
-              "evidence": "https://github.com/YouthOpps/data-pipeline/issues/116#issuecomment-6193553257",
-              "state": {
-                "schema": 1,
-                "family": "youthopps-bmw-group-publisher-v1",
-                "observed_at": 1792071316.7676826,
-                "not_before": 1792070388.5782976,
-                "starts": [
-                  1792071285.4000778,
-                  1792071316.1141105
-                ],
-                "blocked": false,
-                "interval": 12.2,
-                "page_interval": 30,
-                "rate_limit_strikes": 0,
-                "rate_limit_until": 0,
-                "completed": 1792071316.7676826
-              }
-            }
           BMW_GROUP_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
       - name: Preserve inert publisher pacing state
         if: always()

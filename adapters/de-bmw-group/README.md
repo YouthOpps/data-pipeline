@@ -6,17 +6,28 @@ This adapter indexes minimal facts from the official [global career page](https:
 
 The page's own `jobfinder.min.js` builds the literal public HTML continuation route from `data-jobfinder-path`, with `filterSearch`, `rowIndex` and `blockCount`. The reviewed route returned the requested 50 rows without truncation; using 50 reduces requests compared with the UI's five-row default. The parser validates every expected page length, advertised total, unique native ID and canonical link. It does not guess a private API.
 
-The four native youth filters are Apprenticeship, Internship, Recent Graduate and Talent Programs. The publisher's General career category is excluded. Dual study and vocational training follow the publisher's Apprenticeship classification; no title keyword is treated as independent proof of applicant eligibility. Working students follow the publisher's own career type. No region is excluded. UK and Ireland are retained through the same global inventory: bounded source research found 131 UK-filtered and one Ireland-filtered youth vacancies out of 691 global youth vacancies. These are dated research observations, not fixed expected counts.
+The four native youth filters are Apprenticeship, Internship, Recent Graduate and Talent Programs. The publisher's General career category is excluded. Dual study and vocational training follow the publisher's Apprenticeship classification; no title keyword is treated as independent proof of applicant eligibility. Working students follow the publisher's own career type. The global page must have no regional prefilter. Country facets are dynamic,
+not a promise that GB and IE must always appear. The original fixed GB+IE
+assertion stopped collection when IE disappeared from the current taxonomy.
+Issue [#391](https://github.com/YouthOpps/data-pipeline/issues/391) research
+verified the actually linked global route and the UK page's `location=GB`
+prefilter. Its complete current global pass contained 503 youth vacancies;
+the UK youth filter returned zero. An empty regional response is not positive
+material-subset evidence. The older Dublin native ID 195517 was absent from
+that complete current listing. These observations do not establish an expiry
+date or independent worldwide coverage beyond the advertised global jobfinder.
+No unadvertised IE filter is queried, and country absence alone never deletes
+a record. Successful replacement still requires two equal complete frontiers.
 
 Every run traverses the complete filtered inventory twice and requires exactly equal native basic facts across both frontiers. A changing total, duplicate, missing row, changed taxonomy or mismatch stops the refresh. The 5,000-item ceiling is a fail-closed safety bound, never a truncation point. There is no proven update/removal feed or stable change cursor. A publication-date ordering cannot cover older edits/removals, so every run retains complete reconciliation rather than stopping at a known ID.
 
 IDs are `de-bmw-group-<native numeric job ID>`, validated case-insensitively after native assignment. Original links use the exact publisher-provided `/en/jobfinder/job-description-copy.<ID>.html` path. Actual sampled Singapore and Ireland pages confirmed the native ID/title/publication-date/location correspondence. Individual rich descriptions are not needed for this factual index and are not crawled during collection.
 
-Source publication dates remain calendar dates; no midnight or publisher timezone is invented. Deadlines, application status and citizenship eligibility remain unknown. Destination countries are assigned only when the exact native location label maps to one country in the publisher's own location taxonomy. Ambiguous or missing mappings remain empty. In particular, the current taxonomy associates “Dublin” with both GB and IE; neither the city name nor employer name is used to resolve that ambiguity. Such records remain included with their literal location. Titles use `und`; generated summaries are English. Publisher country DE identifies the source operator, not vacancy location or applicant citizenship.
+Source publication dates remain calendar dates; no midnight or publisher timezone is invented. Deadlines, application status and citizenship eligibility remain unknown. Destination countries are assigned only when the exact native location label maps to one country in the publisher's own location taxonomy. Ambiguous or missing mappings remain empty. Earlier research observed an ambiguous Dublin mapping. Current research has no Dublin facet. Neither city names nor employer names resolve missing or ambiguous country evidence; any such listing remains included with its literal location. Titles use `und`; generated summaries are English. Publisher country DE identifies the source operator, not vacancy location or applicant citizenship.
 
 ## Access and publisher conditions
 
-All physical publisher requests use exactly `YouthOppsBot/1.0 (+https://youthopps.org/bot/)`, normal inherited proxy settings and verified TLS. Only `www.bmwgroup.jobs` is allowed; redirects must remain on that host. Current robots returned HTTP200 with only a sitemap declaration. Advertised and applicable legacy protective product groups remain enforced if present. Stronger Crawl-delay/Request-rate limits prevail. Robots-only 4xx except 429 means unavailable REP; robots 429/5xx/TLS failures stop. Content 401/403, visible challenges and genuine denial bodies retain hard holds. No identity change or access workaround is used.
+All physical publisher requests use exactly `YouthOppsBot/1.0 (+https://youthopps.org/bot/)`, normal inherited proxy settings and verified TLS. Only `www.bmwgroup.jobs` is allowed; redirects must remain on that host. The accepted native robots response was a single explicit text/plain HTTP200 with only a sitemap declaration. A missing/duplicate or unsupported MIME and HTML markup, including a policy-looking line inside HTML, retain pending ownership instead of granting access. Empty or comment-only plaintext remains valid. Advertised and applicable legacy protective product groups remain enforced if present. Stronger Crawl-delay/Request-rate limits prevail. Robots-only 4xx except 429 means unavailable REP; robots 429/5xx/TLS failures stop. Content 401/403, visible challenges and genuine denial bodies retain hard holds. No identity change or access workaround is used.
 
 The [global terms](https://www.bmwgroup.jobs/en/general/terms-of-use.html) identify local career-page responsibility and the applicant tracking system. The [global disclaimer](https://www.bmwgroup.jobs/en/general/legal-disclaimer.html) reserves copyright in expressive objects and grants no intellectual-property licence. The [UK recruitment legal notes](https://www.bmwgroup.jobs/gb/en/legal-notes.html), which cover the shared UK/Ireland page, state:
 
@@ -26,9 +37,9 @@ They also state that the website is for personal use only. These clauses are rea
 
 ## Pacing and retained state
 
-One shared serialized family, `youthopps-bmw-group-publisher-v1`, controls all publisher requests. Physical starts are at least 12.2 seconds apart, with at most five starts in a rolling 60 seconds and a conservative wait after the previous response completes. Inventory pages, including the preloaded home inventory, wait at least 30 seconds after the preceding page completes. This separate page guard does not slow every policy/detail request to 30 seconds. Stronger persisted limits prevail.
+One shared serialized family, `youthopps-bmw-group-publisher-v1`, controls all publisher requests. Physical starts are at least 12.2 seconds apart, with at most five starts in a rolling 60 seconds and a conservative wait after the previous response completes. Inventory pages, including the home inventory configuration, wait at least 30 seconds after the preceding page completes. This separate page guard does not slow every policy/detail request to 30 seconds. Stronger persisted limits prevail.
 
-429 stops the current run, doubles both actual retained physical/page gaps and persists at least 30 minutes of cooldown without a valid stronger Retry-After. Repeated 429 increases cooldown exponentially. A timed 429 alone does not create a permanent hard hold: a later bounded run can retry after the embargo at the slower retained pace. Content denials remain hard holds, including a clear human-verification challenge inside a 429 HTML response; its adaptive embargo is retained too. Only finite positive supported Retry-After delays or timezone-aware future dates can extend the embargo; malformed, stale, negative or unrepresentable values preserve the exponential minimum and known MAX state. Cooldown continues to increase beyond the ninth event; unsupported extreme counter states fail before another request rather than overflowing or resetting history. Research history is merged into native state without resetting starts, completion, embargoes or stronger intervals.
+429 stops the current run, doubles both actual retained physical/page gaps and persists at least 30 minutes of cooldown without a valid stronger Retry-After. Repeated 429 increases cooldown exponentially. A timed 429 alone does not create a permanent hard hold: a later bounded run can retry after the embargo at the slower retained pace. Content denials remain hard holds, including a clear human-verification challenge inside a 429 HTML response; its adaptive embargo is retained too. Every observed Retry-After field contributes its supported positive delay or timezone-aware future date to the retained MAX. Malformed, stale or negative fields do not weaken the known embargo. Positive overflow, unsupported time magnitude or ambiguous combined dates preserve pending ownership and stop before body reading; known status restrictions and other supported header values are already durable. Cooldown continues to increase beyond the ninth event; unsupported extreme counter states fail before another request rather than overflowing or resetting history. Research history is merged into native state without resetting starts, completion, embargoes or stronger intervals.
 
 Collection has a fixed 25-minute phase, with a 30-minute workflow job and daily 18:05 UTC schedule. A traversal preflight includes both complete frontiers and a 120-second reserve. Slower retained post-429 pacing can make a complete traversal infeasible; the adapter fails closed rather than increasing caps, dropping pages or claiming every later attempt must succeed. The source App token is created before collection; the normal bounded collection remains within its lifetime.
 
@@ -52,168 +63,98 @@ python -B adapters/de-bmw-group/adapter.py --publish
 
 Only this source's `datas/de-bmw-group/data.json` and `metadata.json` are atomically updated. A complete successful refresh replaces the whole source snapshot, preserving stable creation/first-seen timestamps for existing IDs. Explicit expired deadlines are removed before publication; date-only unknown-zone deadlines remain through the latest civil timezone's end of date, while unknown deadlines imply no expiry. All-expired validated raw data may publish an atomic empty success envelope. A failed/incomplete retrieval preserves last-good data and success time; a first failure creates no placeholder source pair. Large snapshots use digest-verified Git blobs, and compare-and-swap branch updates protect concurrent publications. Native tests do not prove production publication; maintainer merge and actual immutable pair/artifact verification remain separate.
 
-## Redirect access checks
+## Durable continuity repair — issue #391
 
-A visible publisher verification or denial body is checked before following a
-content redirect, including HTTP 3xx responses. An ordinary redirect without a
-challenge continues through the existing host, TLS, pacing and retry guards.
-Robots-only handling is limited to the literal `/robots.txt` route on every
-hop. A robots redirect to a content route stops before requesting that target;
-its response is never treated as unavailable REP or a replacement robots policy.
-Existing refusal holds, retained rate limits and source publication behavior
-remain in force. This conditional-path correction does not clear an access hold
-or certify a new publisher collection.
+The same publisher family and collection-lock inode remain authoritative.
+Schema 3 records a durable `in_flight` reservation before every physical
+request and before applying a cached robots policy. It clears that reservation
+only after complete response processing, restrictive policy persistence and
+successful response closure. A partial read, unknown transport failure, TLS
+failure, interrupted close or uncompleted persistence keeps the reservation
+or invalidates the current owned journal. Restart cannot substitute a weaker
+artifact or a blank state. Current parent, inode, byte generation and the
+original held lock are checked throughout writes and cleanup. These are
+advisory-lock ownership checks, not filesystem compare-and-swap guarantees.
 
-## Source display name
+This repair supersedes the historical header-only 429 stop from #328. The
+adaptive cooldown and status-based refusal are durable before any header
+parsing. All duplicate Retry-After fields are then assessed, and supported
+stronger MAX values are durable before reading at most 64 KiB of a 429 body.
+Unsupported positive values cannot erase a known 403 hold or the doubled
+current 429 gaps, strike and minimum cooldown. They leave the request pending. Only a completely read, assessed
+and closed response can settle its reservation. A genuine visible challenge
+retains a hard hold as well as the timed embargo; an incomplete body or close
+remains pending. Robots-specific 4xx semantics do not weaken content refusal
+handling. Applicable legacy bot groups and stronger REP constraints remain.
 
-Published metadata uses `display_name` = **BMW Group** for the visible
-institution label. Existing source identifiers, legacy names and attribution
-notices remain unchanged. Both success and failure metadata emit this label;
-older snapshots without it remain valid.
+Only the exact last authenticated six-key owner, run 43998513268 attempt 1,
+artifact 14290823021, can cross the legacy decoder. Its immutable ZIP digest,
+producer head and typed state are pinned. The locally migrated journal must
+match the exact settled research bytes. The migration retains MAX constraints
+from all 41 captured research journal witnesses, the original owned state,
+and the union of 22 actual durable starts. Both one-use research guards and
+complete capture digests remain in provenance. Missing historical access,
+hold and 429 information stays explicitly unknown. No unknown owner, missing
+artifact, different legacy journal or pending modern state receives a fallback.
 
-## Hidden page content
+The artifact API redirect is accepted only to an HTTPS subdomain of
+`blob.core.windows.net` or `actions.githubusercontent.com`. Every subsequent
+storage hop must remain within those supported signed-storage families.
+Credentials, explicit ports, trailing-dot hosts, deceptive suffixes and other
+public publisher hosts are rejected before their destination request. Ordinary
+infrastructure API calls use only `api.github.com` and cannot follow redirects.
+Storage requests carry no API authorization header.
 
-Challenge detection reads visible content and preserves nested suppression.
-Hidden attributes, `aria-hidden="true"`, inline display/visibility declarations and
-script/footer/navigation decorations do not create an access hold. Block starts
-close an open paragraph in HTML button scope, without losing suppression from
-an outer hidden ancestor. This is a bounded text inspector, not a full HTML5
-renderer or external stylesheet engine. Explicit
-visible child visibility and void elements retain their DOM behavior. Genuine
-primary verification or denial text still stops content access before a redirect,
-including HTTP 200, 302 and human-verification 429 responses. Existing holds and
-rate-limit budgets remain retained; this correction does not clear old state or
-certify a new publisher collection.
+New owned artifacts have nine strict keys: the existing ownership fields plus
+producer head, adapter digest and state digest. Restoring them authenticates
+both the immutable producer source and the complete state. Partial writes,
+failed fsync, replacement journals, lost locks and output failures block a
+healthy handoff. Private output descriptors remain retained through readiness
+signalling and cleanup, so a later failure invalidates only owned output.
 
-## HTTP 429 HEAD refusal handling
+The 25-minute collection cap is unchanged. A nonrenewable 29-minute outer run
+bounds metadata, collection, publication and export within the existing
+30-minute Action. Absolute alarms interrupt slow-trickle bodies; cancellation
+also interrupts blocked closure/finalizers, retaining pending ownership.
+Local access requires an existing owned family directory and a nonempty
+owned journal before remote restoration; neither a lost whole local namespace
+nor a missing journal may be rebuilt from an older artifact. The existing
+parent descriptor and original journal generation remain pinned across startup,
+so removal, atomic replacement or in-place mutation during metadata retrieval
+cannot turn into a new initialization grant or replace stronger local limits. This adapter supplies no fresh-local
+bootstrap. Normal hosted ephemeral initialization still requires verified
+remote ownership and the approved final MAX handoff. Local access additionally
+requires the exact disabled workflow and terminal family history.
+The unchanged original native test obtains this lifecycle through `collect()`.
 
-On HTTP 429 only, a genuine initial, unsuppressed HEAD title containing
-`Access denied`, `Just a moment`, `Attention required` or `CAPTCHA` retains
-an access hold alongside the existing adaptive cooldown. Ordinary rate-limit
-warnings remain timed restrictions. Hidden, footer/navigation, nested, second
-or post-body HEAD titles do not supply this additional refusal evidence.
-A bounded obvious-HTML prefix also qualifies this 429-only check when the
-response MIME is absent or wrong; ordinary successful-response handling is
-unchanged. Existing access holds, stronger embargoes, retained state and request/page
-spacing remain preserved.
+The original native test of source `62a1a11e` completed two fresh 11-page
+frontiers with exactly equal material facts for 501 current listings. All 28
+physical responses were HTTP200; all 164 durable journal witnesses and the
+complete current consumer output were verified. There was no actual expired
+subset. Later Retry-After and robots-representation protections use qualified
+reuse of that accepted run: its responses had no Retry-After and its sole REP
+response was supported plaintext. Actual-function private-journal controls
+exercise the new restrictive paths, and full captured-input replay preserves
+all 501 material records. This is not a second native run or production proof.
+The final hosted handoff is activated by the [exact independent maintainer
+decision](https://github.com/YouthOpps/data-pipeline/issues/391#issuecomment-6947746096)
+committed in the source. Its exact 2,284-byte typed
+MAX combines the original owned state, all 41 research journal witnesses and
+all 164 native witnesses. Its 50 starts are actual durable reservations;
+28 physical and 26 cached-policy native episodes have complete settlement
+proof. Unknown historical constraints and research provenance remain intact.
+This seed cannot replace a missing, expired, ambiguous or newer untrusted
+owner. The newest authenticated owner is mandatory, and its additional holds,
+pending ownership and stronger constraints survive MAX merging.
 
-This conditional maintenance uses actual-function inert transport controls
-and qualified prior complete native evidence; it does not claim a new live
-collection or alter source facts, identifiers, expiry, publication, caps or
-schedules. No publisher request or production Action validates this fix.
+Private controls exercised four real restore/write/prune/export cycles,
+including the exact original six-key ZIP followed by modern nine-key exports.
+All 656 writer operations stayed within the original 16 KiB limit: the largest
+complete envelope was 2,784 bytes. Existing rolling-window pruning retained
+bounded future exports; no pruning semantics were relaxed. These are inert
+transport controls, not additional publisher requests or production proof.
+Source facts, IDs, dates, unknown deadlines and the sole live test remain.
 
-For publisher rate/denial errors, the existing adaptive 429 state and actual
-content 401/403/451 holds are saved before the bounded response read; a failed
-save stops the request path. Thus a body-read failure cannot defer the first
-durable cooldown save. Literal robots 451 remains unavailable REP, while
-robots 429 keeps its timed backoff. Existing scoped refusal distinctions,
-including any reviewed API-only annotation, are retained.
-
-
-### Completion persistence and artifact failure
-
-A failed publisher-completion state write makes this process unhealthy. It
-refuses further source requests and collection reentry, and cannot export an
-apparently valid pacing artifact containing older state. Export invalidates
-a safely owned prior artifact through its pinned descriptor before unlinking;
-unsafe files, symlinks and hardlinks are preserved and rejected. The new output
-descriptor remains open through serialization and any workflow readiness
-signal, so a later failure truncates it before attempting removal. No state
-history, actual access hold, collection scope or pacing limit is reset.
-
-This conditional safety repair is checked with offline actual-function failure
-controls. It does not claim a new publisher collection, fresh complete current
-consumer replay, or certification of other legacy pacing/rate-limit behavior.
-Historical native proof is reused only for unchanged normal collection, facts,
-normalization, validation, expiry and publication functions; retained record
-and dependency limits are documented in the linked maintenance issue.
-
-### Current journal generation and owned IO maintenance
-
-The #295 Group C maintenance keeps the existing state schema, seed markers,
-source inventory, factual normalization, date precision, expiry, publication
-and workflow schedule. Journal reads and writes now use an owned retained
-read/write descriptor under the existing stable state.lock. Current parent,
-named inode and byte generation are checked before and after IO and again
-before opening a publisher request. Writers serialize in RAM and rewrite only
-that held inode; a changed current file is refused instead of overwritten.
-
-A genuinely new publisher namespace can be initialized only within the original
-validated incoming-state restore. Merely computing a path or finding a
-preexisting directory with missing journal/lock files does not grant
-initialization. Collection-lock identity is captured at acquisition; journal
-and collection releases are attempted independently. Cleanup preserves an
-active primary exception and refuses a healthy handoff after an IO failure.
-Export keeps the original six-key envelope and upload contract, with acquired
-writer/reader/parent identities retained through cleanup. It adds no workflow
-readiness-signal dependency.
-
-This intentionally replaces atomic journal replacement with in-place
-persistence: a crash or failed write can leave empty or partial bytes and
-sacrifice availability. Such bytes are refused rather than reconstructed from a
-weaker snapshot. Locks are advisory; these checks are not filesystem
-compare-and-swap and do not authenticate an arbitrary same-user writer ignoring
-the locks. If both persistence and invalidation fail, this unchanged schema has
-no durable pending barrier for a later process; that separate #273 limitation
-remains. Existing actual holds are never cleared.
-
-Validation for this maintenance is bounded ordinary private-namespace execution
-and whole-source static comparison. All original non-IO functions and
-state/seed/refusal literals are unchanged; the narrow main-finally wrapper only
-coordinates export and IO cleanup. Earlier complete successful native evidence
-remains historical qualification, not a native run of this maintenance. The
-original four raw-body services have expired, so no fresh full original-record
-or body replay is claimed. A separately pinned current published snapshot can
-be checked with the current consumer; it is not proof of current upstream
-accessibility or a replacement for the original full native evidence.
-
-The maintenance checks comprise 48 ordinary private contexts across the
-four-source group, plus whole-source AST protection. At immutable data snapshot
-5e7f5f11aa7698844b54ce30be12f55318425fe0, this source has 696 published
-records; the unchanged adapter expiry filter retains 696, and the pinned
-consumer accepts the complete published pair, its expiry-filtered pair, a
-derived valid-empty pair and failed-metadata last-good retention. These current
-published checks do not replay expired original native raw bodies or assess
-current publisher content.
-
-
-## Header-only HTTP 429 stop — issue #328
-
-A received publisher HTTP 429 now stops after the existing header constraints
-are retained, before reading any response body. The response must close
-successfully before this intentional stop is assessed. A close or persistence
-failure follows the existing failure handling; they cannot establish a healthy
-collection. Previously retained holds, numeric MAX constraints, Retry-After
-and unknown history remain. An unread 429 body provides no new challenge
-classification.
-
-This paragraph supersedes earlier 429 body-inspection descriptions. This
-conditional repair preserves non-429 responses, REP selection, the full
-collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
-caps, workflow, state schema and finite migration markers. It does not add
-missing pending ownership or upgrade a legacy source to a modern continuity
-protocol.
-
-Private ordinary transport/state controls and protected normal-AST comparisons
-qualify this change. Earlier genuine native evidence retains its original code
-and date attribution; no new publisher collection, current factual review,
-complete native replay or production run is claimed. The maintainer alone owns
-workflow/state coordination and the maintenance rollout for issue #328.
-
-
-### Mid-commit journal generation protection (#295)
-
-Each successful truncate or partial positional write is acknowledged only after
-reading back its exact expected complete bytes and stable inode generation.
-The next write, synchronization check and final readback require that last
-acknowledgement. A stronger same-inode update during a write is preserved:
-the process fails closed, and failure cleanup cannot truncate a changed
-generation merely because this writer previously started a commit. Interrupted
-owned bytes can still be invalidated through the retained verified descriptor.
-This is checked descriptor I/O, not a filesystem compare-and-swap guarantee.
-
-Private actual-function fault controls qualify this bounded I/O repair. Existing
-public native evidence retains its original revision and date; no new publisher
-requests, original expired raw-body replay, publication or production run are
-claimed. Collection, facts, identifiers, deadlines, expiry, state schema,
-pending transactions, MAX constraints and workflow behavior are unchanged.
+Published metadata uses `display_name` = **BMW Group**; source identifiers,
+legacy names and attribution remain unchanged. Success and failure metadata
+both retain that label.
