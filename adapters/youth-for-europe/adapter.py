@@ -551,11 +551,12 @@ def browse_inventory(kind="general", *, closing=False):
     total, pages = first["found_posts"], first["max_num_pages"]
     page_size = first["posts_per_page"]
     expected_pages = (total + page_size - 1) // page_size
-    check_inventory_budget(
-        max(pages - 1, 0) + (0 if closing else pages), 0 if closing else total
-    )
     if pages != expected_pages:
         raise AdapterError("Inconsistent native inventory pagination totals")
+    if closing:
+        check_inventory_budget(0, 0, max(pages - 1, 0))
+    else:
+        check_inventory_budget(max(pages - 1, 0), total, pages)
     for page in range(2, pages + 1):
         _, result, more = explore_page(kind, page)
         if (
@@ -571,19 +572,69 @@ def browse_inventory(kind="general", *, closing=False):
     return config, cards
 
 
-def detail_record(identifier, card):
+def verified_badge_image(node):
+    """Recognize a verification image without loading its asset."""
+    return (isinstance(node, Element) and node.tag == "img"
+            and "verified-listing" in node.attrs.get("class", "").split()
+            and node.attrs.get("alt") == "Verified listing")
+
+
+def verified_heading_badge(node):
+    """Recognize the publisher's decorative verification control."""
+    if (not isinstance(node, Element) or node.tag != "span"
+            or not {"verified-badge", "tooltip-element"} <=
+                set(node.attrs.get("class", "").split())):
+        return False
+    children = [child for child in node.children
+                if isinstance(child, Element) or child.strip()]
+    if len(children) not in (2, 3) or not all(isinstance(child, Element) for child in children):
+        return False
+    image, *fallback, tooltip = children
+    if (not verified_badge_image(image) or tooltip.tag != "span"
+            or "tooltip-container" not in tooltip.attrs.get("class", "").split()
+            or clean_text(tooltip.text()) != "Verified listing"):
+        return False
+    if not fallback:
+        return True
+    noscript = fallback[0]
+    if noscript.tag != "noscript":
+        return False
+    content = [child for child in noscript.children
+               if isinstance(child, Element) or child.strip()]
+    lazy_source = image.attrs.get("data-lazy-src")
+    return (len(content) == 1 and verified_badge_image(content[0])
+            and bool(lazy_source)
+            and (image.attrs.get("src") or "").startswith("data:image/")
+            and content[0].attrs.get("src") == lazy_source)
+
+
+def detail_heading_text(heading, body_classes):
+    """Include all heading text except one corroborated verification badge."""
+    badges = [child for child in heading.children if verified_heading_badge(child)]
+    if "c27-verified" not in body_classes or len(badges) != 1:
+        return clean_text(heading.text())
+    return clean_text(" ".join(
+        child.text() if isinstance(child, Element) else child
+        for child in heading.children if child is not badges[0]
+    ))
+
+
+def detail_record(identifier, card, *, document=None):
     """Normalize factual labeled fields from the actual publisher detail."""
-    tree = PublicHtml(source_text(card["url"])).root
+    if document is None:
+        document = source_text(card["url"])
+    tree = PublicHtml(document).root
     bodies = tree.find(lambda node: node.tag == "body")
-    if (len(bodies) != 1 or "postid-" + identifier not in
-            bodies[0].attrs.get("class", "").split() or
-            "type-" + card["type"] not in
-            bodies[0].attrs.get("class", "").split()):
+    if len(bodies) != 1:
+        raise AdapterError("Opportunity detail identity/type mismatch")
+    body_classes = bodies[0].attrs.get("class", "").split()
+    if ("postid-" + identifier not in body_classes
+            or "type-" + card["type"] not in body_classes):
         raise AdapterError("Opportunity detail identity/type mismatch")
     headings = tree.find(lambda node: node.tag == "h1" and
                          "case27-primary-text" in
                          node.attrs.get("class", "").split())
-    if len(headings) != 1 or clean_text(headings[0].text()) != card["title"]:
+    if len(headings) != 1 or detail_heading_text(headings[0], body_classes) != card["title"]:
         raise AdapterError("Opportunity detail title differs from native card")
     links = tree.find(lambda node: node.tag == "link" and
                      node.attrs.get("rel") == "canonical")
@@ -690,13 +741,18 @@ def collect_inventory():
     page_count = config["ListingTypes"]["general"]["prefetched_results"][
         "max_num_pages"
     ]
-    check_inventory_budget(page_count, len(cards))
-    records = [
-        detail_record(identifier, card) for identifier, card in cards.items()
-    ]
+    check_inventory_budget(0, len(cards), page_count)
+    documents = {
+        identifier: source_text(card["url"])
+        for identifier, card in cards.items()
+    }
     _, closing = browse_inventory(closing=True)
     if closing != cards:
         raise AdapterError("Closing complete native inventory changed", "parse")
+    records = [
+        detail_record(identifier, card, document=documents[identifier])
+        for identifier, card in cards.items()
+    ]
     validate_records(records)
     return sorted(
         records, key=lambda record: record["published_at"] or "", reverse=True
@@ -1055,7 +1111,9 @@ FAMILY = "youthopps-youth-for-europe-publisher-v1"
 FAMILY_SOURCES = {SOURCE_ID}
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
 _ARTIFACT_NAME = "yfe-pacing-state"
-COLLECTION_TIMEOUT = 1500
+COLLECTION_TIMEOUT = 1740
+PUBLISHER_REQUEST_TIMEOUT = 90
+FRONTIER_RESERVE = 120
 RUN_TIMEOUT = 2700
 EXPORT_TIMEOUT = 30
 _STATE_PATH = _STATE_LOCK = None
@@ -1346,7 +1404,7 @@ def pace(interval=12.2):
                 recent[-1] + state["interval"] if recent else now,
                 recent[-5] + 60 if len(recent) >= 5 else now,
             )
-            if ready - now + 90 >= remaining():
+            if ready - now + PUBLISHER_REQUEST_TIMEOUT >= remaining():
                 raise AdapterError(
                     "Retained pacing exceeds remaining collection budget",
                     "access",
@@ -1580,7 +1638,7 @@ def inventory_guard():
         wait = state["inventory_completed"] + state["page_gap"] - time.time()
         if wait <= 0:
             return
-        if wait + 90 >= remaining():
+        if wait + PUBLISHER_REQUEST_TIMEOUT >= remaining():
             raise AdapterError(
                 "Page guard exceeds remaining collection budget", "access"
             )
@@ -1597,15 +1655,33 @@ def fetch_inventory_page(fetch, *args, **kwargs):
         _INVENTORY_ACTIVE = previous
 
 
-def check_inventory_budget(pages, details):
+def frontier_seconds(opening_pages, details, closing_pages, state):
+    """Estimate the ordered base frontier after the preceding inventory page."""
+    interval, page_gap = state["interval"], state["page_gap"]
+    requests = opening_pages + details + closing_pages
+    estimate = requests * (interval + PUBLISHER_REQUEST_TIMEOUT)
+    adjacent = opening_pages + max(0, closing_pages - 1)
+    inventory_extra = max(0, page_gap - interval)
+    estimate += adjacent * inventory_extra
+    if closing_pages:
+        # The detail sequence already waits its own physical gaps. Only the
+        # remaining inventory wait matters at the start of the closing pass.
+        estimate += max(0, page_gap - (details + 1) * interval)
+    return estimate + FRONTIER_RESERVE
+
+
+def check_inventory_budget(opening_pages, details, closing_pages):
     with locked_budget():
         state = load_budget()
-    requests = pages + details
-    physical = requests * (state["interval"] + 90)
-    pagination = max(0, pages - 1) * state["page_gap"]
-    if max(physical, pagination) + 120 >= remaining():
+    estimate = frontier_seconds(opening_pages, details, closing_pages, state)
+    time_left = remaining()
+    if estimate >= time_left:
         raise AdapterError(
-            "Complete remaining frontier cannot fit retained timing", "access"
+            "Complete remaining frontier cannot fit retained timing: "
+            f"{opening_pages} opening pages, {details} details, "
+            f"{closing_pages} closing pages; "
+            f"{estimate:.1f}s estimated, {time_left:.1f}s available",
+            "access",
         )
 
 
@@ -1670,6 +1746,8 @@ def collect():
     """One complete actual native collection with bounded exclusive access."""
     if _RUN_END is None:
         with execution():
+            with phase("restore", 180):
+                prepare_collection()
             return collect()
     with phase("collection", COLLECTION_TIMEOUT):
         prepare_collection()
@@ -1725,7 +1803,7 @@ def request_timeout(publisher=False):
     remaining = min(_PHASE_END, _RUN_END) - time.monotonic()
     if remaining <= 0:
         raise PhaseExpired()
-    return min(90 if publisher else 15, remaining)
+    return min(PUBLISHER_REQUEST_TIMEOUT if publisher else 15, remaining)
 
 
 def alarm_expired(signum, frame):
