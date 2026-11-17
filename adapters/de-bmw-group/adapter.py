@@ -2562,6 +2562,23 @@ def export_family_artifact():
                         raise
 
 
+def robots_response_text(headers, body):
+    """An HTTP200 policy needs one explicit plaintext representation."""
+    if hasattr(headers, "get_all"):
+        types = headers.get_all("Content-Type") or []
+    else:
+        types = [value for key, value in headers.items()
+                 if key.lower() == "content-type"]
+    if (len(types) != 1 or not isinstance(types[0], str)
+            or types[0].split(";", 1)[0].strip().lower() != "text/plain"):
+        raise AdapterError("Unsupported robots representation", "access")
+    text = body.decode(headers.get_content_charset() or "utf-8", "strict")
+    meaningful = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    if re.search(r"<!--|-->|<!doctype\b|</?[A-Za-z][^>]*>", meaningful, re.I):
+        raise AdapterError("HTML is not a robots policy", "access")
+    return text
+
+
 def apply_robots_policy(text, url, state=None):
     """Keep policy application pending until restrictive state is durable."""
     if state is None:
@@ -2805,8 +2822,7 @@ def physical_request_bytes(
                 response_constraints_saved = False
                 target = (_ROBOTS_CONTEXT["target"]
                           if _ROBOTS_CONTEXT is not None else SOURCE_URL)
-                text = body.decode(response.headers.get_content_charset() or
-                                   "utf-8")
+                text = robots_response_text(response.headers, body)
                 try:
                     delay = apply_robots_policy(text, target, state)
                 except RobotsDisallow:

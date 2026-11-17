@@ -27,7 +27,7 @@ Source publication dates remain calendar dates; no midnight or publisher timezon
 
 ## Access and publisher conditions
 
-All physical publisher requests use exactly `YouthOppsBot/1.0 (+https://youthopps.org/bot/)`, normal inherited proxy settings and verified TLS. Only `www.bmwgroup.jobs` is allowed; redirects must remain on that host. Current robots returned HTTP200 with only a sitemap declaration. Advertised and applicable legacy protective product groups remain enforced if present. Stronger Crawl-delay/Request-rate limits prevail. Robots-only 4xx except 429 means unavailable REP; robots 429/5xx/TLS failures stop. Content 401/403, visible challenges and genuine denial bodies retain hard holds. No identity change or access workaround is used.
+All physical publisher requests use exactly `YouthOppsBot/1.0 (+https://youthopps.org/bot/)`, normal inherited proxy settings and verified TLS. Only `www.bmwgroup.jobs` is allowed; redirects must remain on that host. The accepted native robots response was a single explicit text/plain HTTP200 with only a sitemap declaration. A missing/duplicate or unsupported MIME and HTML markup, including a policy-looking line inside HTML, retain pending ownership instead of granting access. Empty or comment-only plaintext remains valid. Advertised and applicable legacy protective product groups remain enforced if present. Stronger Crawl-delay/Request-rate limits prevail. Robots-only 4xx except 429 means unavailable REP; robots 429/5xx/TLS failures stop. Content 401/403, visible challenges and genuine denial bodies retain hard holds. No identity change or access workaround is used.
 
 The [global terms](https://www.bmwgroup.jobs/en/general/terms-of-use.html) identify local career-page responsibility and the applicant tracking system. The [global disclaimer](https://www.bmwgroup.jobs/en/general/legal-disclaimer.html) reserves copyright in expressive objects and grants no intellectual-property licence. The [UK recruitment legal notes](https://www.bmwgroup.jobs/gb/en/legal-notes.html), which cover the shared UK/Ireland page, state:
 
@@ -119,12 +119,17 @@ also interrupts blocked closure/finalizers, retaining pending ownership.
 Local access requires the exact disabled workflow and terminal family history.
 The unchanged original native test obtains this lifecycle through `collect()`.
 
-Current offline evidence replays all actual research inputs to 503 records,
-using the same captured pages for both parser passes. It does not claim two
-live passes, a fresh successful native run, production publication or an
-actual expired-to-empty subset. Hosted execution deliberately remains closed
-until the final native MAX handoff is reviewed. Historical source facts, IDs,
-publication dates, unknown deadlines and the original sole live test remain.
+The original native test of source `62a1a11e` completed two fresh 11-page
+frontiers with exactly equal material facts for 501 current listings. All 28
+physical responses were HTTP200; all 164 durable journal witnesses and the
+complete current consumer output were verified. There was no actual expired
+subset. Later Retry-After and robots-representation protections use qualified
+reuse of that accepted run: its responses had no Retry-After and its sole REP
+response was supported plaintext. Actual-function private-journal controls
+exercise the new restrictive paths, and full captured-input replay preserves
+all 501 material records. This is not a second native run or production proof.
+Hosted execution remains closed until the final native MAX handoff is reviewed.
+Source facts, IDs, dates, unknown deadlines and the sole live test remain.
 
 Published metadata uses `display_name` = **BMW Group**; source identifiers,
 legacy names and attribution remain unchanged. Success and failure metadata
