@@ -3847,11 +3847,11 @@ def latest_family_run():
                 ) from None
 
 
-def scan_family_history():
+def scan_family_history(*, hosted_research=False):
     """Select completed chronology, including older-ID rerun attempts."""
     global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
     _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
-    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true" and not hosted_research
     current_id, current_attempt = (
         current_run_identity() if hosted else (None, None)
     )
