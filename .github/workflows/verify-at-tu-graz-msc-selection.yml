@@ -1,0 +1,42 @@
+name: verify-at-tu-graz-msc-selection
+on:
+  push:
+    branches:
+      - 'qa/422-graz-6edf6c191c9acbf6'
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: youthopps-tu-graz-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.run_attempt == 1 && github.event.created && github.event.before == '0000000000000000000000000000000000000000'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 493e53db44e0d00979f6da9e3b876e9bdb9b8f63
+          path: _qa/website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run the original sole nonpublishing test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B .github/qa/graz422-observer.py
+      - name: Retain original encrypted evidence and exact state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graz422-native-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/graz422-native-evidence/
+          if-no-files-found: error
+          retention-days: 14
