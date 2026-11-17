@@ -240,7 +240,11 @@ def read_pages():
                 else "-scholarships-2026"
             )
         )
-    pages = {key: (url, content(page(url), url)) for key, url in urls.items()}
+    pages = {}
+    for key, url in urls.items():
+        section = content(page(url), url)
+        review_page(key, url, section)
+        pages[key] = (url, section)
     pages["german-call"] = german_document(pages["germany"])
     return pages
 
@@ -785,9 +789,6 @@ REVIEWED_CONDITIONS = {
     "havel": (
         "34125e878d31e1f1509118599d3f3e6941caf209b400f5849c27d0f4fe0dddee"
     ),
-    "international": (
-        "01a034298c6997f0a3479f84e6f4b7741817c66d540b87a78e04b5a40e5df034"
-    ),
     "foundations": (
         "692497332ce71bbe9476c2501a6d6f2bb7ca9e41a25c476162d027b6e4852835"
     ),
@@ -1037,25 +1038,189 @@ def mobility_sections(node, url):
     return result
 
 
-def parse_inventory(pages):
-    """Collect genuine programmes and calls from bounded own-publisher pages."""
-    for key, expected in REVIEWED_CONDITIONS.items():
-        text = pages[key][1].text().split("Last change:")[0]
+# Each card retains the reviewed factual projection and its existing record keys.
+INTERNATIONAL_CARDS = {
+    "Aktion": (
+        "c6244dfc61ad2b71dac181337bb99d2e5c3632eaedb7e19c0591701bce72f346",
+        ("aktion",),
+    ),
+    "DAAD": (
+        "ef29b9c4393b20ac9df63bb899176e2157e001759df9dda421aafdbe1441fbab",
+        ("daad-summer", "daad-masters", "daad-research", "daad-cotutelle"),
+    ),
+    "Czech-German Future Fund": (
+        "ff43e9c1f97f060097a9238010d1b6edb0ea7178f4e4ff6e02e078f67eb2787b",
+        ("future-fund",),
+    ),
+    "BTHA": (
+        "293d9788fe98260ac1d5144f9f8f740b3335f22275c80ee622a9228d3070ce93",
+        ("btha-postgraduate", "btha-summer"),
+    ),
+    "GFPS": (
+        "c7e996db2d10e11e0e3c80a3e164abdae6d302f944e23808e773ac247e2963d5",
+        ("gfps",),
+    ),
+    "KAAD": (
+        "63995b07184da01ee09d5b9a2a02e2c4910003cb927cb8ebcad4bc6148a5e763",
+        ("kaad",),
+    ),
+    "CERN - Doctoral Student Programme": (
+        "14c57ad722b53b95dbfd6c892d88413b031f3ee3915c89ab1c2cd1107870ece1",
+        ("cern",),
+    ),
+    "The Institute for Human Sciences": (
+        "435541a143c4d748ab8caa9847e1c1d2f263732c1900e0f6b9bea4eab3d5eff6",
+        (),
+    ),
+    "Baden-Württemberg-Stipendium": (
+        "846d7a5dfd5e329b5389b05a884aea878f6c4a45f824033fda9806a80d08feba",
+        (),
+    ),
+    "The Gerda Henkel Foundation": (
+        "d846fcb7e7ad90c6387cf2ee52d888cf2f6ce7174b86a9eafa8de58c8ec4399a",
+        (),
+    ),
+    "Barrande Fellowship": (
+        "1d940ce4f85e6e21338e5bb20e08f43660a9321dc32c96ec3d7ea9698567891b",
+        ("barrande",),
+    ),
+    "CEEPUS": (
+        "d2b4b17a73eda66f34c14ead605abd5c087c164bd3ef9498a77b828cc2abbbbf",
+        ("ceepus",),
+    ),
+    "Fulbright": (
+        "0120bdf6b57306bc605a9d7df385676f06f3422cab8323078748612c16d92e96",
+        ("fulbright",),
+    ),
+    "Scholarships at Japanese Universities": (
+        "4e3a9368d1523a295d0cf6702c48fedc56514b476ae7e91162c704421350b2d0",
+        (),
+    ),
+    "The Open Society Fund": (
+        "02a604593e6715edc6ccbddab3d3646bae3b7584d4575d8b1978d60fbea156d5",
+        (),
+    ),
+    "The International Visegrad Fund": (
+        "10b17c0133a5693f5b47e7e668726f17f3c0a70b7f23db299b87380ab5a053d0",
+        (),
+    ),
+}
+INTERNATIONAL_ARTICLE_FACTS = "d532a192442209042fed0b284921ac1c02ea213e8fba606a3b6c95edf6a609fa"
+
+
+def international_material(node, url, excluded=()):
+    """Project visible facts and destinations while allowing generic link captions."""
+    words, destinations = [], set()
+
+    def visit(part):
+        if not isinstance(part, Node):
+            words.append(part)
+            return
+        if part in excluded or part.tag in {"script", "style", "noscript"}:
+            return
+        if part.tag == "a" and part.attrs.get("href"):
+            destinations.add(urllib.parse.urljoin(url, part.attrs["href"]))
+            if part.text().casefold() in {
+                "here",
+                "more information",
+                "on the website",
+                "learn more",
+            }:
+                return
+        for child in part.children:
+            visit(child)
+
+    visit(node)
+    return " ".join(" ".join(words).split()), sorted(destinations)
+
+
+def international_fingerprint(material):
+    encoded = json.dumps(material, ensure_ascii=False, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def international_footer(footer, url):
+    omitted = {
+        item for item in nodes(footer, "div", "prints") if not item.text()
+    }
+    for paragraph in nodes(footer, "p"):
+        text = paragraph.text()
+        if re.fullmatch(
+            r"Last change: [A-Za-z]+ \d{1,2}, \d{4}, \d{1,2}:\d{2}", text
+        ) or text == "Responsible for site content: International Relations Office":
+            omitted.add(paragraph)
+    return international_material(footer, url, omitted)
+
+
+def reviewed_international_cards(node, url):
+    page_title = one(nodes(node, "h1"), "international programmes title")
+    article = one(nodes(node, "div", "node-content"), "international programmes article")
+    footers = nodes(node, "div", "content-footer")
+    if (
+        page_title.text() != "International Scholarship Programmes"
+        or len(footers) > 1
+        or any(international_footer(footer, url) != ("", []) for footer in footers)
+        or international_material(node, url, {page_title, article, *footers}) != ("", [])
+    ):
+        raise AdapterError("International programmes article structure changed", "parse")
+    cards = nodes(article, "div", "medailon-item")
+    material = international_material(article, url, set(cards))
+    if international_fingerprint(material) != INTERNATIONAL_ARTICLE_FACTS:
+        raise AdapterError("International programmes shared information changed", "parse")
+    contents = {}
+    for card in cards:
+        body = one(nodes(card, "div", "medailon-text"), "international scholarship card body")
+        heading = one(
+            nodes(body, "div", "medailon-title"), "international scholarship card title"
+        )
+        title = one(nodes(heading, "h4"), "international scholarship card heading").text()
+        if title in contents or title not in INTERNATIONAL_CARDS:
+            raise AdapterError("International scholarship card inventory changed", "parse")
+        if (
+            international_material(card, url, {body}) != ("", [])
+            or international_fingerprint(international_material(body, url))
+            != INTERNATIONAL_CARDS[title][0]
+        ):
+            raise AdapterError("International scholarship card facts changed: " + title, "parse")
+        contents[title] = body
+    if set(contents) != set(INTERNATIONAL_CARDS):
+        raise AdapterError("International scholarship card inventory changed", "parse")
+    return {
+        record: contents[title]
+        for title, (_, records) in INTERNATIONAL_CARDS.items()
+        for record in records
+    }
+
+
+def review_page(key, url, section):
+    """Reject a factual change before fetching the rest of the source inventory."""
+    if key == "international":
+        return reviewed_international_cards(section, url)
+    if key == "mobility":
+        for name, text in mobility_sections(section, url).items():
+            if hashlib.sha256(text.encode()).hexdigest() != MOBILITY_CONDITIONS[name]:
+                raise AdapterError(
+                    "Mobility Fund conditions changed; review section: " + name,
+                    "parse",
+                )
+    expected = REVIEWED_CONDITIONS.get(key)
+    if expected is not None:
+        text = section.text().split("Last change:")[0]
         if hashlib.sha256(text.encode()).hexdigest() != expected:
             raise AdapterError(
                 "Publisher conditions changed; review source page: " + key,
                 "parse",
             )
-    mobility_url, mobility_node = pages["mobility"]
-    for key, text in mobility_sections(mobility_node, mobility_url).items():
-        if (
-            hashlib.sha256(text.encode()).hexdigest()
-            != MOBILITY_CONDITIONS[key]
-        ):
-            raise AdapterError(
-                "Mobility Fund conditions changed; review section: " + key,
-                "parse",
-            )
+
+
+def parse_inventory(pages):
+    """Collect genuine programmes and calls from bounded own-publisher pages."""
+    for key in (*REVIEWED_CONDITIONS, "mobility"):
+        review_page(key, *pages[key])
+    international_url, international_section = pages["international"]
+    international_cards = reviewed_international_cards(
+        international_section, international_url
+    )
     records = []
 
     def add(page_key, key, title, facts, summary, **options):
@@ -1186,7 +1351,12 @@ def parse_inventory(pages):
         hosts=("CZ",),
     )
     for key, title, summary, facts, hosts in INTERNATIONAL:
-        add("international", key, title, facts, summary, hosts=hosts)
+        records.append(
+            programme(
+                key, title, international_url, international_cards[key].text(),
+                facts, summary, hosts=hosts,
+            )
+        )
     for key, title, summary, facts, hosts in FOUNDATIONS:
         item = add("foundations", key, title, facts, summary, hosts=hosts)
         if key == "visegrad":
@@ -3847,11 +4017,11 @@ def latest_family_run():
                 ) from None
 
 
-def scan_family_history():
+def scan_family_history(*, hosted_research=False):
     """Select completed chronology, including older-ID rerun attempts."""
     global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
     _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
-    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true" and not hosted_research
     current_id, current_attempt = (
         current_run_identity() if hosted else (None, None)
     )
