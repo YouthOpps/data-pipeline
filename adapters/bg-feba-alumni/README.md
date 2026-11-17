@@ -41,11 +41,68 @@ subsequent failure records metadata only, and first failure creates no folder.
 
 ## Expired-record cleanup
 
+### Continuity recovery (#377)
+
+The 30 October 2026 job `124263659344` failed its GitHub deadline-context
+request with HTTP 502 before restoration or publisher access. Sixteen later
+exact attempts failed during restoration. Recovery recognizes only those
+seventeen independently reviewed run/job/head/time identities and their
+complete empty artifact inventories. One job lasted 62 seconds; its original
+restoration failure, rather than a short-job assumption, establishes no access.
+The exact last actual owner is `40941478211/1`, artifact `12926738749`, SHA256
+`d6948a41e63b42e5a394e631d45836046405431521a8303f6958e04c67cb17e4`.
+
+All retained restrictions, pending ownership and unknown history remain
+authoritative. Omitted jobs contribute conservative administrative completion
+bounds, never invented physical starts or response receipts. Missing that
+actual owner cannot fall back to an older modern artifact or the retired
+first-state migration. A later authenticated actual owner remains authoritative.
+
+An enforced monotonic 60-second startup floor now supplements the existing
+wall-clock pacing constraints and is checked again immediately before an
+opener. Future missing-state failures qualify only with one complete failed
+first-attempt `collect` job lasting strictly less than 58 seconds, a complete
+zero-artifact inventory, the exact reviewed producer workflow and immutable
+adapter bytes identical to the authenticated current collector. Unknown code,
+reruns, long jobs, extra jobs and incomplete outcomes remain errors. Changing
+the first-wire guard requires new independent proof. This is not a generic
+older-artifact fallback or permission to reset established local state.
+
+The current repair retains the existing complete API scan; no publisher-backed
+delta ordering or removal contract establishes a safe early-stop boundary.
+The original parser, source inventory, supported deadlines and atomic expiry
+publication remain unchanged. On 16 November 2026, the original sole native
+test passed with 13 genuine records from all 242 unique WordPress posts over
+three pages. The actual current consumer accepted those 13 raw records, the
+actual zero-record expiry-filtered pair and the valid-empty envelope. All 13
+raw records had explicit past deadlines; zero current records is a successful
+filtered result, not empty or failed retrieval. Complete captured-page replay,
+all response bodies and all 26 persistence journals passed independent review.
+Physical completion gaps were at least 12.201883815 seconds, inventory gaps
+at least 30.005394673 seconds and rolling starts at most three per minute.
+
+The original pre-access observer failure remains separate from that genuine
+passing run. It used the wrong archive-limit assertion and made no publisher
+requests or state changes; only the external observer was corrected before
+the passing test. [Exact native and independent evidence](https://github.com/YouthOpps/data-pipeline/issues/377#issuecomment-6925959688)
+records both outcomes. No production test or data-source write was used.
+
+The #377 maintenance literal preserves the old #299 approved MAX, the actual
+owned archive and all actually persisted native start points, plus the newest
+settled local receipt. Its 54 retained points preserve all four native request
+reservations, rather than only the final rolling window; actual opener timing
+was checked separately. Stronger incoming
+restrictions, pending ownership and unknown history still win through the
+original merge. Publication and live indexing are verified separately after
+the reviewed merge; the source stays paused until that handoff is accepted.
+
 Supported Bulgarian application-closing title dates remain date-only without
 an invented closing timezone. Other titles retain null deadlines. Current
-publisher titles take precedence over stale URL text: the live scholarship
+publisher titles take precedence over stale URL text: the freshmen scholarship
 notice title states 20 October 2026 although its unchanged URL includes
-16 October. No deadline is inferred from the URL or article publication date.
+16 October. The OMV scholarship title states 1 November 2026. These dates
+were inspected in the complete 16 November capture. No deadline is inferred
+from the URL or article publication date.
 Null/ambiguous values remain eligible; supported aware timestamps, if supplied
 in a validated record, use their stated offsets.
 
