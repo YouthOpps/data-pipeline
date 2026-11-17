@@ -37,7 +37,7 @@ SOURCE_URL = (
     "scholarships-for-full-degree-students"
 )
 WEBSITE_URL = SOURCE_URL
-VACANCIES_URL = "https://employment.ku.dk/phd/"
+VACANCIES_URL = "https://employment.ku.dk/all-vacancies/"
 POLICY_URL = "https://about.ku.dk/cookies-and-privacy-policy/"
 LANGUAGE = "en"
 PUBLISHER_COUNTRY = "DK"
@@ -409,6 +409,60 @@ _FUNDING_PROGRAMMES = {
     ),
 }
 
+# Preserve published legacy IDs through canonical programme URLs. New records
+# use their actual linked programme URL, never mutable display headings.
+_PROGRAMME_IDENTITIES = {
+    (
+        "http://www.conicyt.cl/becas-conicyt/sobre-becas-conicyt/"
+        "que-es-becas-conicyt/"
+    ): "18e34dfa9c34d5f035340372",
+    "https://brightsparks.com.sg/profile/sfa/scholarships.php": (
+        "b62448b32fe5e62370812d9e"
+    ),
+    (
+        "https://bursaries.firstrand.co.za/Bursary/"
+        "FirstRandLaurieDippenaarScholarship"
+    ): "1fa24ef224fe662833eadd0e",
+    "https://educationglobal.ru/en/general_program_information/": (
+        "1b39739bd1f125c2bac9a07b"
+    ),
+    "https://inlaksfoundation.org/": "7df73f49d959864eec6631fe",
+    "https://jeanmonnet.org.tr/en/about-scholarship-programme/": (
+        "8002013c16d3a7f6b336dbde"
+    ),
+    "https://jntataendowment.org/loan-scholarship-process/": (
+        "ea6f56fa784d63f3ea50662e"
+    ),
+    "https://johnmonash.com/": "9df94cc0fdd9691fe5aa352f",
+    "https://mkingscholarships.ca/": "b5b27b69a1dfd61cedcde521",
+    "https://qalaascholarships.org/index.html": "741fad7c9c8cd4f1aeae2be6",
+    (
+        "https://scholarships.uq.edu.au/scholarship/"
+        "conacyt-mexican-scholarship-program"
+    ): "5b834808c3933e6e994a2122",
+    "https://the.akdn/en/how-we-work/our-agencies/aga-khan-foundation": (
+        "d045d8c8715daad6975fa1e7"
+    ),
+    "https://www.colfuturo.org/": "4b2ecf6f18ec52b24a440d7f",
+    (
+        "https://www.daad.de/en/studying-in-germany/scholarships/"
+        "daad-scholarships/"
+    ): "72dc4bff9f591eaebc61ff98",
+    "https://www.fes.de/de/": "e9ef78fb492ef91810d5675e",
+    "https://www.funedmx.org/": "29a5c21fefd810cf89c5af19",
+    (
+        "https://www.mastersportal.com/scholarships/148/"
+        "the-tamim-bin-hamad-scholarship.html"
+    ): "6df9bc28ec0a9ce5164c5ddb",
+    "https://www.rotary.org/en/our-programs/scholarships": (
+        "f24444ce3faab8d324c2a7e2"
+    ),
+    (
+        "https://www.tatatrusts.org/our-work/individual-grants-programme/"
+        "education-grants"
+    ): "b141f7f45a5c6f44191ffd60",
+}
+
 _EXCLUDED_FUNDING = {
     "The International Scholarships Program (ISP)": "programme database",
     "Fulbright Commission": "duplicate of the detailed UCPH Fulbright route",
@@ -443,7 +497,10 @@ def additional_programmes(main):
     found = set()
     records = []
     for section in sections:
-        for item in nodes(section, "div", "accordion-item"):
+        items = nodes(section, "div", "accordion-item")
+        if not items:
+            raise AdapterError("Funding section has no programme blocks", "parse")
+        for item in items:
             heading = one(nodes(item, "h2"), "funding accordion heading")
             body = one(nodes(item, "div", "accordion-body"), "funding body")
             blocks = []
@@ -451,28 +508,62 @@ def additional_programmes(main):
                 current = None
                 for child in body.walk():
                     if child.tag == "h3":
-                        current = [child.text(), []]
+                        current = [child.text(), [], []]
                         blocks.append(current)
                     elif child.tag == "p" and current is not None:
                         current[1].append(child.text())
+                    elif child.tag == "a" and current is not None:
+                        current[2].append(child.attrs.get("href", ""))
             else:
-                blocks.append([heading.text(), [body.text()]])
-            for name, paragraphs in blocks:
+                blocks.append([
+                    heading.text(), [body.text()],
+                    [link.attrs.get("href", "") for link in nodes(body, "a")],
+                ])
+            for name, paragraphs, links in blocks:
                 if name in found:
                     raise AdapterError("Repeated funding identity", "parse")
                 found.add(name)
                 if name in _EXCLUDED_FUNDING:
                     continue
-                if name not in _FUNDING_PROGRAMMES:
-                    raise AdapterError("Unreviewed named funding programme")
-                title, summary, required, countries, tags = _FUNDING_PROGRAMMES[
-                    name
-                ]
-                text = " ".join(paragraphs)
-                if any(fact not in text for fact in required):
+                targets = set()
+                for link in links:
+                    target = urllib.parse.urljoin(SOURCE_URL, link)
+                    parsed = urllib.parse.urlsplit(target)
+                    if (
+                        parsed.scheme not in ("http", "https")
+                        or not parsed.hostname
+                        or parsed.username
+                        or parsed.password
+                        or not link.strip()
+                    ):
+                        raise AdapterError("Invalid funding identity link", "parse")
+                    targets.add(urllib.parse.urldefrag(target)[0])
+                canonical = one(list(targets), "canonical funding programme link")
+                if (
+                    name in _FUNDING_PROGRAMMES
+                    and canonical not in _PROGRAMME_IDENTITIES
+                ):
                     raise AdapterError(
-                        "Reviewed funding conditions changed: " + name
+                        "Legacy programme canonical identity changed", "parse"
                     )
+                text = " ".join(paragraphs).strip()
+                if not name or len(name) > 300 or len(text) < 20:
+                    raise AdapterError("Incomplete named funding block", "parse")
+                reviewed = _FUNDING_PROGRAMMES.get(name)
+                supported = reviewed is not None and all(
+                    fact in text for fact in reviewed[2]
+                )
+                if supported:
+                    title, summary, _, countries, tags = reviewed
+                else:
+                    title = name
+                    summary = (
+                        "UCPH lists " + name + " among its external funding "
+                        "options for prospective students. Consult the official "
+                        "university entry for current programme and "
+                        "administrator information."
+                    )
+                    countries, tags = [], []
                 record = programme(
                     title,
                     heading.attrs["id"],
@@ -481,17 +572,24 @@ def additional_programmes(main):
                         "UCPH-published programme identity: " + name,
                         "External administrator; only this university's "
                         "published conditions are collected.",
-                        "No current dated application call is given here.",
+                        "Application terms are described in the official "
+                        "university entry.",
                     ],
                     countries=countries,
                 )
-                record["id"] = hashlib.sha256(
-                    (SOURCE_ID + "|programme|" + name).encode()
-                ).hexdigest()[:24]
+                record["id"] = _PROGRAMME_IDENTITIES.get(canonical) or (
+                    hashlib.sha256(
+                        (SOURCE_ID + "|programme-url|" + canonical).encode()
+                    ).hexdigest()[:24]
+                )
                 record["tags"] = tags
                 record["host_countries"] = []
                 record["location"] = None
-                if "University of Copenhagen" in text:
+                if not supported:
+                    record["classification"]["method"] = (
+                        "official-programme-listing"
+                    )
+                elif "University of Copenhagen" in text:
                     record["host_countries"] = ["DK"]
                     record["location"] = "University of Copenhagen, Denmark"
                 elif name == "Mackenzie King Open Scholarship":
@@ -507,8 +605,11 @@ def additional_programmes(main):
                         "other European destinations are unspecified."
                     )
                 records.append(record)
-    if found != set(_FUNDING_PROGRAMMES) | set(_EXCLUDED_FUNDING):
-        raise AdapterError("Reviewed funding inventory changed", "parse")
+    # This is a complete current inventory, not a permanent membership list.
+    # Retire removed programmes. New names and changed conditions retain
+    # minimal supported facts; both sections must remain substantive.
+    if not records:
+        raise AdapterError("Current named funding inventory is empty", "parse")
     return records
 
 
@@ -525,116 +626,45 @@ def scholarships(root):
     )
     text = government.text()
     required = (
+        "full tuition fee waivers",
+        "basic living expenses for 22 months",
         "automatically",
         "non-EU/EEA",
+        "outside the EU, EEA",
+        "Switzerland",
+        "admitted to a master’s degree programme",
         "time-limited residence permit",
-        "Faculty of Health and Medical Sciences",
-        "Faculty of Humanities",
-        "Faculty of Social Sciences",
-        "Faculty of Science",
-        "Faculty of Theology",
-        "22 months",
-        "90%",
-        "60 ECTS",
-        "GPA of 10 or higher",
-        "maximum three with the same nationality",
-        "less than four per year",
-        "generally 2-3 per year",
-        "September intake",
+        "rights of Danish citizens",
+        "State Educational Grant and Loan Scheme (SU)",
+        "§9c",
+        "§9m",
+        "financial need is not taken into consideration",
+        "Each year the University Management will decide which programmes",
+        "do not submit an individual application",
     )
     if any(term not in text for term in required):
         raise AdapterError("Reviewed scholarship conditions changed", "parse")
-    health = one(
-        [
-            n
-            for n in nodes(government, "div", "accordion-item")
-            if n.text().startswith("Faculty of Health and Medical Sciences")
-        ],
-        "Health scholarship conditions",
-    )
-    science = one(
-        [
-            n
-            for n in nodes(government, "div", "accordion-item")
-            if n.text().startswith("Faculty of Science")
-        ],
-        "Science scholarship conditions",
-    )
-    if not all(
-        "Scholarship for 2" in n.text() and "year students" in n.text()
-        for n in (health, science)
-    ):
-        raise AdapterError("Second-year scholarship cohorts missing", "parse")
     records = [
         programme(
             "UCPH Danish Government Scholarship for MA/MSc admission",
             "danish-government-scholarships",
-            "Automatic academic-merit consideration for eligible master's "
-            "applicants from outside the EU, EEA and Switzerland with a "
-            "time-limited study residence permit. "
-            "Awards provide tuition waivers and/or living support. Faculty "
-            "rules "
-            "vary; SCIENCE requires a first-priority application and "
-            "bachelor's "
-            "GPA above 90%. No separate scholarship application or dated call "
-            "is "
-            "published here; financial need does not determine selection.",
+            "Eligible master's applicants from outside the EU, EEA and "
+            "Switzerland are considered automatically for a limited number "
+            "of academic-merit scholarships. Awards cover full tuition and "
+            "basic living expenses for 22 months. UCPH selects participating "
+            "programmes annually; financial need is not a selection factor. "
+            "No separate scholarship application or current dated call is "
+            "published on this page.",
             [
                 "Eligibility: citizenship outside EU, EEA and Switzerland; "
-                "UCPH master's admission and temporary study residence permit.",
+                "UCPH master's admission and a temporary study residence "
+                "permit.",
                 "Exclusions: Danish-citizen rights, SU eligibility and the "
                 "specified Aliens Act section 9c/9m residence exception.",
-                "HEALTH: academically outstanding applicants; either tuition "
-                "alone or tuition and living costs; living support may be "
-                "taxed.",
-                "HUMANITIES: automatic consideration of eligible MA "
-                "applicants.",
-                "SOCIAL SCIENCES: September intake only; usually 2–3 "
-                "awards/year.",
-                "SCIENCE: first-priority MSc admission; bachelor's GPA above "
-                "90%; "
-                "tuition and living expenses for 22 months. 2025 minimum 98% "
-                "is historical.",
-                "THEOLOGY: partial tuition waiver only, usually fewer than "
-                "4/year; "
-                "fees must be paid before possible later reimbursement.",
-                "Yearless admission calendars are not scholarship deadlines.",
-            ],
-        ),
-        programme(
-            "UCPH HEALTH second-year master's scholarship",
-            one(nodes(health, "h2"), "Health heading").attrs["id"],
-            "Automatic annual consideration for fee-paying master's students "
-            "who completed their first year at UCPH HEALTH. Very limited "
-            "one-year awards; the best student may receive tuition and living "
-            "support. The faculty expects GPA 10 or higher on the Danish scale "
-            "and notifies recipients around mid-September/early October. "
-            "No exact current deadline is stated.",
-            [
-                "Distinct continuing-student cohort, not an admission award.",
-                "Publisher expects approximately 2 second-year awards/year; "
-                "capacity "
-                "does not create separate opportunities.",
-                "Source conditions: " + SOURCE_URL + "#" + health.attrs["id"],
-            ],
-        ),
-        programme(
-            "UCPH SCIENCE second-year master's scholarship",
-            one(nodes(science, "h2"), "Science heading").attrs["id"],
-            "Fee-paying UCPH SCIENCE students may receive second-year tuition "
-            "and living support after excellent first-year results. At least "
-            "60 ECTS must be registered by 1 September; exchange grades "
-            "receive "
-            "individual assessment. No more than 3 recipients share a "
-            "nationality. "
-            "Selected students are contacted in early September; fees already "
-            "paid for semester 3 are refunded. No dated application call is "
-            "stated.",
-            [
-                "Distinct continuing-student cohort, not an admission award.",
-                "2025 recipient GPA 11 or higher is historical, not a current "
-                "cutoff.",
-                "Source conditions: " + SOURCE_URL + "#" + science.attrs["id"],
+                "Programme selection is determined annually by University "
+                "Management; admission does not guarantee a scholarship.",
+                "A recipient must accept by the deadline in their offer; "
+                "this is not a public application deadline.",
             ],
         ),
     ]
@@ -691,7 +721,7 @@ def scholarships(root):
 
 
 def vacancy_rows(root, url):
-    """Read the complete server-rendered official vacancy table."""
+    """Validate every row of the complete official all-vacancies table."""
     table = one(nodes(root, "table", "vacancies"), "PhD vacancy table")
     rows = []
     for row in nodes(table, "tr"):
@@ -706,7 +736,7 @@ def vacancy_rows(root, url):
         if (
             parsed.scheme != "https"
             or parsed.netloc != "employment.ku.dk"
-            or parsed.path != "/phd/"
+            or parsed.path != "/all-vacancies/"
             or parsed.fragment
             or not re.fullmatch(r"show=\d+", parsed.query)
         ):
@@ -772,22 +802,37 @@ def application_deadline(body, listing_date):
         remainder = text[match.end() : match.end() + 65]
         clock = re.match(
             r"\s*[,\s]*(?:at\s*)?(\d{1,2})[:.](\d{2})"
-            r"\s*(?:pm|PM)?\s*[([]?\s*"
+            r"\s*(am|pm)?\s*[([]?\s*"
             r"(CET|CEST|GMT\s*\+\s*[12]|UTC)",
             remainder,
+            re.I,
         )
         instant = None
         if clock:
             hour, minute = int(clock[1]), int(clock[2])
-            zone = re.sub(r"\s", "", clock[3].upper())
+            meridiem = (clock[3] or "").lower()
+            day = date
+            if minute > 59:
+                raise AdapterError("Invalid explicit deadline minute", "parse")
+            if meridiem:
+                if not 1 <= hour <= 12:
+                    raise AdapterError("Invalid explicit 12-hour deadline", "parse")
+                hour = hour % 12 + (12 if meridiem == "pm" else 0)
+            elif hour == 24 and minute == 0:
+                # Publisher 24:00 means the end of the stated calendar day.
+                day += timedelta(days=1)
+                hour = 0
+            elif hour > 23:
+                raise AdapterError("Invalid explicit deadline hour", "parse")
+            zone = re.sub(r"\s", "", clock[4].upper())
             offset = {"CET": 1, "CEST": 2, "GMT+1": 1, "GMT+2": 2, "UTC": 0}[
                 zone
             ]
             instant = (
                 datetime(
-                    date.year,
-                    date.month,
-                    date.day,
+                    day.year,
+                    day.month,
+                    day.day,
                     hour,
                     minute,
                     tzinfo=timezone(timedelta(hours=offset)),
@@ -898,8 +943,24 @@ def vacancy(row, root):
         if integrated
         else "The notice specifies relevant degree and academic requirements. "
     )
+    research_assistant = bool(re.search(r"\bresearch assistant\b", title, re.I))
+    if research_assistant:
+        route = (
+            "The initial appointment is as a research assistant; the notice "
+            "describes a possible subsequent PhD pathway. "
+        )
+        if "pending evaluation and mutual agreement" in text:
+            evidence.append(
+                "Transition to a funded PhD requires evaluation and mutual "
+                "agreement; it is not an immediate PhD appointment."
+            )
+        if "initially for 1 year as Research Assistant" in text:
+            evidence.append(
+                "The initial research assistant appointment is one year."
+            )
     summary = (
-        "Funded doctoral recruitment at "
+        ("Research assistant recruitment at "
+         if research_assistant else "Funded doctoral recruitment at ")
         + department
         + ", UCPH. "
         + route
@@ -941,9 +1002,12 @@ def vacancy(row, root):
     record = make_record(
         title,
         url,
-        ["fellowships", "jobs"],
+        ["jobs"] if research_assistant else ["fellowships", "jobs"],
         host_countries=["DK"],
-        method="official-funded-doctoral-vacancy",
+        method=(
+            "official-research-assistant-phd-pathway"
+            if research_assistant else "official-funded-doctoral-vacancy"
+        ),
         evidence=evidence,
     )
     record.update(
@@ -953,11 +1017,18 @@ def vacancy(row, root):
         location=department + ", Denmark",
     )
     record["tags"] = ["PhD", "University of Copenhagen"]
+    # The native show identifier survives the listing-route change. Preserve
+    # previously published IDs while linking to the actual current detail URL.
+    native = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["show"][0]
+    legacy_identity = "https://employment.ku.dk/phd/?show=" + native
+    record["id"] = hashlib.sha256(
+        (SOURCE_ID + "|" + legacy_identity).encode()
+    ).hexdigest()[:24]
     return record
 
 
 def vacancy_catalog():
-    """Read every authoritative listing page before comparing inventories."""
+    """Read all pages before selecting explicitly doctoral advertised roles."""
     pending, seen, rows, urls = [VACANCIES_URL], set(), [], set()
     while pending:
         url = pending.pop(0)
@@ -979,7 +1050,7 @@ def vacancy_catalog():
             if (
                 parsed.scheme != "https"
                 or parsed.netloc != "employment.ku.dk"
-                or parsed.path != "/phd/"
+                or parsed.path != "/all-vacancies/"
                 or parsed.fragment
             ):
                 raise AdapterError("Unreviewed vacancy pagination", "parse")
@@ -987,7 +1058,14 @@ def vacancy_catalog():
                 pending.append(target)
         if len(seen) > 30:
             raise AdapterError("Excessive vacancy pagination", "parse")
-    return rows, len(seen)
+    doctoral = [
+        row for row in rows
+        if re.search(r"\bPhD\b", row[1], re.I)
+        and not re.search(
+            r"\b(?:postdoc(?:toral)?|professor|lecturer)\b", row[1], re.I
+        )
+    ]
+    return doctoral, len(seen)
 
 
 
@@ -2182,6 +2260,144 @@ _STATE_PATH = _STATE_LOCK = None
 _COLLECTION_LOCK_FD = _COLLECTION_LOCK_CONTEXT = None
 _COLLECTION_STARTED = None
 _LEGACY_COLLECTION_OBSERVATION = None
+# Issue #374: complete logs prove these exact 18 attempts failed before access.
+# Historical proof is finite; future proof additionally requires current code.
+_STARTUP_QUIET_UNTIL = None
+_RECOVERY_JOBS, _RECOVERY_RUNS, _HISTORY_COMPLETED = {}, {}, []
+_PREACCESS_ATTEMPTS = {
+    41063528294: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124088964387,
+        '2026-10-30T13:28:28Z',
+        '2026-10-30T13:28:56Z',
+    ),
+    41203520457: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124543912180,
+        '2026-10-31T12:59:37Z',
+        '2026-10-31T13:00:02Z',
+    ),
+    41312673989: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124866156361,
+        '2026-11-01T13:44:04Z',
+        '2026-11-01T13:44:31Z',
+    ),
+    41481969758: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        125402361721,
+        '2026-11-02T16:29:29Z',
+        '2026-11-02T16:30:05Z',
+    ),
+    41655466758: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        125984460048,
+        '2026-11-03T14:37:10Z',
+        '2026-11-03T14:37:40Z',
+    ),
+    41851561644: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        126648931932,
+        '2026-11-04T14:50:23Z',
+        '2026-11-04T14:50:58Z',
+    ),
+    42049734221: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        127322282243,
+        '2026-11-05T14:55:32Z',
+        '2026-11-05T14:56:04Z',
+    ),
+    42235021935: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        127950287027,
+        '2026-11-06T14:33:50Z',
+        '2026-11-06T14:34:16Z',
+    ),
+    42377177447: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        128417075576,
+        '2026-11-07T13:29:22Z',
+        '2026-11-07T13:29:49Z',
+    ),
+    42486700762: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        128750032533,
+        '2026-11-08T13:48:30Z',
+        '2026-11-08T13:49:02Z',
+    ),
+    42658481844: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        129303312821,
+        '2026-11-09T16:48:37Z',
+        '2026-11-09T16:49:23Z',
+    ),
+    42841803438: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        129918705814,
+        '2026-11-10T15:11:47Z',
+        '2026-11-10T15:12:32Z',
+    ),
+    43040709686: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        130591429388,
+        '2026-11-11T14:40:24Z',
+        '2026-11-11T14:41:05Z',
+    ),
+    43249065915: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        131289578926,
+        '2026-11-12T15:33:27Z',
+        '2026-11-12T15:34:17Z',
+    ),
+    43446837751: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        131958387016,
+        '2026-11-13T14:52:05Z',
+        '2026-11-13T14:52:43Z',
+    ),
+    43601343453: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        132466546300,
+        '2026-11-14T13:45:20Z',
+        '2026-11-14T13:45:55Z',
+    ),
+    43723372302: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        132839942369,
+        '2026-11-15T14:15:39Z',
+        '2026-11-15T14:16:12Z',
+    ),
+    43906352876: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        133436133375,
+        '2026-11-16T16:20:20Z',
+        '2026-11-16T16:21:12Z',
+    ),
+}
+_PREACCESS_SOURCE_BLOBS = {'5fd9fa82d5d2d5f0871aba653376765a6e00c897': 'e117a83f0f252c65c70802d8ff225abd0062f914'}
+_PREACCESS_WORKFLOW_BLOB = '46ebbf402db820d77d9f8e4aa6519d99469f496a'
+_RECOVERY_WORKFLOW_BLOBS = {"728770075187da1e7e802c50771f4f49a5f82863"}
+_PREACCESS_OWNER = (40883890576, 1, SOURCE_ID)
+_PREACCESS_ARTIFACT = (12902046316, 'sha256:c0183d9a1c12a7bc53bca75bbdb672eb2a1b64af0449bf74d8af19e9ec4fa166')
+
 _RESTORED = _PUBLISHING = _STATE_TRUSTED = False
 _RUN_END = _PHASE_END = _SOURCE_END = None
 _PHASE_NAME = None
@@ -3963,6 +4179,9 @@ def attempt_completion(identity, attempt, head):
                 or job.get("status") != "completed"
             ):
                 raise ValueError("Untrusted exact-attempt job")
+            _RECOVERY_JOBS.setdefault((identity, attempt), []).append(
+                copy.deepcopy(job)
+            )
             jobs_seen.add(job["id"])
             value = datetime.fromisoformat(
                 job["completed_at"].replace("Z", "+00:00")
@@ -4516,6 +4735,8 @@ def physical_request_bytes(
         collection_lock_authority()
     if publisher and _INVENTORY_ACTIVE and not robots:
         inventory_guard()
+    if publisher:
+        wait_startup_quiet()
     lock, state = pace(interval) if publisher else (None, None)
     attempted = response_received = response_constraints_saved = False
     retryable_connection_failure = False
@@ -4566,6 +4787,11 @@ def physical_request_bytes(
             collection_lock_authority()
             locked_journal_authority()
         try:
+            if publisher and (
+                _STARTUP_QUIET_UNTIL is None
+                or time.monotonic() < _STARTUP_QUIET_UNTIL
+            ):
+                raise AdapterError("Publisher startup quiet changed", "access")
             attempted = True
             response = _OPENER.open(request, timeout=timeout)
         except urllib.error.HTTPError as error:
@@ -4778,6 +5004,8 @@ def local_workflow_definition():
 def scan_family_history():
     """Read complete producer history and rank exact job completion."""
     global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
+    global _RECOVERY_JOBS, _RECOVERY_RUNS, _HISTORY_COMPLETED
+    _RECOVERY_JOBS, _RECOVERY_RUNS, _HISTORY_COMPLETED = {}, {}, []
     _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     current = current_run_identity() if hosted else (None, None)
@@ -4853,6 +5081,7 @@ def scan_family_history():
                             f"/actions/runs/{identity}/attempts/{number}"
                         )
                     )
+                    _RECOVERY_RUNS[(identity, number)] = copy.deepcopy(wrapper)
                     expected = (identity, number, expected_source)
                     revision = (run.get("head_sha"), workflow)
                     candidates.append(
@@ -4880,6 +5109,7 @@ def scan_family_history():
         raise AdapterError("Existing publisher history missing", "access")
     if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
         raise AdapterError("Ambiguous actual family completion", "access")
+    _HISTORY_COMPLETED = ordered
     return ordered[-1][2:]
 
 
@@ -5250,7 +5480,7 @@ def enter_phase(name, seconds):
 def execution():
     """Own one nonrenewing entry clock including all setup and cleanup work."""
     global _RUN_END, _SOURCE_END, _PHASE_END, _PHASE_NAME
-    global _COLLECTION_PREPARED, _TIMER_OWNED
+    global _COLLECTION_PREPARED, _TIMER_OWNED, _STARTUP_QUIET_UNTIL
     if (
         _RUN_END is not None
         or threading.current_thread() is not threading.main_thread()
@@ -5264,6 +5494,7 @@ def execution():
     _SOURCE_END = min(start + COLLECTION_TIMEOUT, _RUN_END - 390)
     _PHASE_END, _PHASE_NAME = min(start + 180, _SOURCE_END), "restore"
     _COLLECTION_PREPARED = False
+    _STARTUP_QUIET_UNTIL = None
     signal.signal(signal.SIGALRM, phase_alarm)
     _TIMER_OWNED = True
     try:
@@ -5478,14 +5709,236 @@ def reviewed_migration_state():
 
 
 
+def recovery_contents(path, head, cache):
+    """Read immutable source evidence once per revision during this scan."""
+    key = (path, head)
+    if key not in cache:
+        item = workflow_api(f"/contents/{path}?ref={head}")
+        try:
+            if (
+                item.get("encoding") != "base64"
+                or item.get("path") != path
+                or type(item.get("size")) is not int
+                or not 0 < item["size"] <= 5_000_000
+            ):
+                raise ValueError()
+            body = base64.b64decode(item["content"], validate=False)
+            blob = hashlib.sha1(
+                b"blob " + str(len(body)).encode() + b"\0" + body
+            ).hexdigest()
+            if item.get("sha") != blob or len(body) != item["size"]:
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise AdapterError("Incomplete no-access code evidence", "access")
+        cache[key] = (blob, body)
+    return cache[key]
+
+
+def prove_no_publisher_access(row, cache):
+    """Require a finite historical proof or the exact current quiet code."""
+    finished, _, run_id, attempt, source = row
+    exact = _RECOVERY_RUNS[(run_id, attempt)]
+    head = _ATTEMPT_HEADS[(run_id, attempt)]
+    jobs = _RECOVERY_JOBS.get((run_id, attempt), [])
+    try:
+        started = datetime.fromisoformat(
+            jobs[0]["started_at"].replace("Z", "+00:00")
+        )
+        if started.utcoffset() is None:
+            raise ValueError()
+        started = started.timestamp()
+    except (IndexError, KeyError, TypeError, ValueError):
+        raise AdapterError("Missing exact job start evidence", "access")
+    if (
+        attempt != 1
+        or exact.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("conclusion") != "failure"
+        or not 0 <= finished - started < 58
+    ):
+        raise AdapterError("Missing state has no no-access proof", "access")
+    source_blob, source_bytes = recovery_contents(
+        "adapters/dk-university-of-copenhagen/adapter.py", head, cache
+    )
+    workflow_blob, _ = recovery_contents(
+        ".github/workflows/fetch-dk-university-of-copenhagen.yml", head, cache
+    )
+    pin = _PREACCESS_ATTEMPTS.get(run_id)
+    if pin is not None:
+        actual = (
+            attempt, head, jobs[0]["id"], jobs[0]["started_at"],
+            jobs[0]["completed_at"],
+        )
+        if (
+            actual != pin
+            or source_blob != _PREACCESS_SOURCE_BLOBS.get(head)
+            or workflow_blob != _PREACCESS_WORKFLOW_BLOB
+        ):
+            raise AdapterError("Historical no-access proof changed", "access")
+        return
+    if (
+        hashlib.sha256(source_bytes).hexdigest() != source_file_digest()
+        or workflow_blob not in _RECOVERY_WORKFLOW_BLOBS
+    ):
+        raise AdapterError("Unreviewed artifactless source revision", "access")
+
+
+def restoration_owner(latest):
+    """Cross only positively proved no-access attempts, never unknown gaps."""
+    rows = list(reversed(_HISTORY_COMPLETED))
+    if not rows or rows[0][2:] != latest:
+        raise AdapterError("Restoration chronology changed", "access")
+    skipped, cache = [], {}
+    for row in rows:
+        identity = row[2:]
+        run_id, attempt, source = identity
+        result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        artifacts = result.get("artifacts")
+        if (
+            not isinstance(artifacts, list)
+            or len(artifacts) > 100
+            or type(result.get("total_count")) is not int
+            or result["total_count"] != len(artifacts)
+            or any(not isinstance(item, dict) for item in artifacts)
+        ):
+            raise AdapterError("Incomplete recovery artifact inventory", "access")
+        matches = [
+            item for item in artifacts
+            if item.get("name") == _ARTIFACT_NAME + "-" + str(attempt)
+        ]
+        if matches:
+            historical = {
+                item[2] for item in skipped if item[2] in _PREACCESS_ATTEMPTS
+            }
+            if (historical or identity == _PREACCESS_OWNER) and (
+                historical != set(_PREACCESS_ATTEMPTS)
+                or identity != _PREACCESS_OWNER
+                or len(matches) != 1
+                or (matches[0].get("id"), matches[0].get("digest"))
+                != _PREACCESS_ARTIFACT
+            ):
+                raise AdapterError("Incomplete historical recovery chain", "access")
+            return identity, result, max((item[0] for item in skipped), default=0)
+        if artifacts:
+            raise AdapterError("Unexpected artifactless attempt outputs", "access")
+        prove_no_publisher_access(row, cache)
+        skipped.append(row)
+    raise AdapterError("No actual owned publisher state remains", "access")
+
+
+def preserve_recovery_bounds(incoming, finished):
+    """Retain elapsed job bounds without fabricating publisher receipts."""
+    state = copy.deepcopy(validate_budget(incoming))
+    if finished:
+        state["until"] = max(
+            state["until"],
+            finished + max(state["interval"], state["page_gap"]),
+        )
+        state["observed_at"] = max(state["observed_at"], finished)
+    return validate_budget(state)
+
+
+def wait_startup_quiet():
+    """A wall-clock adjustment cannot shorten the first-access quiet floor."""
+    if _STARTUP_QUIET_UNTIL is None:
+        raise AdapterError("Publisher startup quiet is unproved", "access")
+    while time.monotonic() < _STARTUP_QUIET_UNTIL:
+        check_deadline()
+        time.sleep(max(0, min(1, _STARTUP_QUIET_UNTIL - time.monotonic())))
+
+
+
+_NATIVE_HANDOFF_SHA256 = (
+    "9d5353f1eab6cf3bc76edf9f371d0ec616477bf7aa39a0221d5c6877d326e08f"
+)
+_NATIVE_HANDOFF_BINDING = {
+    "schema": 1,
+    "repository": "YouthOpps/data-pipeline",
+    "source": "dk-university-of-copenhagen",
+    "family": "youthopps-dk-university-of-copenhagen-publisher-v1",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/"
+        "374#issuecomment-6925929088"
+    ),
+    "native_source_sha256": (
+        "acf5aaa62dad84f3d7731d8fec957a7767b5cfedfad37d053112ec3242b9f813"
+    ),
+    "native_test_sha256": (
+        "7f617ecc1518907486589529f1e13c36210eae5df2490fcfdcd3e0de1e6169ab"
+    ),
+    "native_final_state_sha256": (
+        "cab9b31ea7fd997b0dd7f6a0058034c85ab851bc0c73a744100791c6689abcef"
+    ),
+    "base_owner": [
+        40883890576,
+        1,
+        "dk-university-of-copenhagen"
+    ],
+    "base_artifact": {
+        "id": 12902046316,
+        "digest": (
+            "sha256:"
+            "c0183d9a1c12a7bc53bca75bbdb672eb2a1b64af0449bf74d8af19e9ec4fa166"
+        ),
+    },
+    "state_sha256": "db54ed71544a88bb07a1b60eff7ebea6fe5fda8de234334488faba075cecca99"
+}
+
+def production_maintenance_state(incoming):
+    """MAX-merge the exact reviewed native handoff after owned ZIP decoding."""
+    raw = os.environ.get("UCPH_PACING_MAINTENANCE", "")
+    if not raw:
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise AdapterError(
+                "Reviewed modern native MAX handoff missing", "access"
+            )
+        return incoming
+    try:
+        encoded = raw.encode("utf-8")
+        if (
+            len(encoded) > 16384
+            or hashlib.sha256(encoded).hexdigest() != _NATIVE_HANDOFF_SHA256
+        ):
+            raise ValueError("Native handoff binding changed")
+        approval = json.loads(raw)
+        if (
+            not isinstance(approval, dict)
+            or set(approval) != set(_NATIVE_HANDOFF_BINDING) | {"state"}
+            or type(approval.get("schema")) is not int
+            or any(
+                approval.get(key) != value
+                for key, value in _NATIVE_HANDOFF_BINDING.items()
+            )
+        ):
+            raise ValueError("Invalid native handoff provenance")
+        state = validate_budget(approval["state"])
+        canonical = json.dumps(
+            state, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+        if hashlib.sha256(canonical).hexdigest() != approval["state_sha256"]:
+            raise ValueError("Native handoff state digest changed")
+        return merge_budget(incoming, state)
+    except (ValueError, TypeError, KeyError, AdapterError) as error:
+        raise AdapterError(
+            "Invalid reviewed modern native MAX handoff", "access"
+        ) from error
+
+
+
 def restore_family_artifact():
     """Exact reviewed zero-artifact ancestry, then strict newest owned state."""
     global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
-    global _VERIFIED_REMOTE_CREATE
+    global _VERIFIED_REMOTE_CREATE, _STARTUP_QUIET_UNTIL
     _STATE_TRUSTED = False
     latest = latest_family_run()
     run_id, attempt, source = latest
     if (run_id, attempt) in _LEGACY_ATTEMPTS:
+        if (
+            os.environ.get("GITHUB_ACTIONS") == "true"
+            or os.environ.get("UCPH_PACING_MAINTENANCE")
+        ):
+            raise AdapterError("Modern handoff requires an owned artifact", "access")
         expected = {
             identity: (value["head_sha"], value["workflow_id"])
             for identity, value in _LEGACY_ATTEMPTS.items()
@@ -5518,7 +5971,8 @@ def restore_family_artifact():
                 )
         incoming = reviewed_migration_state()
     else:
-        value = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        owner, value, recovery_bound = restoration_owner(latest)
+        run_id, attempt, source = owner
         artifacts = value.get("artifacts")
         if (
             not isinstance(artifacts, list)
@@ -5548,7 +6002,11 @@ def restore_family_artifact():
             or not re.fullmatch(r"sha256:[0-9a-f]{64}", item.get("digest", ""))
         ):
             raise AdapterError("Newest artifact binding invalid", "access")
-        incoming = download_inert_artifact(latest, item["id"], item["digest"])
+        incoming = preserve_recovery_bounds(
+            download_inert_artifact(owner, item["id"], item["digest"]),
+            recovery_bound,
+        )
+        incoming = production_maintenance_state(incoming)
     _VERIFIED_REMOTE_CREATE = incoming
     try:
         with locked_budget():
@@ -5566,6 +6024,7 @@ def restore_family_artifact():
         copy.deepcopy(_SCANNED_JOB_DIGESTS),
         copy.deepcopy(_ATTEMPT_HEADS),
     )
+    _STARTUP_QUIET_UNTIL = time.monotonic() + 60
     _RESTORED = _STATE_TRUSTED = True
 
 

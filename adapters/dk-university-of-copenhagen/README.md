@@ -10,10 +10,11 @@ external provider websites, application systems and credentials are not used.
 The issue's historical studies.ku.dk redirect is legitimate: its current
 canonical scholarship leaf is
 https://www.ku.dk/studies/admission/scholarships-for-full-degree-students .
-The funded PhD inventory is https://employment.ku.dk/phd/ . Each notice has a
-public university URL with a numeric `show` identifier. All twenty notices
-were researched with the honest project User-Agent, normal TLS verification
-and the session proxy on 8 October 2026.
+The current funded PhD inventory is selected from the complete official table
+at https://employment.ku.dk/all-vacancies/ . Each notice has a public university
+URL with a numeric `show` identifier. The former `/phd/` category page no longer
+contains a vacancy table. Historical research of twenty notices on 8 October
+2026 does not establish the current count.
 
 The inspected www.ku.dk robots policy permits these public study routes.
 The employment and about subdomains return robots HTTP 404 (no published
@@ -34,22 +35,22 @@ metadata; each record carries its source ID, canonical URL and evidence.
 
 ## Inventory and identifiers
 
-The government MA/MSc admission scholarship is one programme. Its HEALTH,
-HUMANITIES, SOCIAL SCIENCES, SCIENCE and THEOLOGY conditions do not create
-five duplicate awards. Faculty restrictions remain in classification evidence.
-Two separate second-year HEALTH and SCIENCE cohorts have different eligibility
-and annual allocation, so each has its own programme record. The detailed UCPH
-Fulbright study route is collected from this university's own page, not from
-the external administrator. Programme identifiers use canonical page anchors.
+The government MA/MSc admission scholarship is one central programme. The
+16 November captured university page replaces the former faculty-specific
+admission conditions and second-year HEALTH/SCIENCE cohorts with centralized
+selection, full tuition and 22 months of basic living support. It specifies
+eligible citizenship, master's admission and study residence, automatic
+consideration and annual university selection of participating programmes.
+The removed cohorts and their former GPA/faculty claims are not emitted.
+The detailed Fulbright study route is collected from this university's own
+page, not from the external administrator.
 
 | University programme/cohort | Actual anchor |
 |---|---|
 | Danish Government MA/MSc admission scholarship | danish-government-scholarships |
-| HEALTH second-year master's scholarship | accordion-heading-3850 |
-| SCIENCE second-year master's scholarship | accordion-heading-3851 |
 | Fulbright full-degree/guest study route | fulbright-scholarship |
 
-The same university page also publishes 22 substantive named external funding
+The same university page currently publishes 19 substantive named external funding
 programmes. They remain attributed to UCPH's own guidance, with external
 administration stated explicitly. No external provider endpoint is fetched.
 Their application dates and active call status are unknown here; that is not
@@ -73,7 +74,6 @@ accordion's country label.
 | Inlaks Shivdasani | accordion-heading-3831 | Indian citizen with undergraduate degree; tuition, living costs and one-way travel |
 | J. N. Tata Endowment | accordion-heading-3831 | Indian national; one-time repayable postgraduate/PhD/postdoctoral loan scholarship |
 | Lady Meherbai D. Tata | accordion-heading-3831 | Female Indian graduates; recognised home/overseas institution; may await admission |
-| Indonesian Education Scholarship | accordion-heading-3833 | Indonesian citizens; overseas master's; UCPH listed target |
 | CONACYT Mexican Scholarship | accordion-heading-3834 | Mexican citizens; monthly overseas graduate award, amount unspecified |
 | FUNED | accordion-heading-3834 | Mexican citizens; overseas master's in listed fields; funding terms unspecified |
 | Tamim bin Hamad | accordion-heading-3835 | Qatari citizens; overseas study; UCPH approved university |
@@ -82,14 +82,11 @@ accordion's country label.
 | FirstRand Laurie Dippenaar | accordion-heading-3838 | South African citizens; postgraduate study outside South Africa |
 | Jean Monnet | accordion-heading-3839 | Graduate study on Turkey's EU harmonisation/EU acquis; citizenship not stated |
 | Aga Khan Foundation | accordion-heading-3841 | Outstanding postgraduate applicants, selected developing countries, financial need; 50% grant/50% loan |
-| Women Techmakers | accordion-heading-3842 | Female identity; CS/engineering/related field; academic, leadership and community selection |
-| OFID Scholarship | accordion-heading-3843 | Developing-country students; development-related master's; tuition and monthly allowance |
 | Rotary Global Grants | accordion-heading-3844 | Local club nomination; generally rolling with possible local club deadlines |
 
-Source-supported host destinations are deliberately sparse. The Indonesian
-paragraph says "The University of Copenhagen is a listed target university."
-The Qatari paragraph says "University of Copenhagen is included in the list of
-approved universities." These explicitly support Denmark. Mackenzie King
+Source-supported host destinations are deliberately sparse. The Qatari
+paragraph says "University of Copenhagen is included in the list of
+approved universities." This explicitly supports Denmark. Mackenzie King
 allows "graduate studies in Canada or abroad"; Canada is a known possible host,
 with other overseas destinations unspecified. FES supports "postgraduate
 studies in Germany but also at European universities"; Germany is a known
@@ -118,16 +115,39 @@ Exclusions are complete for the inspected funding sections:
 | Scholarship databases section | section heading | Search/directory advice, not an award |
 | Funding-your-studies section | section heading | Budget/tuition guidance, not an award |
 
-The researched complete inventory is 26 programme records and 20 funded PhD
-advertisements (46 total). This is a checked current inventory, not a fallback
-or a hardcoded list of jobs. Changed/unreviewed funding blocks fail safely so
-new or changed programmes receive review rather than silent omission.
+The complete scholarship page captured on 16 November yields 21 programme
+overviews. This is partial source evidence: the original failed test stopped
+before collecting the current PhD inventory. The older 46-record research count
+is not a current completeness claim.
 
-Every server-rendered PhD table row is collected, with all public detail pages;
-any explicit next-page links are followed within the same reviewed PhD path.
+Every named block in both substantive funding sections is enumerated. Reviewed
+conditions provide optional enrichment only while their supporting text remains
+present. New or changed blocks retain minimal original factual prose and unknown
+eligibility, host countries and deadlines rather than invented terms. Missing
+programmes retire from the next successful full replacement. Empty sections,
+missing substantive blocks, duplicate identities or missing/ambiguous programme
+links fail safely. Explicit directory, generic-lender and inactive-programme
+exclusions above remain in place.
+
+External programme IDs use their actual linked programme URL (without text
+fragments), never a new display-name hash. A fixed canonical-URL mapping preserves
+all 19 retained legacy IDs, verified against the previously published 45-record
+snapshot, Git blob `c7832532dd8536e65edae52c186d7c6d2f842441`. The legacy
+algorithm hashed source plus programme name; this repair does not silently
+migrate those existing IDs. University anchors remain the public record URLs,
+including shared country anchors. A title change at the same linked canonical
+programme URL keeps the ID. An unmapped URL for an existing legacy name stops
+for identity review instead of silently replacing its published ID. Validation runs after final identity assignment.
+
+Every server-rendered all-vacancies table row is validated, with all next-page
+links followed inside the reviewed `/all-vacancies/` path. Only titles explicitly
+identifying a PhD role are retained; professor, lecturer and postdoctoral titles
+are excluded. A research-assistant role explicitly offering PhD-fellowship
+continuation remains included. Every selected public detail page is collected.
 Missing, duplicate or malformed advertisements fail the collection rather than
-publish a partial inventory. Job identifiers use the canonical numeric `show`
-URL. Multiple places or regular/integrated degree routes within one
+publish a partial inventory. Job identifiers preserve the native numeric `show`
+identity: hashes continue to use the historical `/phd/?show=ID` identity while
+public URLs point to the actually linked `/all-vacancies/?show=ID` notice. Multiple places or regular/integrated degree routes within one
 advertisement remain one opportunity. Listing department and detail conditions
 are retained; host Denmark is not applicant nationality.
 
@@ -155,7 +175,7 @@ source-specific overrides.
 
 Programme descriptions with no dated current application call retain null
 deadlines and unknown status. Academic-merit, citizenship, study residence,
-faculty enrolment and fee-paying conditions come from the publisher. The
+and any currently supported programme conditions come from the publisher. The
 Danish Government award excludes citizenship in EU, EEA and Switzerland;
 no arbitrary positive country list is invented from that exclusion.
 
@@ -592,3 +612,154 @@ Each successful truncate, short write, and fsync now receives an exact-byte
 readback acknowledgement before the next mutation. Failure invalidation also
 requires that last acknowledged full generation; an external stronger generation
 arriving during a partial write is preserved and makes the run fail closed.
+
+## Missing-state continuity recovery (#374)
+
+The 18 completed attempts from run `41063528294` through `43906352876`
+failed before publisher transport. Their complete job logs show the first
+`Untrusted completed family attempt` failure and 17 subsequent
+`Newest state missing; no older fallback` failures. Recovery pins every exact
+run, attempt, head, job ID, start/completion timestamp, source blob and workflow
+blob. It requires the entire contiguous reviewed set to reach owned run
+`40883890576/1`, artifact `12902046316`, ZIP SHA-256
+`c0183d9a1c12a7bc53bca75bbdb672eb2a1b64af0449bf74d8af19e9ec4fa166`.
+Every skipped run must still have a complete, empty artifact inventory.
+
+Future recovery is narrower than general artifact fallback: the failed run must
+be attempt 1, contain exactly one completed failed `collect` job lasting less
+than 58 seconds, and use the exact current adapter bytes plus the reviewed
+workflow blob. The actual publisher transport now waits at least 60 monotonic
+seconds after successful restoration, before reserving a publisher start; it
+checks that guard again immediately before opening the request. Wall-clock
+changes cannot shorten this first-access floor. Unknown revisions, reruns,
+longer jobs, unexpected artifacts and incomplete evidence stop collection.
+
+The original nine-field artifact envelope decoder remains authoritative,
+including producer source and state hashes. Restoring the selected owned state
+preserves all MAX constraints, pending/refusal flags and unknown history. Job
+completion only adds a conservative quiet bound, never fabricated request
+receipts. The last observed family identity and complete history remain those
+of the newest attempt, so the existing first-access recheck detects new work.
+
+This repair does not certify a successful collection. The last owned run
+reached the scholarship page but failed with `Reviewed funding inventory
+changed`; its journal is valid independently of that parser failure. The
+workflow is paused pending independent pre-run review and one fully observed
+native test. Any initial native failure and actual inputs must be retained for
+parser diagnosis before another separately reviewed attempt. Offline controls
+verify exact recovery, rejection cases, the original owned ZIP decoder, MAX
+preservation and the monotonic clock guard; they do not replace native evidence.
+
+
+### First recovery native outcome and semantic repair
+
+The first original test on source SHA-256
+`c91bdeafe8d9d2bd3037d487b2d2b7770838a98cd374d0e9d4cbc4f977b20da9`
+failed after two successful publisher responses with
+`Reviewed scholarship conditions changed`. Its original FAIL is immutable;
+complete response bodies, headers, physical timings, eight persistence attempts
+and stdout/stderr remain in the private RAM observer. No observer error occurred.
+The actual page revealed the central scholarship policy change and removal of
+Indonesian Education Scholarship, OFID and Women Techmakers from the external
+inventory. Offline replay of that complete page verifies the new 21-record
+scholarship subset, current consumer envelopes and stable retained identities.
+It does not certify the unvisited doctoral catalogue or a complete live test.
+A separate pre-run review is required before another genuine collection.
+
+
+### Official doctoral inventory route recovery
+
+The second original native test on source `8925bf0e` passed scholarship parsing
+but failed at the missing `/phd/` table. Its complete four-response capture and
+original FAIL remain separately preserved. A bounded research pass followed the
+already observed official `/all-vacancies/` link and found 37 complete table rows,
+including seven explicit doctoral titles, with no next-page link. All seven
+observed links carry the same native numeric `show` identity and the current
+`/all-vacancies/` route. This is a category-route change, not removal of doctoral
+coverage or proof that no doctoral opportunities exist.
+
+The old category page also links Jobnet. During scoped research, Jobnet's
+`robots.txt` returned a 307 redirect to an authentication route. The original
+robots-purpose guard stopped before that redirect; neither authentication nor
+Jobnet job content was requested. That research outcome and all pacing history
+are retained. Jobnet is not included in the delivered collector: the complete
+same-university all-vacancies route supplies the required inventory.
+
+The seven current detail pages require real observation and a separately
+reviewed complete native test before acceptance. No previous FAIL is relabelled
+as a pass, and no partial scholarship result replaces the published snapshot.
+
+
+### Current detail evidence and midnight deadlines
+
+The bounded same-publisher research pass obtained all seven actual current
+selected detail pages and retained their complete bodies privately in RAM.
+Six describe direct PhD recruitment. The seventh, `show=172290`, is an initial
+one-year research-assistant appointment with a possible funded PhD transition
+subject to evaluation and mutual agreement. It is classified as a job pathway,
+not an immediate fellowship; its own title and conditional-route evidence remain
+visible.
+
+That notice explicitly states `29 November 2026, 24:00 CET`. End-of-day 24:00
+is normalized to midnight of the following local day, then converted using the
+publisher's explicit offset: `2026-11-29T23:00:00.000Z`. Invalid hours/minutes
+are rejected; explicit AM/PM clocks are normalized before conversion. The
+listing's original calendar day remains the comparison date, so ordinary 24:00
+does not create a false date conflict. Unsupported zones are not invented.
+
+Combined offline replay of the complete actual scholarship page, complete
+37-row inventory and all seven selected detail responses yields 28 validated
+records. The actual current website consumer accepts all 28 raw and filtered
+records and a valid empty envelope. All 19 previously published doctoral ID
+formulas were checked against the actual old snapshot. This combined research
+replay is not an original native PASS; both earlier original FAILs remain
+unchanged and a separately reviewed complete native collection is still needed.
+
+
+## Accepted native result and modern production handoff (#374)
+
+The third original nonpublishing test passed on source SHA-256
+`acf5aaa62dad84f3d7731d8fec957a7767b5cfedfad37d053112ec3242b9f813`
+in 323.623 seconds. Independent QA accepted all 28 records: 21 programme
+overviews, six direct doctoral roles and one research-assistant job with a
+conditional PhD pathway. Every one of the 37 inventory rows and all seven
+selected details was covered. Complete input replay matched substantive output;
+the current website consumer accepted exact raw28/current28/valid-empty0 IDs.
+No actual records in that successful collection were expired. The earlier two
+original FAILs remain distinct and preserved.
+
+The complete 11-response ledger and 35 persistence attempts passed independent
+checks: at least 12.201670 seconds after completion before the next request,
+at most five starts per rolling minute, and 30.004168 seconds between the two
+inventory requests after completion. Crawler identity, startup quiet, journal
+bytes and retained MAX/unknown flags passed without observer errors. See the
+[accepted native evidence](https://github.com/YouthOpps/data-pipeline/issues/374#issuecomment-6925929088).
+
+The matching workflow supplies `UCPH_PACING_MAINTENANCE`, a byte-exact,
+SHA-256-pinned modern handoff envelope. It binds that accepted source and
+original test, the real final-state file, the original modern owner
+`40883890576/1`, artifact `12902046316`, and the canonical approved state digest
+`db54ed71544a88bb07a1b60eff7ebea6fe5fda8de234334488faba075cecca99`.
+The seed retains all five native/research final MAX states, their observed durable
+reservations and all 28 actual physical starts: 58 distinct timestamps. It adds
+no fabricated requests. Settled final outcomes determine pending/refusal flags;
+intermediate pending reservations are not mistaken for unresolved requests.
+The robots-only Jobnet authentication redirect remains documented above and in
+retained research evidence; Jobnet is not a runtime publisher for this adapter.
+
+The original nine-field owned-artifact decoder must succeed before this seed is
+considered. The loader then uses only the existing MAX, union and OR merge, so
+stronger remote constraints, refusals, pending state and unknown history survive.
+Missing or altered hosted approval fails before publisher access. A legacy-only
+history cannot replace the required modern owned artifact. The finite original
+18-attempt proof keeps its historical workflow binding; future short-attempt
+proofs accept only the reviewed workflow that includes this seed.
+
+The accepted native source is preserved byte-for-byte outside the repository.
+Collection, publisher transport, parsing, expiry, metadata and publication
+functions remain unchanged by this handoff. Focused offline controls cover the
+new loader through the actual original ZIP decoder, corrupt ownership/seed
+refusals, stronger state, pending-state refusal and unchanged local behavior.
+This qualifies the accepted native evidence for reuse without another publisher
+run. Final configuration review and the authorized post-merge publication remain
+separate from the successful nonpublishing test.
