@@ -4051,7 +4051,25 @@ _RESEARCH_TRANSITION = {
     "until": 1794880351.8468106,
 }
 
-_HOSTED_HANDOFF_DECISION = None
+_HOSTED_HANDOFF_DECISION = {
+    "kind": "reviewed-bmw-native-max-handoff",
+    "issue": 391,
+    "native_source_sha256": (
+        "62a1a11ef6017d471fb1ceba890bc2f7"
+        "367bcfbf086b96606ff37f111c34b44c"),
+    "qualified_source_sha256": (
+        "6e8d2de0f3e5fcff0d581bce20c01996"
+        "adeaa85a990774c4e52c812d4d59d065"),
+    "native_final_state_sha256": (
+        "ce1046252dfa48ead2d07327562a0159"
+        "3d301b4fe6cc7dc5e6dfd419e96b4098"),
+    "state_sha256": (
+        "355179fbae605286be38c3e1cf82a07e"
+        "314c40a709ddabbf0064d0b2c268843a"),
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/391"
+        "#issuecomment-6947746096"),
+}
 
 _HOSTED_HANDOFF_STATE = {
     "blocked": False,
