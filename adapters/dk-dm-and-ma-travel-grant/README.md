@@ -21,9 +21,11 @@ windows are retained in `application_windows`; multiple windows leave the
 universal `deadline` unknown. Relevant receipt and CVR guidance from the linked
 reimbursement page is included with the Activity Fund's conditions and digest.
 
-The Danish travel page currently supplies the complete next window,
-1 November 2026 to 1 February 2027. English yearless recurring dates do not
-invent years. Relative instructions such as applying a month before an event
+Both language versions supply the explicit application CTA window,
+1 November 2026 to 1 February 2027. Beginning-of-clause “Apply here during the
+period” and “Ansøg i perioden” labels feed the existing `application_windows`
+and `deadline` fields. Application opening does not become an event or programme
+start date. Yearless recurring examples do not invent years. Relative instructions such as applying a month before an event
 remain conditions, not fabricated calendar deadlines. Unknown closing clocks
 and zones stay unknown. Future openings do not imply currently open calls.
 
@@ -218,182 +220,55 @@ collection, fields, pacing, schedule and the 30-minute job cap are unchanged.
 Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
 
-## Durable pacing migration (issue #291)
+## Durable pacing and historical evidence
 
-This migration is currently offline and unqualified for publisher access or
-production. The original test, full two-root breadth-first discovery, explicit
-150-page overflow failure, bilingual records, identifiers, dates and publication
-conflict behavior are preserved. The implementation has no manual programme
-profiles, inventory truncation or pagination stop based on an existing ID.
-Complete collection remains necessary because the publisher has no verified
-incremental reconciliation contract.
+The #291 migration introduced schema3 pending ownership and the original
+source-local pacing namespace. Its earlier native result remains attributed to
+source `9cebb8cb` and
+[its historical qualification](https://github.com/YouthOpps/data-pipeline/issues/291#issuecomment-6207347601).
+That original first-hosted bridge is retired. The exact #408 continuity chain
+and modern owned-artifact contracts below govern the present implementation.
 
-Schema 3 stores a durable pending owner before physical access. Redirects,
-robots parsing, cached restrictions, body reads and page access-policy checks
-remain inside that owner until all restrictions and completion are saved.
-Every storage or unassessed policy/calculation failure latches a process stop;
-a new process refuses an unsettled journal. Failed persistence cannot be healed
-by a later completion or an older hosted artifact. The original journal is
-invalidated only through its verified current inode and parent, with the pending
-reservation providing protection when cleanup itself fails.
+The complete bilingual discovery remains mandatory, with a150-page overflow
+failure and no partial publication. A durable pending owner covers physical
+access, robots and cached restrictions, redirects, body assessment and policy
+checks. Unknown or failed persistence cannot be repaired by a later completion
+or an older remote artifact. The original journal generation and both lock
+descriptions remain authoritative across reads, writes and cleanup.
 
-A 429 stops the run without same-run retry. It doubles both current persisted
-physical and inventory gaps and retains at least 30 minutes of exponentially
-increasing cooldown, honoring a longer valid Retry-After. Invalid, stale or
-unsupported Retry-After alone never invents a permanent refusal. Actual content
-401/403/451, genuine visible challenges and explicit applicable restrictions
-retain a hold. Literal robots 4xx except 429 is unavailable REP; it does not
-clear content refusals or stronger rate constraints.
+The exact newest completed attempt, immutable main head, actual jobs, artifact
+owner and archive digest govern restoration. Any unknown missing artifact or
+nonterminal sibling refuses; there is no general older-run fallback. LOCAL
+mode requires the workflow paused and an already established owned journal.
+Hosted publication proves its original token/job window before restoration,
+then reserves bounded snapshot, collection, publication, failure and export
+phases. The existing30-minute job,1200-second collection,1740-second run and
+30-second export limits remain unchanged. Each operation includes its full
+body and close under a bounded deadline.
 
-The exact latest completed attempt, immutable head, main branch, actual job
-completion, artifact owner and archive digest govern mature restoration. Queued
-reruns retain their preceding completed attempt rather than silently falling
-back to an older run. LOCAL mode requires the workflow paused, fresh no-active
-history before namespace creation and another definition check after quiet time
-before the first request. Restore precedes source-pair snapshot access; final
-artifact export remains attempted on later failures. Neither a missing legacy
-field nor a missing artifact establishes zero request, refusal or rate history.
+## Received-response constraints (#408)
 
-The original namespace and known `dm.dk`, `www.dm.dk` and GitHub host files are
-read without creation, with shared nonblocking locks and current parent/name/FD
-identity checks after reading. Both publisher aliases normalize to `dm.dk` in
-the current original code; a separate old alias file is still checked. The
-known publisher file retains ten old reservations and its original inode;
-missing counter/completion fields are explicitly unknown. A one-off exact
-maintainer-approved LOCAL bridge is now bound; separate native and
-production releases remain pending.
-The original GitHub file path and successful six-second/default Retry-After
-behavior remain separate from publisher constraints.
+The historical header-only stop from #328 is retired. A received429 first
+persists doubled **current** physical and inventory gaps, the next strike and
+at least the exponential1800-second embargo, before header/context handling.
+All supported Retry-After fields contribute their maximum; unsupported positive
+or ambiguous constraints keep the request pending. The bounded response body
+is assessed for a genuine visible challenge before settlement, and a challenge
+retains its separate durable access hold. Known content401/403/451 also retain
+that hold before response entry or header parsing. Literal robots-only4xx
+unavailability keeps its existing distinct purpose policy.
 
-The existing job timeout remains 30 minutes and cron remains 17:56 UTC. New
-entry-frozen source I/O/wait admission is at most 1200 seconds within a
-1740-second overall admission limit, with 180-second publication and failure
-reserves plus 30 seconds for export. These are stricter admission guards, not
-a claim that an uninterruptible parser is hard-bounded. Each physical source
-call, including its body read, has a total guard of at most 30 seconds and the
-remaining source allowance. Original hosted publication timers, exact-job
-proof, three attempts, CAS jitter and token/deadline checks remain unchanged;
-no unrelated outer alarm interferes with them. Slow setup, a larger current
-frontier, stronger restored pacing or backoff may prevent completion. Preserve
-last-good data rather than raise limits or omit inputs; live fit remains
-unverified until a separately released complete original test succeeds.
+A200 robots response requires explicit text/plain, valid plain REP structure,
+and supported timing declarations. HTML fragments, malformed rules or unknown
+numeric bounds remain pending. Ordinary HTTP chunked transfer remains supported
+through the actual standard-library decoder. Ambiguous Content-Length/transfer
+coding, unsupported coding, incomplete bodies and failed closure cannot settle
+healthy. Operation and publication deadlines include bounded cancellation of a
+close that stalls while unwinding a body timeout.
 
-Artifact export validates its private runner directory and exact output inode
-through held descriptors. On failure it invalidates its safely owned original
-FD and attempts both an independent false signal and unlink. Unsafe ownership,
-mode, symlinks, hard links, FIFOs and unrelated replacement objects are refused
-and preserved. The private job directory is trusted against an independent
-same-UID process forging replacement envelopes after successful publication;
-finite in-process checks do not authenticate such an adversarial writer.
-
-All implementation controls use private journals, synthetic responses and
-external harnesses. They do not establish current publisher facts, full live
-coverage, actual timing fit or production readiness. No publisher request,
-native test, actual family journal write or workflow activation is authorized
-by those controls.
-
-The publisher journal is rewritten through one retained, locked read/write
-descriptor. A changed parent, name, inode or generation closes access rather
-than adopting or overwriting a replacement. This deliberately favors safety
-over crash availability: interruption during an in-place rewrite can leave an
-empty or partial journal. A later process then refuses collection and older
-artifacts cannot substitute for that invalid local state; operator review is
-required. Cleanup targets only the retained original descriptor.
-
-Execution admits proof, restoration, snapshot, source collection, primary
-publication, failure reporting and export against one fixed entry clock.
-The source phase is at most 1,200 seconds and also limited by remaining
-headroom for publication (180 seconds), failure reporting (180 seconds) and
-export (30 seconds); restoration and snapshot time cannot be borrowed back.
-Failure reporting begins before its first fallback snapshot and retains one
-fixed end across subsequent reads, write and verification. Original job/token
-proof, GitHub retry, CAS and publication bodies remain unchanged. These are
-admission and complete-call I/O bounds within the original 30-minute job,
-not a claim that arbitrary parser work is timed or the complete live graph
-will fit. The genuine complete native passed on source `9cebb8cb`; the
-first-hosted correction is qualified by the retained-body replay below.
-
-The original two connection attempts remain available only for typed network
-faults before a response, including temporary DNS resolution (`EAI_AGAIN`).
-HTTP responses do not enter that retry path. Storage failures, TLS failures,
-permanent DNS errors and opaque errors fail closed; unresolved response or
-policy work retains pending state (or an invalidated journal), so a second
-request or an older artifact cannot silently restore access.
-
-Current bot robots rules select their own specific group or wildcard before
-retained legacy-specific restrictions are applied. A legacy allow cannot
-suppress a current wildcard denial or longer delay, while a current specific
-grant is not overridden by the historical wildcard. Cached policies keep the
-same target-specific assessment.
-
-Each state-lock context retains a private duplicate of the original locked
-file description. Replacing an exposed descriptor with a newly opened handle
-to the same inode cannot release the private flock or authorize a write. The
-context verifies both descriptions before cleanup, refuses further work on
-lost authority, and preserves unrelated reused descriptors. These are private
-regressions for the confirmed authority defect, not live-access evidence.
-
-The maintainer approved only the exact initial local transition in
-https://github.com/YouthOpps/data-pipeline/issues/291#issuecomment-6206821242.
-Its reviewed seed retains 38 known timing observations, actual original-host
-constraints and unknown historical rate-limit state. Missing known aliases
-remain absent observations rather than proof of no past restrictions. The
-original namespace is checked read-only; a newly appeared modern namespace
-or changed history/provenance refuses this transition. This literal approval
-is not a native-test, production or workflow-execution release. A separately
-bound original test and later production review remain required.
-
-The complete original nonpublishing test passed on immutable source `9cebb8cb`:
-26 physical responses, the full two-root 24-route catalogue and all five
-records (five retained after expiry), with actual current consumer 5/5/0.
-Every one of 177 persisted state afterimages and its attempted state was
-retained; 24 logical owners settled through matching actual completion. No
-new collection was made to qualify the later first-hosted compatibility fix.
-
-A fresh hosted runner cannot reproduce the old local directory/inode pins.
-The maintainer approved the exact first-hosted transfer and full native MAX in
-https://github.com/YouthOpps/data-pipeline/issues/291#issuecomment-6207347601.
-The narrow exception requires the actual existing job/publication proof,
-matching immutable main workflow/head, publishing credentials, all 28 exact
-old jobs with zero artifacts, and the exact approved state envelope. Its
-modern namespace must be absent and exclusively newly created before any
-journal writes. Existing or stronger current state refuses this first-state
-exception. LOCAL still checks the actual original files; later hosted runs
-still require the newest exact owned artifact, with stronger constraints
-retained. This transfers retained provenance rather than claiming the old
-files were read or had zero history on the hosted runner.
-
-The approved state digest is
-`50edb877d1db2b20865dc322221fddcc860251023a0e2e7c0b25f5a497d586a0`.
-It retains 168 conservative timing observations (not 168 requests), all known
-MAX constraints, unknown historical rate state and matching owner settlement
-proof. No observation normalization or schema-bound increase was needed.
-Production execution and website delivery require separate maintainer review
-and verification after the working PR; no production success is claimed here.
-
-
-## Header-only HTTP 429 stop — issue #328
-
-A received publisher HTTP 429 now stops after the existing header constraints
-are retained, before reading any response body. The response must close
-successfully before this intentional stop is assessed. A close or persistence
-failure follows the existing failure handling; they cannot establish a healthy
-collection. Previously retained holds, numeric MAX constraints, Retry-After
-and unknown history remain. An unread 429 body provides no new challenge
-classification.
-
-This paragraph supersedes earlier 429 body-inspection descriptions. This
-conditional repair preserves non-429 responses, REP selection, the full
-collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
-caps, workflow, state schema and finite migration markers. It does not add
-missing pending ownership or upgrade a legacy source to a modern continuity
-protocol.
-
-Private ordinary transport/state controls and protected normal-AST comparisons
-qualify this change. Earlier genuine native evidence retains its original code
-and date attribution; no new publisher collection, current factual review,
-complete native replay or production run is claimed. The maintainer alone owns
-workflow/state coordination and the maintenance rollout for issue #328.
+Verified pending journal bytes retain stronger acknowledged constraints on an
+unassessed response failure; this never adopts a replaced generation or heals
+an unresolved owner. Actual persistence and authority failures remain sticky.
 
 ### Acknowledged journal mutations (#295)
 
@@ -413,10 +288,8 @@ synthetic admission metadata; it does not claim a new native collection.
 
 Historical native evidence remains attributed to source `9cebb8cb25461c1bedf23d63b8a50d442d46037528ffa1a200f4f39f694fb7a6`
 and its [public qualification](https://github.com/YouthOpps/data-pipeline/issues/291#issuecomment-6207347601).
-The present IO-only correction preserves all other decorated function AST and
-module constants. Original raw inputs are no longer available here, so these
-public historical qualifications and private IO controls do not establish a
-fresh native PASS, current full-input replay, or current publisher facts.
+Those earlier IO controls alone did not establish new publisher facts. The
+separate #408 actual input and full native evidence are recorded below.
 
 Snapshot reads now recheck actual acquired collection/state locks and current
 parent/journal names after reading, before acknowledging a generation or
@@ -436,3 +309,141 @@ checking authority and generation before and after every read. This also detects
 a timestamp-colliding change to a prefix already read during the first pass.
 The 16 KiB size bound remains; these checks are not filesystem compare-and-swap. These private
 IO controls do not claim a fresh publisher collection or current source facts.
+
+### Healthy pre-request deferrals (#408)
+
+A fully restored, settled publisher journal may contain a valid future timed
+restriction that cannot fit the current phase. Admission now records that
+normal decision without reserving a transaction, verifies the retained journal
+on clean lock exit, and only then raises `PreRequestDeferral`. The unchanged
+export path can preserve the exact healthy state for the next scheduled run.
+Neither the guard nor its unknown rate history is cleared.
+
+Pending transactions, retained refusals, exhausted counters, journal or lock
+replacement, generation changes, and failed lock closure remain hard failures.
+The typed deferral is raised outside the lock only after those checks succeed;
+it is not a general exception exemption in the journal context manager. Normal
+admission still durably reserves its transaction before publisher access.
+
+The original failure in run41240102691 is supported by the exact owned guard
+from run41132970149 and the immutable pre-request admission callgraph. Later
+missing-artifact attempts require their own exact finite continuity proof.
+This correction alone does not authorize older-artifact fallback, real state
+initialization, publisher requests, workflow activation or publication. That
+correction alone left hosted handoff OFF; the separately reviewed final producer
+decision below authorizes transfer. Historical and current native evidence retain
+their own source/date attribution. No production or current-index success is
+claimed by an offline control.
+
+### Exact continuity and initial local state (#408)
+
+The only exceptional legacy archive accepted is artifact13014865082 from
+run41132970149/attempt1/head5fd9fa82d5d2d5f0871aba653376765a6e00c897:
+625-byte ZIP SHA256
+`fac722c920432ba96f19f769053b2041abce2c688e86e7c639ef21b8664350b9`.
+The seventeen missing exact attempts are admitted only as a complete pinned
+chain with their actual job identities, immutable source/workflow and absence
+of artifacts reverified. The first original future guard exceeded even its
+entire possible run budget before transaction reservation; the following
+sixteen failed newest-artifact restoration. An unexpected attempt, rerun,
+changed job, code, workflow or artifact refuses this exceptional chain.
+There is no generic older-owner fallback. The obsolete first-hosted empty-state
+bootstrap is removed; historical jobless-cancel pins remain solely for accurate
+ancestry inventory.
+
+New exports use nine exact envelope keys, binding authenticated executing
+adapter bytes and a canonical state digest in addition to run/attempt/source/
+head ownership. Modern restore verifies both digests. GitHub API reads cannot
+redirect into a source host; signed archive reads admit only the reviewed
+GitHub Azure/Actions storage suffixes without credentials or explicit ports,
+strip authorization, and do not follow subsequent redirects.
+
+Local collection requires an existing nonempty owned journal before remote
+metadata restoration, retaining its original directory, file generation and
+bytes across that restoration. Whole-family disappearance, empty state,
+replacement, pending ownership and unsafe paths cannot create a fresh allowance.
+The first local state requires a separately accepted exclusive initializer;
+that is not part of ordinary adapter startup. The approved initial state retained all169
+known timing values from the actual owner and every historical workflow state,
+including the assessed503 guard and unknown rate history. Administrative bounds
+from the seventeen no-access attempts add embargo evidence, not invented
+physical starts or response-completion receipts.
+
+The original collection/parser/identities/expiry, sole test, daily workflow and
+1200-second collection/1740-second run bounds remain unchanged. Private tests
+exercise the real journal, transport, framing, timers, artifact decoder/export,
+complete61-run metadata and current consumer. The actual #408 full native
+result is separately qualified below; hosted handoff and live-index delivery
+still require their own acceptance and observed production result.
+
+Literal robots responses retain their status-only unavailable exemption, but
+visible human challenges are assessed in every received body, including 3xx,
+401/403/451, 404 and 5xx responses. An actual challenge persists the family hold.
+The original temporary parent descriptor, path identity, owner/group and mode
+remain bound throughout local state operations; replacement, symlink substitution
+or metadata changes refuse. A legitimate shared sticky `/tmp` is supported
+without assuming it is owned by the collector user.
+
+If received-status constraint persistence fails before response context entry,
+the response is explicitly closed under the same bounded operation deadline.
+The primary failure and pending state survive a secondary close failure; no
+assessment or completion is invented. The exclusive local initializer applies
+the same parent metadata safety and continuity checks before any state creation.
+
+### Actual native and reviewed hosted transfer (#408)
+
+The first original test failed in owned-artifact restoration before any
+publisher request or journal write. Its unchanged3740-byte initial state and
+failure evidence are retained. The observer's artifact selector was corrected;
+no initializer was rerun and no history was reset.
+
+The second original test passed on source `0dccf3dd` and observer `7642200f`:
+26 actual responses,24 complete documents,177 exact acknowledged journal
+witnesses and five records accepted by the current website consumer. All five
+published identities were preserved. The result is independently qualified in
+[the native acceptance](https://github.com/YouthOpps/data-pipeline/issues/408#issuecomment-6955295989).
+No actual expired subset existed; synthetic empty readiness is labelled as such.
+
+The third original test passed on source `38e01164` and observer `3834b840`:
+26 actual responses, 24 complete documents, 177 acknowledged journal witnesses
+and five current records, including the explicit travel application window.
+[Independent native acceptance](https://github.com/YouthOpps/data-pipeline/issues/408#issuecomment-6956397136)
+confirms the new collection output; the earlier attempts remain distinct.
+
+The source-committed hosted floor retains 273 unique known observations:
+the prior 221 plus all 26 new reservation times and 26 new wire starts. Every
+journal starts array and before/after request_started value is included.
+Its canonical 5693-byte state digest is
+`acf2a8540990fcb91be684f12dc5d7348416f200a2b291349aadab3344871fc2`.
+The old workflow environment seed is removed only after this full union is
+retained. The [final producer decision](https://github.com/YouthOpps/data-pipeline/issues/408#issuecomment-6956597173)
+activates `_HOSTED_HANDOFF_EVIDENCE` after independent handoff acceptance.
+The real newest owned archive must still be decoded before the floor is merged.
+Native evidence alone cannot activate hosted collection. Stronger incoming
+MAX, pending owners, refusal holds and unknown history survive every merge.
+The new immutable workflow identity is separate from the old workflow blob
+used exclusively to prove the seventeen historical missing attempts.
+
+HTTP Retry-After accepts complete IMF-fixdate, RFC850 and asctime forms.
+Only valid asctime grammar implies UTC. RFC850 follows HTTP's fifty-year rule.
+Recognized components of combined fields retain their full MAX, while ambiguous
+combined framing remains pending. Invalid prefixes and unrepresentable positive
+values cannot silently authorize earlier access. Actual native responses had
+no Retry-After fields; the date correction is independently exercised offline.
+
+Actual `main --publish` controls cover31/62/179-second restores and healthy
+export under an already active parent exception. Publication proof precedes
+restore. An export's own fsync or terminal file/parent close fault revokes
+readiness, retains the stop and invalidates only the original output generation;
+an unrelated parent exception does not poison a healthy export. Publication and
+live indexing remain unverified until the separate hosted release completes.
+
+The #408 factual audit checked all24 held documents. The explicit bilingual
+application CTA changes only the existing travel record's application window,
+deadline, status and summary; the five stable identities and other programme
+facts remain unchanged. Footer, navigation, aside and complementary content do
+not supply programme windows. Additional primary application windows are
+retained together rather than reduced to an invented universal deadline.
+This semantic correction changes collection output: the earlier `0dccf3dd`
+native success is not relabelled as a success for the new parser. The separately
+reviewed third original full native run confirms this semantic correction.
