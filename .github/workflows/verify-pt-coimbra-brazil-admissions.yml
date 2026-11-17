@@ -1,0 +1,42 @@
+name: verify-pt-coimbra-brazil-admissions
+on:
+  push:
+    branches:
+      - 'qa/425-coimbra-7e6e6ebb1bf72605'
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: youthopps-coimbra-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.run_attempt == 1 && github.event.created && github.event.before == '0000000000000000000000000000000000000000'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 2a21a11e9958b8563e5da9ad385c3409c7894ef7
+          path: _qa/website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run the original sole nonpublishing test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B .github/qa/coimbra425-observer.py
+      - name: Retain original encrypted evidence and exact state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coimbra425-native-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coimbra425-native-evidence/
+          if-no-files-found: error
+          retention-days: 14
