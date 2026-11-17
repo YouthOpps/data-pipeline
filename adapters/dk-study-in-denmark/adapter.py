@@ -3166,9 +3166,39 @@ def reviewed_native_floor():
     return candidate
 
 
+_PUBLICATION_FAILURE_RECOVERY_EVIDENCE = (
+    "https://github.com/YouthOpps/data-pipeline/issues/401"
+    "#issuecomment-6956101679"
+)
+
+
+def reviewed_publication_failure_end():
+    """Authorize the exact reviewed failure before source access."""
+    evidence = _PUBLICATION_FAILURE_RECOVERY_EVIDENCE
+    if (not isinstance(evidence, str) or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/401"
+            r"#issuecomment-[1-9][0-9]*", evidence)
+            or evidence in {
+                _HOSTED_NATIVE_EVIDENCE,
+                "https://github.com/YouthOpps/data-pipeline/issues/401"
+                "#issuecomment-6954162466",
+                "https://github.com/YouthOpps/data-pipeline/issues/401"
+                "#issuecomment-6951763417",
+                "https://github.com/YouthOpps/data-pipeline/issues/401"
+                "#issuecomment-6950328945"}):
+        raise AdapterError("Finite publication-failure recovery is OFF",
+                           "access")
+    pin = _NO_ACCESS_ATTEMPTS[44128201202]
+    return datetime.fromisoformat(
+        pin["completed_at"].replace("Z", "+00:00")).timestamp()
+
+
 def require_modern_native_floor(state):
     """A successor producer must export its known native MAX, even if idle."""
     state, floor = validate_budget(state), reviewed_native_floor()
+    end = reviewed_publication_failure_end()
+    floor["not_before"] = max(floor["not_before"], end + 120)
+    floor["observed_at"] = max(floor["observed_at"], end)
     keys = ("observed_at", "not_before", "interval", "completed",
             "page_interval", "last_inventory_completed", "rate_limit_strikes",
             "rate_limit_until")
@@ -3218,6 +3248,9 @@ def production_maintenance_state(incoming, *, legacy_owner=False):
         raise AdapterError(
             "Final hosted native MAX approval is absent", "access")
     floor = reviewed_native_floor()
+    end = reviewed_publication_failure_end()
+    floor["not_before"] = max(floor["not_before"], end + 120)
+    floor["observed_at"] = max(floor["observed_at"], end)
     # Only the exact old seven-key bootstrap uses the newer reviewed native
     # lifecycle. An authenticated successor or an unsettled incoming owner is
     # always authoritative for identity, irrespective of its clock values.
@@ -3241,7 +3274,8 @@ def restored_state():
         raise AdapterError("Study in Denmark family history missing", "access")
     expected = {(run, 1) for run in _NO_ACCESS_ATTEMPTS}
     if not expected <= set(_NO_ACCESS_BOUNDS):
-        raise AdapterError("Reviewed29-gap ancestry is incomplete", "access")
+        raise AdapterError(
+            "Reviewed finite no-access ancestry is incomplete", "access")
     if latest[:2] != (39128750508, 1) and _HISTORY_COMPLETED[-1][0] <= max(
             value[0] for key, value in _NO_ACCESS_BOUNDS.items()
             if key in expected):
@@ -4689,11 +4723,11 @@ def main():
     _PUBLISHING = args.publish
     with execution():
         try:
-            with phase("restore", 180):
-                prepare_collection()
             if args.publish:
                 with phase("proof", 30):
                     publication_window()
+            with phase("restore", 180):
+                prepare_collection()
             return run_body(args.publish)
         finally:
             with phase("export", EXPORT_TIMEOUT):
@@ -5398,6 +5432,7 @@ def journal_output_signal(value):
         os.path.join(root, ".output-binding")
     )
     handles = [(parent, root_id, True, None, None)]
+    primary = None
     try:
         output_parent(parent, root, root_id)
         for name in parts[:-1]:
@@ -5451,13 +5486,17 @@ def journal_output_signal(value):
         verify()
         os.fsync(descriptor)
         verify()
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        primary = sys.exc_info()[1]
+        # A caller exception cannot hide this boundary's close failures.
         errors = []
         for fd, expected, directory, _, _ in reversed(handles):
             try:
                 output_close(fd, expected, directory)
             except BaseException as error:
+                journal_failure()
                 errors.append(error)
         if errors and primary is None:
             raise errors[0]
@@ -5571,11 +5610,12 @@ def journal_export_envelope(path, envelope, atomic=False, signal=False):
         output_identity(guard, identity)
         if (current.st_dev, current.st_ino) != identity:
             raise AdapterError("Final pacing artifact was replaced", "access")
-    except BaseException:
+    except BaseException as error:
+        primary = error
         journal_failure()
         raise
     finally:
-        primary = sys.exc_info()[1]
+        # An inherited caller exception is not an export failure.
         errors = []
         failed = primary is not None or _PUBLISHER_GATE_FAILED
         if failed:
@@ -9656,7 +9696,18 @@ _NO_ACCESS_ATTEMPTS = {39281149968: {'completed_at': '2026-10-19T15:52:39Z',
                'job': 133532760243,
                'log_sha256': '6001969715c94d8376cf7bf3a3756be24b47e34d915887136f435307042285cf',
                'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
-               'started_at': '2026-11-16T18:54:37Z'}}
+               'started_at': '2026-11-16T18:54:37Z'},
+ 44128201202: {
+     'head': 'a213f416753bf117f77f4cf98fc84bb1829bbd96',
+     'job': 134197699664,
+     'started_at': '2026-11-17T16:39:16Z',
+     'completed_at': '2026-11-17T16:40:26Z',
+     'source_blob': '2b23d2823236c67053c2fa429302435ae6df8792',
+     'workflow_blob': '0ed1544aa7e6d0f7ad942de529f92b11c761da60',
+     'log_sha256': ('00f1e64c2d68f844dd4f841d01a5fb414'
+                    '8e35631e2f8eb3c7e1a7c0cfb2c26f3'),
+     'cause': 'proof-entry-after-complete-restore-before-run-body',
+ }}
 _NO_ACCESS_BOUNDS = {}
 _IMMUTABLE_CODE_PROOFS = set()
 _PRODUCER_SHA256 = {}
@@ -9694,13 +9745,21 @@ def proven_no_access_attempt(run, jobs):
     job = jobs[0]
     pin = _NO_ACCESS_ATTEMPTS.get(run["id"])
     if pin is not None:
+        if run["id"] == 44128201202:
+            reviewed_publication_failure_end()
+            if (job.get("run_id") != 44128201202
+                    or job.get("run_attempt") != 1
+                    or job.get("head_sha") != pin["head"]):
+                raise AdapterError("Exact failed publication owner changed",
+                                   "access")
         if (run["head_sha"] != pin["head"]
                 or any(job.get(k) != pin[k] for k in
                        ("started_at", "completed_at"))
                 or job["id"] != pin["job"]
                 or not re.fullmatch(r"[0-9a-f]{64}", pin["log_sha256"])
-                or not verified_code_identity(pin["head"], pin["source_blob"],
-                                               _NO_ACCESS_WORKFLOW_BLOB)):
+                or not verified_code_identity(
+                    pin["head"], pin["source_blob"],
+                    pin.get("workflow_blob", _NO_ACCESS_WORKFLOW_BLOB))):
             raise AdapterError("Reviewed pre-access attempt changed", "access")
     else:
         if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -9743,6 +9802,10 @@ def preserve_no_access_bounds(state):
         end = max(v[0] for v in _NO_ACCESS_BOUNDS.values())
         result["not_before"] = max(result["not_before"], end + max(
             result["interval"], result["page_interval"]))
+        result["observed_at"] = max(result["observed_at"], end)
+    if (44128201202, 1) in _NO_ACCESS_BOUNDS:
+        end = reviewed_publication_failure_end()
+        result["not_before"] = max(result["not_before"], end + 120)
         result["observed_at"] = max(result["observed_at"], end)
     return validate_budget(result)
 
