@@ -1,0 +1,59 @@
+name: Fetch ANU international admissions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - adapters/au-anu-international-admissions/**
+      - .github/workflows/fetch-au-anu-international-admissions.yml
+  schedule:
+    - cron: '55 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  queue: max
+  group: youthopps-anu-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: >-
+      github.repository == 'YouthOpps/data-pipeline' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate data-source publication
+        id: token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.WEBSITE_APP_ID }}
+          private-key: ${{ secrets.WEBSITE_APP_PRIVATE_KEY }}
+          owner: YouthOpps
+          repositories: data-source
+          permission-contents: write
+      - name: Collect and publish reviewed source
+        id: collect
+        run: python -B adapters/au-anu-international-admissions/adapter.py --publish
+        env:
+          DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ANU_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+      - name: Preserve inert publisher pacing state
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: au-anu-international-admissions-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
