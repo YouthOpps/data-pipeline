@@ -1,0 +1,53 @@
+name: ANU original nonpublishing collection QA
+on:
+  push:
+    branches: [issue/423-anu-hosted-qa]
+    paths: [.github/workflows/anu-423-qa.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: youthopps-anu-publisher-v1
+  cancel-in-progress: false
+jobs:
+  collect:
+    if: github.event.created && github.event.before == '0000000000000000000000000000000000000000' && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/issue/423-anu-hosted-qa' && github.run_attempt == 1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 2a21a11e9958b8563e5da9ad385c3409c7894ef7
+          path: .qa-website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Execute the original nonpublishing test and inspect RAM evidence
+        id: collect
+        run: python -B .github/anu-423-qa-observer.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ANU_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+      - name: Preserve the authorized exact pacing receipt
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: au-anu-international-admissions-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Preserve encrypted complete evidence and derived observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: au-anu-international-admissions-qa-observations-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/anu-qa-observations.json
+            ${{ runner.temp }}/anu-qa-evidence.cms
+          if-no-files-found: error
+          retention-days: 3
