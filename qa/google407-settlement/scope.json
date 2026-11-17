@@ -1,0 +1,25 @@
+{
+  "archive": {
+    "id": 14374724594,
+    "sha256": "a461e9e938bdb12f7a565e03fc50bc22da5ab641480cbf0de6aace04b3311f4d",
+    "size": 45632642
+  },
+  "effects_sha256": "30b220562d795611237645d887606817dc5b817491ab1ca6e971584f5d983da0",
+  "issue": 407,
+  "original_state_sha256": "73400b4ef6679b11ca7d49889756b8e967a178689b0a92ddb0e98798b5067e68",
+  "predecessor": {
+    "attempt": 1,
+    "grant": 6962558398,
+    "head": "22d650621275708029ceac150485aa4440055b30",
+    "job": 134410545737,
+    "run_id": 44188287593,
+    "scope": "2e99ecbf617e616d4fac077d663d14c93964b6063789cf764fdbeefc4e0cf2ef",
+    "workflow": 421935029
+  },
+  "production_history_sha256": "4a0a529a46c1b75d303696d993372dd284cd0613e39f521d0e0e7e3f8b567a24",
+  "proposed_settled_sha256": "7fba0b7c94a333f90b0664aa9729f2813702baed98694f9588014906d46b7dae",
+  "terminal_job": "2026-11-17T22:24:04Z",
+  "terms_body_sha256": "3705125baca1d5e274152c7d1eee4723bfcf55cac31062efe4fde9aa0151dda1",
+  "terms_candidate_sha256": "445d2e43cad894eda0c8479452f3042c8a907c63d9af9db8cb98e1c017416fe8",
+  "terms_substantive_sha256": "05700da7039f8e03d5936ce1c61b07f75786886c8b051a2c560624848d6c7cc5"
+}

@@ -1,0 +1,39 @@
+name: Google407 zero-publisher logical settlement
+
+on:
+  push:
+    branches: [qa/google407-terms-settlement]
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: youthopps-google-publisher-v1
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  settlement:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.run_attempt == 1 && github.event.created && !github.event.deleted
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prove and project the original closed physical state without publisher access
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/google407-settlement/settle.py
+      - name: Retain exact zero-wire settlement evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: google407-logical-settlement-${{ github.run_id }}-1
+          path: ${{ runner.temp }}/google407-logical-only-settlement/
+          retention-days: 30
+          if-no-files-found: error
