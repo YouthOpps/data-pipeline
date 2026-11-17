@@ -426,3 +426,24 @@ metadata, or transport exception class. They omit query strings, response
 bodies, credentials and signed locations. These diagnostics establish the
 actual failure on a later attempt instead of guessing its cause. Publisher
 collection, expiry decisions, and the reviewed native result are unchanged.
+
+
+The actionable diagnostic from attempt `44039351512/1` established HTTP 404
+for the adapter contents route, with 4,554 API requests still available.
+Authenticated inspection confirms that old failed eight-second run
+`37776255637/1` at commit `18acb393d6f8a8baa4eb36a33678017e51943c40`
+predates this adapter file. Optional generic short-job eligibility previously
+tried to read that absent file and aborted restoration. The earlier offline
+metadata fixture incorrectly supplied a matching file for every unknown
+historical head; it now models this real historical 404 explicitly.
+
+Only the optional short-job code proof treats HTTP 404 as a negative proof.
+That historical run remains in the complete ancestry and is never omitted;
+a newest run with the same missing-file condition still blocks missing-state
+restoration. Required code proofs, other HTTP statuses and transport failures
+remain errors. The second exact production failure has its own immutable
+head/source/workflow/job/time/empty-artifact binding; its 62-second duration
+is not treated as a generic short job. Strict hosted restoration across all
+63 completed actual attempts retains all 19 no-access completion bounds,
+the actual owned artifact and the complete 54-point MAX seed. No new publisher
+collection is claimed by these offline controls.
