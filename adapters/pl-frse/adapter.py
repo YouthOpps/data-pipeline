@@ -4400,6 +4400,7 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                            "access") from None
 
 
+_HOSTED_HANDOFF_EVIDENCE = None
 _HOSTED_WORKFLOW_BLOB = 'b3a3e5adff1e43268b820dd48363f3378f40598c'
 _NATIVE_HANDOFF_BINDING = {
     'evidence':
@@ -4739,6 +4740,12 @@ def production_maintenance_state(incoming):
     """Retain reviewed native MAX only after the real newest owned decoder."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return incoming
+    if (not isinstance(_HOSTED_HANDOFF_EVIDENCE, str) or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/384"
+            r"#issuecomment-[1-9][0-9]*", _HOSTED_HANDOFF_EVIDENCE) or
+            _HOSTED_HANDOFF_EVIDENCE == _NATIVE_HANDOFF_BINDING["evidence"]):
+        raise AdapterError("Final hosted MAX handoff approval is absent",
+                           "access")
     try:
         incoming = validate_budget(incoming)
         state = validate_budget(copy.deepcopy(_NATIVE_HANDOFF_STATE))

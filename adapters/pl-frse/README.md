@@ -445,3 +445,10 @@ and committed workflow bytes. The obsolete `FRSE_PACING_BOOTSTRAP` is removed
 only because the complete conservative state is now retained in source. The
 workflow must remain disabled until independent final handoff review and an
 explicit activation decision.
+
+Hosted restoration also has an explicit source-level final approval gate.
+`_HOSTED_HANDOFF_EVIDENCE` is `None` until the final handoff decision is recorded
+in a dedicated issue #384 comment. The native-test acceptance comment is not
+that decision. Missing, malformed or native-only evidence refuses after the
+actual owned decoder, before any restored journal write or publisher access.
+Disabling the workflow externally is an additional control, not this gate.
