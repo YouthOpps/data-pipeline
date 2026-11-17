@@ -45,29 +45,6 @@ jobs:
         env:
           DATA_SOURCE_TOKEN: ${{ steps.token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          GRANTS_AT_PACING_BOOTSTRAP: >-
-            {
-              "schema": 1,
-              "family": "youthopps-grants-at-publisher-v1",
-              "not_before": 1792068255.101424,
-              "evidence": "https://github.com/YouthOpps/data-pipeline/issues/26#issuecomment-6192771195",
-              "state": {
-                "schema": 1,
-                "family": "youthopps-grants-at-publisher-v1",
-                "observed_at": 1792068195.101424,
-                "not_before": 1792067649.9943218,
-                "starts": [
-                  1792068163.257482,
-                  1792068194.6272607
-                ],
-                "blocked": false,
-                "interval": 12.2,
-                "page_interval": 30,
-                "rate_limit_strikes": 0,
-                "rate_limit_until": 0,
-                "completed": 1792068195.101424
-              }
-            }
           GRANTS_AT_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
       - name: Preserve inert publisher pacing state
         if: always()
