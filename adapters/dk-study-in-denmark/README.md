@@ -25,7 +25,11 @@ The complete fresh source research inspected 14 own HTML pages, robots and the
 advertised sitemap index/918-route child. The full news SSR inventory contains
 22 actual news identities plus two images; the visible ten cards alone would
 be incomplete. All 22 descriptions concern admissions, guidance, residence
-rules, culture or rankings. Current events inventory has zero results. Master's,
+rules, culture or rankings. The complete current-event query is checked on every
+refresh, including its loaded status, total, every item and aware start/end dates.
+Only positively identified academic admissions information with no funding or
+other opportunity signal is excluded; funding-like and unclassified events stop
+for factual review. Event IDs and counts are not pinned. Master's,
 exchange and summer-school leaves add no new funded award: Erasmus is deduplicated,
 unnamed bilateral exchanges and degree/course guidance are excluded.
 
@@ -75,7 +79,10 @@ year never become application closing dates. No current open award is claimed.
 
 Each of 14 required pages must be complete and match reviewed material conditions
 or actual own navigation/news inventory. Full news item totals must agree with
-the complete embedded actual inventory; a new current event requires review.
+the complete embedded actual inventory. Current events use the classification
+above instead of requiring an empty query. Admission dates in the application
+article remain distinct from award deadlines; degree structures and general PhD
+funding context do not create additional named award identities.
 The advertised sitemap index and relevant own funding/policy route inventory
 must match; unrelated course/image changes are excluded. New rights statements,
 linked terms/licences or changed ministry attribution fail closed. Unrelated
@@ -382,7 +389,7 @@ and a separate ROOT original-native release then remained required. That LOCAL
 boundary did not approve HOSTED publication.
 
 
-## ROOT-approved HOSTED transition (#327)
+## Historical ROOT-approved HOSTED transition (#327)
 
 [ROOT approval](https://github.com/YouthOpps/data-pipeline/issues/327#issuecomment-6214619603)
 binds the six-key HOSTED publisher-absent transition. It preserves all 95
@@ -396,9 +403,11 @@ this literal binding performs no new collection or native run.
 
 [Supplemental workflow approval](https://github.com/YouthOpps/data-pipeline/issues/327#issuecomment-6214649525)
 binds the required four-key maintenance environment packet to that same
-evidence URL and exact 95-observation state. The source requires this packet on
-both the first legacy transition and later owned-artifact restoration. All
-other workflow settings and the original test remain unchanged.
+evidence URL and exact 95-observation state. That historical environment-packet
+transition is superseded by issue401: the current source accepts only the exact
+actual owned-state restoration and keeps the new native MAX handoff OFF until
+independent live review. It cannot fall back to that earlier transition.
+Other workflow settings and the original test remain unchanged.
 
 
 ## Received-response failures (#343)
@@ -438,3 +447,135 @@ Deadline-proof failures identify the rejected validation stage without logging
 credentials or response bodies. Missing newest pacing artifacts still fail
 closed; this change does not recover an earlier artifact, reset request history,
 clear publisher holds or certify production recovery. See issue #358.
+
+## Issue401 continuity recovery
+
+The last owned production state is run39128750508/1, artifact12137342762,
+a 646-byte ZIP with SHA256
+`864face5ba6a31748b137c15b7e4f4e48ad3a851e8dc48465dbeb2a9011e045e`.
+The complete 59-run history and 29 exact subsequent artifactless failures were
+reviewed against full job logs and immutable source/workflow code. Three job
+proof failures occur before restoration; 26 newest-artifact errors occur before
+publisher initialization. The historical metadata subcondition remains unknown.
+These finite reviewed facts are source-bound pins, not a duration heuristic.
+The initial reviewed MAX also retains all 95 timing observations and every
+stronger constraint from the original workflow maintenance packet, plus the
+four retained starts in the actual latest owner: 99 known timing observations,
+not a count of physical publisher requests. The original workflow MAX has
+canonical SHA256 `a99f07b096fad88ebe26be5542e16dcdf1e3c09d07f8d84f559da6007f9ee413`.
+Its obsolete environment packet is removed; historical no-access workflow
+proof and the new fixed producer workflow have separate immutable blob pins.
+Their log digests remain immutable review evidence; healthy future runs do not
+need to download expired historical logs. Changed jobs, heads, code, workflow,
+artifacts or missing ancestry stop restoration. No generic latest-success
+fallback exists.
+
+Only that exact original seven-key owner may migrate. Subsequent artifacts bind
+repository, run, attempt, source, producer head, actual adapter digest, complete
+state digest and state in a nine-key envelope. Restoration selects the newest
+authenticated actual owner and preserves stronger MAX, pending ownership,
+retained holds and unknown history. Administrative gap completion bounds can
+increase not-before/observation bounds; they never become physical receipts.
+The source-committed full-native production handoff remains OFF pending a new
+complete native collection and independent review. Environment bootstrap or
+maintenance values cannot approve it.
+
+Local collection requires an existing safe family namespace, stable lock and
+original journal generation before any metadata read. Missing mature state is
+never reconstructed. A separately reviewed one-use initializer may admit the
+exact actual owner to this machine; a sibling claim survives directory loss.
+Hosted fresh state still requires authenticated restored ownership. Startup
+waits60 real monotonic seconds, independent of wall-clock changes, and checks
+that floor immediately before each publisher opener. Only an attempt1 failed
+job strictly shorter than 58 seconds, with exact current immutable adapter and
+fixed workflow plus complete zero-artifact/sole-job proof, can establish a
+future pre-access failure. Reruns and unproved gaps cannot use that exception.
+
+All Retry-After fields preserve their maximum supported restriction. Received
+429 status constraints double the CURRENT physical/page spacing and persist
+the strike/fallback before header/body failures. Content refusals retain holds
+before response entry or unsupported header assessment. Incomplete bodies, closure failures,
+positive numeric overflow and unsupported REP representations retain the
+pending owner and sticky access gate. Robots 200 requires supported plaintext without tag-like HTML/XML markup;
+mixed date/numeric Retry-After fields remain pending rather than trusting a
+permissively parsed date prefix;
+valid fractional publisher delays remain stronger constraints. Source and
+publication alarms repeat cancellation while response cleanup unwinds, so a
+slow close cannot consume unlimited lifecycle headroom after the first alarm.
+This strengthens transport without changing the original source graph,
+identifiers, expiry semantics, source factual summaries, test or daily cron.
+
+## Reviewed catalog deferral and local continuity
+
+A recognized event-purpose/award review or changed application/degree-context
+fingerprint still fails the refresh and preserves the previous publication.
+When the exact outer policy owner has a clean assessed physical receipt, no
+unsettled response, no retained refusal, healthy descriptors and successful lock
+release, that narrowly typed catalog deferral can finish its transport journal.
+Other parse errors, body/close failures, pending requests, commit failures and
+changed journal ownership retain the existing sticky failure protections.
+
+The first issue #401 native attempt failed on a current MSc information meeting;
+its original failure and all 17 responses/86 journal witnesses are retained.
+Offline review of those complete inputs also identified two changed general
+application/degree context fingerprints. Their admission and degree information
+was reviewed without changing the seven funding summaries or inferring award
+deadlines. That replay is not a successful native test. ROOT then accepted one finite
+administrator repair of the same failed inode, retaining both old claims, all
+constraints and 133 distinct historical/reservation/actual-start observations.
+The separately authorized original native2 test passed with seven raw/current
+records, 17 physical responses and 87 journal witnesses; its complete inputs and
+current consumer were independently verified. The first native remains failed.
+A mature missing or invalid journal still cannot self-bootstrap.
+
+A healthy retained cooldown or known guard that cannot fit the remaining phase
+defers before reserving an owner or opening a request. The typed deferral is
+raised only after the retained journal generation and lock exit are verified;
+the exact healthy bytes remain eligible for owned export. Pending/refused state,
+exhausted strikes, generation changes and lock failures remain hard failures.
+
+## Hosted producer handoff
+
+[Accepted native2 evidence](https://github.com/YouthOpps/data-pipeline/issues/401#issuecomment-6952200367)
+binds the exact source, original test, observer, complete receipts and healthy
+final state. The separate
+[final producer approval](https://github.com/YouthOpps/data-pipeline/issues/401#issuecomment-6954162466)
+is committed in `_HOSTED_HANDOFF_DECISION`; the matching workflow job's explicit
+boolean gate is enabled. The source pins the reviewed active workflow blob,
+separately from the old historical maintenance workflow. Workflow enablement,
+merge and production verification belong to a separate maintainer.
+
+The reviewed 3,750-byte native MAX retains 167 known timing observations: 99 old
+observations plus 17 journal reservations and 17 actual wire starts from each
+native attempt. These are 34 actual physical requests across two attempts, not
+167 physical requests. All numeric constraints, both unknown-history flags and
+original failed witnesses remain represented. The exact original 646-byte owned
+archive accepts only its seven-key legacy envelope. Successor producers require
+nine-key source/head/adapter/state digest provenance and the full native floor;
+a missing stronger constraint or observation fails closed.
+
+The exact legacy bootstrap may adopt the reviewed native lifecycle. Newer owned
+state keeps its own lifecycle even when its clock values are older than the seed.
+Pending requests and actual refusals remain pending/refused. Every hosted journal
+save reapplies the reviewed MAX before writing, including after ordinary rolling
+window pruning; first-owner export reapplies it as well. A later missing owned
+artifact never falls back to the legacy archive or to the native seed alone.
+
+A received 429 first durably records its new strike, every representable doubling
+of the current physical/page intervals and the minimum 1,800-second embargo.
+Only then does it calculate exponential stronger constraints, retaining each
+representable MAX independently. An unsupported value leaves the response
+unassessed and the owner pending; it cannot discard already known constraints
+or admit another request after restart.
+
+Combined Retry-After syntax may still require review, but every recognizable
+complete HTTP-date and numeric component is assessed and its positive MAX saved
+before that refusal. A known-status failure before response entry still invokes
+bounded response close, preserving the primary error and all pending constraints
+even when close itself fails or exceeds the operation deadline.
+
+HTTP dates accept the complete IMF-fixdate, RFC850 and asctime forms, including
+asctime's space-padded single-digit day. UTC is implied only by that exact
+asctime form; arbitrary naive dates and email-parser prefixes are not accepted.
+RFC850 two-digit years use the HTTP 50-year interpretation. All three forms are
+recognized independently in combined fields before preserving positive MAX.
