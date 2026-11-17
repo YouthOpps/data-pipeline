@@ -1036,6 +1036,31 @@ _WBI_SCOPE_DECISION = {
     ],
     "detail_prefixes": ["/fr/actualites/", "/fr/aide-service/"],
 }
+_WBI_SCOPE_EXTENSION = {
+    "schema": 1,
+    "source": "be-wbi",
+    "migration_revision": "wbi373-content-scope-v2",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/373"
+        "#issuecomment-6941417638"
+    ),
+    "parent_decision_sha256": (
+        "04ebc93fb4dd788782dbaa4468414f48276039889e93ef4d2551837d3bad526a"
+    ),
+    "prior_journal_sha256": (
+        "271667f2f3958af5cc217f1143cf3fe56d53c585fab620bcaf2aff2cf1459c53"
+    ),
+    "held_sha256": (
+        "aa544101765e65c7f3126501cce8e67881062ccbefec77fb1930cd5efab26e0c"
+    ),
+    "response_sha256": (
+        "befd4e4a843a70b415e8b99d479820598a322e4b404c8c63e2464e2babe6d917"
+    ),
+    "paths": ["/fr/WBI-World"],
+}
+_WBI_V1_JOURNAL_SHA256 = (
+    "271667f2f3958af5cc217f1143cf3fe56d53c585fab620bcaf2aff2cf1459c53"
+)
 _WBI_NATIVE_REVISION = (
     "06cc8b0de832b4f055c34a47bf16c435dc75365d0260ee260cd37a8766034086"
 )
@@ -1081,6 +1106,61 @@ def wbi_scope_decision():
     return copy.deepcopy(value)
 
 
+def wbi_scope_extension():
+    """Accept only the separately committed World-route scope amendment."""
+    value = _WBI_SCOPE_EXTENSION
+    if value is None:
+        return None
+    parent = hashlib.sha256(json.dumps(
+        wbi_scope_decision(), sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    if (
+        not isinstance(value, dict)
+        or set(value) != {
+            "schema", "source", "migration_revision", "evidence",
+            "parent_decision_sha256", "prior_journal_sha256",
+            "held_sha256", "response_sha256", "paths",
+        }
+        or type(value["schema"]) is not int or value["schema"] != 1
+        or value["source"] != SOURCE_ID
+        or value["migration_revision"] != "wbi373-content-scope-v2"
+        or value["parent_decision_sha256"] != parent
+        or value["prior_journal_sha256"] != _WBI_V1_JOURNAL_SHA256
+        or value["held_sha256"] != _WBI_HELD_JOURNAL_SHA256
+        or value["response_sha256"] != _WBI_REMOVED_BODY_SHA256
+        or value["paths"] != ["/fr/WBI-World"]
+        or not isinstance(value["evidence"], str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/373"
+            r"#issuecomment-[1-9][0-9]*", value["evidence"]
+        )
+    ):
+        raise AdapterError("Unreviewed WBI scope extension", "access")
+    return copy.deepcopy(value)
+
+
+def wbi_upgrade_scope(state, raw=None):
+    """Preserve v1 provenance while durably adding only reviewed scope v2."""
+    validate_budget(state)
+    extension = wbi_scope_extension()
+    if state["schema"] != 4 or extension is None:
+        return copy.deepcopy(state)
+    scope = state["refusal_scope"]
+    if scope["additional_holds"] or state["in_flight"]:
+        raise AdapterError("Held or pending WBI scope cannot expand", "access")
+    if scope.get("extensions") == [extension]:
+        return copy.deepcopy(state)
+    if (
+        not isinstance(raw, bytes)
+        or hashlib.sha256(raw).hexdigest() != _WBI_V1_JOURNAL_SHA256
+        or json.loads(raw) != state
+    ):
+        raise AdapterError("WBI v1 scope generation changed", "access")
+    result = copy.deepcopy(state)
+    result["refusal_scope"]["extensions"] = [extension]
+    return validate_budget(result)
+
+
 def wbi_initial_refusal(state):
     """Keep the exact failed native event without rewriting its outcome."""
     return {
@@ -1121,15 +1201,21 @@ def wbi_validate_scope(state):
     try:
         if (
             not isinstance(scope, dict)
-            or set(scope) != {
-                "decision", "original_journal_base64", "initial_refusal",
-                "additional_holds",
-            }
+            or set(scope) not in (
+                {"decision", "original_journal_base64", "initial_refusal",
+                 "additional_holds"},
+                {"decision", "original_journal_base64", "initial_refusal",
+                 "additional_holds", "extensions"},
+            )
             or scope["decision"] != wbi_scope_decision()
             or state["blocked"] is not True
             or not isinstance(scope["original_journal_base64"], str)
         ):
             raise ValueError()
+        if "extensions" in scope:
+            extension = wbi_scope_extension()
+            if extension is None or scope["extensions"] != [extension]:
+                raise ValueError()
         raw = base64.b64decode(scope["original_journal_base64"], validate=True)
         if hashlib.sha256(raw).hexdigest() != _WBI_HELD_JOURNAL_SHA256:
             raise ValueError()
@@ -1200,11 +1286,16 @@ def wbi_scope_admission(state, url, method="GET"):
         and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", path[len(prefix):])
         for prefix in state["refusal_scope"]["decision"]["detail_prefixes"]
     )
-    if path not in _WBI_SCOPE_PATHS and not detail:
+    extension_paths = {
+        path for extension in state["refusal_scope"].get("extensions", [])
+        for path in extension["paths"]
+    }
+    if (path not in _WBI_SCOPE_PATHS
+            and path not in extension_paths and not detail):
         raise AdapterError("WBI route outside reviewed scope", "access")
     query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
     if parsed.query and (
-        detail or path in ("/robots.txt", "/fr/rss-feeds")
+        detail or path in ("/robots.txt", "/fr/rss-feeds", "/fr/WBI-World")
         or set(query) != {"page"} or len(query["page"]) != 1
         or not re.fullmatch(r"0|[1-9][0-9]*", query["page"][0])
     ):
@@ -1240,6 +1331,13 @@ def wbi_merge_scope(result, left, right):
         for event in scope["additional_holds"]:
             if event not in holds:
                 holds.append(copy.deepcopy(event))
+        if "extensions" in scope:
+            existing = result["refusal_scope"].get("extensions")
+            if existing is not None and existing != scope["extensions"]:
+                raise AdapterError("Conflicting WBI scope extension", "access")
+            result["refusal_scope"]["extensions"] = copy.deepcopy(
+                scope["extensions"]
+            )
     original = json.loads(base64.b64decode(
         result["refusal_scope"]["original_journal_base64"]
     ))
@@ -1271,7 +1369,15 @@ def wbi_canonical_url(base, href):
 
 def wbi_inventory_page(root, url):
     """Parse supported public catalogue cards and every advertised pager."""
-    cards = nodes(root, class_name="search-result")
+    main = one(nodes(root, "main"), "WBI inventory main")
+    view = one(nodes(main, "div", "view-page"), "WBI inventory view")
+    path = urllib.parse.urlsplit(url).path
+    if path == "/en/bourses":
+        cards = nodes(view, "article", "search-result")
+    elif path == "/fr/appels-a-projets":
+        cards = nodes(view, "article", "article-item")
+    else:
+        raise AdapterError("Unverified WBI inventory scope", "parse")
     if not cards:
         raise AdapterError("Unverified WBI inventory structure", "parse")
     candidates = set()
@@ -1280,14 +1386,15 @@ def wbi_inventory_page(root, url):
             wbi_canonical_url(url, node.attrs["href"])
             for node in nodes(card, "a")
             if node.attrs.get("href")
-            and re.search(
-                r"/(?:aide-service|actualites)/", node.attrs["href"]
+            and (
+                re.search(r"/(?:aide-service|actualites)/", node.attrs["href"])
+                or node.attrs["href"] == "/fr/WBI-World"
             )
         }
         if len(links) != 1:
             raise AdapterError("Ambiguous WBI inventory card", "parse")
         candidates.update(links)
-    pagers = nodes(root, "nav", "pager")
+    pagers = nodes(view, "nav", "pager")
     if len(pagers) > 1:
         raise AdapterError("Ambiguous WBI pager", "parse")
     targets = set()
@@ -6879,6 +6986,7 @@ def restore_family_artifact():
             if (local["schema"] == 3 and local["blocked"]
                     and _WBI_SCOPE_DECISION is not None):
                 local = wbi_migrate_scope(_JOURNAL_ACK[1])
+            local = wbi_upgrade_scope(local, _JOURNAL_ACK[1])
             combined = merge_budget(local, incoming)
             combined["until"] = max(combined["until"], time.time() + 60)
             write_budget(combined)

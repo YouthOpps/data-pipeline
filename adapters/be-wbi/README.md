@@ -598,3 +598,40 @@ status and permits only independently reviewed bounded research within the
 named scope, after the committed-decision recheck. Dynamic inventory remains
 separately gated and incomplete; this decision supplies no complete native or
 production acceptance. The original failure and refused CIRC event remain.
+
+### Proposed exact World-route scope v2
+
+The independently checked four-root research retained all original scope
+provenance and made no new refusal. Its four responses were robots 200,
+programme catalogue 200, current calls 200 and `/actualites` 301. The literal
+redirect target `/fr/news` was not requested because it was outside the
+approved scope. All 23 raw journal witnesses, pacing and final schema-4 state
+were independently checked. The resulting actual journal SHA-256 is
+`271667f2f3958af5cc217f1143cf3fe56d53c585fab620bcaf2aff2cf1459c53`.
+
+The catalogue's ten actual first-page cards advertise page 1 and the exact
+programme URL `/fr/WBI-World`, already recorded as legacy `PAGES['leaf0']`.
+The current calls page contains six article cards with no pager. Parsing now
+uses each actual main view and card layout, including the World link; it does
+not include footer news. This validates those two captured pages only, not the
+remaining catalogue page, complete detail coverage or multi-call normalization.
+
+Proposed migration `wbi373-content-scope-v2` adds only `/fr/WBI-World`, without
+queries or alternate origins. `/fr/news` and further feed discovery are not
+needed for this amendment and remain outside the active scope. The amendment
+is disabled until its own committed independent approval is present.
+First application binds the exact current v1 journal generation and original
+v1 decision digest. It adds a durable extension record while retaining the v1
+decision, original held bytes/event, all MAX fields and unknown history.
+Additional holds, pending requests, changed generations or extra paths reject
+expansion. V1/v2 merges retain the extension and refusal events in either order.
+The proposed state is 13,548 bytes within the unchanged 16,384-byte journal
+bound; actual private-writer and interrupted-write controls pass. No actual
+family state or publisher requests accompanied this offline amendment work.
+
+The exact World-only amendment is now recorded at
+https://github.com/YouthOpps/data-pipeline/issues/373#issuecomment-6941417638
+and committed in `_WBI_SCOPE_EXTENSION`. Its reviewed source change is limited
+to the approval literal. After independent literal recheck, it permits the
+bounded remaining catalogue-page/current-six-calls/World research; no news or
+feed scope is added. It does not establish full parser or native acceptance.
