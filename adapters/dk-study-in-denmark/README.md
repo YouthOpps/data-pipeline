@@ -579,3 +579,38 @@ asctime's space-padded single-digit day. UTC is implied only by that exact
 asctime form; arbitrary naive dates and email-parser prefixes are not accepted.
 RFC850 two-digit years use the HTTP 50-year interpretation. All three forms are
 recognized independently in combined fields before preserving positive MAX.
+
+## First automatic production failure and bounded repair
+
+The first automatic run after PR #412, `44128201202/1`, failed before publication
+proof entry and before any publisher request. Its 70-second job duration alone
+does not prove no access: the exact immutable source, job, workflow, full log
+digest and traceback establish that restoration completed and the entry-anchored
+30-second proof phase rejected entry before `publication_window` or `run_body`.
+The original native2 PASS and first production FAIL remain separate outcomes.
+
+The publication job proof now runs before restoration, within its original
+entry-anchored budget. All existing run/job deadlines and downstream collection,
+publication, failure and export reserves remain unchanged. Healthy settled export and workflow-output signaling
+track their own exceptions. An inherited caller error neither poisons an
+otherwise completed artifact nor hides a descriptor close failure at the output
+boundary. Genuine export I/O, ownership, generation,
+close and output-signal failures still deny artifact readiness.
+
+Only this exact additional failed owner is eligible for a finite no-access
+exception, with its own immutable active-workflow binding; the original 29 pins
+keep their old workflow binding. The separate
+[finite recovery approval](https://github.com/YouthOpps/data-pipeline/issues/401#issuecomment-6956101679)
+is committed in `_PUBLICATION_FAILURE_RECOVERY_EVIDENCE`. Its only administrative
+MAX extension is job-end plus 120 seconds in `not_before`, with the job-end
+observation.
+The 167 native timing observations, original `f0cf…` native floor, unknown flags,
+request identities and actual completion receipts are retained. No physical
+request, reservation, receipt, strike or rate change is invented. An unknown newer
+missing owner never falls back to the old archive.
+
+Private integration exercises the actual `main --publish`, original job proof,
+restoration, phase wrappers, run body and first export with inert publication
+callbacks and virtual 30.001/62/179-second restoration. It reproduces the original
+failure and checks healthy-error export plus real write/close/generation/signal
+fault denial. These are offline controls, not a new native or production run.
