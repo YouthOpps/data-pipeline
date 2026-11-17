@@ -291,7 +291,7 @@ partial mature journal, which fails closed. It cannot be healed from an older
 hosted artifact. The actual data publication still uses its existing atomic
 GitHub transaction.
 
-Only an actually newly created publisher namespace, during its existing verified
+Only an actually newly created hosted publisher namespace, during its verified
 latest-owned restoration, can initialize neutral state for the incoming MAX
 merge. An existing directory with missing or empty state fails closed. GitHub
 publication transport does not establish publisher namespace creation proof.
@@ -389,3 +389,11 @@ remain unresolved pending transactions. They do not invent a content-refusal
 hold. Valid empty/comment-only policies and genuine allow/delay/disallow rules
 retain their existing meanings. All six captured source robots responses were
 text/plain and pass the stricter representation check.
+
+Local startup requires the existing owned family directory and a nonempty
+journal before workflow metadata access or namespace setup. It pins the parent
+through startup, so removal between that check and restoration cannot become a
+new initialization allowance. A wholly missing local namespace, missing/empty
+journal, or lost pending/MAX state cannot be recreated from an older artifact.
+Fresh hosted runners retain their separately verified owned-artifact path;
+this protection does not initialize or reset local state.
