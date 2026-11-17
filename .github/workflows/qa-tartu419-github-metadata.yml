@@ -1,0 +1,37 @@
+name: qa-tartu419-github-metadata
+on:
+  push:
+    branches: [qa/tartu419-github-metadata]
+permissions: {}
+jobs:
+  original_permissions:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/tartu419-github-metadata' && github.run_attempt == 1 && github.event.created == true
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect official GitHub metadata with original read scope
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/tartu419-metadata/check_comment.py
+  issue_permissions:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/tartu419-github-metadata' && github.run_attempt == 1 && github.event.created == true
+    permissions:
+      actions: read
+      contents: read
+      issues: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect official GitHub metadata with explicit issue read scope
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/tartu419-metadata/check_comment.py
