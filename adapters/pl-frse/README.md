@@ -4,7 +4,7 @@ Standalone `pl-frse` adapter for [Fundacja Rozwoju Systemu Edukacji](https://www
 
 ## Discovery and coverage
 
-Each collection exhausts the advertised pages of the public [funding](https://www.frse.org.pl/finansowanie-projektow), [events](https://www.frse.org.pl/wydarzenia-i-szkolenia) and [competitions](https://www.frse.org.pl/konkursy) catalogues using their public history queries. Repeated, empty or excessive pagination fails collection. Funding and event details, current homepage call announcements, related call announcements and linked HTML rules are read dynamically. The general news archive and external aggregators are not enumerated.
+Each collection exhausts the advertised pages of the public [funding](https://www.frse.org.pl/finansowanie-projektow) and [competitions](https://www.frse.org.pl/konkursy) catalogues using their public history queries. The [events](https://www.frse.org.pl/wydarzenia-i-szkolenia) catalogue uses one consistent all-filter public calendar frontier, described below. Repeated, empty or excessive pagination fails collection. Funding and event details, current homepage call announcements, related call announcements and linked HTML rules are read dynamically. The general news archive and external aggregators are not enumerated.
 
 Jobs are separated by actual FRSE recruitment reference. Named competition anchors become separate opportunities, including the four [Erasmus+ anniversary calls](https://erasmusplus.org.pl/konkursy-40-lat-erasmus), with their independently applicable conditions and dates. Supporting catalogues and regulations are attached to actual calls rather than published as duplicate opportunities. Nomination-only awards, winner pages, charity activities and generic celebrations are excluded with diagnostics. The two available WorldSkills HTML overviews are retained with explicit external-condition limits; no WorldSkills origin is accessed.
 
@@ -158,8 +158,8 @@ stale, malformed or out-of-range 429 timing is not a new access hold, on any
 status. Genuine content refusals remain independent hard holds; valid longer
 timing is retained on every status.
 
-The optional schema-1 rate fields extend trusted older state without changing
-its family or clearing its blocked flag, starts, interval or embargo. A missing
+The finite schema-1 migration described below preserves the known owned
+state without clearing its blocked flag, starts, interval or embargo. A missing
 new-event count means no events observed **since this change**, not proof that
 no historical 429 occurred. The durable `legacy_rate_history_unknown` boolean
 defaults to true for old/missing state and merges with logical OR through
@@ -291,7 +291,7 @@ partial mature journal, which fails closed. It cannot be healed from an older
 hosted artifact. The actual data publication still uses its existing atomic
 GitHub transaction.
 
-Only an actually newly created publisher namespace, during its existing verified
+Only an actually newly created hosted publisher namespace, during its verified
 latest-owned restoration, can initialize neutral state for the incoming MAX
 merge. An existing directory with missing or empty state fails closed. GitHub
 publication transport does not establish publisher namespace creation proof.
@@ -309,31 +309,146 @@ claim a fresh full-body replay from expired RAM or a new publisher request.
 
 Reference: https://github.com/YouthOpps/data-pipeline/issues/295
 
-These existing schemas do not add a durable pending-transaction marker here.
-If both the restrictive write and original-inode invalidation fail, a restart
-still needs the separate #273 protocol correction. This journal-ownership patch
-does not claim to resolve that broader historical persistence limitation.
+## Complete calendar frontier and durable continuity (#384)
 
+The implicit events HTML page and the explicit all-filter calendar do not have
+the same first page. Mixing the implicit first page with explicit subsequent
+pages repeated real cards and correctly failed completeness. Collection now
+reads the actual `PioroMyCalendar2` configuration and filter inputs, then starts
+at page 1 of that public GET calendar with the same parameters for every page.
+It follows the advertised contiguous frontier dynamically; active-page identity,
+filter context, total pages and unique card URLs must reconcile. The entry's
+separate static programme cards remain included. New advertised pages require
+no fixed-count update. Research reconciled 17 calendar links across five pages
+and 15 static programme links; those counts are evidence, not production caps.
 
-## Header-only HTTP 429 stop — issue #328
+The calendar request uses the declared YouthOppsBot identity and ordinary
+same-origin AJAX headers. Only unexpired anonymous session cookies actually
+issued by the public entry are held in RAM and sent to its exact calendar
+endpoint. No application/login route, constructor token, XSRF token, private API
+or browser identity is used. Redirects cannot forward the cookie elsewhere.
+Funding, competitions, governing materials, stable URL-derived identities,
+factual parsers and expiry/publication rules remain in scope.
 
-A received publisher HTTP 429 now stops after the existing header constraints
-are retained, before reading any response body. The response must close
-successfully before this intentional stop is assessed. A close or persistence
-failure follows the existing failure handling; they cannot establish a healthy
-collection. Previously retained holds, numeric MAX constraints, Retry-After
-and unknown history remain. An unread 429 body provides no new challenge
-classification.
+Schema 3 persists `in_flight=true` before every physical publisher request and
+before cached REP policy application. Full body assessment and successful
+response closure are required before settlement. TLS, incomplete body, unsafe
+policy parsing, storage or closure failures retain pending state or invalidate
+the original owned journal; another process cannot restore an older healthy
+artifact over that uncertainty. Current and legacy REP identities, genuine
+refusals, unknown historical access/rate provenance, all stronger MAX constraints
+and rolling physical history remain effective. Independent descriptor probes
+verify locks during their held scopes without hiding accidental unlocks by
+reacquiring them. The collection lifecycle lock remains continuously held.
 
-This paragraph supersedes earlier 429 body-inspection descriptions. This
-conditional repair preserves non-429 responses, REP selection, the full
-collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
-caps, workflow, state schema and finite migration markers. It does not add
-missing pending ownership or upgrade a legacy source to a modern continuity
-protocol.
+A received 429 first durably increases its physical/page gaps, event count and
+cooldown, then assesses at most 64 KiB of actual response evidence. A visible
+challenge retains an access hold as well as the timer. Ordinary assessed 429
+stops without another request; incomplete reading or closure remains pending.
+This replaces the header-only healthy settlement introduced by #328, which
+could not classify a challenge in an unread body.
 
-Private ordinary transport/state controls and protected normal-AST comparisons
-qualify this change. Earlier genuine native evidence retains its original code
-and date attribution; no new publisher collection, current factual review,
-complete native replay or production run is claimed. The maintainer alone owns
-workflow/state coordination and the maintenance rollout for issue #328.
+Only the exact six-key owned artifact 14252313258 from run 43918525358/1,
+including its ZIP, producer head and state digest, may use the legacy decoder.
+The local migration likewise requires the exact settled research journal bytes.
+The reviewed research transition conservatively unions all 22 actual starts,
+58 journal observations and existing owned constraints, including reservation
+history, and retains the separately assessed closed HTTP 500 provenance. Its
+historical failed research guard is never cleared. No unknown pending state is
+converted into permission. Future artifacts use the strict nine-key envelope
+with immutable producer head, source digest and canonical state digest.
+
+The complete original native test for #384 passed in 1,885.989 seconds and
+received independent acceptance in [the issue evidence](https://github.com/YouthOpps/data-pipeline/issues/384#issuecomment-6948839009).
+All 112 responses and 643 journal writes were verified. The exact complete
+replay yields 69 raw records; the actual website consumer accepts 61 current
+records and removes all eight expired records. Production handoff and activation
+remain separate review gates. Inert fault controls are not publisher runs.
+
+GitHub metadata transport accepts only `api.github.com`, without redirects.
+Artifact download permits only the observed `.blob.core.windows.net` and
+`.actions.githubusercontent.com` storage families at the authenticated initial
+302 boundary and every later storage hop. Publisher hosts and unrelated public
+HTTPS endpoints cannot use this transport to avoid publisher controls. Credentials,
+explicit ports (including empty port syntax), trailing-dot hosts, fragments and
+suffix lookalikes fail before their opener; storage requests carry no API
+Authorization or Cookie headers. The actual owned ZIP and producer/state digest
+checks remain mandatory.
+
+Every observed `Retry-After` field contributes its supported future MAX;
+duplicate short/long fields and separate HTTP dates cannot hide a stronger
+value. Known 429 strike, doubled current spacing and minimum cooldown, or a
+known content 401/403/451 hold, are durably written before header parsing.
+Supported stronger timing is retained even when another field has an
+unrepresentable positive duration. Unsupported positive or ambiguously combined
+date fields stop with pending ownership, without reading the body or allowing
+an older artifact to clear that uncertainty on restart. Ordinary absent,
+malformed nonrestrictive, zero, negative and stale values create no access hold.
+
+A successful robots response must have one explicit `text/plain` content type
+and a valid plaintext REP body. HTML MIME, HTML markup hidden among plausible
+User-agent lines, missing/ambiguous MIME, junk and unsupported selected timing
+remain unresolved pending transactions. They do not invent a content-refusal
+hold. Valid empty/comment-only policies and genuine allow/delay/disallow rules
+retain their existing meanings. All six captured source robots responses were
+text/plain and pass the stricter representation check.
+
+Local startup requires the existing owned family directory and a nonempty
+journal before workflow metadata access or namespace setup. It pins the parent
+through startup, so removal between that check and restoration cannot become a
+new initialization allowance. A wholly missing local namespace, missing/empty
+journal, or lost pending/MAX state cannot be recreated from an older artifact.
+Fresh hosted runners retain their separately verified owned-artifact path;
+this protection does not initialize or reset local state.
+
+The local precheck also retains the original RW journal descriptor and its
+acknowledged byte/metadata generation across workflow metadata reads. Replacing
+the named journal with a valid older file or modifying its contents in place
+cannot make restoration adopt weaker state. The failure remains sticky and
+leaves the replacement untouched; existing pending state refuses before any
+metadata request.
+
+The complete captured discovery graph requires 106 content requests and six
+origin robots checks. Replaying all captured inputs yields 69 raw records,
+61 current records and eight expired records. This is offline evidence, not a
+successful complete native run: the earlier observable native stopped at its
+remaining-budget guard after 96 responses; the first attempt is unverifiable.
+Measured response durations, unchanged 12.2-second request spacing and
+30-second inventory spacing predict about 1,900 seconds including startup.
+Collection now has a 2,400-second bound; the whole run has 2,790 seconds,
+retaining the existing publication, failure-state and export reserves. The
+Actions job allows 55 minutes. The 120-second physical-request reserve, all
+pacing constraints and complete-frontier rejection remain unchanged. These
+bounds do not permit truncation or guarantee success if the source grows.
+
+The hosted handoff is committed in this standalone adapter, not supplied as an
+initialization environment variable. It is applied only after fresh family
+history selects the actual newest owned artifact and the strict decoder verifies
+that artifact. An absent, expired, ambiguous or malformed newest artifact still
+refuses collection; the handoff never searches backward or replaces ownership.
+The exact known legacy six-key owner remains separately pinned. Future owners
+require the complete nine-key producer/source/state envelope. Stronger incoming
+constraints, actual refusal and unresolved pending state retain their effects.
+
+The handoff unions 515 observed timing/start witnesses from all available
+journals, 232 later physical receipts and the earlier reviewed research state.
+The first native remains UNVERIFIABLE: only its surviving exact final numeric
+state is retained, and lost response receipts are not invented. The second
+native's genuine failure and the separately assessed HTTP500 research guard
+remain recorded. Unknown legacy access/rate history is preserved. Actual writer,
+rolling-window pruning and exported-envelope controls verify this state without
+changing the established local namespace.
+
+The old workflow blob is historical provenance only. Hosted startup separately
+checks the exact current workflow ID, main workflow reference, executing commit
+and committed workflow bytes. The obsolete `FRSE_PACING_BOOTSTRAP` is removed
+only because the complete conservative state is now retained in source. The
+workflow must remain disabled until independent final handoff review and an
+explicit activation decision.
+
+Hosted restoration also has an explicit source-level final approval gate.
+`_HOSTED_HANDOFF_EVIDENCE` is `None` until the final handoff decision is recorded
+in a dedicated issue #384 comment. The native-test acceptance comment is not
+that decision. Missing, malformed or native-only evidence refuses after the
+actual owned decoder, before any restored journal write or publisher access.
+Disabling the workflow externally is an additional control, not this gate.
