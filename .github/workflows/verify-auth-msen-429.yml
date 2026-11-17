@@ -1,0 +1,56 @@
+name: verify-auth-msen-429
+
+on:
+  push:
+    branches: [qa/429-auth-msen-native]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: youthopps-auth-education-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/429-auth-msen-native' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: fe54fa839233f34973991584567408acae269487
+          path: website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run the one original nonpublishing MSEn test
+        id: collect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AUTH_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+          AUTH_WEBSITE_SHA: fe54fa839233f34973991584567408acae269487
+        run: python -B qa-auth429/observer.py
+      - name: Retain owned state from exact QA execution
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gr-auth-msen-admissions-qa-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Retain derived evidence and authenticated ciphertext
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gr-auth-msen-admissions-qa-result-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/auth429-native-evidence
+          if-no-files-found: error
+          retention-days: 90
