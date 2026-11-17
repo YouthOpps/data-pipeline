@@ -939,6 +939,7 @@ def original_publication_http_guard(deadline):
     previous = signal.getsignal(signal.SIGALRM)
 
     def exhausted(signum, frame):
+        signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
         raise AdapterError("Publication call deadline exhausted", "publish")
 
     try:
@@ -1639,6 +1640,7 @@ EXPORT_TIMEOUT = 30
 _STATE_PATH = _STATE_LOCK = None
 
 _STATE_DIR_FD = _STATE_DIR_ID = None
+_STATE_PARENT_FD = _STATE_PARENT_ID = _STATE_PARENT_METADATA = None
 
 _STATE_INITIALIZING = False
 
@@ -2392,6 +2394,8 @@ class PhaseExpired(BaseException):
 
 
 def alarm_expired(signum, frame):
+    # Body cancellation must leave response closure under the same deadline.
+    signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
     raise PhaseExpired()
 
 
@@ -2511,20 +2515,45 @@ def numeric(value):
 def budget_file():
     global _STATE_PATH, _STATE_LOCK, _STATE_DIR_FD, _STATE_DIR_ID
     global _STATE_INITIALIZING
+    global _STATE_PARENT_FD, _STATE_PARENT_ID, _STATE_PARENT_METADATA
     if _STATE_PATH:
         verify_state_directory()
         return
     temporary = tempfile.gettempdir()
-    parent = os.open(temporary, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    parent = descriptor = None
     try:
+        named_parent = os.stat(temporary, follow_symlinks=False)
+        parent = os.open(
+            temporary, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        held_parent = os.fstat(parent)
+        parent_id = (held_parent.st_dev, held_parent.st_ino)
+        metadata = (held_parent.st_uid, stat.S_IMODE(held_parent.st_mode))
+        shared_sticky = metadata[1] == 0o1777
+        if (
+            not stat.S_ISDIR(named_parent.st_mode)
+            or parent_id != (named_parent.st_dev, named_parent.st_ino)
+            or metadata != (
+                named_parent.st_uid, stat.S_IMODE(named_parent.st_mode)
+            )
+            or metadata[0] not in (0, os.getuid()) and not shared_sticky
+            or metadata[1] & 0o022 and not shared_sticky
+        ):
+            raise AdapterError("Unsafe publisher state parent", "access")
         leaf = FAMILY + "-" + str(os.getuid())
         created = False
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            try:
+                os.mkdir(leaf, 0o700, dir_fd=parent)
+                created = True
+            except FileExistsError:
+                pass
         try:
-            os.mkdir(leaf, 0o700, dir_fd=parent)
-            created = True
-        except FileExistsError:
-            pass
-        linked = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+            linked = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            raise AdapterError(
+                "Established local publisher family is missing", "access"
+            ) from None
         descriptor = os.open(
             leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
         )
@@ -2536,17 +2565,33 @@ def budget_file():
             or info.st_nlink < 2
             or (info.st_dev, info.st_ino) != (linked.st_dev, linked.st_ino)
         ):
-            os.close(descriptor)
             raise AdapterError("Unsafe publisher pacing directory", "access")
         _STATE_INITIALIZING = created
+        _STATE_PARENT_FD = os.dup(parent)
+        _STATE_PARENT_ID = parent_id
+        _STATE_PARENT_METADATA = metadata
         _STATE_DIR_FD = descriptor
+        descriptor = None
         _STATE_DIR_ID = (info.st_dev, info.st_ino)
         directory = os.path.join(temporary, leaf)
         _STATE_PATH = os.path.join(directory, "state.json")
         _STATE_LOCK = os.path.join(directory, "state.lock")
         verify_state_directory()
+    except BaseException:
+        journal_failure()
+        raise
     finally:
-        os.close(parent)
+        primary = sys.exc_info()[0] is not None
+        errors = []
+        for candidate in (descriptor, parent):
+            if candidate is not None:
+                try:
+                    os.close(candidate)
+                except BaseException as error:
+                    journal_failure()
+                    errors.append(error)
+        if errors and not primary:
+            raise errors[0]
 
 
 def journal_version(info):
@@ -2673,7 +2718,7 @@ def verify_journal_locks():
 
 
 @contextlib.contextmanager
-def locked_budget():
+def locked_budget(*, verify_exit=False):
     """Keep an independent original flock description across every context."""
     global _JOURNAL_LOCK_ID
     budget_file()
@@ -2705,6 +2750,8 @@ def locked_budget():
         _JOURNAL_EXPOSED[guard] = descriptor
         retain_journal()
         yield descriptor
+        if verify_exit:
+            verify_journal()
     except BaseException:
         journal_failure()
         raise
@@ -2829,20 +2876,42 @@ def save_budget(state):
 
 
 def verify_state_directory():
-    """Bind the mature leaf to its retained descriptor before each operation."""
-    info = os.fstat(_STATE_DIR_FD)
-    current = os.stat(os.path.dirname(_STATE_PATH), follow_symlinks=False)
-    if (
-        not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != os.getuid()
-        or stat.S_IMODE(info.st_mode) != 0o700
-        or info.st_nlink < 2
-        or (info.st_dev, info.st_ino) != _STATE_DIR_ID
-        or (current.st_dev, current.st_ino) != _STATE_DIR_ID
-    ):
-        raise AdapterError(
-            "Publisher state directory identity changed", "access"
+    """Verify the original parent name, metadata and descriptor-held leaf."""
+    try:
+        parent = os.fstat(_STATE_PARENT_FD)
+        parent_path = os.path.dirname(os.path.dirname(_STATE_PATH))
+        named_parent = os.stat(parent_path, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or not stat.S_ISDIR(named_parent.st_mode)
+            or (parent.st_dev, parent.st_ino) != _STATE_PARENT_ID
+            or (named_parent.st_dev, named_parent.st_ino) != _STATE_PARENT_ID
+            or (parent.st_uid, stat.S_IMODE(parent.st_mode))
+            != _STATE_PARENT_METADATA
+            or (named_parent.st_uid, stat.S_IMODE(named_parent.st_mode))
+            != _STATE_PARENT_METADATA
+        ):
+            raise AdapterError("Publisher state parent changed", "access")
+        info = os.fstat(_STATE_DIR_FD)
+        current = os.stat(
+            os.path.basename(os.path.dirname(_STATE_PATH)),
+            dir_fd=_STATE_PARENT_FD,
+            follow_symlinks=False,
         )
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700
+            or info.st_nlink < 2
+            or (info.st_dev, info.st_ino) != _STATE_DIR_ID
+            or (current.st_dev, current.st_ino) != _STATE_DIR_ID
+        ):
+            raise AdapterError(
+                "Publisher state directory identity changed", "access"
+            )
+    except BaseException:
+        journal_failure()
+        raise
 
 
 def secure_file(name, flags):
@@ -2863,26 +2932,56 @@ def secure_file(name, flags):
 
 
 def retry_after_until(value, now):
-    """Accept only a finite supported positive delay or aware future date."""
+    """Retain supported future timing without discarding positive overflow."""
+    if value is None:
+        return None
     if not isinstance(value, str):
-        return None
-    try:
-        value = value.strip()
-        if re.fullmatch(r"[0-9]+", value):
-            if len(value) > 10:
-                return None
-            delay = int(value)
+        raise AdapterError("Unsupported Retry-After field", "access")
+    value = value.strip()
+    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value):
+        try:
+            delay = float(value)
             until = now + delay
-        else:
-            parsed = parsedate_to_datetime(value)
-            if parsed.utcoffset() is None:
-                return None
-            until = parsed.timestamp()
-        if not numeric(until) or not now < until <= 253402300799:
-            return None
-        return until
+            if not numeric(delay) or not numeric(until) or until > 253402300799:
+                raise ValueError()
+        except (ValueError, OverflowError):
+            raise AdapterError(
+                "Unsupported positive Retry-After", "access"
+            ) from None
+        return until if delay > 0 else None
+    if (
+        re.fullmatch(
+            r"\+?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?",
+            value,
+        )
+        or value.lower() in {"inf", "+inf", "infinity", "+infinity"}
+    ):
+        raise AdapterError("Unsupported positive Retry-After syntax", "access")
+    try:
+        parsed = parsedate_to_datetime(value)
     except (ValueError, TypeError, OverflowError):
+        if re.search(r"\b[0-9]{1,2} [A-Za-z]{3} [0-9]{5,}\b", value):
+            raise AdapterError(
+                "Unsupported Retry-After date", "access"
+            ) from None
         return None
+    if parsed.utcoffset() is None:
+        if not re.fullmatch(
+            r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Za-z]{3}\s+"
+            r"[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+[0-9]{4}",
+            value,
+        ):
+            return None
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    try:
+        until = parsed.timestamp()
+        if math.isfinite(until) and until <= now:
+            return None
+        if not numeric(until) or until > 253402300799:
+            raise ValueError()
+        return until
+    except (ValueError, TypeError, OverflowError, OSError):
+        raise AdapterError("Unsupported Retry-After date", "access") from None
 
 
 def retain_publisher_hold():
@@ -3030,7 +3129,9 @@ class VisibleText(HTMLParser):
             self.text.append(data)
 
 
-def reject_visible_challenge(body, headers, *, challenge_only=False):
+def reject_visible_challenge(
+    body, headers, *, challenge_only=False, robots_unavailable=False
+):
     # A challenge redirect must not escape inspection through a wrong MIME.
     prefix = body[:512].decode("utf-8", "replace")
     obvious_html = re.match(
@@ -3043,6 +3144,8 @@ def reject_visible_challenge(body, headers, *, challenge_only=False):
     if (
         "html" not in headers.get("Content-Type", "").lower()
         and not obvious_html
+        and not challenge_only
+        and not robots_unavailable
     ):
         return
 
@@ -3117,7 +3220,7 @@ def reject_visible_challenge(body, headers, *, challenge_only=False):
         "enable javascript and cookies to continue",
         "checking your browser",
     )
-    if not challenge_only:
+    if not challenge_only and not robots_unavailable:
         phrases += (
             "access denied",
             "permission denied",
@@ -3126,9 +3229,10 @@ def reject_visible_challenge(body, headers, *, challenge_only=False):
             "unusual traffic",
         )
     title = " ".join(" ".join(parser.head_title).lower().split())
-    title_refusal = re.search(
-        r"just a moment|attention required|access denied|captcha", title, re.I
-    )
+    title_pattern = r"just a moment|attention required|captcha"
+    if not robots_unavailable:
+        title_pattern += r"|access denied"
+    title_refusal = re.search(title_pattern, title, re.I)
     if any(phrase in text for phrase in phrases) or title_refusal:
         retain_publisher_hold()
         raise PolicyStop("Visible publisher challenge or denial", "access")
@@ -3727,6 +3831,15 @@ def prepare_collection():
         raise AdapterError("Publisher completion persistence failed", "access")
     if _RESTORED:
         return
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        # An established local family cannot be healed from an older owner.
+        budget_file()
+        with locked_budget():
+            local = load_budget()
+            if local["in_flight"] or local["blocked"]:
+                raise AdapterError(
+                    "Local publisher state is unresolved", "access"
+                )
     workflow_mode_guard()
     current_job_context()
     incoming = restored_state()
@@ -3799,7 +3912,7 @@ def export_family_artifact():
     path = os.environ.get("FEBA_PACING_ARTIFACT_PATH")
     if not path:
         return
-    if not _STATE_TRUSTED:
+    if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED:
         with artifact_output(path, cleanup_only=True):
             pass
         pacing_not_ready()
@@ -3953,6 +4066,10 @@ class PolicyStop(AdapterError):
     policy_retained = True
 
 
+class PreRequestDeferral(AdapterError):
+    """Healthy retained timing prevents a new, unreserved transaction."""
+
+
 def empty_budget(now):
     return {
         "schema": _STATE_SCHEMA,
@@ -4067,7 +4184,7 @@ def publisher_healthy(state):
 
 
 def fail_policy(state=None):
-    """Never heal an unassessed response, failed calculation or failed save."""
+    """Retain verified pending response evidence; never heal a failed save."""
     global _PUBLISHER_GATE_FAILED, _FAILED_BUDGET
     _PUBLISHER_GATE_FAILED = True
     if state is not None:
@@ -4075,6 +4192,23 @@ def fail_policy(state=None):
     elif _FAILED_BUDGET is None:
         with contextlib.suppress(BaseException):
             _FAILED_BUDGET = copy.deepcopy(load_budget())
+    error = sys.exc_info()[1]
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if getattr(error, "_response_unassessed", False):
+            try:
+                verify_journal()
+                retained = load_budget()
+                if (
+                    retained["in_flight"]
+                    and retained["flight_id"] == _ACTIVE_FLIGHT_ID
+                ):
+                    return
+            except BaseException:
+                pass
+            break
+        error = error.__context__
     with contextlib.suppress(BaseException):
         invalidate_budget()
 
@@ -4086,38 +4220,40 @@ def begin_transaction(kind):
         raise AdapterError(
             "Healthy restored publisher state required", "access"
         )
-    with locked_budget():
+    deferred = None
+    with locked_budget(verify_exit=True):
         state = load_budget()
         if state["in_flight"] or state["blocked"]:
             raise AdapterError(
                 "Publisher state requires reviewed recovery", "access"
             )
         now = time.time()
-        if state["rate_limit_until"] > now:
-            raise AdapterError("Retained timed publisher cooldown", "access")
         if state["rate_limit_strikes"] >= 100:
             raise AdapterError("Publisher rate counter exhausted", "access")
         ready = max(state["not_before"], state["completed"] + state["interval"])
-        if ready + 120 > now + (active_deadline() - time.monotonic()):
-            raise AdapterError(
-                "Known publisher guard exceeds phase budget", "access"
+        if state["rate_limit_until"] > now:
+            deferred = "Retained timed publisher cooldown"
+        elif ready + 120 > now + (active_deadline() - time.monotonic()):
+            deferred = "Known publisher guard exceeds phase budget"
+        else:
+            ident = os.urandom(16).hex()
+            if ident == state["flight_id"]:
+                raise AdapterError(
+                    "Publisher transaction identity collision", "access"
+                )
+            state.update(
+                in_flight=True,
+                flight_id=ident,
+                flight_started=now,
+                flight_kind=kind,
+                observed_at=now,
             )
-        ident = os.urandom(16).hex()
-        if ident == state["flight_id"]:
-            raise AdapterError(
-                "Publisher transaction identity collision", "access"
-            )
-        state.update(
-            in_flight=True,
-            flight_id=ident,
-            flight_started=now,
-            flight_kind=kind,
-            observed_at=now,
-        )
-        # This fsynced owner remains True across original no-response retries,
-        # all redirect validation and new/cached robots policy assessment.
-        save_budget(state)
-        _ACTIVE_FLIGHT_ID = ident
+            # Retain ownership through retries, redirects and policy assessment.
+            save_budget(state)
+            _ACTIVE_FLIGHT_ID = ident
+    if deferred is not None:
+        # Generation checks and descriptor closure above still fail closed.
+        raise PreRequestDeferral(deferred, "access")
 
 
 def durable_transaction(kind):
@@ -4290,13 +4426,25 @@ def retryable_connection_error(error):
 def publisher_attempt(inventory=False):
     global _PUBLISHER_COMPLETED_MONOTONIC, _INVENTORY_COMPLETED_MONOTONIC
     global _ACTIVE_REQUEST_ID
-    frame = {"started": False, "received": False, "assessed": False}
+    frame = {
+        "started": False,
+        "received": False,
+        "assessed": False,
+        "closed": False,
+    }
     _REQUEST_FRAMES.append(frame)
     ordinary_no_response = False
     try:
         yield frame
-    except PolicyStop:
-        frame["assessed"] = True
+    except PolicyStop as error:
+        frame["assessed"] = (
+            not _PUBLISHER_GATE_FAILED
+            and not getattr(error, "_response_unassessed", False)
+            and (
+                not frame["received"]
+                or frame["assessed"] and frame["closed"]
+            )
+        )
         raise
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         ordinary_no_response = (
@@ -4309,6 +4457,8 @@ def publisher_attempt(inventory=False):
         )
         raise
     finally:
+        if frame["received"] and not frame["closed"]:
+            frame["assessed"] = False
         if not _REQUEST_FRAMES or _REQUEST_FRAMES.pop() is not frame:
             fail_policy()
         if not frame["assessed"] and not ordinary_no_response:
@@ -4353,10 +4503,60 @@ def publisher_attempt(inventory=False):
                 raise
 
 
-def record_retry_after(value, status=None):
+def retry_after_fields(value):
+    """Retain complete date/numeric members without accepting email prefixes."""
+    if not isinstance(value, str):
+        return [value], False
+    if re.fullmatch(
+        r"\s*[0-9]+(?:\.[0-9]+)?"
+        r"(?:\s*,\s*[0-9]+(?:\.[0-9]+)?)*\s*",
+        value,
+    ):
+        return value.split(","), False
+    weekday = (
+        r"(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|"
+        r"Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)"
+    )
+    date_tail = (
+        r"(?:[0-9]{1,2}\s+[A-Za-z]{3,9}\s+[0-9]{4,}|"
+        r"[0-9]{1,2}-[A-Za-z]{3}-[0-9]{2,4})\s+"
+        r"[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s+"
+        r"(?:GMT|UT|UTC|[+-][0-9]{4})"
+    )
+    asctime = (
+        r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+[A-Za-z]{3}\s+"
+        r"[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+[0-9]{4}"
+    )
+    date = "(?:" + weekday + r",\s*" + date_tail + "|" + asctime + ")"
+    if re.fullmatch(date, value.strip(), re.I):
+        return [value], False
+    parts = [part.strip() for part in value.split(",")]
+    recognizable = re.findall(
+        r"(?<![A-Za-z0-9])" + date + r"(?![A-Za-z0-9])", value, re.I
+    )
+    if recognizable or "," in value:
+        return parts + recognizable, True
+    try:
+        parsedate_to_datetime(value)
+    except (ValueError, TypeError, OverflowError):
+        return parts, False
+    return parts, True
+
+
+def record_retry_after(value, status=None, *, rate_limited=False):
+    """Save known adaptive constraints before headers or response entry."""
     now = time.time()
-    until = retry_after_until(value, now)
-    if status != 429 and until is None:
+    values = value if isinstance(value, (list, tuple)) else [value]
+    maximum, unsupported = 0, False
+    for raw in values:
+        parts, ambiguous = retry_after_fields(raw)
+        unsupported = unsupported or ambiguous
+        for part in parts:
+            try:
+                maximum = max(maximum, retry_after_until(part, now) or 0)
+            except AdapterError:
+                unsupported = True
+    if status != 429 and not maximum and not unsupported:
         return
     with locked_budget():
         state = load_budget()
@@ -4364,34 +4564,49 @@ def record_retry_after(value, status=None):
         if status == 429:
             strikes = state["rate_limit_strikes"] + 1
             if strikes > 100:
-                fail_policy(state)
-                raise AdapterError("Publisher rate counter exhausted", "access")
-            state["rate_limit_strikes"] = strikes
-            factor = 2**strikes
-            interval = max(state["interval"] * 2, 12.2 * factor)
-            page = max(state["page_interval"] * 2, 30 * factor)
-            fallback = now + 1800 * 2 ** (strikes - 1)
-            if any(
-                not numeric(v) or v > 253402300799
-                for v in (interval, page, fallback)
-            ):
-                fail_policy(state)
-                raise AdapterError(
-                    "Unsupported observed rate constraint", "access"
-                )
-            state.update(
-                rate_limit_strikes=strikes,
-                interval=interval,
-                page_interval=page,
+                unsupported = True
+            else:
+                state["rate_limit_strikes"] = strikes
+            known = {
+                "interval": max(state["interval"] * 2, 12.2),
+                "page_interval": max(state["page_interval"] * 2, 30),
+                "rate_limit_until": max(state["rate_limit_until"], now + 1800),
+            }
+            for key, constraint in known.items():
+                if numeric(constraint) and constraint <= 253402300799:
+                    state[key] = constraint
+                else:
+                    unsupported = True
+            state["not_before"] = max(
+                state["not_before"], state["rate_limit_until"]
             )
-            state["rate_limit_until"] = max(
-                state["rate_limit_until"], fallback, until or 0
-            )
+            state["observed_at"] = now
+            # Keep known constraints even if a full exponential floor fails.
+            save_budget(state)
+            if strikes <= 100:
+                floors = {
+                    "interval": 12.2 * 2**strikes,
+                    "page_interval": 30 * 2**strikes,
+                    "rate_limit_until": now + 1800 * 2 ** (strikes - 1),
+                }
+                for key, constraint in floors.items():
+                    if numeric(constraint) and constraint <= 253402300799:
+                        state[key] = max(state[key], constraint)
+                    else:
+                        unsupported = True
+        if status == 429 or rate_limited:
+            state["rate_limit_until"] = max(state["rate_limit_until"], maximum)
         state["not_before"] = max(
-            state["not_before"], state["rate_limit_until"], until or 0
+            state["not_before"], state["rate_limit_until"], maximum
         )
         state["observed_at"] = now
         save_budget(state)
+    if unsupported:
+        error = AdapterError(
+            "Unsupported response timing; pending retained", "access"
+        )
+        error._response_unassessed = True
+        raise error
 
 
 def merge_budgets(local, incoming, now):
@@ -4494,8 +4709,8 @@ def infrastructure_request_bytes(
         return response.status, response.headers, body
 
 
-def header_rate_limit_failure_guard(function):
-    """Preserve a marked HTTP 429 error through failing cleanup."""
+def unassessed_response_failure_guard(function):
+    """Preserve an unassessed response error through failing cleanup."""
     def invoke(*args, **kwargs):
         try:
             return function(*args, **kwargs)
@@ -4503,7 +4718,7 @@ def header_rate_limit_failure_guard(function):
             current, seen = error, set()
             while current is not None and id(current) not in seen:
                 seen.add(id(current))
-                if getattr(current, "_header429_unassessed", False):
+                if getattr(current, "_response_unassessed", False):
                     raise current
                 current = current.__context__
             raise
@@ -4513,7 +4728,7 @@ def header_rate_limit_failure_guard(function):
     return invoke
 
 
-@header_rate_limit_failure_guard
+@unassessed_response_failure_guard
 @durable_transaction("physical")
 def request_bytes(
     url,
@@ -4615,35 +4830,47 @@ def request_bytes(
                 ) from None
             raise
         frame["received"] = True
-        with (
-            header_rate_limit_response(response)
-            if True and response.status == 429
-            else response
-        ):
-            status, response_headers = response.status, response.headers
-            record_retry_after(response_headers.get("Retry-After"), status)
-            if status == 429:
-                raise HeaderRateLimitStop(
-                    "Publisher stopped: HTTP 429", "access", 429
-                )
-            if not robots and status in (401, 403, 451):
-                retain_publisher_hold()
+        with source_response_scope(response, frame, robots) as status:
+            response_headers = response.headers
+            if hasattr(response_headers, "get_all"):
+                values = response_headers.get_all("Retry-After") or []
+            else:
+                values = [
+                    value
+                    for key, value in response_headers.items()
+                    if key.lower() == "retry-after"
+                ]
+            record_retry_after(values, rate_limited=status == 429)
+            length = response_body_length(response_headers)
             body = response.read(5_000_001)
             if len(body) > 5_000_000:
                 raise AdapterError("Response exceeds 5 MB", "fetch")
-            length = response_headers.get("Content-Length")
-            if length and (not length.isdigit() or int(length) != len(body)):
+            if length is not None and length != len(body):
                 raise AdapterError("Incomplete source response length", "fetch")
-            if not robots or status in (200, 429):
+            try:
                 reject_visible_challenge(
-                    body, response_headers, challenge_only=status == 429
+                    body,
+                    response_headers,
+                    challenge_only=status == 429,
+                    robots_unavailable=(
+                        robots and 400 <= status < 500 and status != 429
+                    ),
                 )
+            except PolicyStop:
+                frame["assessed"] = True
+                raise
             if robots and status == 200:
-                groups = parse_robots(body)
+                groups = parse_robots(
+                    robots_response_text(response_headers, body).encode("utf-8")
+                )
                 target_origin, target = _REP_TARGETS.get(
                     origin, (origin, SOURCE_URL)
                 )
-                apply_robots_policy(target, groups)
+                try:
+                    apply_robots_policy(target, groups)
+                except PolicyStop:
+                    frame["assessed"] = True
+                    raise
                 # Preserve the original caller-origin cache. A later content
                 # redirect to an alias must still check that origin's REP.
                 _ROBOTS[target_origin] = groups
@@ -4772,6 +4999,68 @@ def check_robots(url):
             )
     apply_robots_policy(url, _ROBOTS[origin])
     return _PUBLISHER_INTERVAL
+
+
+def response_body_length(headers):
+    """Reject ambiguous framing while allowing one decoded chunked body."""
+    def fields(name):
+        if hasattr(headers, "get_all"):
+            return headers.get_all(name) or []
+        return [
+            value for key, value in headers.items()
+            if key.lower() == name.lower()
+        ]
+
+    lengths = fields("Content-Length")
+    transfers = fields("Transfer-Encoding")
+    encodings = fields("Content-Encoding")
+    if len(lengths) > 1 or len(transfers) > 1 or lengths and transfers:
+        raise AdapterError("Ambiguous source response framing", "fetch")
+    if transfers and (
+        not isinstance(transfers[0], str)
+        or transfers[0].strip().lower() != "chunked"
+    ):
+        raise AdapterError("Unsupported source transfer encoding", "fetch")
+    if len(encodings) > 1 or encodings and (
+        not isinstance(encodings[0], str)
+        or encodings[0].strip().lower() != "identity"
+    ):
+        raise AdapterError("Unsupported response content encoding", "fetch")
+    if not lengths:
+        return None
+    value = lengths[0]
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]+", value.strip()):
+        raise AdapterError("Invalid source response length", "fetch")
+    value = value.strip().lstrip("0") or "0"
+    if len(value) > 7 or int(value) > 5_000_000:
+        raise AdapterError("Source response length exceeds bound", "fetch")
+    return int(value)
+
+
+def robots_response_text(headers, body):
+    """A successful REP response must be one explicit plaintext document."""
+    if hasattr(headers, "get_all"):
+        types = headers.get_all("Content-Type") or []
+    else:
+        types = [
+            value for key, value in headers.items()
+            if key.lower() == "content-type"
+        ]
+    if (
+        len(types) != 1
+        or not isinstance(types[0], str)
+        or types[0].split(";", 1)[0].strip().lower() != "text/plain"
+    ):
+        raise AdapterError("Unsupported robots representation", "access")
+    charset = (
+        headers.get_content_charset()
+        if hasattr(headers, "get_content_charset") else None
+    )
+    text = body.decode(charset or "utf-8", "strict")
+    meaningful = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    if re.search(r"<!--|-->|<!doctype\b|</?[A-Za-z][^>]*>", meaningful, re.I):
+        raise AdapterError("HTML is not a robots policy", "access")
+    return text
 
 
 def parse_robots(body):
@@ -5302,24 +5591,42 @@ def legacy_transition_state():
     return state
 
 
-class HeaderRateLimitStop(PolicyStop):
-    """A header-only HTTP 429 stop assessed after safe closure."""
-
-
 @contextlib.contextmanager
-def header_rate_limit_response(response):
-    """Retain existing barriers when closing an HTTP 429 fails."""
+def source_response_scope(response, frame, robots):
+    """Retain known status restrictions before response entry or headers."""
+    entered = False
     try:
-        with response:
-            yield
-    except HeaderRateLimitStop:
-        raise
+        status = response.status
+        if status == 429:
+            record_retry_after(None, 429)
+        if not robots and status in (401, 403, 451):
+            retain_publisher_hold()
+        response.__enter__()
+        entered = True
+        try:
+            yield status
+        except BaseException:
+            suppressed = response.__exit__(*sys.exc_info())
+            frame["closed"] = True
+            if not suppressed:
+                raise
+        else:
+            response.__exit__(None, None, None)
+            frame["closed"] = True
     except BaseException as error:
-        error._header429_unassessed = True
-        # Latch before any fallible best-effort diagnostics.
-        with contextlib.suppress(BaseException):
-            journal_failure()
+        if not frame["closed"] or not frame["assessed"]:
+            frame["assessed"] = False
+            error._response_unassessed = True
         raise
+    finally:
+        if not entered:
+            try:
+                response.close()
+                frame["closed"] = True
+            except BaseException as error:
+                frame["assessed"] = False
+                error._response_unassessed = True
+                raise
 
 
 if __name__ == "__main__":

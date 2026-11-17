@@ -32,6 +32,12 @@ python -B adapter.py --publish
 
 The sole live test collects and validates real nonempty records and emits
 the complete JSON array without publication or publication credentials.
+Local collection requires an existing reviewed source-family journal. A missing
+family, journal or empty journal is not initialized from an older remote owner.
+First use on another machine requires a separately reviewed administrator seed
+with exact owned-state provenance; there is no environment bootstrap override.
+Hosted jobs retain their existing exact-owner restoration before creating a
+fresh private run directory.
 Production alone uses DATA_SOURCE_TOKEN, atomic source-only Git-tree commits
 and nonforce branch updates to publish data and metadata together under
 `datas/bg-feba-alumni/`. New records replace the prior collection; matching
@@ -383,9 +389,9 @@ rechecked typed collection-local proof. Production execution and live delivery
 remain separate from the native and offline qualification recorded here.
 
 
-## Header-only HTTP 429 stop — issue #328
+## Historical header-only HTTP 429 stop — issue #328
 
-A received publisher HTTP 429 now stops after the existing header constraints
+At that revision, a received HTTP 429 stopped after the header constraints
 are retained, before reading any response body. The response must close
 successfully before this intentional stop is assessed. A close or persistence
 failure follows the existing failure handling; they cannot establish a healthy
@@ -393,8 +399,9 @@ collection. Previously retained holds, numeric MAX constraints, Retry-After
 and unknown history remain. An unread 429 body provides no new challenge
 classification.
 
-This paragraph supersedes earlier 429 body-inspection descriptions. This
-conditional repair preserves non-429 responses, REP selection, the full
+Issue #409 below supersedes that header-only behavior with bounded body and
+closure assessment. The historical conditional repair preserved non-429
+responses, REP selection, the full
 collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
 caps, workflow, state schema and finite migration markers. It does not add
 missing pending ownership or upgrade a legacy source to a modern continuity
@@ -447,3 +454,68 @@ is not treated as a generic short job. Strict hosted restoration across all
 63 completed actual attempts retains all 19 no-access completion bounds,
 the actual owned artifact and the complete 54-point MAX seed. No new publisher
 collection is claimed by these offline controls.
+
+## Healthy pre-request deferral — issue #409
+
+A retained cooldown or a known publisher guard that exceeds the remaining
+collection budget stops before creating a policy owner or physical request.
+These two expected timing decisions now leave the existing journal unchanged
+and eligible for owned export. The decision is raised only after a clean lock
+exit verifies the held journal generation and closes both lock descriptions.
+Previously it crossed the lock's broad failure handler, marking an otherwise
+healthy journal untrusted and suppressing its artifact.
+
+This does not shorten the cooldown, clear pending/refused state, reset unknown
+history or admit another request. Pending owners, refusals, exhausted counters,
+journal replacement or in-place changes, persistence errors and lock-close
+failures retain the original fail-closed behavior. Successful admission still
+durably reserves the original policy owner before collection proceeds.
+
+The source-local repair also closes the required response-assessment gaps:
+
+- A received 429 saves its strike, doubled current physical/page gaps and
+  exponential fallback before response entry or header access. All repeated
+  and supported combined numeric `Retry-After` fields contribute their MAX.
+  Known stronger values survive an unsupported positive constraint; that
+  response remains pending instead of being treated as assessed.
+  IMF-fixdate, RFC 850 and UTC asctime HTTP dates remain supported. Mixed
+  date/numeric fields retain every recognizable MAX before an ambiguous field
+  stops assessment; accepting an email parser's prefix never proves completion.
+- The bounded body is inspected before a 429 stop. Ordinary throttling remains
+  timed; visible verification also retains a hold. Known content 401/403/451
+  holds are saved before response entry or headers. Literal robots-only 4xx
+  unavailable handling remains distinct. Every received REP body is inspected
+  for visible verification, including a 403/404 body. A status-only unavailable
+  REP response, including an ordinary access-denied title, is not a global
+  content refusal.
+  The known strike, current doubled gaps and minimum 1,800-second embargo are
+  committed before full exponential floors are calculated. An unrepresentable
+  larger floor remains pending; response closure is still attempted and bounded
+  when status persistence or calculation stops before response entry.
+- Successful robots responses need one explicit `text/plain` representation;
+  HTML tags are not accepted as policy. Empty and comment-only plaintext
+  policies remain valid, and applicable fractional delays are preserved.
+- A received response is completed only after assessed constraints and actual
+  response closure. Body, entry, header and close errors retain verified
+  pending ownership and deny process reentry and fresh local access. Journal
+  generation or persistence failures keep their original invalidation path.
+  Repeating cancellation bounds response closure after a body timeout, for
+  source, infrastructure and the original publication HTTP guard.
+- Publisher framing accepts a single content length or a sole chunked transfer
+  without content length. Chunked bodies are decoded by the standard transport
+  and retain the five-MB body bound. Duplicate length/transfer fields, combined
+  transfer and length, and unsupported or stacked codings remain unassessed.
+  The original temporary parent descriptor, name, owner and mode are pinned
+  along with the owned leaf; a renamed parent or symlink cannot substitute for
+  it. A legitimate shared sticky parent with mode 01777 remains supported.
+
+Collection, parser, IDs, dates, expiry, metadata, atomic publication, state
+schema and workflow are unchanged. Private controls use synthetic settled
+state with actual transport, journal, namespace and export functions; they do
+not claim a new native run or current publisher facts. All four complete
+successful responses from the earlier native run are separately assessed by
+the new transport without publisher access. Full retained-page comparison
+against the unchanged main collection path preserves 13 raw records and the
+actual zero-record expiry-filtered/current-consumer result. That is reuse of
+retained evidence with its original revision/date, not a new live collection.
+Post-merge production verification remains separate.
