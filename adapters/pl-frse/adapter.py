@@ -4400,7 +4400,9 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                            "access") from None
 
 
-_HOSTED_HANDOFF_EVIDENCE = None
+_HOSTED_HANDOFF_EVIDENCE = (
+    "https://github.com/YouthOpps/data-pipeline/issues/384#issuecomment-6949508353"
+)
 _HOSTED_WORKFLOW_BLOB = 'b3a3e5adff1e43268b820dd48363f3378f40598c'
 _NATIVE_HANDOFF_BINDING = {
     'evidence':
