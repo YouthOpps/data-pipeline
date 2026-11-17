@@ -361,3 +361,31 @@ with immutable producer head, source digest and canonical state digest.
 Validation and production handoff for #384 remain pending until the original
 complete native test, actual consumer/expiry checks and independent review have
 accepted the final implementation. Inert fault controls are not publisher runs.
+
+GitHub metadata transport accepts only `api.github.com`, without redirects.
+Artifact download permits only the observed `.blob.core.windows.net` and
+`.actions.githubusercontent.com` storage families at the authenticated initial
+302 boundary and every later storage hop. Publisher hosts and unrelated public
+HTTPS endpoints cannot use this transport to avoid publisher controls. Credentials,
+explicit ports (including empty port syntax), trailing-dot hosts, fragments and
+suffix lookalikes fail before their opener; storage requests carry no API
+Authorization or Cookie headers. The actual owned ZIP and producer/state digest
+checks remain mandatory.
+
+Every observed `Retry-After` field contributes its supported future MAX;
+duplicate short/long fields and separate HTTP dates cannot hide a stronger
+value. Known 429 strike, doubled current spacing and minimum cooldown, or a
+known content 401/403/451 hold, are durably written before header parsing.
+Supported stronger timing is retained even when another field has an
+unrepresentable positive duration. Unsupported positive or ambiguously combined
+date fields stop with pending ownership, without reading the body or allowing
+an older artifact to clear that uncertainty on restart. Ordinary absent,
+malformed nonrestrictive, zero, negative and stale values create no access hold.
+
+A successful robots response must have one explicit `text/plain` content type
+and a valid plaintext REP body. HTML MIME, HTML markup hidden among plausible
+User-agent lines, missing/ambiguous MIME, junk and unsupported selected timing
+remain unresolved pending transactions. They do not invent a content-refusal
+hold. Valid empty/comment-only policies and genuine allow/delay/disallow rules
+retain their existing meanings. All six captured source robots responses were
+text/plain and pass the stricter representation check.

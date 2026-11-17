@@ -3111,24 +3111,77 @@ def pace(interval=12.2):
 
 
 def retry_embargo(value):
-    """Return finite future timing without mutating malformed input."""
+    """Retain supported future timing; never discard positive overflow."""
     if value is None:
         return 0
+    if not isinstance(value, str):
+        raise AdapterError("Unsupported Retry-After field", "access")
+    value = value.strip()
+    numeric_form = re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value)
+    if numeric_form:
+        try:
+            delay = float(value)
+            until = time.time() + delay
+            if not numeric(delay) or not supported_epoch(until):
+                raise ValueError("Unsupported positive duration")
+        except (ValueError, OverflowError, OSError):
+            raise AdapterError("Unsupported positive Retry-After duration",
+                               "access") from None
+        return until if delay > 0 and until > time.time() else 0
+    # Numeric-looking positive extensions cannot establish an unbounded grant.
+    if (re.fullmatch(
+            r"\+?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+            r"(?:[eE][+-]?[0-9]+)?", value) or
+            value.lower() in {"inf", "+inf", "infinity", "+infinity"}):
+        raise AdapterError("Unsupported positive Retry-After syntax", "access")
     try:
-        value = value.strip()
-        if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value):
-            until = time.time() + float(value)
-        else:
-            date = email.utils.parsedate_to_datetime(value)
-            if date.utcoffset() is None:
-                return 0
-            until = date.timestamp()
-        if not numeric(until) or until <= time.time():
-            return 0
-        datetime.fromtimestamp(until, timezone.utc)
-        return until
-    except (ValueError, TypeError, OverflowError, OSError, AttributeError):
+        date = email.utils.parsedate_to_datetime(value)
+    except (ValueError, TypeError, OverflowError):
+        # An explicitly out-of-range future year is restrictive but cannot
+        # be represented in this runtime's durable timestamp schema.
+        year = re.search(r"\b[0-9]{1,2} [A-Za-z]{3} ([0-9]{5,})\b", value)
+        if year:
+            raise AdapterError("Unsupported Retry-After date", "access")
         return 0
+    if date.utcoffset() is None:
+        return 0
+    try:
+        until = date.timestamp()
+        if not supported_epoch(until):
+            raise ValueError("Unsupported date timestamp")
+    except (ValueError, OverflowError, OSError):
+        raise AdapterError("Unsupported Retry-After date", "access") from None
+    return until if until > time.time() else 0
+
+
+def retry_after_constraints(headers):
+    """Inspect every observed field, retaining MAX even alongside overflow."""
+    if hasattr(headers, "get_all"):
+        values = headers.get_all("Retry-After") or []
+    else:
+        values = [
+            value for key, value in headers.items()
+            if key.lower() == "retry-after"
+        ]
+    maximum, unsupported = 0, False
+    for value in values:
+        # Combined numeric fields contain no date comma ambiguity.
+        parts = (value.split(",") if isinstance(value, str) and re.fullmatch(
+            r"\s*[0-9]+(?:\.[0-9]+)?"
+            r"(?:\s*,\s*[0-9]+(?:\.[0-9]+)?)+\s*", value) else [value])
+        if (parts == [value] and isinstance(value, str) and "," in value and
+                re.search(r"[0-9]|inf", value, re.I) and
+                not re.fullmatch(r"[A-Za-z]+,[^,]+", value)):
+            # A combined date/duration field is not a single HTTP date.
+            # Do not let permissive date parsing discard a restrictive suffix.
+            unsupported = True
+            continue
+        for part in parts:
+            try:
+                maximum = max(maximum, retry_embargo(part))
+            except AdapterError:
+                unsupported = True
+    return maximum, unsupported
 
 
 def infrastructure_pace(url):
@@ -3543,10 +3596,6 @@ def physical_request_bytes(
                 retain_infrastructure_retry(url,
                                             response.headers.get("Retry-After"))
             if publisher:
-                state["until"] = max(
-                    state["until"],
-                    retry_embargo(response.headers.get("Retry-After")),
-                )
                 if status == 429:
                     strikes = state["observed_429_since_transition"] + 1
                     state["observed_429_since_transition"] = strikes
@@ -3560,8 +3609,22 @@ def physical_request_bytes(
                                                     state["until"])
                 if status in (401, 403, 451) and not robots:
                     state["blocked"] = True
+                # Known status restrictions are durable before parsing any
+                # possibly unsupported or duplicated Retry-After field.
                 state["observed_at"] = time.time()
                 write_budget(state)
+                embargo, unsupported = retry_after_constraints(response.headers)
+                if embargo > state["until"]:
+                    state["until"] = embargo
+                    if status == 429:
+                        state["rate_limit_until"] = max(
+                            state["rate_limit_until"], embargo)
+                    state["observed_at"] = time.time()
+                    write_budget(state)
+                if unsupported:
+                    raise AdapterError(
+                        "Unsupported Retry-After; pending state retained",
+                        "access", status)
             if publisher and status == 429:
                 byte_limit = min(byte_limit, 65536)
             declared = response.headers.get("Content-Length")
@@ -3602,8 +3665,7 @@ def physical_request_bytes(
                 response_constraints_saved = False
                 target = (_ROBOTS_CONTEXT["target"]
                           if _ROBOTS_CONTEXT is not None else SOURCE_URL)
-                text = body.decode(response.headers.get_content_charset() or
-                                   "utf-8")
+                text = robots_response_text(response.headers, body)
                 try:
                     delay = apply_robots_policy(text, target, state)
                 except RobotsDisallow:
@@ -3663,6 +3725,26 @@ def physical_request_bytes(
 
 class RobotsDisallow(AdapterError):
     """A genuine applicable REP restriction, retained independently."""
+
+
+def robots_response_text(headers, body):
+    """Validate successful REP representation before settling its owner."""
+    values = (headers.get_all("Content-Type") or [] if hasattr(
+        headers, "get_all") else [
+            value for key, value in headers.items()
+            if key.lower() == "content-type"
+        ])
+    if (len(values) != 1 or not isinstance(values[0], str) or
+            values[0].partition(";")[0].strip().lower() != "text/plain"):
+        raise AdapterError(
+            "Successful robots MIME is not unambiguous text/plain; pending retained",
+            "access")
+    text = body.decode(headers.get_content_charset() or "utf-8")
+    active = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    if "<!--" in active or re.search(r"<\s*[!?/]?[A-Za-z][^>]*>", active):
+        raise AdapterError("HTML is not a robots policy; pending retained",
+                           "access")
+    return text
 
 
 def selected_robots_policies(groups):
@@ -4259,18 +4341,7 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                 raise ValueError("Expected artifact redirect")
             destination = response.headers.get("Location", "")
             response.read(1001)
-        parsed = urllib.parse.urlsplit(destination)
-        if (parsed.scheme != "https" or not parsed.hostname or
-                parsed.username or parsed.password or parsed.port or
-                "." not in parsed.hostname or parsed.hostname.endswith(
-                    (".local", ".internal", ".localhost"))):
-            raise ValueError("Unsafe artifact URL")
-        try:
-            ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            pass
-        else:
-            raise ValueError("Literal artifact address")
+        infrastructure_url(destination, storage_only=True)
         status, _, body = request_bytes(destination, byte_limit=32768)
         if (status != 200 or len(body) > 32768 or not isinstance(digest, str) or
                 not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or
@@ -4469,6 +4540,30 @@ def prepare_collection():
     preserve_legacy_pacing()
 
 
+def infrastructure_url(url, *, storage_only=False):
+    """Keep every metadata hop outside publisher transports and policies."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        host = parsed.hostname or ""
+        storage = any(
+            host.endswith(suffix) and host != suffix[1:]
+            for suffix in (".blob.core.windows.net",
+                           ".actions.githubusercontent.com"))
+        if (not isinstance(url, str) or any(ord(c) <= 32 for c in url) or
+                parsed.scheme != "https" or parsed.username is not None or
+                parsed.password is not None or parsed.netloc != host or
+                parsed.port is not None or parsed.fragment or
+                host.endswith(".") or not re.fullmatch(
+                    r"[a-z0-9]+(?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9]+(?:[a-z0-9-]*[a-z0-9])?)*",
+                    host) or
+                not (storage or not storage_only and host == "api.github.com")):
+            raise ValueError("Unsupported infrastructure host")
+    except (TypeError, ValueError):
+        raise AdapterError("Untrusted GitHub infrastructure endpoint",
+                           "access") from None
+    return parsed
+
+
 def infrastructure_request_bytes(url,
                                  method="GET",
                                  headers=None,
@@ -4476,9 +4571,18 @@ def infrastructure_request_bytes(url,
                                  byte_limit=30000000):
     """Retain the existing bounded GitHub API and signed-ZIP transport."""
     headers = {"User-Agent": _USER_AGENT, **(headers or {})}
+    initial = infrastructure_url(url)
+    storage_only = initial.hostname != "api.github.com"
+    if storage_only:
+        headers = {
+            k: v
+            for k, v in headers.items()
+            if k.lower() not in ("authorization", "cookie")
+        }
     current = url
     for redirect in range(6):
         check_deadline()
+        infrastructure_url(current, storage_only=storage_only)
         request = urllib.request.Request(current,
                                          data=payload,
                                          headers=headers,
@@ -4506,19 +4610,15 @@ def infrastructure_request_bytes(url,
         if status in (301, 302, 303, 307, 308):
             if not location or redirect == 5:
                 raise AdapterError("Invalid redirect chain", "access")
-            destination = urllib.parse.urljoin(current, location)
-            old, new = urllib.parse.urlsplit(current), urllib.parse.urlsplit(
-                destination)
-            if new.scheme != "https" or new.username or new.password:
-                raise AdapterError("Unsafe authenticated redirect", "publish")
-            if new.netloc != old.netloc:
-                headers = {
-                    k: v
-                    for k, v in headers.items()
-                    if k.lower() != "authorization"
-                }
-            if urllib.parse.urlsplit(url).hostname == "api.github.com":
+            if not storage_only:
                 raise AdapterError("Unexpected GitHub API redirect", "publish")
+            destination = urllib.parse.urljoin(current, location)
+            infrastructure_url(destination, storage_only=True)
+            headers = {
+                k: v
+                for k, v in headers.items()
+                if k.lower() not in ("authorization", "cookie")
+            }
             current = destination
             continue
         return status, response_headers, body
