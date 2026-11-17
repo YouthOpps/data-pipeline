@@ -4858,16 +4858,6 @@ def physical_request_bytes(
                     state["blocked"] = True
                 state["observed_at"] = time.time()
                 write_budget(state)
-                if status == 429:
-                    # Preserve the original received-429 stop before any body.
-                    # Context closure still runs before settlement; its failure
-                    # leaves the owner pending and prevents connection retry.
-                    response_constraints_saved = True
-                    raise AdapterError(
-                        "Publisher429; durable adaptive cooldown retained",
-                        "access",
-                        429,
-                    )
             declared = response.headers.get("Content-Length")
             if declared and (
                 not declared.isdigit() or int(declared) > byte_limit
@@ -4914,6 +4904,15 @@ def physical_request_bytes(
                 )
             if publisher and not (robots and status == 200):
                 response_constraints_saved = True
+            if publisher and status == 429:
+                # The increased cooldown is already durable. Assess the body
+                # before settling so a verification challenge also retains its
+                # hold; a failed read or closure keeps this owner pending.
+                raise AdapterError(
+                    "Publisher429; durable adaptive cooldown retained",
+                    "access",
+                    429,
+                )
             if publisher and robots and status == 200:
                 response_constraints_saved = False
                 target = (

@@ -386,8 +386,10 @@ headers, bounded body assessment, closure and applicable policy persistence.
 Cached robots decisions have their own pending policy transaction, even when
 no wire request occurs. A received 429 doubles BOTH CURRENT retained physical
 and inventory gaps, saves its strike count and maximum embargo before reading
-a body, and stops the collection without reading it. A failed response close
-retains the pending owner and cannot enter the connection retry. The embargo
+a body. It then assesses the bounded body and stops the collection; a visible
+verification challenge retains a durable access hold as well as the cooldown.
+Body-read and response-close failures retain the pending owner and cannot enter
+the connection retry. The embargo
 includes at least 1,800 seconds, exponentially increased for observed repeat
 strikes, any longer valid header and all stronger retained constraints.
 Technical body, TLS, storage or policy assessment failures retain unresolved
