@@ -1507,6 +1507,110 @@ _WORKFLOW_ID = 378431598
 
 _ARTIFACT_NAME = "bg-feba-alumni-pacing-state"
 
+# Independently reviewed exact pre-access failures, issue #377. One job lasted
+# 62 seconds; its original restoration error, not a short-job assumption,
+# establishes that no publisher transport was reached.
+_NO_ACCESS_HEAD = "5fd9fa82d5d2d5f0871aba653376765a6e00c897"
+_NO_ACCESS_SOURCE_BLOB = "e4ff0ea305db0f171a4ea56a60b707e6d2329b25"
+_NO_ACCESS_WORKFLOW_BLOB = "e7b3bf1c4cffcc2c52ae63e07da3e878d33b46bf"
+_REVIEWED_PRODUCER_WORKFLOW_BLOB = "975382b0944037179bb0f2afa04f7c52ff427592"
+_NO_ACCESS_ATTEMPTS = {
+    41114084843: (
+        124263659344,
+        "2026-10-30T19:17:55Z",
+        "2026-10-30T19:18:17Z",
+    ),
+    41229641827: (
+        124620992076,
+        "2026-10-31T18:29:16Z",
+        "2026-10-31T18:29:54Z",
+    ),
+    41338934536: (
+        124944596349,
+        "2026-11-01T18:53:45Z",
+        "2026-11-01T18:54:25Z",
+    ),
+    41539855449: (
+        125600940619,
+        "2026-11-02T22:45:02Z",
+        "2026-11-02T22:45:35Z",
+    ),
+    41712977978: (
+        126185578626,
+        "2026-11-03T20:29:09Z",
+        "2026-11-03T20:29:55Z",
+    ),
+    41910087673: (
+        126855029109,
+        "2026-11-04T20:48:30Z",
+        "2026-11-04T20:49:14Z",
+    ),
+    42109126463: (
+        127531720676,
+        "2026-11-05T21:03:46Z",
+        "2026-11-05T21:04:32Z",
+    ),
+    42288264823: (
+        128134645541,
+        "2026-11-06T20:25:45Z",
+        "2026-11-06T20:26:18Z",
+    ),
+    42402663443: (
+        128493613201,
+        "2026-11-07T18:43:09Z",
+        "2026-11-07T18:43:47Z",
+    ),
+    42511815966: (
+        128826311745,
+        "2026-11-08T18:48:26Z",
+        "2026-11-08T18:49:10Z",
+    ),
+    42720260087: (
+        129512117042,
+        "2026-11-09T23:25:01Z",
+        "2026-11-09T23:25:43Z",
+    ),
+    42898679912: (
+        130118508532,
+        "2026-11-10T20:47:19Z",
+        "2026-11-10T20:48:21Z",
+    ),
+    43102260093: (
+        130796453480,
+        "2026-11-11T21:20:58Z",
+        "2026-11-11T21:21:48Z",
+    ),
+    43310348192: (
+        131504481180,
+        "2026-11-12T21:26:57Z",
+        "2026-11-12T21:27:55Z",
+    ),
+    43505572725: (
+        132162232222,
+        "2026-11-13T20:52:47Z",
+        "2026-11-13T20:53:46Z",
+    ),
+    43630273607: (
+        132555108736,
+        "2026-11-14T19:06:34Z",
+        "2026-11-14T19:07:18Z",
+    ),
+    43754145109: (
+        132934435250,
+        "2026-11-15T19:45:03Z",
+        "2026-11-15T19:45:48Z",
+    ),
+}
+_NO_ACCESS_LAST_OWNER = (40941478211, 1)
+_NO_ACCESS_ARTIFACT = (
+    12926738749,
+    "sha256:d6948a41e63b42e5a394e631d45836046405431521a8303f6958e04c67cb17e4",
+)
+_NO_ACCESS_BOUNDS = {}
+_IMMUTABLE_CODE_PROOFS = set()
+_STARTUP_QUIET_UNTIL = None
+
+
 _STATE_SCHEMA = 3
 
 COLLECTION_TIMEOUT = 1200
@@ -2293,6 +2397,8 @@ def execution():
         raise AdapterError("Nested execution context refused", "access")
     if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
         raise AdapterError("Existing process alarm refused", "access")
+    global _STARTUP_QUIET_UNTIL
+    _STARTUP_QUIET_UNTIL = None
     _RESTORED = _STATE_TRUSTED = _LOCAL_FIRST_WIRE_VERIFIED = False
     _ROBOTS.clear()
     _REP_TARGETS.clear()
@@ -3469,7 +3575,7 @@ def production_maintenance_state(incoming):
             or approval["family"] != FAMILY
             or not isinstance(approval["evidence"], str)
             or not re.fullmatch(
-                r"https://github\.com/YouthOpps/data-pipeline/issues/299"
+                r"https://github\.com/YouthOpps/data-pipeline/issues/(?:299|377)"
                 r"#issuecomment-[1-9][0-9]*",
                 approval["evidence"],
             )
@@ -3483,7 +3589,7 @@ def production_maintenance_state(incoming):
 
 
 def restored_state():
-    """Newest exact artifact is mandatory after the one reviewed legacy set."""
+    """Restore the actual modern owner; retired legacy state is not fallback."""
     latest = latest_family_run()
     if latest is None:
         raise AdapterError("FEBA Alumni family history missing", "access")
@@ -3493,7 +3599,26 @@ def restored_state():
         and row[5] == _LEGACY_JOB_PINS[str(row[2])]["head"]
         for row in _HISTORY_COMPLETED
     ):
-        return production_maintenance_state(legacy_transition_state())
+        raise AdapterError(
+            "Established FEBA Alumni requires modern state", "access"
+        )
+    historical = {
+        key: row for key, row in _NO_ACCESS_BOUNDS.items()
+        if key[0] in _NO_ACCESS_ATTEMPTS
+    }
+    if historical:
+        if set(historical) != {
+            (identity, 1) for identity in _NO_ACCESS_ATTEMPTS
+        }:
+            raise AdapterError(
+                "Reviewed no-access ancestry is incomplete", "access"
+            )
+        if (
+            latest[:2] != _NO_ACCESS_LAST_OWNER
+            and _HISTORY_COMPLETED[-1][0]
+            <= max(row[0] for row in historical.values())
+        ):
+            raise AdapterError("Actual post-gap owner is missing", "access")
     run_id, attempt, source, head = latest
     result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
     artifacts = result.get("artifacts")
@@ -3526,12 +3651,25 @@ def restored_state():
         or not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact["digest"])
     ):
         raise AdapterError("Invalid FEBA Alumni artifact binding", "access")
-    return production_maintenance_state(
-        download_inert_artifact(latest, artifact["id"], artifact["digest"])
+    if (run_id, attempt) == _NO_ACCESS_LAST_OWNER:
+        if (
+            not {(identity, 1) for identity in _NO_ACCESS_ATTEMPTS}
+            <= set(_NO_ACCESS_BOUNDS)
+            or (artifact["id"], artifact["digest"]) != _NO_ACCESS_ARTIFACT
+            or artifact["size_in_bytes"] != 612
+        ):
+            raise AdapterError(
+                "Reviewed no-access ancestry is incomplete", "access"
+            )
+    return preserve_no_access_bounds(
+        production_maintenance_state(
+            download_inert_artifact(latest, artifact["id"], artifact["digest"])
+        )
     )
 
 
 def prepare_collection():
+    global _STARTUP_QUIET_UNTIL
     global _COLLECTION_STARTED, _STATE_TRUSTED, _COLLECTION_LOCK_FD, _RESTORED
     global _COLLECTION_LOCK_ID
     if _PUBLISHER_GATE_FAILED:
@@ -3579,6 +3717,7 @@ def prepare_collection():
         combined["not_before"] = max(combined["not_before"], now + 60)
         save_budget(combined)
     _COLLECTION_STARTED = time.time()
+    _STARTUP_QUIET_UNTIL = time.monotonic() + 60
     _RESTORED = _STATE_TRUSTED = True
 
 
@@ -4032,7 +4171,14 @@ def pace():
             target = max(target, starts[-5] + 60)
         while True:
             check_deadline()
-            wait = max(0, target - time.time())
+            if _STARTUP_QUIET_UNTIL is None:
+                raise AdapterError(
+                    "Publisher startup was not prepared", "access"
+                )
+            wait = max(
+                0, target - time.time(),
+                _STARTUP_QUIET_UNTIL - time.monotonic(),
+            )
             if _PUBLISHER_COMPLETED_MONOTONIC is not None:
                 wait = max(
                     wait,
@@ -4399,6 +4545,13 @@ def request_bytes(
                 workflow_mode_guard()
             _LOCAL_FIRST_WIRE_VERIFIED = True
         try:
+            if (
+                _STARTUP_QUIET_UNTIL is None
+                or time.monotonic() < _STARTUP_QUIET_UNTIL
+            ):
+                raise AdapterError(
+                    "Publisher startup quiet is incomplete", "access"
+                )
             frame["started"] = True
             verify_journal()
             response = _OPENER.open(request, timeout=request_timeout(True))
@@ -4706,6 +4859,106 @@ def main():
                 export_family_artifact()
 
 
+def verified_code_identity(head, source_blob, workflow_blob):
+    """Bind immutable source and the sole reviewed production command."""
+    key = (head, source_blob, workflow_blob)
+    if key in _IMMUTABLE_CODE_PROOFS:
+        return True
+    for path, expected in (
+        ("adapters/bg-feba-alumni/adapter.py", source_blob),
+        (".github/workflows/fetch-bg-feba-alumni.yml", workflow_blob),
+    ):
+        value = workflow_api("/contents/" + path + "?ref=" + head)
+        if value.get("sha") != expected:
+            return False
+    _IMMUTABLE_CODE_PROOFS.add(key)
+    return True
+
+
+def proven_no_access_attempt(run, jobs):
+    """Omit only exact reviewed failures or a positively proven short job."""
+    if (
+        run.get("run_attempt") != 1
+        or run.get("status") != "completed"
+        or run.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("status") != "completed"
+        or jobs[0].get("conclusion") != "failure"
+    ):
+        return False
+    pin = _NO_ACCESS_ATTEMPTS.get(run["id"])
+    if pin is not None:
+        if (
+            run["head_sha"] != _NO_ACCESS_HEAD
+            or (
+                jobs[0]["id"], jobs[0]["started_at"],
+                jobs[0]["completed_at"],
+            ) != pin
+            or not verified_code_identity(
+                _NO_ACCESS_HEAD, _NO_ACCESS_SOURCE_BLOB,
+                _NO_ACCESS_WORKFLOW_BLOB,
+            )
+        ):
+            raise AdapterError("Reviewed pre-access history changed", "access")
+    else:
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            return False
+        start = datetime.fromisoformat(
+            jobs[0]["started_at"].replace("Z", "+00:00")
+        )
+        end = datetime.fromisoformat(
+            jobs[0]["completed_at"].replace("Z", "+00:00")
+        )
+        if not 0 <= (end - start).total_seconds() < 58:
+            return False
+        with open(__file__, "rb") as source_file:
+            raw = source_file.read(1_000_001)
+        if len(raw) > 1_000_000:
+            raise AdapterError("Current source proof exceeds bound", "access")
+        prefix = b"blob " + str(len(raw)).encode("ascii") + b"\0"
+        current_blob = hashlib.sha1(
+            prefix + raw, usedforsecurity=False
+        ).hexdigest()
+        if not verified_code_identity(
+            run["head_sha"], current_blob, _REVIEWED_PRODUCER_WORKFLOW_BLOB
+        ):
+            return False
+        current = workflow_api(
+            "/contents/adapters/bg-feba-alumni/adapter.py?ref="
+            + os.environ["GITHUB_SHA"]
+        )
+        if current.get("sha") != current_blob:
+            raise AdapterError("Executing source provenance differs", "access")
+    result = workflow_api(f"/actions/runs/{run['id']}/artifacts?per_page=100")
+    if (
+        type(result.get("total_count")) is not int
+        or not isinstance(result.get("artifacts"), list)
+        or result["total_count"] != len(result["artifacts"])
+    ):
+        raise AdapterError("Incomplete no-access artifact proof", "access")
+    if pin is not None and result["total_count"] != 0:
+        raise AdapterError(
+            "Reviewed pre-access artifact inventory changed", "access"
+        )
+    return result["total_count"] == 0
+
+
+def preserve_no_access_bounds(state):
+    """Retain administrative completion bounds without inventing receipts."""
+    if not _NO_ACCESS_BOUNDS:
+        return state
+    result = copy.deepcopy(validate_budget(state))
+    boundary = max(row[0] for row in _NO_ACCESS_BOUNDS.values())
+    result["not_before"] = max(
+        result["not_before"],
+        boundary + max(result["interval"], result["page_interval"]),
+    )
+    result["observed_at"] = max(result["observed_at"], boundary)
+    result["legacy_rate_history_unknown"] = True
+    return validate_budget(result)
+
+
 def completed_identity(run, expected=None):
     """Use exact immutable attempts/jobs; retain the pinned jobless cancel."""
     identity = validate_family_identity(run, expected)
@@ -4770,12 +5023,16 @@ def completed_identity(run, expected=None):
         raise AdapterError(
             "Untrusted completed family jobs", "access"
         ) from None
-    return max(finished), min(began), *identity
+    row = (max(finished), min(began), *identity)
+    if expected is None and proven_no_access_attempt(exact, jobs):
+        _NO_ACCESS_BOUNDS[(run_id, attempt)] = row
+    return row
 
 
 def scan_family_history():
     global _HISTORY_COMPLETED, _HISTORY_JOBLESS
     _HISTORY_JOBLESS = []
+    _NO_ACCESS_BOUNDS.clear()
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     current = current_run_identity() if hosted else None
     candidates, seen = [], set()
@@ -4783,7 +5040,7 @@ def scan_family_history():
 
     def remember(run, expected=None):
         row = completed_identity(run, expected)
-        if row is not None:
+        if row is not None and (row[2], row[3]) not in _NO_ACCESS_BOUNDS:
             candidates.append(row)
 
     for page in range(1, 101):
