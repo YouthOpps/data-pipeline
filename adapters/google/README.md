@@ -54,275 +54,283 @@ The US Legal Summer Institute's 2027 closing date is retained with its conflicti
 cohort and eligibility statements. No timezone, nationality restriction or current
 vacancy is inferred.
 
-## Run and publication
+## Collection and continuity
 
-Run `python -B adapters/google/test_adapter.py` for one complete live,
-non-publishing collection. The test emits all actual records as one JSON document
-on stdout. It needs no publication credentials and writes no collection files.
-Independent static and live acceptance are required before delivery.
+Complete reconciliation remains necessary: Google supplies no verified change
+sequence covering additions, updates and removals across these programme pages.
+A known record is not a stopping boundary. The normal frontier remains all
+23 guarded inputs, including the 20 programme/directory HTML documents, redirect
+shell, literal script and terms, plus three fresh robots origins. No application,
+account, delegated IIE or worldwide vacancy endpoint is added.
 
-Every physical publisher start, including robots, redirects and the existing
-single bounded 503 retry per input, uses one exclusive
-`youthopps-google-publisher-v1` family: at least 12.2 seconds after the previous
-physical attempt completes and no more than five starts per rolling sixty
-seconds. The six inventory hubs are the student root, scholarships, programs,
-apprenticeships, internships and early-career pages. Every physical inventory HTML attempt, including each redirect and retry,
-waits at least thirty seconds after the previous inventory attempt completes.
-Their complete fetch/parse units also retain a thirty-second completion guard;
-the three intervening details before early-career naturally contribute elapsed
-time. Other details, the redirect shell/script and terms use physical pacing.
-Literal robots.txt requests use ordinary physical pacing even within an
-inventory redirect chain; they never acquire inventory content purpose.
+Every physical start, including robots, redirects and the existing single
+bounded HTTP 503 retry per input, shares the exclusive
+`youthopps-google-publisher-v1` family. Starts wait at least 12.2 seconds after
+physical completion, with at most five starts in a rolling minute. The student
+root, scholarships, programmes, apprenticeships, internships and early-career
+hubs additionally wait thirty seconds after inventory completion. Details and
+literal robots requests retain physical purpose even inside an inventory unit.
 
-Local collection locks prevent overlap. All four original research budget files
-remain locked and merged without modifying their inodes: interval/embargo use
-MAX, refusal uses OR and every known start is retained before access. Missing
-legacy rate/page fields become durable `legacy_rate_history_unknown: true`;
-a new zero strike counter describes only observations under the new schema.
-The full retained union is bounded at 512 timestamps and fails closed rather
-than truncating it. Ordinary pacing ages expired starts only after restoration
-and the startup guard. Legacy mixed holds never clear automatically.
+Schema 3 records a durable policy owner and a distinct reservation for each
+physical request. Header, body, framing, REP and factual-policy failures leave
+the corresponding owner unresolved. A received 429 commits its strike,
+representable doubled CURRENT physical/page gaps and at least 1,800 seconds of
+MAX cooldown before stronger exponential arithmetic, context entry or any
+header/body callback. Every representable stronger restriction survives an
+unsupported calculation. Repeated and combined numeric Retry-After fields use
+MAX; ambiguous combined dates and unsupported positive values remain pending.
+A fully read and closed ordinary 429 remains timed; a primary visible challenge
+also retains a hold. Known content 401/403/451 holds persist before response
+entry. A failure to retain them cannot become a healthy completion.
 
-A 429 stops the current run without another publisher request. Before reading
-its body, it durably doubles both current physical and inventory intervals,
-increases its strike counter, and retains at least thirty minutes of cooldown,
-increasing exponentially on subsequent refusals. A valid longer Retry-After
-wins; invalid, stale, negative or unsupported headers never create a hard hold
-on their own. Generic rate-warning text remains timed. Actual content 401/403/451
-or a primary visible human-verification/denial challenge retains a hard hold.
-The visible-text guard excludes chrome and explicit hidden DOM, including
-implicit paragraph closure; it does not implement full stylesheet rendering.
-Literal robots.txt requests and every redirected hop retain their purpose:
-robots-only 4xx except 429 means unavailable REP, while robots 429, 5xx and
-transport failures stop. Explicit applicable robots restrictions remain stops.
+Literal robots 4xx other than 429 means unavailable REP for that origin. A
+status or ordinary denial page does not create a global content hold or reuse
+another response's provenance. Explicit human-verification challenges in any REP
+response retain a durable hold and leave the received request pending; they
+cannot enter the unavailable-REP cache or establish healthy completion.
+Robots 200 requires explicit text/plain, complete non-markup REP and the existing
+query/percent-octet/wildcard matcher. Decisions retain their actual target,
+policy-body digest and physical receipt. Unreviewed rate extensions, denied
+routes or policy failures stop the collection. Generic copyright notices do not
+alone become an access prohibition.
 
-The unchanged normal frontier is 26 physical starts: all 23 guarded inputs in
-original order plus three robots origins. A rough estimate from the earlier
-271-second collection/publication step is about 497 seconds at the new floors;
-this is not proof of fit. The hard caps remain 100 starts, eight MiB per response,
-64 MiB aggregate bytes and 900 seconds for prepublication, including history
-restoration. The whole operation remains 1290 seconds, with 180-second
-publication/failure phases and thirty seconds reserved for inert state export;
-the job remains thirty minutes and its daily UTC slot remains 16:09. The App
-token is minted immediately before the sole application command. Stronger
-restored limits, network delays or post-429 slowdown can exceed these caps;
-the run then fails closed and preserves last-good data without relaxing limits.
+Responses accept one supported chunked transfer coding only when the standard
+HTTPResponse actually dechunks it and no Content-Length is present. Duplicate,
+stacked or ambiguous framing, incomplete chunks and oversized bodies fail
+closed. The existing single-member gzip decoder, eight-MiB encoded and decoded
+limits, and 64-MiB combined collection ceiling remain. Complete headers, body and
+closure share the earliest operation/phase deadline. Repeated cancellation
+alarms also interrupt a close after a body timeout; a timeout never establishes
+an assessed response.
 
-Both local validation and production restore the newest exact owned family
-artifact first. The complete Google workflow history validates repository,
-source path, main branch, immutable head, exact attempts and actual completed
-jobs. A queued rerun retains its previous completed attempt; missing newest
-state fails closed without selecting older state. The historical six-key
-Google envelope is accepted only with exact matching attempt/jobs and artifact
-head metadata; new envelopes also contain head_sha. Signed downloads use only
-reviewed HTTPS artifact storage, with digest, ZIP member and byte bounds.
+The 100-start, 900-second prepublication, 1,290-second operation, 180-second
+publication/failure and thirty-second export caps remain. The job stays thirty
+minutes and the daily UTC slot remains 16:09. Stronger restored constraints or
+network delay can exceed these budgets; the adapter fails without reducing
+spacing, source coverage or restrictions.
 
-The obsolete timestamp-only first-family bootstrap is removed. This mature
-family requires real history. Production additionally requires
-`GOOGLE_PACING_MAINTENANCE`, a maintainer-linked full native budget state merged
-with the latest owned artifact and local/research MAX. The exact full state is
-[maintainer-approved](https://github.com/YouthOpps/data-pipeline/issues/219#issuecomment-6197983326)
-and bound in the workflow. It retains all 65 known timestamps, including the
-13 prior events and both 26 native reservations and 26 measured wire starts,
-without coalescing them. A fresh sixty-second quiet period follows restoration;
-no publisher budget is reset. Root owns workflow re-enabling and the merge;
-production execution is still unverified here.
+## Local preparation and owned restoration
 
-Only `datas/google/data.json` and `datas/google/metadata.json` can be published.
-Success replaces both in one source-scoped compare-and-swap commit and preserves
-all siblings. Existing source pairs are fully validated before publisher access.
-A first-run failure creates no source folder or empty/failure pair. Later failures
-preserve every last-good data byte and success/check timestamp, updating safe
-failure metadata only when the complete prior owned pair remains unchanged.
-Record creation/first-seen times survive matching identities; update time changes
-only with substantive fields. Last-seen uses collection START, and every record's
-last-checked and metadata's last-checked use actual collection END.
+A mature local family must already contain its nonempty verified journal.
+Missing directories, missing/empty journals, unsupported history and unresolved
+owners never create a fresh allowance or adopt an older remote snapshot.
+The original parent, directory, journal generation and kernel flocks remain
+pinned through metadata and source access. Unknown existing journal bytes are
+preserved for review. Separate retained descriptors protect the original lock
+descriptions from close/reuse. The four legacy research files, when present,
+remain unchanged and locked through the entire execution; new or changed legacy
+history also requires review.
 
-Each physical publisher attempt persists completion plus the native interval,
-including failed opens, body processing and response closure. A monotonic gate
-also enforces the elapsed interval; longer inherited intervals and embargoes
-remain effective. The exclusive family collector preserves a full 60-second
-startup embargo after legacy/artifact restoration to age abandoned attempts.
-A failed completion-state save prevents any further publisher attempt.
+Local collection requires the exact paused workflow, a separately reviewed
+machine/source/state-bound initialization claim and one exclusive native claim.
+The original initialization was an external, one-use administrative action;
+the adapter has no bootstrap switch and initialization is now disabled. A separate ROOT orchestration gate requires the
+initializer subprocess to exit zero with its exact success JSON. ROOT verifies
+the outer process's zero exit and exact final JSON before accepting its outside
+success-proof digest for launch. Healthy-looking state and claim files alone do
+not establish initialization success; an exception never permits a retry.
+The pause is checked before history restoration
+and again after the sixty-second monotonic startup quiet immediately before the
+first publisher wire. Publication credentials are refused locally.
 
-## Expired-record cleanup
+The initial #407 proposal preserves the exact 505-byte owned ZIP from
+[run 43985597132/1](https://github.com/YouthOpps/data-pipeline/actions/runs/43985597132),
+artifact 14284968983, and the obsolete workflow's known MAX state. Its seventy
+observations are five owned starts plus 65 workflow observations, not seventy
+new physical requests. Both rate and policy history remain explicitly unknown;
+zero newly observed strikes does not declare earlier history known. The initial
+proposal alone did not establish an actual initialization or native test; the
+separate observed failed attempt is recorded below.
 
-Google retains supported dated Summer of Code, US Legal Summer Institute and
-Google Ireland scholarship application closings. Null deadlines and conflicting
-programme status wording never authorize removal.
+Restoration exhausts exact attempts and actual completed job identities,
+ordering them by job completion rather than mutable update timestamps. The
+newest applicable exact owned artifact is mandatory. Missing, expired,
+incomplete or mismatched state cannot select an older success. Only the exact
+reviewed legacy owner accepts its seven-key envelope. Modern nine-key envelopes
+bind repository/run/attempt/source/head, canonical state SHA-256 and immutable
+producer source SHA-256. Future modern owners use their own bound identities.
+GitHub API and signed-storage origins are strict; storage and publisher requests
+never receive API/publication credentials or cookies.
 
-The complete fresh inventory is fetched and validated before cleanup. The next
-source-scoped atomic data/metadata publication replaces the prior dataset rather
-than merging its rows, so expired previously published records cannot survive
-that successful replacement. Current records and records with missing or
-ambiguous deadlines remain eligible; status alone does not determine expiry.
+## Factual review and native evidence
 
-Offset-aware deadlines expire only after the stated instant. A date-only
-deadline with no documented publisher timezone remains eligible through that
-date in every civil timezone: cleanup uses the conservative UTC-12 calendar
-boundary, without guessing a publisher timezone or an unstated closing hour.
-The source recipes and their original deadline fields remain unchanged.
+The known APM material guard remains active. A structurally complete APM page
+with its recognized heading and positively assessed transport can raise a narrow
+factual-review deferral. The refresh still fails, and no new record material is
+published. Only a matching, fully closed physical receipt and healthy retained
+journal/locks permit that deferral to finish its logical owner. Changed identity,
+access-policy language, malformed input, missing receipts, pending requests,
+namespace changes and storage failures retain the failure barrier. Other parser
+errors have no immunity. This does not replace actual APM factual review or
+permit a blind hash update.
 
-A valid nonempty fresh inventory may produce an empty cleaned dataset; that
-empty result is published atomically with success metadata. An empty upstream
-collection still fails validation. Fetch, parsing, validation and publication
-failures preserve the last-good dataset (including a prior empty success) and
-success timestamp; cleanup never performs a separate deletion or writes another source.
-The sole live test validates the complete nonpublishing inventory, including
-closed records needed to verify source completeness; publication alone applies
-the deadline filter after that validation.
+The original single test remains
+`python -B adapters/google/test_adapter.py`. A reviewed local attempt emits the
+complete actual fifteen-record raw result as one stdout JSON document, with
+errors on stderr and no publication credentials. Private controls and synthetic
+consumer-readiness cases are not a passing native test. Each controlled attempt
+retains actual inputs, journals, output and its immutable outcome in RAM; a
+failed test remains failed. A further attempt requires separate review and
+continuation, not reinitialization or an automatic retake.
 
-On 14 October 2026, the reviewed original shell at
-https://buildyourfuture.withgoogle.com/ returned HTTP 200 with Content-Encoding
-gzip: its 96,098 decoded bytes matched the existing material fingerprint. The
-bounded standard-library gzip decoder now applies to every reviewed publisher
-route. Wire and decoded byte limits/accounting, fingerprints, robots checks and
-transport policy remain enforced; unsupported encodings still fail with the
-reviewed route in evidence.
+## Publication
 
-## Bot identity
+The unchanged sole workflow command is
+`python -B adapters/google/adapter.py --publish`. It mints the existing scoped
+publication token immediately beforehand and uses serialized, source-only,
+atomic GitHub commits. The obsolete environment maintenance state is removed.
+The replacement source-committed hosted MAX gate remains OFF until a separate
+public decision accepts complete actual native evidence and all retained
+constraints. That decision is distinct from permission to initialize locally.
 
-This adapter sends the following identifying HTTP header:
+After successful nonempty retrieval and validation, expired records are removed
+from the complete next dataset and data/metadata are committed together.
+A legitimately filtered-empty result publishes an empty dataset with success
+metadata. Missing or ambiguous deadlines do not expire records. A failed
+fetch, review, validation or publication preserves last-good data and its
+successful timestamp; only failure metadata is updated when safely possible.
+Pending or untrusted state never exports a valid stale pacing artifact.
 
-```http
-User-Agent: YouthOppsBot/1.0 (+https://youthopps.org/bot/)
-```
-
-The [bot information page](https://youthopps.org/bot/) explains the project
-and provides contact and indexing-removal information. This identity does not
-grant source access or clear retained refusals. Robots checks use the advertised
-product token. Applicable current and legacy product groups must both permit
-access; restrictive rate and delay directives remain effective. Native
-budget identities and stronger retained restrictions remain in force. The
-pacing and timed-429 behavior above supersede the original floors. Existing
-disabled workflows remain disabled until root coordinates their recovery.
-
-Google access also retains the previous YouthOpps policy result, including its
-wildcard fallback. A new YouthOppsBot Allow therefore does not override a
-previously applicable wildcard Disallow; this intentionally remains blocked.
-
-## Daily automation
-
-The scheduled refresh runs once daily at **16:09 UTC** (`9 16 * * *`).
-This fixed time was selected randomly within a staggered daily timetable; it
-is not randomized again on each run. Main-merge and manual triggers remain
-available, so this is one scheduled run per day, not a hard limit on all runs.
-GitHub can delay scheduled events; the existing publication concurrency
-serializes source jobs when they queue. Root coordinates re-enabling the
-workflow after this validation pause; durable access holds still require
-separate reviewed recovery.
-
-The collector has no offset pagination. Its six finite inventory hubs still
-use the separate completion-to-next-inventory guard documented above. The
-original complete frontier, publisher restrictions and daily slot are retained.
-
-## Source display name
-
-Published metadata uses `display_name` = **Google** for the visible
-institution label. Existing source identifiers, legacy names and attribution
-notices remain unchanged. Both success and failure metadata emit this label;
-older snapshots without it remain valid.
-
-## Pacing validation on 15 October 2026
-
-One genuine complete nonpublishing collection passed on the unchanged final
-source: 23 guarded inputs plus three robots requests, fifteen raw records and
-thirteen records after deadline cleanup. The actual current website consumer
-accepted 15 raw, 13 filtered and 0 valid-empty records, with exact ID agreement.
-Independent review checked all actual fingerprints and non-temporal fields.
-The full native took 462 seconds within the unchanged 900-second cap; minimum
-physical completion spacing was 12.21775 seconds, minimum physical inventory
-spacing 30.12985 seconds, and at most five starts occurred per rolling minute.
-All 131 offline access, artifact, state and lifecycle controls also passed.
-
-Actual response evidence retains bodies, statuses, timing and selected
-Content-Type/Content-Encoding headers in private RAM. Full raw headers were
-not retained; absence of Retry-After is not inferred from that selection.
-Sixty actual budget-save snapshots plus the prior artifact, prior local state
-and final native local state supply the 63 MAX inputs. The new strike counter
-records only new observations; unknown earlier rate history remains explicit.
-No additional publisher requests or production Actions were used for
-validation. The maintainer-approved workflow seed and runtime quiet guard
-preserve this history before the automatic merge-push production attempt.
-
-## HTTP 429 HEAD refusal handling
-
-On HTTP 429 only, a genuine initial, unsuppressed HEAD title containing
-`Access denied`, `Just a moment`, `Attention required` or `CAPTCHA` retains
-an access hold alongside the existing adaptive cooldown. Ordinary rate-limit
-warnings remain timed restrictions. Hidden, footer/navigation, nested, second
-or post-body HEAD titles do not supply this additional refusal evidence.
-A bounded obvious-HTML prefix also qualifies this 429-only check when the
-response MIME is absent or wrong; ordinary successful-response handling is
-unchanged. Existing access holds, stronger embargoes, retained state and request/page
-spacing remain preserved.
-
-This conditional maintenance uses actual-function inert transport controls
-and qualified prior complete native evidence; it does not claim a new live
-collection or alter source facts, identifiers, expiry, publication, caps or
-schedules. No publisher request or production Action validates this fix.
-
-## Journal ownership maintenance (#295)
-
-Publisher journal reads and writes retain the acquired original RW descriptor,
-parent identity and file generation. They check that authority again before
-transport and export. A changed name, generation, lock or descriptor fails the
-publisher gate; cleanup never adopts or truncates the stronger replacement.
-Serialization, write, fsync and release failures remain sticky for the process.
-Cleanup attempts independent original descriptors and preserves a prior error.
-Safe owned artifact output is invalidated before best-effort signaling or
-unlink; foreign descriptors and unsafe existing output are preserved.
-
-Journal updates now write through the retained, locked inode instead of
-replacing it by pathname. This deliberately trades atomic journal availability
-for original inode ownership: an interrupted update may leave an empty or
-partial mature journal, which fails closed. It cannot be healed from an older
-hosted artifact. The actual data publication still uses its existing atomic
-GitHub transaction.
-
-Only an actually newly created publisher namespace, during its existing verified
-latest-owned restoration, can initialize neutral state for the incoming MAX
-merge. An existing directory with missing or empty state fails closed. GitHub
-publication transport does not establish publisher namespace creation proof.
-
-This maintenance preserves source facts, frontier, dates, expiry rules, schemas,
-seeds, history pins, pacing limits, retries, publication and workflow settings.
-Validation uses actual functions with inert transport and private journals, plus
-prior accepted native evidence for unchanged collection functions. It does not
-certify a new crawl, production run or every legacy runtime contract. Artifact
-output assumes the existing trusted private job/temporary-directory boundary; it
-cannot authenticate an arbitrary concurrent same-UID writer forging output.
-
-The earlier native acceptance remains historical evidence. This patch does not
-claim a fresh full-body replay from expired RAM or a new publisher request.
-
-Reference: https://github.com/YouthOpps/data-pipeline/issues/295
-
-These existing schemas do not add a durable pending-transaction marker here.
-If both the restrictive write and original-inode invalidation fail, a restart
-still needs the separate #273 protocol correction. This journal-ownership patch
-does not claim to resolve that broader historical persistence limitation.
+References: [repair #407](https://github.com/YouthOpps/data-pipeline/issues/407),
+[prior native/MAX decision #219](https://github.com/YouthOpps/data-pipeline/issues/219#issuecomment-6197983326).
 
 
-## Header-only HTTP 429 stop — issue #328
+## Actual failed APM review and proposed native continuation
 
-A received publisher HTTP 429 now stops after the existing header constraints
-are retained, before reading any response body. The response must close
-successfully before this intentional stop is assessed. A close or persistence
-failure follows the existing failure handling; they cannot establish a healthy
-collection. Previously retained holds, numeric MAX constraints, Retry-After
-and unknown history remain. An unread 429 body provides no new challenge
-classification.
+The first original #407 test failed on source `8c457df4` and observer `72efac03`.
+It received eleven complete HTTP 200 responses, retained fifty exact journal
+witnesses and captured ten guarded documents before the APM material guard
+raised its factual-review deferral. No records or successful collection were
+emitted. All physical responses were durably reserved, assessed and closed;
+the final journal stayed healthy and both legacy unknown flags remained true.
+That failed test is not relabelled as a passing test.
 
-This paragraph supersedes earlier 429 body-inspection descriptions. This
-conditional repair preserves non-429 responses, REP selection, the full
-collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
-caps, workflow, state schema and finite migration markers. It does not add
-missing pending ownership or upgrade a legacy source to a modern continuity
-protocol.
+The complete actual APM material now explicitly closes U.S. internship and
+graduate applications for 2027 cohorts. London internship dates and Bengaluru
+graduate dates remain yearless; the page does not announce 2027 London/EMEA
+graduate intake information. The summary preserves those distinctions. India
+is added from Bengaluru recruitment and its India application filter. The
+existing United States, United Kingdom, Germany, Switzerland and Japan entries
+are independently supported by current recruitment or placement statements.
+A Paris travel example does not add France. Overall programme status remains
+unknown and the scalar deadline remains null. The other nine captured material
+guards and the fixed source frontier were unchanged; at that stage thirteen
+remaining inputs and two robots origins had not been collected. The second
+failed test below reduced the unreceived guarded inputs to seven.
 
-Private ordinary transport/state controls and protected normal-AST comparisons
-qualify this change. Earlier genuine native evidence retains its original code
-and date attribution; no new publisher collection, current factual review,
-complete native replay or production run is claimed. The maintainer alone owns
-workflow/state coordination and the maintenance rollout for issue #328.
+Only the prior-snapshot validation route accepts the exact previously published
+APM summary and five-country material together. Mixed old/new summary and
+countries, changed unrelated fields or other modified profiles are refused.
+Fresh raw collection and output remain strict against the current profile.
+A successful refresh preserves original creation/first-seen timestamps and
+advances the APM material update timestamp; failure preserves the original
+last-good pair.
+
+The separately authorized second test consumed its own exclusive successor
+claim on the original namespace without rerunning initialization. Its complete
+ninety-two-observation starting MAX was seventy earlier values, eleven first-test
+reservations and eleven first-test physical starts, not ninety-two new requests.
+Original initialized and first-native claims, the original outside zero-exit
+initialization proof and the failed RAM capture were preserved. The launcher
+verified source/observer dependencies and the paused exact workflow history, and
+persisted the child PID before release. The result of that second test follows.
+
+## Second failed native and typed material review
+
+The separately authorized second original test used source `a45b191b` and
+observer `0a702333`. The corrected APM material passed, then the Americas Sales
+Associate (ASA) guard failed. Seventeen complete HTTP 200 responses, seventy-four
+exact journal witnesses and sixteen guarded documents were retained. No records
+or successful collection were emitted. The original test remains failed.
+Seven guarded inputs and two other robots origins remain unreceived.
+
+The complete current ASA document retains the same programme heading. All sixty
+material text items, seven literal links and thirty-seven controls support the
+existing U.S. summary, quarterly starts, two-year rotations, degree or equivalent
+experience and track-specific one-year experience requirements. The page states
+applications are open and links two jobs; their vacancy conditions were not
+fetched. Programme status remains unknown and the scalar deadline remains null.
+Only the reviewed material guard changes. No historical ASA body exists to
+support an exact old/new DOM difference claim, and the fetch frontier is unchanged.
+
+Material changes on a configured embedded programme or directory input now raise
+a typed review deferral only when the exact nonempty heading still matches and
+neither the embedded document nor the visible outer document contains
+recognized automation or access-policy vocabulary. Any such vocabulary retains
+a hard barrier, including crawl/spider/scrape/automation mentions, permission,
+approval, consent, authorization, licensing, prohibition or restriction language.
+This conservative gate does not infer permission from nearby words; unfamiliar
+negation, conditional language or distant clauses cannot relax it. A false
+positive requires manual review. A factual deferral still fails collection and
+requires factual review. A logical policy owner may complete only when the error's exact
+configured target and physical receipt match the last closed, positively
+assessed response, the current policy owner and durable journal. Original
+journal, collection flock, namespace and exclusive-claim verification remain
+mandatory. A changed heading, legal-policy HTML, redirect HTML or script,
+missing/malformed bytes, automation restriction, physical request pending, hold,
+wrong receipt, IO/close failure or generic adapter error retains its barrier.
+No generic pending-state reset or blanket parse-error exemption is introduced.
+
+The persisted ASA failure predated the typed handling: its last physical
+request was assessed and closed, while its logical policy owner remained
+pending. The separately reviewed repaired administrator helper settled only
+that logical owner on the original journal inode under [ROOT decision
+6960520829](https://github.com/YouthOpps/data-pipeline/issues/407#issuecomment-6960520829).
+Its original child exited zero with exact canonical JSON and empty stderr.
+ROOT independently observed its post-finalizer RAM success and exact durable
+outside proof. The original journal now contains the complete 126-observation
+MAX: ninety-two earlier values, seventeen second-test reservations and seventeen
+second-test wire starts. Only the complete observation union, `in_flight=false`
+and the exact completed logical owner changed. Every physical receipt, timing
+bound, unknown flag and old claim was retained; no publisher HTTP or native
+collection occurred during settlement. The earlier interrupted helper outcome
+remains unqualified and preserved; it was not treated as successful from a
+healthy-looking file.
+
+The repaired helper's entrypoint does not catch its own successful `SystemExit`.
+An actual read-only authenticated workflow scan took 87 metadata calls and
+74.4 seconds, exceeding the old 50-second administrator window; the separate
+administrator-only window now accommodates all three full scans. Collection
+pacing/deadlines are unchanged. The outside supervisor exposes success only
+after the actual child result and all proof writes, readbacks and descriptor
+finalizers complete. Its own close failures, including under inherited caller
+exceptions, remain failed even if proof bytes exist. The helper and its failed
+predecessor remain outside the delivered standalone adapter.
+
+## Verified original hosted test and production continuity
+
+Live tests and production collection run through GitHub Actions. The earlier
+local native proposal is preserved as history. The first hosted original test
+received a current Google Terms of Service document that differed from the
+older full-page hash. Its 25 complete responses and all original acknowledged
+state were preserved. The signed zero-publisher settlement closed only its
+pending logical terms owner and retained its original physical receipt. The
+Terms guard now compares the complete substantive terms, their links and
+access controls, with unrelated page chrome excluded. The rest of the
+publisher scope and guards remain unchanged.
+
+The second original hosted test succeeded in [run 44194838216/1](https://github.com/YouthOpps/data-pipeline/actions/runs/44194838216/job/134433403271).
+It covered 23 guarded source inputs and three robots origins, including the
+complete literal redirect script. Independent replay privately checked the
+actual source material, all 26 physical requests and 107 acknowledged state
+writes. The current website consumer accepted 15 original records and the
+13-record expiry-filtered snapshot. No publication took place in that test.
+
+The successful temporary workflow is retired. The 228-observation reviewed
+production floor preserves all 176 earlier observations, the new original
+reservations and the independently measured physical opens. These are timing
+observations with distinct provenance. The first normal producer verifies
+the exact retired native workflow, run, job and authentic artifact metadata.
+It verifies and decodes the oldest currently owned production archive and
+adopts the exact stronger reviewed floor without dropping completed owner
+fields. Subsequent runs restore their own latest exact producer artifact.
+The adapter preserves the fixed reviewed history and uses the rolling minute
+for request pacing. A lost artifact, changed current owner, blocked state or
+unresolved transaction stops the next attempt rather than falling back.
+
+The existing production workflow still runs the original publishing command
+and publishes the exact source data and metadata together. Its normal
+`google-pacing-state-<attempt>` artifact is the sole mature producer handoff.
+The temporary QA and administrator workflows are outside the product changes.
+Local and hosted startup verify access authority again after metadata and the
+startup quiet period before the first physical publisher request.
