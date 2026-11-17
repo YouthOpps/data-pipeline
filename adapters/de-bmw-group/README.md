@@ -135,7 +135,22 @@ reuse of that accepted run: its responses had no Retry-After and its sole REP
 response was supported plaintext. Actual-function private-journal controls
 exercise the new restrictive paths, and full captured-input replay preserves
 all 501 material records. This is not a second native run or production proof.
-Hosted execution remains closed until the final native MAX handoff is reviewed.
+The final hosted handoff is implemented behind a source-committed decision
+that remains disabled pending independent review. Its exact 2,284-byte typed
+MAX combines the original owned state, all 41 research journal witnesses and
+all 164 native witnesses. Its 50 starts are actual durable reservations;
+28 physical and 26 cached-policy native episodes have complete settlement
+proof. Unknown historical constraints and research provenance remain intact.
+This seed cannot replace a missing, expired, ambiguous or newer untrusted
+owner. The newest authenticated owner is mandatory, and its additional holds,
+pending ownership and stronger constraints survive MAX merging.
+
+Private controls exercised four real restore/write/prune/export cycles,
+including the exact original six-key ZIP followed by modern nine-key exports.
+All 656 writer operations stayed within the original 16 KiB limit: the largest
+complete envelope was 2,784 bytes. Existing rolling-window pruning retained
+bounded future exports; no pruning semantics were relaxed. These are inert
+transport controls, not additional publisher requests or production proof.
 Source facts, IDs, dates, unknown deadlines and the sole live test remain.
 
 Published metadata uses `display_name` = **BMW Group**; source identifiers,

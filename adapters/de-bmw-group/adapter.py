@@ -3539,11 +3539,44 @@ def download_inert_artifact(identity, artifact_id, digest=None):
 
 
 def production_maintenance_state(incoming):
-    """Production remains closed until final native MAX handoff is reviewed."""
+    """Require a source-committed decision for the reviewed native MAX."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return incoming
-    raise AdapterError("Final native publisher MAX handoff is not yet approved",
-                       "access")
+    expected = {
+        "kind": "reviewed-bmw-native-max-handoff",
+        "issue": 391,
+        "native_source_sha256": (
+            "62a1a11ef6017d471fb1ceba890bc2f7367"
+            "bcfbf086b96606ff37f111c34b44c"),
+        "qualified_source_sha256": (
+            "6e8d2de0f3e5fcff0d581bce20c01996"
+            "adeaa85a990774c4e52c812d4d59d065"),
+        "native_final_state_sha256": (
+            "ce1046252dfa48ead2d07327562a01593d"
+            "301b4fe6cc7dc5e6dfd419e96b4098"),
+        "state_sha256": (
+            "355179fbae605286be38c3e1cf82a07e314"
+            "c40a709ddabbf0064d0b2c268843a"),
+    }
+    decision = _HOSTED_HANDOFF_DECISION
+    if (not isinstance(decision, dict)
+            or set(decision) != set(expected) | {"evidence"}
+            or any(decision[key] != value for key, value in expected.items())
+            or not isinstance(decision["evidence"], str)
+            or not re.fullmatch(
+                r"https://github\.com/YouthOpps/data-pipeline/issues/391"
+                r"#issuecomment-[1-9][0-9]*", decision["evidence"])):
+        raise AdapterError("Final native MAX handoff is not approved",
+                           "access")
+    candidate = copy.deepcopy(_HOSTED_HANDOFF_STATE)
+    raw = json.dumps(candidate, sort_keys=True,
+                     separators=(",", ":")).encode()
+    if (len(raw) > 16384 or hashlib.sha256(raw).hexdigest()
+            != expected["state_sha256"]):
+        raise AdapterError("Reviewed native MAX handoff changed", "access")
+    # The caller already authenticated the newest exact owned artifact.
+    # Its newer constraints, actual holds and pending state can only increase.
+    return merge_budget(validate_budget(incoming), validate_budget(candidate))
 
 
 def restore_family_artifact():
@@ -4014,6 +4047,128 @@ _RESEARCH_TRANSITION = {
     ],
     "until": 1794880351.8468106,
 }
+
+_HOSTED_HANDOFF_DECISION = None
+
+_HOSTED_HANDOFF_STATE = {
+    "blocked": False,
+    "completed": 1794912213.1568158,
+    "family": "youthopps-bmw-group-publisher-v1",
+    "in_flight": False,
+    "interval": 12.2,
+    "inventory_completed": 1794912213.1568158,
+    "legacy_429_history": "unknown",
+    "legacy_access_history_unknown": True,
+    "legacy_access_observations": [
+    ],
+    "legacy_hold_history": "unlogged_fields_unknown",
+    "legacy_rate_history_unknown": True,
+    "observed_429_since_transition": 0,
+    "observed_at": 1794912213.1568158,
+    "page_gap": 30,
+    "rate_limit_until": 0,
+    "research_provenance": {
+        "8870": {
+            "capture": (
+                "51cd796ad73a3e5d37a598bd663980b1e8e06e0c"
+                "a5605a96fc458ed021c9ede6"
+            ),
+            "controller_sha256": (
+                "1799270817dba548cd3124fecb9736888ed10714"
+                "234f5014f47572bd7dd2096e"
+            ),
+            "guard_sha256": (
+                "057c0ade5563b377ef0d1cc603543bd7c855107a"
+                "39c6e30fcd095434c6789315"
+            ),
+            "persistence": (
+                "574934238206f621cb2378d02f7cc9c757e14b04"
+                "41b527642768d1a6800cf482"
+            ),
+            "status": (
+                "10ee7212318ac629cefbc8d1003003d2abc985b4"
+                "676a80d8fa4ab17d85a8c26b"
+            ),
+        },
+        "8871": {
+            "capture": (
+                "ed0d792553499d4a0096422072656d0b6991fb71"
+                "283de2233793e7864cba64a2"
+            ),
+            "controller_sha256": (
+                "ceacd9e8f1356e1caf08b07f3cfe77ed20ccdc6b"
+                "1a3503a614061845c2223592"
+            ),
+            "guard_sha256": (
+                "9a4ea0ad58e230b0c90c18a9e8d842cc8258ac5b"
+                "48c3e9fc3fc53698ce78689f"
+            ),
+            "persistence": (
+                "76a218e8f7f0aa4101f7c1b7886c90b5588b5f92"
+                "785aa89cb408a204d1d200da"
+            ),
+            "status": (
+                "771049999476db61cfa1f6ac34f82f2e60081b68"
+                "2afa9dd9acdd6ec5136182aa"
+            ),
+        },
+    },
+    "schema": 3,
+    "starts": [
+        1794880351.84692,
+        1794880364.706743,
+        1794908253.4563498,
+        1794908329.1280534,
+        1794908344.823981,
+        1794908358.27946,
+        1794908371.3389707,
+        1794908385.8807216,
+        1794908399.3709297,
+        1794909341.9703007,
+        1794909417.4264784,
+        1794909433.2237983,
+        1794909466.4986186,
+        1794909498.7357147,
+        1794909531.4939315,
+        1794909564.4820395,
+        1794909596.0208871,
+        1794909629.2562978,
+        1794909662.6185675,
+        1794909693.7348237,
+        1794909726.2334356,
+        1794909759.057816,
+        1794911462.91189,
+        1794911479.4124148,
+        1794911493.6019154,
+        1794911507.4474094,
+        1794911520.4814122,
+        1794911534.2851193,
+        1794911547.1791844,
+        1794911578.017117,
+        1794911609.2857883,
+        1794911640.2296615,
+        1794911672.4417884,
+        1794911704.8564997,
+        1794911736.9543202,
+        1794911768.982032,
+        1794911801.0453973,
+        1794911832.957761,
+        1794911865.4772708,
+        1794911896.9200783,
+        1794911928.6767712,
+        1794911959.2773402,
+        1794911991.035107,
+        1794912022.8997748,
+        1794912053.635139,
+        1794912085.8093624,
+        1794912117.7160199,
+        1794912149.791737,
+        1794912180.4202797,
+        1794912212.5132635,
+    ],
+    "until": 1794911462.9107761,
+}
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
