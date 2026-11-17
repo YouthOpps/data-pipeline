@@ -116,7 +116,14 @@ The 25-minute collection cap is unchanged. A nonrenewable 29-minute outer run
 bounds metadata, collection, publication and export within the existing
 30-minute Action. Absolute alarms interrupt slow-trickle bodies; cancellation
 also interrupts blocked closure/finalizers, retaining pending ownership.
-Local access requires the exact disabled workflow and terminal family history.
+Local access requires an existing owned family directory and a nonempty
+owned journal before remote restoration; neither a lost whole local namespace
+nor a missing journal may be rebuilt from an older artifact. The existing
+parent descriptor remains pinned across startup, so a removal race cannot
+turn into a new initialization grant. This adapter supplies no fresh-local
+bootstrap. Normal hosted ephemeral initialization still requires verified
+remote ownership and the approved final MAX handoff. Local access additionally
+requires the exact disabled workflow and terminal family history.
 The unchanged original native test obtains this lifecycle through `collect()`.
 
 The original native test of source `62a1a11e` completed two fresh 11-page

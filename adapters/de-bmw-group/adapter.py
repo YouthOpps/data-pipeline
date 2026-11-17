@@ -3632,6 +3632,37 @@ def authenticate_hosted_run():
         raise AdapterError("Untrusted current collect job", "access")
 
 
+def require_existing_local_state():
+    """A mature local namespace cannot be recreated from an older artifact."""
+    directory = os.path.join(tempfile.gettempdir(),
+                             FAMILY + "-" + str(os.getuid()))
+    descriptor = info = None
+    try:
+        # Retain this parent through subsequent startup, preventing a race
+        # from turning a removed directory into a new initialization grant.
+        parent = state_parent(directory)
+        descriptor = os.open("state.json", os.O_RDWR | os.O_NOFOLLOW |
+                             os.O_NONBLOCK, dir_fd=parent)
+        info = os.fstat(descriptor)
+        validate_state_descriptor(descriptor, parent, "state.json")
+        if not 0 < info.st_size <= 16384:
+            raise AdapterError("Existing local journal is empty or oversized",
+                               "access")
+    except BaseException:
+        fail_publisher_cleanup()
+        raise
+    finally:
+        if descriptor is not None and info is not None:
+            primary = sys.exc_info()[0] is not None
+            try:
+                close_retained_descriptor(descriptor,
+                                          (info.st_dev, info.st_ino))
+            except BaseException:
+                fail_publisher_cleanup()
+                if not primary:
+                    raise
+
+
 def prepare_collection():
     global _COLLECTION_LOCK_FD, _COLLECTION_LOCK_CONTEXT, _COLLECTION_STARTED
     global _LOCAL_FIRST_ACCESS_CHECKED, _STARTUP_QUIET_UNTIL, _RESTORED
@@ -3640,6 +3671,7 @@ def prepare_collection():
     if os.environ.get("GITHUB_ACTIONS") == "true":
         authenticate_hosted_run()
     else:
+        require_existing_local_state()
         verify_local_workflow_pause()
     budget_file()
     if _COLLECTION_LOCK_FD is not None:
