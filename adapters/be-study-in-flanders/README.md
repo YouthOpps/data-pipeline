@@ -6,7 +6,13 @@ Official assigned source: https://www.studyinflanders.be/scholarships/master-min
 
 Reviewed 10 October 2026: official robots excludes `/cpresources/`, `/vendor/` and `/.env`; all required public routes are permitted. The actual footer links [Privacy Policy](https://www.studyinflanders.be/privacy) and [Cookie Policy](https://www.studyinflanders.be/cookie-policy). These govern personal data/cookies and do not establish a prior-permission requirement or automation ban for factual summaries. Copyright is retained: this is not an open-licence claim. Publish original concise factual summaries, attribution and canonical publisher links, without images, protected full prose or applicant data. No form submission, login, contact or external catalogue access.
 
-Every run retrieves fresh robots and ten exact public HTML inputs: scholarship hub, MasterMind main/eligibility/application/host/payment pages, US funding overview, privacy, cookies and the linked Russian-mobility policy notice. Only one `main` article and its complete substantive text/links are fingerprinted; site navigation, footer copyright year and opaque client chrome are not opportunities. Exact canonical URLs and complete HTML are checked. A material change to facts, policy or the finite inventory stops the whole collection before publication; no partial stale subset is emitted. Unexpected publisher redirects are rejected before destination access, after bounded denial-body inspection.
+Every run retrieves fresh robots and ten exact public HTML inputs: scholarship hub, MasterMind main/eligibility/application/host/payment pages, US funding overview, privacy, cookies and the linked Russian-mobility policy notice. The hub is checked first after robots. Exact canonical URLs and complete HTML are required. The nine programme, support and policy pages retain their complete `main` article text and link checks. A material change to facts, policy or the finite inventory stops collection before publication. Unexpected publisher redirects are rejected before destination access, after bounded denial-body inspection.
+
+The 17 November 2026 [GitHub Actions diagnostic](https://github.com/YouthOpps/data-pipeline/actions/runs/44183750124) observed both `/robots.txt` and the hub return HTTP 200 after production was paused. The retrieved robots policy permitted the hub under both evaluated crawler-policy checks. The hub still linked to the same two own programme pages. Its revised article no longer matched the previous whole-article fingerprint. The job failed while serializing the carry-forward report after retaining both assessed response bodies and the acknowledged journal in its encrypted artifact. The diagnostic covered the hub and robots only.
+
+The hub now checks reviewed sections and programme URLs. Exact own routes, substantive section text, the known external provider identities, and the footer policy notice remain guarded. Changes limited to the testimonial, the footer copyright year, recognized link-label variants, or paths on the same reviewed external providers do not invalidate the programme inventory. The adapter never fetches those external targets. New sections, routes or load controls and changed reuse or access notices stop for review before collecting the detail pages. Programme facts and eligibility still come from the independently checked detail pages.
+
+The [original nonpublishing test](https://github.com/YouthOpps/data-pipeline/actions/runs/44191725719) passed on GitHub Actions. All eleven physical responses closed and validated. The website consumer accepted all four actual records in both the raw and expiry-filtered result at revision `7da2b3eb81853707def0ff67de64f8d43773fe87`. The exact owned custody artifact is `14376887557`. The production maintenance marker preserves the complete reviewed set of 266 historical observations and all known stronger limits. The adapter binds the marker to its canonical digest before merging it into the latest original owned producer state.
 
 ## Complete inventory and identifiers
 
@@ -90,16 +96,14 @@ snapshot, and attempt finally-export even after later snapshot/auth failure.
 Upload only a freshly finalized, owned state artifact signalled by the sole
 application step. Keep the stable local collector lock through export/cleanup.
 
-The exact full-native-MAX maintenance state is
-[maintainer-approved](https://github.com/YouthOpps/data-pipeline/issues/225#issuecomment-6199351980)
-and bound in the workflow. It supplements, never replaces, mandatory newest
-mature artifact/local restoration. All 34 known starts remain: twelve earlier
-retained events plus eleven native reservations and eleven measured wire
-starts, without coalescing. Numeric MAX, hold/unknown OR and native completion
-plus sixty seconds are preserved; runtime additionally waits a fresh sixty
-seconds. Root owns re-enabling before merge and the sole automatic production
-run; production remains unverified here. The daily UTC cron remains
-`21 10 * * *` (10:21 UTC); no extra schedules or manual runs are introduced.
+The [original maintenance decision](https://github.com/YouthOpps/data-pipeline/issues/225#issuecomment-6199351980)
+covered 34 observations. The current issue #428 marker carries those events,
+all subsequently recovered evidence and the exact qualified native result. It
+supplements mandatory newest mature artifact restoration. The 266 starts
+include separate reservation and opener observations. The marker preserves
+numeric maxima, holds, legacy history uncertainty and a quiet period of at
+least 120 seconds after the native job ended. Startup also waits a fresh sixty
+seconds. The daily schedule is `21 10 * * *` (10:21 UTC).
 
 The single main-push/manual/daily workflow publishes only `datas/be-study-in-flanders/{data,metadata}.json`. Success atomically creates/replaces both files through source-scoped non-force compare-and-swap, preserving all sibling sources. Validate prior complete own pair before changes. Initial failures create no folder; later failures preserve last-good data and last-success time, updating only safe failure metadata when possible. Uncertain commits are reconciled against exact desired bytes; newer own pairs are never overwritten. Logs distinguish unconfirmed durable outcome from saved failure. Source metadata is the durable status record after first success; pacing artifacts contain infrastructure state only.
 
