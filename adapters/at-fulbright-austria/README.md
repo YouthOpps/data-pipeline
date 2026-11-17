@@ -480,3 +480,108 @@ Deadline-proof failures identify the rejected validation stage without logging
 credentials or response bodies. Missing newest pacing artifacts still fail
 closed; this change does not recover an earlier artifact, reset request history,
 clear publisher holds or certify production recovery. See issue #358.
+
+
+## Owned-state continuity repair (#405)
+
+The recovery recognizes only 29 individually reviewed failed attempts after the
+actual last owned run 39128036954/1. Their authenticated immutable source and
+workflow versions, exact single-job identifiers and UTC boundaries match the
+complete retained failure logs. Those failures occurred before publisher access;
+their administrative completion bounds are retained without inventing physical
+request receipts. Missing, changed or unreviewed ancestry fails closed. The
+643-byte legacy artifact 12137805346 is accepted only for that exact owner and
+digest after the complete finite ancestry proof. No older-success or legacy
+seed-only fallback is available.
+
+Future omitted failures require a positive proof: attempt 1, exactly one failed
+collect job lasting strictly less than 58 seconds, no artifacts, authenticated
+identical executing adapter bytes and the reviewed canonical workflow. The
+actual first publisher request has an independent 60-second monotonic startup
+floor, so such an attempt cannot have reached it. Unknown code, reruns, longer
+jobs and incomplete inventories remain owners requiring their actual artifact.
+
+Queued siblings are admitted only after proving attempt 1, a creation time
+strictly later than the current active job start, identical authenticated source
+and canonical serialized workflow bytes, complete zero-job/zero-artifact
+inventories, stable queued metadata and a still-active current owner. Older or
+unknown queued attempts remain blockers; a jobless queue is not itself proof.
+
+New exports add immutable source and canonical state SHA256 fields to the
+existing owner envelope. Both digests are validated before modern state is
+adopted. The existing schema 3 journal, unknown rate history and all stronger
+local/remote constraints remain effective. Local collection requires an
+already initialized private namespace and retained journal before any remote
+restoration; losing the namespace never silently creates an empty bucket.
+Exclusive one-use initialization is an independently reviewed maintenance step.
+
+The initial local proposal includes the actual owner's five retained starts,
+all six conservative timing observations from the old workflow approval, and
+all 29 administrative completion bounds. Eleven retained timing values do not
+mean eleven observed physical requests. The old approval's MAX constraints are
+incorporated before publisher access rather than deferred until publication.
+
+Complete response reads and closure share one fixed deadline with bounded
+cancellation grace. Received 429 responses durably retain adaptive backoff and
+the minimum hold before accessing headers or entering the response context.
+Every Retry-After value is assessed; ambiguous combined values leave ownership
+pending. A complete typed REP document is required for a 200 robots response;
+markup, missing MIME and unsupported policy values do not become allow-all.
+Actual response bytes, including 429 bodies, remain subject to challenge checks.
+
+The first independently reviewed original native attempt failed after two
+physical responses: a normal literal REP 404 and the publisher sitemap 200. The
+compatibility wall marker was missing before the next inventory wait. That
+attempt remains a failure; its complete bodies, eighteen acknowledged journals,
+original one-use claim and intentionally invalidated empty journal inode are
+retained. Restoring the marker is covered by actual two-inventory pacing
+integration, without supplying the missing marker from a test fixture.
+
+A separate OFF causal continuation proposal retains all fifteen known timing
+observations: the initial eleven conservative values, two durable reservation
+times and two separately observed physical wire starts. This is two actual
+requests, not fifteen. Only the known final pre-wire logical policy owner is
+proposed for administrative settlement; its physical receipt identity remains
+unchanged. An independently observed failure boundary strengthens the policy
+completion/guard bound without claiming another physical response. The original
+empty inode and old claim are not replaced or reset by preparing this proposal.
+Any authorized continuation needs its own exclusive claim and exact public
+decision. The separately approved second original native test passed with 45 raw awards,
+54 actual responses and 481 exact journal witnesses. All 53 programme/inventory
+documents and 45 normalized material records replay from retained complete
+inputs. The current website consumer accepts 45 raw, 13 deadline-cleaned and zero
+synthetic-empty records; 32 actual expired records are excluded. These are the
+observed results, not fixed future count gates. The first failed attempt remains
+attributed separately. See the [actual native acceptance](https://github.com/YouthOpps/data-pipeline/issues/405#issuecomment-6952734662).
+No production recovery is claimed at this stage.
+
+Healthy unreserved timed deferrals now exit only after journal generation and
+lock-release verification. The typed error is raised outside that clean locked
+scope, allowing the unchanged held state to export. IO faults, changed
+generations, pending owners, refusals and exhausted counters remain hard
+failures. No generic exception class receives an access or cleanup exemption.
+
+The disposable controls do not substitute for the original full native test.
+Discovery, parsing, identifiers, original test, publication command and daily
+schedule are unchanged.
+
+
+### Source-committed hosted restriction floor
+
+The proposed producer replaces the obsolete issue 287 workflow ENV approval
+with an OFF source-committed native MAX gate. Exact newest owned-state
+restoration and finite ancestry validation still run before this restriction
+union; the native floor never substitutes for a missing owner or artifact. Its
+canonical state hash binds 123 distinct timing observations: all 15 prior values,
+54 durable reservations and 54 separately observed wire starts. It also preserves
+all scalar MAX, uncertainty and receipt identities. It does not claim 123
+physical requests. A separate exact public production decision is required.
+The workflow changes only by removing that obsolete ENV; its schedule,
+publication command and concurrency group remain unchanged.
+
+At a high retained strike counter, each representable doubled current interval,
+page gap, known counter and minimum 1800-second hold is saved before an
+unsupported exponential value leaves ownership pending. Known-status
+persistence and response-entry errors close under the existing nonrenewable
+operation bound, retain the original primary error and preserve pending/hold
+state. No healthy-response behavior or actual native data changed.
