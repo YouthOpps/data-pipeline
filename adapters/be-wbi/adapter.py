@@ -143,748 +143,906 @@ def content(root):
     )
 
 
-def source_facts(key, root):
-    if key.startswith("listing") or key.startswith("category"):
-        cards = nodes(root, class_name="search-result")
-        if not cards:
-            raise AdapterError(
-                "Missing complete WBI programme inventory", "parse"
-            )
-        links = sorted(
-            {
-                n.attrs.get("href", "")
-                for card in cards
-                for n in nodes(card, "a")
-                if n.attrs.get("href")
-            }
-        )
-        pagers = sorted(
-            {
-                n.attrs.get("href", "")
-                for nav in nodes(root, "nav", "pager")
-                for n in nodes(nav, "a")
-                if n.attrs.get("href")
-            }
-        )
-        return json.dumps([links, pagers], ensure_ascii=False)
-    text = (
-        one(nodes(root, "h1"), "WBI article title").text()
-        + " "
-        + content(root).text()
-    )
-    text = re.sub(
-        r"Last edited il y a \d+ (?:minutes?|heures?|jours?)", "", text
-    )
-    return " ".join(text.split())
-
-
-PAGES = {
-    "louisiana-call": (
-        "https://www.wbi.be/fr/actualites/appel-candidatures-devenir-"
-        "formateurtrice-enseignante-louisiane"
-    ),
-    "circ-call": (
-        "https://www.wbi.be/fr/actualites/offre-stage-centre-internat"
-        "ional-recherche-cancer-circ"
-    ),
-    "leaf17": (
-        "https://www.wbi.be/fr/aide-service/realiser-stage-entreprise"
-        "-letranger"
-    ),
-    "leaf16": (
-        "https://www.wbi.be/fr/aide-service/obtenir-bourse-specialisa"
-        "tion-letranger-wbi"
-    ),
-    "leaf15": (
-        "https://www.wbi.be/fr/aide-service/obtenir-bourse-effectuer-"
-        "sejour-recherche-letranger-wbi"
-    ),
-    "leaf14": (
-        "https://www.wbi.be/fr/aide-service/obtenir-bourse-dexcellenc"
-        "e-suivre-formation-haut-niveau-wallonie-ou-bruxelles"
-    ),
-    "leaf13": (
-        "https://www.wbi.be/fr/aide-service/obtenir-bourse-cadre-du-p"
-        "rojet-pilote-entre-wbi-centre-international-recherche-cancer"
-    ),
-    "leaf12": (
-        "https://www.wbi.be/fr/aide-service/etre-soutenu-votre-partic"
-        "ipation-aux-initiatives-programmes-europeens-financement"
-    ),
-    "leaf11": (
-        "https://www.wbi.be/fr/aide-service/enterprise-europe-network"
-        "-votre-porte-dentree-partenariats-europeens"
-    ),
-    "leaf10": (
-        "https://www.wbi.be/fr/aide-service/effectuer-stage-organisat"
-        "ion-internationale-intergouvernementale-dinteret-public"
-    ),
-    "leaf9": (
-        "https://www.wbi.be/fr/aide-service/devenir-formatrice-ou-for"
-        "mateur-enseignante-louisiane-wbi"
-    ),
-    "leaf8": (
-        "https://www.wbi.be/fr/aide-service/devenir-auxiliaire-conver"
-        "sation-langue-francaise-letranger-wbi"
-    ),
-    "leaf7": (
-        "https://www.wbi.be/fr/aide-service/beneficier-dune-formation"
-        "-droit-international-lacademie-droit-international-haye"
-    ),
-    "leaf6": (
-        "https://www.wbi.be/fr/aide-service/beneficier-dun-soutien-vo"
-        "s-projets-domaines-recherche-linnovation"
-    ),
-    "leaf5": (
-        "https://www.wbi.be/fr/aide-service/beneficier-dun-soutien-pr"
-        "ojets-cooperation-scientifique-france-programme-hubert-curie"
-        "n"
-    ),
-    "leaf4": (
-        "https://www.wbi.be/fr/aide-service/beneficier-dun-soutien-fr"
-        "ais-mobilite-lors-dune-manifestation-allemagne-france-grand"
-    ),
-    "leaf3": (
-        "https://www.wbi.be/fr/aide-service/beneficier-du-fonds-mobil" "ite-wbi"
-    ),
-    "leaf2": (
-        "https://www.wbi.be/fr/aide-service/apprendre-ou-se-perfectio"
-        "nner-langue-etrangere-wbi"
-    ),
-    "leaf1": (
-        "https://www.wbi.be/fr/aide-service/apprendre-metiers-lies-le"
-        "xportation-au-developpement-business-linternational-explort"
-    ),
-    "leaf0": "https://www.wbi.be/fr/WBI-World",
-    "category847": "https://www.wbi.be/en/taxonomy/term/847",
-    "category846": "https://www.wbi.be/en/taxonomy/term/846",
-    "category844": "https://www.wbi.be/en/taxonomy/term/844",
-    "category843": "https://www.wbi.be/en/taxonomy/term/843",
-    "legal": "https://www.wbi.be/fr/mentions-legales-0",
-    "listing2": "https://www.wbi.be/en/bourses?page=1",
-    "listing": "https://www.wbi.be/en/bourses",
-    "entry": (
-        "https://www.wbi.be/fr/actualites/offre-bourse-stage-entrepri"
-        "se-etudiants"
-    ),
-}
-CONDITIONS = {
-    "louisiana-call": "498830cc23309429651a6545e25007cf297c882d4430a0419bccbbf282ef22f9",
-    "circ-call": "af6ddc24951880b08181493ea88089ca00aad25742c912a873293cb8fb85e8d7",
-    "leaf17": "63fd26abacff59225f4c547a355b699d64264d04730c38e9cf916c8299fdf345",
-    "leaf16": "182d40518ec56dca9e81e13562ee5c3ee073a51d8e9bdd3ed6fe840adbb2d3f1",
-    "leaf15": "c75acb19c583508598ebaa310f9f625ee7c0cb93f0c5776ec912860c5cb04a8b",
-    "leaf14": "53d6b18ddc9e7cbe7b5d992f3d1e93f9578b2a3829c7d19d745ddde36f8265fe",
-    "leaf13": "92dd452fa99f6ba64f114625343c5cec0c9afd604910f5634f184ae433c1aab4",
-    "leaf12": "01cb89d55426de2d9aaaa8569ca1ecb7194e8a22aa746f3c6ae27ebc06f736d0",
-    "leaf11": "e71080f16fadf02a7bfe2b543a44ecc760184c18d6a280766f01067886c6c2db",
-    "leaf10": "b5d998a8679978272517360c6939d622759931008b273d9a22c0257c1d0972df",
-    "leaf9": "82febbe3c945596b7192d20a8648e7757500e0b40e38777e61dfc00c032ed171",
-    "leaf8": "cb0c937be88da27233a64173d38bba017d6e7089ca406d7068addea9f3cde9aa",
-    "leaf7": "296cc74c8c8934df0ed680d55dae07d488cf103498436fc6933290109770f2ef",
-    "leaf6": "55dcf38a2239387d1ba6ecf64334aea7af5e372024e8d29efa7939f0df821376",
-    "leaf5": "b3af3d49f8f8e5befd00cd9b782950f40ab82e1a627816f6195ff9a106e9670e",
-    "leaf4": "a5eb1c8b0d6cdd9d43964a576e1790940d38f36066a4f97843ff268bffec3d33",
-    "leaf3": "9de10449e97f7d979dd771f7136025ec8df6336b53eb69333f641f411821f0a3",
-    "leaf2": "213d4623aa0b7b952b4c0079c3c30bd2e672b4f865bc1d15380f883257537cae",
-    "leaf1": "0df63e3d292e0b9dc324bb3608506be0f3d9c1cc05d6d88f5e9399fef6c5a390",
-    "leaf0": "df00f9cf5f33a283f2848ecc9872cd666d01236a79cbd2b6f592d75861d2f1db",
-    "category847": "a566b5b255d1097afc38fc3b4d6c4cee59328028e1fb9e599e1250ed30c56928",
-    "category846": "16dc4e37d861f8e4bbc9703dddec9606be9cf80d0315dfe8e92c64b1dcd45a85",
-    "category844": "655504070f0097104dcc9167087bf195897ba900f1fa1539b83b78b7be7a14dd",
-    "category843": "16dc4e37d861f8e4bbc9703dddec9606be9cf80d0315dfe8e92c64b1dcd45a85",
-    "legal": "562a601d3df8c4d6127959f72fc51504c3435a2768d00073d76789ab1f9a91b7",
-    "listing2": "d3dd8a41b1b73c7e60409fe8127847c400b8bf45d96e3316b8735f4a716b3d92",
-    "listing": "6e3ed3826a25d77af1829ca45b42bf3cbde8addbbaff82cdd7cc3cef75e68102",
-    "entry": "943ddb44c6ff4cd09196361cb8fe89a04cee05b2542009a6ed5c9de8fa3809b9",
+_WBI_HELD_JOURNAL_SHA256 = (
+    "aa544101765e65c7f3126501cce8e67881062ccbefec77fb1930cd5efab26e0c"
+)
+_WBI_REMOVED_BODY_SHA256 = (
+    "befd4e4a843a70b415e8b99d479820598a322e4b404c8c63e2464e2babe6d917"
+)
+_WBI_REMOVED_SLUG = (
+    "offre-stage-centre-international-recherche-cancer-circ"
+)
+_WBI_REMOVED_URL = (
+    "https://www.wbi.be/fr/actualites/"
+    "offre-stage-centre-international-recherche-cancer-circ"
+)
+_WBI_TOURNESOL_URL = (
+    "https://www.wbi.be/fr/aide-service/beneficier-dun-soutien-projets-"
+    "cooperation-scientifique-france-programme-hubert-curien"
+)
+_WBI_DYNAMIC_ROOTS = (
+    "https://www.wbi.be/en/bourses",
+    "https://www.wbi.be/fr/appels-a-projets",
+)
+_WBI_MONTHS = {
+    "janvier": 1, "février": 2, "mars": 3, "avril": 4,
+    "mai": 5, "juin": 6, "juillet": 7, "août": 8,
+    "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12,
 }
 
-PROFILES = [
-    {
-        "track": "world-doctoral",
-        "key": "leaf0",
-        "title": "WBI Excellence WORLD — doctoral",
-        "category": "scholarships",
-        "summary": "At least one year, renewable three times. FWB master (120 "
-        "credits), or foreign degree with current FWB university "
-        "affiliation. €2,120/month mobility allowance, not salary; "
-        "return travel and conditional doctoral registration fees up "
-        "to €835. Maximum three applications.",
-        "evidence": "Postdoctorate normally within five years; parenthood "
-        "extensions: 15 months per childbirth, 12 months for "
-        "biological fathers/adoption/long-term foster placement. "
-        "One doctoral and one postdoctoral long award lifetime "
-        "entitlement. FNRS co-tutelle mobility allowance suspended "
-        "during return to Belgium. Annual February 1 (UTC+1), or "
-        "short October 1/April 1 (UTC+2), without an actual year or "
-        "closing clock.",
-        "hosts": [],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "world-postdoctoral",
-        "key": "leaf0",
-        "title": "WBI Excellence WORLD — postdoctoral",
-        "category": "scholarships",
-        "summary": "At least one year, renewable once. FWB doctorate, or "
-        "foreign degree with current FWB university affiliation. "
-        "€2,120/month mobility allowance, not salary; return travel "
-        "and conditional postdoctoral training fees up to €835. "
-        "Maximum three applications.",
-        "evidence": "Postdoctorate normally within five years; parenthood "
-        "extensions: 15 months per childbirth, 12 months for "
-        "biological fathers/adoption/long-term foster placement. "
-        "One doctoral and one postdoctoral long award lifetime "
-        "entitlement. FNRS co-tutelle mobility allowance suspended "
-        "during return to Belgium. Annual February 1 (UTC+1), or "
-        "short October 1/April 1 (UTC+2), without an actual year or "
-        "closing clock.",
-        "hosts": [],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "world-short",
-        "key": "leaf0",
-        "title": "WBI Excellence WORLD — short research",
-        "category": "scholarships",
-        "summary": "One to three months; three years between repeat stays. FWB "
-        "master/doctorate, or foreign degree with current FWB "
-        "university affiliation. €2,120/month mobility allowance, "
-        "not salary; return travel and conditional fee support. "
-        "Maximum three applications.",
-        "evidence": "Postdoctorate normally within five years; parenthood "
-        "extensions: 15 months per childbirth, 12 months for "
-        "biological fathers/adoption/long-term foster placement. "
-        "One doctoral and one postdoctoral long award lifetime "
-        "entitlement. FNRS co-tutelle mobility allowance suspended "
-        "during return to Belgium. Annual February 1 (UTC+1), or "
-        "short October 1/April 1 (UTC+2), without an actual year or "
-        "closing clock. Registration/training fee support up to "
-        "€835 is tied to the published doctoral/postdoctoral award "
-        "conditions, not a universal short-stay benefit.",
-        "hosts": [],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "explort",
-        "key": "leaf1",
-        "title": "EXPLORT international business training",
-        "category": "training",
-        "summary": "Joint AWEX/Forem training, placement in a Belgian business "
-        "and mission abroad for students or jobseekers with suitable "
-        "qualifications or relevant experience and language skills. "
-        "International business interest required. Funding amount "
-        "and dated application deadline are not specified.",
-        "evidence": "",
-        "hosts": [],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "language",
-        "key": "leaf2",
-        "title": "WBI partner language immersion scholarships",
-        "category": "scholarships",
-        "summary": "Usually one month of language immersion. Normally at least "
-        "two years of FWB higher education; Czech Republic allows "
-        "one. WBI funds return travel; partners cover tuition, "
-        "accommodation and meals. Other public funding cannot be "
-        "combined. Destination-specific conditions apply; no dated "
-        "call is established.",
-        "evidence": "One programme across twelve explicit destinations; "
-        "obsolete linked service alias returns 404 and is not used.",
-        "hosts": [
-            "BG",
-            "EE",
-            "GR",
-            "HU",
-            "LV",
-            "LT",
-            "MA",
-            "PL",
-            "CZ",
-            "SK",
-            "TN",
-            "TR",
-        ],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "mobility-out",
-        "key": "leaf3",
-        "title": "WBI institutional Mobility Fund — outgoing",
-        "category": "grants",
-        "summary": "Grant submitted by and paid to an FWB higher education "
-        "institution for eligible permanent academic, scientific or "
-        "administrative staff travelling to partner institutions. "
-        "International travel and essential transfers covered; FNRS "
-        "qualified researchers and discretionary exceptions may "
-        "qualify.",
-        "evidence": "Normally full/part-time indefinite employment; students, "
-        "doctoral students, emeritus, non-permanent scientific and "
-        "temporary staff excluded. Annual April 10/October 9 have "
-        "no published call year. Institutional applicant, not an "
-        "individual grant.",
-        "hosts": [
-            "AR",
-            "BR",
-            "CL",
-            "CO",
-            "CU",
-            "MX",
-            "UY",
-            "AU",
-            "KH",
-            "KR",
-            "JP",
-            "IN",
-            "ID",
-            "LA",
-            "MY",
-            "NZ",
-            "PH",
-            "CN",
-            "SG",
-            "TW",
-            "TH",
-            "VN",
-            "DZ",
-            "LB",
-            "MA",
-            "TN",
-        ],
-        "deadline": None,
-        "kind": "institutional-grant",
-        "eligible": [],
-    },
-    {
-        "track": "mobility-in",
-        "key": "leaf3",
-        "title": "WBI institutional Mobility Fund — incoming",
-        "category": "grants",
-        "summary": "FWB institution applies and receives funding to host "
-        "academic, scientific or administrative staff from "
-        "accredited Maghreb/Lebanon partner institutions. "
-        "Accommodation up to €100/night and subsistence up to "
-        "€56/day plus local public transport, for at most 30 days. "
-        "International flights excluded.",
-        "evidence": (
-            "Incoming foreign staff are beneficiaries, not direct grant "
-            "applicants. Outgoing indefinite FWB employment conditions "
-            "are not imposed as incoming citizenship requirements. "
-            "Annual April 10/October 9 have no established call year."
-        ),
-        "hosts": ["BE"],
-        "deadline": None,
-        "kind": "institutional-grant",
-        "eligible": [],
-    },
-    {
-        "track": "nearby",
-        "key": "leaf4",
-        "title": "WBI nearby-country cultural mobility support",
-        "category": "grants",
-        "summary": "Travel support for a manifestation in Germany, France, "
-        "Luxembourg or the Netherlands. Individuals/entities "
-        "domiciled in Wallonia or Brussels, or a foreign hosting "
-        "entity, may apply. French cultural activities require joint "
-        "design with CWB Paris. Second-class travel or capped "
-        "€0.3751/km reimbursement; funding conditions apply.",
-        "evidence": "Relative application windows are not evidence of a dated "
-        "open call.",
-        "hosts": ["DE", "FR", "LU", "NL"],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "tournesol",
-        "key": "leaf5",
-        "title": "PHC Tournesol scientific cooperation grant",
-        "category": "grants",
-        "summary": "An FWB university-led research team and French partner "
-        "jointly submit a cooperation project; higher education "
-        "co-promoters may participate. Mobility grant up to €2,000 "
-        "per year for two years; short missions typically one to two "
-        "weeks per year.",
-        "evidence": "Lodging up to €200 per night and food/local travel up to "
-        "€50 per calendar day under published reimbursement "
-        "conditions. Both sides must submit their application. "
-        "Funding supports institutional cooperation, not a "
-        "citizenship-based personal scholarship.",
-        "hosts": ["FR"],
-        "deadline": None,
-        "kind": "institutional-grant",
-        "eligible": [],
-    },
-    {
-        "track": "hague",
-        "key": "leaf7",
-        "title": "WBI Hague Academy international law scholarships 2026",
-        "category": "training",
-        "summary": "Three annual scholarships for one three-week public or "
-        "private international law course. At least four university "
-        "study years or a suitable three-year law degree; English or "
-        "French proficiency and some study at an FWB-funded "
-        "university required. Tuition, capped travel and housing "
-        "contribution covered.",
-        "evidence": "Courses July 6–24 and July 27–August 14, 2026. Apply by "
-        "January 31, 2026. European travel capped at €250; three "
-        "available places are one programme, not three records.",
-        "hosts": ["NL"],
-        "deadline": "2026-01-31",
-        "kind": "opportunity",
-        "eligible": [],
-    },
-    {
-        "track": "assistants",
-        "key": "leaf8",
-        "title": "WBI French conversation assistant placements",
-        "category": "jobs",
-        "summary": "Paid French conversation assistant placements: host salary "
-        "or stipend plus WBI travel. Normally under 35 and at least "
-        "one year FWB residence; degree and language requirements "
-        "vary by destination. No Belgian citizenship restriction is "
-        "inferred.",
-        "evidence": "Italy under 30; Switzerland 21–30 or under 35 with second "
-        "qualification. Spain permits a foreign-degree route; no "
-        "2026–27 Catalonia/Andalusia posts. Annual October–February "
-        "15 is yearless. Native French or certified C2; FWB "
-        "bachelor/master or completed three study years with degree "
-        "proof before departure. Host language: UK/Ireland B1+, "
-        "German-speaking Switzerland B1, Spain/Germany A2+, Italy "
-        "A1+, Austria A2, Taiwan Chinese A1+ and English B1+. "
-        "Germany requires measles vaccination/immunity and relevant "
-        "experience; Switzerland future teaching interest and "
-        "pedagogical experience. WBI travel cap €1,200 Taiwan/€250 "
-        "others; Spain travel support only first20 selected, "
-        "prioritising first-time assistants. Stays six to eleven "
-        "months; one supported renewal in same country. Criminal "
-        "record required before arrival.",
-        "hosts": ["AT", "IE", "CH", "DE", "ES", "IT", "GB", "TW"],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "louisiana",
-        "key": "leaf9",
-        "title": "WBI teaching placements in Louisiana — current call",
-        "category": "jobs",
-        "summary": "Ten-month Louisiana teaching placements, renewable twice "
-        "with exceptional longer renewals. Teaching qualification, "
-        "27 months full-time teaching, current teaching post, French "
-        "C2+ and English B1+ required. Application deadline December "
-        "31, 2026; interviews in late January 2027.",
-        "evidence": "Residence conflict: programme requires at least one year "
-        "FWB residence, current article says Belgium; preserve both "
-        "and seek publisher clarification. Article quotes 2026–27 "
-        "salary stages USD52,443/53,632/53,665/54,583/55,602 and "
-        "conditional USD6,000/4,000/4,000 bonuses; not a verified "
-        "2027–28 schedule. Raw before midnight has no time zone. "
-        "December 1 event registration and December 8 information "
-        "event are not award deadlines.",
-        "hosts": ["US"],
-        "deadline": "2026-12-31",
-        "kind": "opportunity",
-        "eligible": [],
-    },
-    {
-        "track": "oi",
-        "key": "leaf10",
-        "title": "WBI intergovernmental organisation internships",
-        "category": "internships",
-        "summary": "One-to-six-month funded internships for master students or "
-        "final-year bachelor students or recent FWB graduates within "
-        "two years, at most 30 at placement start. €1,200–1,600 "
-        "monthly support and travel up to €500. Previous "
-        "organisation experience over six weeks excluded.",
-        "evidence": "Other support cannot normally be combined; social "
-        "allowance exceptions apply. Annual October 15/April 15 "
-        "lack a call year. Nonexhaustive organisation directory is "
-        "not a host-country whitelist. NGOs are excluded; the host "
-        "must be an actual intergovernmental organisation of public "
-        "interest.",
-        "hosts": [],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "circ-postdoc",
-        "key": "leaf13",
-        "title": "WBI CIRC pilot postdoctoral scholarship",
-        "category": "scholarships",
-        "summary": (
-            "Research in Lyon for at least one year, renewable once. FWB "
-            "doctorate or foreign degree with current FWB university "
-            "affiliation; normally within five years of doctorate, "
-            "extended one year per childbirth/adoption. €3,000/month "
-            "mobility scholarship, not salary; return travel and "
-            "conditional insurance/training."
-        ),
-        "evidence": "Maximum three applications and one award with renewal. "
-        "February 1 UTC+1 is yearless; not the distinct 2027 SEE "
-        "internship.",
-        "hosts": ["FR"],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "excellence-in-long",
-        "key": "leaf14",
-        "title": "WBI Excellence IN — long postdoctoral",
-        "category": "scholarships",
-        "summary": "At least one year, renewable once. Foreign doctorate "
-        "required, or pending doctorate with timely proof, for "
-        "research at an FWB higher education institution. At most 12 "
-        "months in Belgium during the previous three years. "
-        "€2,120/month mobility allowance, not salary, plus return "
-        "travel and insurance.",
-        "evidence": "Maximum three applications; incompatible with FNRS "
-        "funding. Long award only once with renewal; short repeat "
-        "entitlements differ. Annual February 1 or October 1/April "
-        "1 without actual year. July 15/December 1/July 1 pending "
-        "doctorate proof dates are not application deadlines.",
-        "hosts": ["BE"],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "excellence-in-short",
-        "key": "leaf14",
-        "title": "WBI Excellence IN — short postdoctoral",
-        "category": "scholarships",
-        "summary": (
-            "One to three months, with three years between repeat stays. "
-            "Foreign doctorate required, or pending doctorate with "
-            "timely proof, for research at an FWB higher education "
-            "institution. At most 12 months in Belgium during the "
-            "previous three years. €2,120/month mobility allowance, not "
-            "salary, plus return travel and insurance."
-        ),
-        "evidence": "Maximum three applications; incompatible with FNRS "
-        "funding. Long award only once with renewal; short repeat "
-        "entitlements differ. Annual February 1 or October 1/April "
-        "1 without actual year. July 15/December 1/July 1 pending "
-        "doctorate proof dates are not application deadlines.",
-        "hosts": ["BE"],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "research",
-        "key": "leaf15",
-        "title": "WBI bilateral research stay scholarships",
-        "category": "scholarships",
-        "summary": "One-to-six-month research, doctoral/postdoctoral "
-        "specialisation or institutional partnership stays. FWB "
-        "higher education graduates or final-year students "
-        "completing their qualification before departure may apply. "
-        "Partner-specific funding and conditions apply; no actual "
-        "dated call established.",
-        "evidence": "",
-        "hosts": [
-            "BG",
-            "EG",
-            "EE",
-            "HU",
-            "IL",
-            "LV",
-            "LT",
-            "MA",
-            "MD",
-            "PL",
-            "RU",
-            "SK",
-            "SI",
-            "CZ",
-        ],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "specialisation",
-        "key": "leaf16",
-        "title": "WBI bilateral academic specialisation scholarships",
-        "category": "scholarships",
-        "summary": "Academic-year complementary qualification abroad for FWB "
-        "higher education graduates or final-year students "
-        "completing their qualification before departure. "
-        "Destination-specific funding and requirements apply; no "
-        "dated call established. The separately named Québec fee "
-        "exemption has distinct requirements.",
-        "evidence": "",
-        "hosts": [
-            "BG",
-            "EG",
-            "EE",
-            "HU",
-            "IL",
-            "JP",
-            "LV",
-            "LT",
-            "PL",
-            "CA",
-            "CZ",
-            "RU",
-            "SK",
-            "SI",
-            "TN",
-        ],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": [],
-    },
-    {
-        "track": "quebec-exemption",
-        "key": "leaf16",
-        "title": "Québec tuition fee exemption",
-        "category": "scholarships",
-        "summary": "Separately named fee exemption for Belgian citizens with "
-        "the required FWB school or degree certification studying in "
-        "Québec. No WBI scholarship application is needed; the "
-        "Québec-specific procedure applies. A fee exemption is not a "
-        "cash stipend.",
-        "evidence": "Belgian citizenship is explicit only for this named "
-        "subprogramme and is not propagated to other WBI "
-        "affiliation/residence schemes.",
-        "hosts": ["CA"],
-        "deadline": None,
-        "kind": "programme-overview",
-        "eligible": ["BE"],
-    },
-    {
-        "track": "company",
-        "key": "leaf17",
-        "title": "WBI company internship scholarship — January–June 2027",
-        "category": "internships",
-        "summary": "One-to-three-month curricular company internship abroad in "
-        "January–June 2027 for final-cycle FWB university or higher "
-        "education students. €1,200/1,400/1,600 per month and 50% "
-        "travel support capped at €500. No host salary or other "
-        "public funding except social allowance. Apply by November "
-        "1, 2026.",
-        "evidence": "FWB affiliation, not Belgian citizenship. "
-        "Doctoral/research placements excluded subject to actual "
-        "article exceptions. Source says EU27 priority although "
-        "Belgium contradicts abroad requirement: known destination "
-        "projection excludes BE (EU26); unspecified border "
-        "countries may qualify subject to budget. Raw 23h59 has no "
-        "time zone.",
-        "hosts": [
-            "AT",
-            "BG",
-            "HR",
-            "CY",
-            "CZ",
-            "DK",
-            "EE",
-            "FI",
-            "FR",
-            "DE",
-            "GR",
-            "HU",
-            "IE",
-            "IT",
-            "LV",
-            "LT",
-            "LU",
-            "MT",
-            "NL",
-            "PL",
-            "PT",
-            "RO",
-            "SK",
-            "SI",
-            "ES",
-            "SE",
-        ],
-        "deadline": "2026-11-01",
-        "kind": "opportunity",
-        "eligible": [],
-    },
-    {
-        "track": "circ-see",
-        "key": "circ-call",
-        "title": "WBI CIRC SEE internship — March–July 2027",
-        "category": "internships",
-        "summary": "Five-month funded internship at CIRC in Lyon, March–July "
-        "2027, for a relevant FWB higher education master student "
-        "enrolled throughout the placement, with English "
-        "proficiency. €1,400/month and travel support up to €500. "
-        "Apply by November 13, 2026.",
-        "evidence": "Distinct named SEE internship call, not the CIRC pilot "
-        "postdoctoral award. Raw midnight deadline has no time "
-        "zone.",
-        "hosts": ["FR"],
-        "deadline": "2026-11-13",
-        "kind": "opportunity",
-        "eligible": [],
-    },
-]
+
+def wbi_retired_resource(url):
+    """Deny known aliases independently of caller purpose or URL encoding."""
+    parsed = urllib.parse.urlsplit(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if host not in {"wbi.be", "www.wbi.be"}:
+        return False
+    path = parsed.path
+    for _ in range(4):
+        if re.search(r"%(?![0-9a-fA-F]{2})", path):
+            return True
+        try:
+            decoded = urllib.parse.unquote(path, errors="strict")
+        except UnicodeError:
+            return True
+        if decoded == path:
+            break
+        path = decoded
+    if (
+        "%" in path or "\\" in path or ";" in path
+        or any(part in (".", "..") for part in path.split("/"))
+    ):
+        return True
+    path = path.rstrip("/").lower()
+    return (
+        path.rsplit("/", 1)[-1] == _WBI_REMOVED_SLUG
+        or bool(re.search(r"(?:^|/)node/0*25108$", path))
+    )
 
 
-def read_pages():
-    """Read every required hub, leaf, current call and legal article."""
-    return {key: (fetch_inventory_page(page, url)
-                  if key.startswith("listing") else page(url))
-            for key, url in PAGES.items()}
+# Only an independently accepted, committed source decision can populate this.
+_WBI_SCOPE_DECISION = {
+    "schema": 1,
+    "source": "be-wbi",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/373"
+        "#issuecomment-6925600137"
+    ),
+    "held_sha256": (
+        "aa544101765e65c7f3126501cce8e67881062ccbefec77fb1930cd5efab26e0c"
+    ),
+    "response_sha256": (
+        "befd4e4a843a70b415e8b99d479820598a322e4b404c8c63e2464e2babe6d917"
+    ),
+    "native_revision": (
+        "06cc8b0de832b4f055c34a47bf16c435dc75365d0260ee260cd37a8766034086"
+    ),
+    "migration_revision": "wbi373-content-scope-v1",
+    "paths": [
+        "/robots.txt", "/en/bourses", "/en/taxonomy/term/843",
+        "/en/taxonomy/term/844", "/en/taxonomy/term/846",
+        "/en/taxonomy/term/847", "/fr/appels-a-projets", "/actualites",
+        "/fr/actualites", "/fr/rss-feeds",
+    ],
+    "detail_prefixes": ["/fr/actualites/", "/fr/aide-service/"],
+}
+_WBI_SCOPE_EXTENSION = {
+    "schema": 1,
+    "source": "be-wbi",
+    "migration_revision": "wbi373-content-scope-v2",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/373"
+        "#issuecomment-6941417638"
+    ),
+    "parent_decision_sha256": (
+        "04ebc93fb4dd788782dbaa4468414f48276039889e93ef4d2551837d3bad526a"
+    ),
+    "prior_journal_sha256": (
+        "271667f2f3958af5cc217f1143cf3fe56d53c585fab620bcaf2aff2cf1459c53"
+    ),
+    "held_sha256": (
+        "aa544101765e65c7f3126501cce8e67881062ccbefec77fb1930cd5efab26e0c"
+    ),
+    "response_sha256": (
+        "befd4e4a843a70b415e8b99d479820598a322e4b404c8c63e2464e2babe6d917"
+    ),
+    "paths": ["/fr/WBI-World"],
+}
+_WBI_V1_JOURNAL_SHA256 = (
+    "271667f2f3958af5cc217f1143cf3fe56d53c585fab620bcaf2aff2cf1459c53"
+)
+_WBI_NATIVE_REVISION = (
+    "06cc8b0de832b4f055c34a47bf16c435dc75365d0260ee260cd37a8766034086"
+)
+_WBI_SCOPE_PATHS = (
+    "/robots.txt", "/en/bourses", "/en/taxonomy/term/843",
+    "/en/taxonomy/term/844", "/en/taxonomy/term/846",
+    "/en/taxonomy/term/847", "/fr/appels-a-projets", "/actualites",
+    "/fr/actualites", "/fr/rss-feeds",
+)
 
 
-def parse_inventory(pages):
-    """Normalize reviewed genuine identities; reject changed source facts."""
-    if set(pages) != set(PAGES):
-        raise AdapterError("Incomplete WBI source evidence", "parse")
-    for key, root in pages.items():
-        digest = hashlib.sha256(source_facts(key, root).encode()).hexdigest()
-        if digest != CONDITIONS[key]:
-            raise AdapterError(
-                "WBI facts or inventory changed: " + key, "parse"
+def wbi_scope_decision():
+    """No environment value or parser result can approve refusal scope."""
+    value = _WBI_SCOPE_DECISION
+    if value is None:
+        raise AdapterError(
+            "WBI refusal scope awaits independent review", "access"
+        )
+    if (
+        not isinstance(value, dict)
+        or set(value) != {
+            "schema", "source", "evidence", "held_sha256",
+            "response_sha256", "native_revision", "migration_revision",
+            "paths", "detail_prefixes",
+        }
+        or type(value["schema"]) is not int or value["schema"] != 1
+        or value["source"] != SOURCE_ID
+        or value["held_sha256"] != _WBI_HELD_JOURNAL_SHA256
+        or value["response_sha256"] != _WBI_REMOVED_BODY_SHA256
+        or value["native_revision"] != _WBI_NATIVE_REVISION
+        or value["migration_revision"] != "wbi373-content-scope-v1"
+        or value["paths"] != list(_WBI_SCOPE_PATHS)
+        or value["detail_prefixes"] != [
+            "/fr/actualites/", "/fr/aide-service/",
+        ]
+        or not isinstance(value["evidence"], str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/373"
+            r"#issuecomment-[1-9][0-9]*", value["evidence"]
+        )
+    ):
+        raise AdapterError("Invalid WBI committed scope decision", "access")
+    return copy.deepcopy(value)
+
+
+def wbi_scope_extension():
+    """Accept only the separately committed World-route scope amendment."""
+    value = _WBI_SCOPE_EXTENSION
+    if value is None:
+        return None
+    parent = hashlib.sha256(json.dumps(
+        wbi_scope_decision(), sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    if (
+        not isinstance(value, dict)
+        or set(value) != {
+            "schema", "source", "migration_revision", "evidence",
+            "parent_decision_sha256", "prior_journal_sha256",
+            "held_sha256", "response_sha256", "paths",
+        }
+        or type(value["schema"]) is not int or value["schema"] != 1
+        or value["source"] != SOURCE_ID
+        or value["migration_revision"] != "wbi373-content-scope-v2"
+        or value["parent_decision_sha256"] != parent
+        or value["prior_journal_sha256"] != _WBI_V1_JOURNAL_SHA256
+        or value["held_sha256"] != _WBI_HELD_JOURNAL_SHA256
+        or value["response_sha256"] != _WBI_REMOVED_BODY_SHA256
+        or value["paths"] != ["/fr/WBI-World"]
+        or not isinstance(value["evidence"], str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/373"
+            r"#issuecomment-[1-9][0-9]*", value["evidence"]
+        )
+    ):
+        raise AdapterError("Unreviewed WBI scope extension", "access")
+    return copy.deepcopy(value)
+
+
+def wbi_upgrade_scope(state, raw=None):
+    """Preserve v1 provenance while durably adding only reviewed scope v2."""
+    validate_budget(state)
+    extension = wbi_scope_extension()
+    if state["schema"] != 4 or extension is None:
+        return copy.deepcopy(state)
+    scope = state["refusal_scope"]
+    if scope["additional_holds"] or state["in_flight"]:
+        raise AdapterError("Held or pending WBI scope cannot expand", "access")
+    if scope.get("extensions") == [extension]:
+        return copy.deepcopy(state)
+    if (
+        not isinstance(raw, bytes)
+        or hashlib.sha256(raw).hexdigest() != _WBI_V1_JOURNAL_SHA256
+        or json.loads(raw) != state
+    ):
+        raise AdapterError("WBI v1 scope generation changed", "access")
+    result = copy.deepcopy(state)
+    result["refusal_scope"]["extensions"] = [extension]
+    return validate_budget(result)
+
+
+def wbi_initial_refusal(state):
+    """Keep the exact failed native event without rewriting its outcome."""
+    return {
+        "url": _WBI_REMOVED_URL, "status": 403,
+        "body_sha256": _WBI_REMOVED_BODY_SHA256,
+        "completed": state["completed"],
+        "native_revision": _WBI_NATIVE_REVISION,
+        "resource_slug": _WBI_REMOVED_SLUG, "node_id": 25108,
+        "origins": ["https://wbi.be", "https://www.wbi.be"],
+    }
+
+
+def wbi_migrate_scope(raw):
+    """Derive a scope-aware journal, retaining exact held bytes and history."""
+    decision = wbi_scope_decision()
+    if (
+        not isinstance(raw, bytes) or len(raw) > 16384
+        or hashlib.sha256(raw).hexdigest() != _WBI_HELD_JOURNAL_SHA256
+    ):
+        raise AdapterError("Unreviewed WBI held journal generation", "access")
+    state = validate_budget(json.loads(raw))
+    if state["schema"] != 3 or not state["blocked"] or state["in_flight"]:
+        raise AdapterError("WBI held event is incomplete", "access")
+    original = copy.deepcopy(state)
+    state["schema"] = 4
+    state["refusal_scope"] = {
+        "decision": decision,
+        "original_journal_base64": base64.b64encode(raw).decode(),
+        "initial_refusal": wbi_initial_refusal(original),
+        "additional_holds": [],
+    }
+    return validate_budget(state)
+
+
+def wbi_validate_scope(state):
+    """Reject detached provenance, weakened MAX state and unreviewed events."""
+    scope = state.get("refusal_scope")
+    try:
+        if (
+            not isinstance(scope, dict)
+            or set(scope) not in (
+                {"decision", "original_journal_base64", "initial_refusal",
+                 "additional_holds"},
+                {"decision", "original_journal_base64", "initial_refusal",
+                 "additional_holds", "extensions"},
             )
+            or scope["decision"] != wbi_scope_decision()
+            or state["blocked"] is not True
+            or not isinstance(scope["original_journal_base64"], str)
+        ):
+            raise ValueError()
+        if "extensions" in scope:
+            extension = wbi_scope_extension()
+            if extension is None or scope["extensions"] != [extension]:
+                raise ValueError()
+        raw = base64.b64decode(scope["original_journal_base64"], validate=True)
+        if hashlib.sha256(raw).hexdigest() != _WBI_HELD_JOURNAL_SHA256:
+            raise ValueError()
+        original = json.loads(raw)
+        if original.get("schema") != 3:
+            raise ValueError()
+        validate_budget(original)
+        if scope["initial_refusal"] != wbi_initial_refusal(original):
+            raise ValueError()
+        for key in (
+            "interval", "page_gap", "until", "completed",
+            "inventory_completed", "rate_limit_until",
+            "observed_429_since_transition",
+        ):
+            if state[key] < original[key]:
+                raise ValueError()
+        for key in (
+            "legacy_hold_history", "legacy_access_history_unknown",
+            "legacy_access_observations", "legacy_429_history",
+            "research_provenance",
+        ):
+            if state[key] != original[key]:
+                raise ValueError()
+        holds = scope["additional_holds"]
+        if not isinstance(holds, list):
+            raise ValueError()
+        for item in holds:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"kind", "url", "status", "observed_at"}
+                or item["kind"] not in {
+                    "content_status", "visible_refusal", "robots_disallow",
+                    "unattributed_held_state",
+                }
+                or not isinstance(item["url"], str)
+                or not item["url"]
+                or type(item["status"]) is not int
+                or not 0 <= item["status"] <= 599
+                or not numeric(item["observed_at"])
+                or item["observed_at"] > state["observed_at"]
+            ):
+                raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        raise AdapterError("Invalid WBI retained refusal scope", "access")
+
+
+def wbi_scope_admission(state, url, method="GET"):
+    """Admit only reviewed unrelated public routes; retain every denial."""
+    if state["schema"] != 4 or state["in_flight"]:
+        raise AdapterError("Unreviewed or pending WBI access state", "access")
+    wbi_validate_scope(state)
+    if state["refusal_scope"]["additional_holds"]:
+        raise AdapterError("Additional WBI refusal remains global", "access")
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        method != "GET" or parsed.scheme != "https"
+        or parsed.hostname != "www.wbi.be"
+        or parsed.username or parsed.password or parsed.port or parsed.fragment
+        or "%" in parsed.path or "\\" in parsed.path
+        or "//" in parsed.path or ";" in parsed.path
+        or any(part in (".", "..") for part in parsed.path.split("/"))
+        or wbi_retired_resource(url)
+    ):
+        raise AdapterError("WBI resource identity not admitted", "access")
+    path = parsed.path
+    detail = any(
+        path.startswith(prefix)
+        and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", path[len(prefix):])
+        for prefix in state["refusal_scope"]["decision"]["detail_prefixes"]
+    )
+    extension_paths = {
+        path for extension in state["refusal_scope"].get("extensions", [])
+        for path in extension["paths"]
+    }
+    if (path not in _WBI_SCOPE_PATHS
+            and path not in extension_paths and not detail):
+        raise AdapterError("WBI route outside reviewed scope", "access")
+    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+    if parsed.query and (
+        detail or path in ("/robots.txt", "/fr/rss-feeds", "/fr/WBI-World")
+        or set(query) != {"page"} or len(query["page"]) != 1
+        or not re.fullmatch(r"0|[1-9][0-9]*", query["page"][0])
+    ):
+        raise AdapterError("Unreviewed WBI query scope", "access")
+
+
+def wbi_retain_new_hold(state, url, status, kind):
+    """A later real refusal is globally restrictive, never auto-reclassified."""
+    state["blocked"] = True
+    state["observed_at"] = time.time()
+    if state["schema"] == 4:
+        event = {
+            "kind": kind, "url": url, "status": status,
+            "observed_at": state["observed_at"],
+        }
+        holds = state["refusal_scope"]["additional_holds"]
+        if event not in holds:
+            holds.append(event)
+
+
+def wbi_merge_scope(result, left, right):
+    """Union events; an unproved blocked input retains a global veto."""
+    scopes = [s["refusal_scope"] for s in (left, right) if s["schema"] == 4]
+    if not scopes:
+        return
+    result["schema"] = 4
+    result["refusal_scope"] = copy.deepcopy(scopes[0])
+    holds = result["refusal_scope"]["additional_holds"]
+    for scope in scopes[1:]:
+        for key in ("decision", "original_journal_base64", "initial_refusal"):
+            if scope[key] != result["refusal_scope"][key]:
+                raise AdapterError("Conflicting WBI scope provenance", "access")
+        for event in scope["additional_holds"]:
+            if event not in holds:
+                holds.append(copy.deepcopy(event))
+        if "extensions" in scope:
+            existing = result["refusal_scope"].get("extensions")
+            if existing is not None and existing != scope["extensions"]:
+                raise AdapterError("Conflicting WBI scope extension", "access")
+            result["refusal_scope"]["extensions"] = copy.deepcopy(
+                scope["extensions"]
+            )
+    original = json.loads(base64.b64decode(
+        result["refusal_scope"]["original_journal_base64"]
+    ))
+    for state in (left, right):
+        if state["schema"] == 3 and state["blocked"] and state != original:
+            event = {
+                "kind": "unattributed_held_state", "url": WEBSITE_URL,
+                "status": 0, "observed_at": state["observed_at"],
+            }
+            if event not in holds:
+                holds.append(event)
+    holds.sort(key=lambda item: json.dumps(item, sort_keys=True))
+
+
+def wbi_canonical_url(base, href):
+    """Resolve public source links without accepting alternate access paths."""
+    url = urllib.parse.urljoin(base, href)
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "www.wbi.be"
+        or parsed.username or parsed.password or parsed.port
+        or parsed.fragment
+        or re.search(r"/(?:search|recherche|user|admin|node)/", parsed.path)
+    ):
+        raise AdapterError("Unsupported WBI public inventory link", "parse")
+    return url
+
+
+def wbi_inventory_page(root, url):
+    """Parse supported public catalogue cards and every advertised pager."""
+    main = one(nodes(root, "main"), "WBI inventory main")
+    view = one(nodes(main, "div", "view-page"), "WBI inventory view")
+    path = urllib.parse.urlsplit(url).path
+    if path == "/en/bourses":
+        cards = nodes(view, "article", "search-result")
+    elif path == "/fr/appels-a-projets":
+        cards = nodes(view, "article", "article-item")
+    else:
+        raise AdapterError("Unverified WBI inventory scope", "parse")
+    if not cards:
+        raise AdapterError("Unverified WBI inventory structure", "parse")
+    candidates = set()
+    for card in cards:
+        links = {
+            wbi_canonical_url(url, node.attrs["href"])
+            for node in nodes(card, "a")
+            if node.attrs.get("href")
+            and (
+                re.search(r"/(?:aide-service|actualites)/", node.attrs["href"])
+                or node.attrs["href"] == "/fr/WBI-World"
+            )
+        }
+        if len(links) != 1:
+            raise AdapterError("Ambiguous WBI inventory card", "parse")
+        candidates.update(links)
+    pagers = nodes(view, "nav", "pager")
+    if len(pagers) > 1:
+        raise AdapterError("Ambiguous WBI pager", "parse")
+    targets = set()
+    base = urllib.parse.urlsplit(url)
+    for nav in pagers:
+        if not nodes(nav, "a"):
+            raise AdapterError("Empty WBI pagination control", "parse")
+        for node in nodes(nav, "a"):
+            if not node.attrs.get("href"):
+                raise AdapterError("Incomplete WBI pager link", "parse")
+            target = wbi_canonical_url(url, node.attrs["href"])
+            parsed = urllib.parse.urlsplit(target)
+            query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            if (
+                parsed.path != base.path
+                or set(query) not in (set(), {"page"})
+                or (query and (len(query["page"]) != 1
+                    or not re.fullmatch(
+                        r"0|[1-9][0-9]*", query["page"][0]
+                    )))
+            ):
+                raise AdapterError("Unverified WBI pagination scope", "parse")
+            if not query or query["page"] == ["0"]:
+                target = urllib.parse.urlunsplit(
+                    (parsed.scheme, parsed.netloc, parsed.path, "", "")
+                )
+            targets.add(target)
+    return sorted(candidates), sorted(targets)
+
+
+def wbi_expiry_disposition(url, checked_at):
+    """Exclude only the exact proven expired CIRC call, never ambiguous URLs."""
+    if url != _WBI_REMOVED_URL:
+        return None
+    checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    if checked.utcoffset() is None:
+        raise AdapterError("WBI expiry requires aware time", "validate")
+    if checked.astimezone(timezone.utc).date().isoformat() <= "2026-11-14":
+        raise AdapterError("CIRC expiry boundary not established", "validate")
+    return {
+        "url": _WBI_REMOVED_URL, "deadline": "2026-11-13",
+        "disposition": "expired_known_call_do_not_fetch",
+        "body_sha256": _WBI_REMOVED_BODY_SHA256,
+    }
+
+
+def wbi_article(root, url):
+    """Bind factual content to a single publisher-native article identity."""
+    main = one(nodes(root, "main"), "WBI article main")
+    article = one([
+        node for node in nodes(main, "article", "node--view-mode-full")
+        if node.attrs.get("data-history-node-id")
+    ], "WBI full article")
+    native = article.attrs["data-history-node-id"]
+    if not re.fullmatch(r"[1-9][0-9]*", native):
+        raise AdapterError("Invalid WBI native article identity", "parse")
+    canonical = one([
+        node.attrs.get("href") for node in nodes(root, "link")
+        if node.attrs.get("rel") == "canonical"
+    ], "WBI canonical article")
+    shortlink = one([
+        node.attrs.get("href") for node in nodes(root, "link")
+        if node.attrs.get("rel") == "shortlink"
+    ], "WBI native shortlink")
+    if canonical != url or shortlink != WEBSITE_URL + "fr/node/" + native:
+        raise AdapterError("Conflicting WBI article identity", "parse")
+    title = one(nodes(main, "h1"), "WBI opportunity title").text()
+    body = content(article)
+    if not title or not body.text():
+        raise AdapterError("Missing WBI current factual article", "parse")
+    return native, title, body
+
+
+def wbi_explicit_deadline(text):
+    """Only explicit application dates with a published year are deadlines."""
+    text = re.sub(r"[^\s]+@[^\s]+", "[email]", text)
+    months = "|".join(_WBI_MONTHS)
+    lead = (
+        r"(?:candidatures?|dossier|demande)[^.!?]{0,120}?"
+        r"(?:pour|avant|jusqu'au)|"
+        r"date limite (?:de dépôt )?(?:des? candidatures?)?\s*:"
+    )
+    pattern = (
+        r"(?:" + lead + r")\s+(?:le\s+)?"
+        r"(?:(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)\s+)?"
+        r"(\d{1,2})\s+(" + months + r")\s+(20\d{2})"
+    )
+    matches = {
+        datetime(int(year), _WBI_MONTHS[month], int(day)).date().isoformat()
+        for day, month, year in re.findall(pattern, text.lower())
+    }
+    if len(matches) > 1:
+        raise AdapterError("Multiple WBI application deadlines", "parse")
+    return next(iter(matches), None)
+
+
+def wbi_record(native, title, url, category, kind, summary,
+               *, slot=None, legacy_track=None, deadline=None):
+    record = make_record(
+        title, url, [category], kind=kind,
+        method="official-structured-facts",
+        evidence=[ATTRIBUTION, "Publisher article node " + native],
+    )
+    identity = "node:" + native
+    if slot is not None:
+        identity += "|" + slot
+    if legacy_track is not None:
+        identity = legacy_track
+    record["id"] = hashlib.sha256(
+        (SOURCE_ID + "|" + identity).encode()
+    ).hexdigest()[:24]
+    record["summary"] = summary
+    record["deadline"] = deadline
+    return record
+
+
+def wbi_unesco_records(native, title, body, url, root):
+    """Use separately named attachment identities without fetching files."""
+    attachments = {}
+    for link in nodes(root, "a"):
+        href = link.attrs.get("href", "")
+        if href.startswith("/sites/default/files/"):
+            attachments.setdefault(link.text(), set()).add(href)
+    headings = [h.text() for h in nodes(body, "h3")]
+    if headings.count("Financement") != 1:
+        raise AdapterError("Missing WBI internship section boundary", "parse")
+    named = headings[:headings.index("Financement")]
+    if (
+        len(named) < 2 or len(named) != len(set(named))
+        or set(named) != set(attachments)
+    ):
+        raise AdapterError("Incomplete WBI named internship inventory", "parse")
     records = []
-    today = datetime.now(timezone.utc).date().isoformat()
-    for profile in PROFILES:
-        record = make_record(
-            profile["title"],
-            PAGES[profile["key"]],
-            [profile["category"]],
-            kind=profile["kind"],
-            host_countries=profile["hosts"],
-            evidence=[ATTRIBUTION, profile["evidence"]],
-        )
-        record["id"] = hashlib.sha256(
-            (SOURCE_ID + "|" + profile["track"]).encode()
-        ).hexdigest()[:24]
-        record["summary"] = profile["summary"]
-        record["eligible_countries"] = profile["eligible"]
-        record["deadline"] = profile["deadline"]
-        if profile["deadline"]:
-            record["status"] = (
-                "open"
-                if today < profile["deadline"]
-                else "expired" if today > profile["deadline"] else "unknown"
-            )
-        records.append(record)
+    for name in named:
+        attachment = one(list(attachments[name]), "WBI internship attachment")
+        records.append(wbi_record(
+            native, title + " — " + name, url, "internships", "opportunity",
+            "WBI publishes an internship call for this UNESCO unit.",
+            slot=attachment, deadline=wbi_explicit_deadline(body.text()),
+        ))
     validate_records(records)
     return records
 
 
+def wbi_world_records(native, title, body, url):
+    """Extract each explicitly enumerated award type, preserving legacy IDs."""
+    types = [
+        node.text() for node in nodes(body, "li")
+        if re.match(r"Bourses de (?:longue|courte) durée", node.text())
+    ]
+    records, seen = [], set()
+    for label in types:
+        lowered = label.lower()
+        if "courte" in lowered:
+            track, variant = "world-short", "Short research stay"
+        elif "postdoctoral" in lowered:
+            track, variant = "world-postdoctoral", "Postdoctoral research"
+        elif "doctoral" in lowered:
+            track, variant = "world-doctoral", "Doctoral research"
+        else:
+            raise AdapterError("Unclassified WBI WORLD award type", "parse")
+        if track in seen:
+            raise AdapterError("Duplicate WBI WORLD award type", "parse")
+        seen.add(track)
+        records.append(wbi_record(
+            native, title + " — " + variant, url,
+            "scholarships", "programme-overview",
+            "WBI supports " + variant.lower() + " outside Belgium.",
+            legacy_track=track,
+            deadline=wbi_explicit_deadline(body.text()),
+        ))
+    if seen != {"world-short", "world-postdoctoral", "world-doctoral"}:
+        raise AdapterError("Incomplete WBI WORLD award inventory", "parse")
+    validate_records(records)
+    return records
+
+
+def wbi_excellence_in_records(native, title, body, url):
+    types = [
+        node.text() for node in nodes(body, "li")
+        if re.match(r"Bourses de (?:longue|courte) durée", node.text())
+    ]
+    records, seen = [], set()
+    for label in types:
+        if "postdoctoral" not in label.lower():
+            raise AdapterError("Unclassified WBI IN award type", "parse")
+        variant = "long" if "longue" in label.lower() else "short"
+        if variant in seen:
+            raise AdapterError("Duplicate WBI IN award type", "parse")
+        seen.add(variant)
+        record = wbi_record(
+            native, title + " — " + variant + " postdoctoral stay",
+            url, "scholarships", "programme-overview",
+            "WBI supports a " + variant + " postdoctoral research stay "
+            "at a higher education institution in Wallonia or Brussels.",
+            legacy_track="excellence-in-" + variant,
+            deadline=wbi_explicit_deadline(body.text()),
+        )
+        record["host_countries"] = ["BE"]
+        records.append(record)
+    if seen != {"long", "short"}:
+        raise AdapterError("Incomplete WBI IN award inventory", "parse")
+    validate_records(records)
+    return records
+
+
+def wbi_mobility_records(native, title, body, url):
+    descriptions = [
+        node.text() for node in nodes(body, "p")
+        if node.text().startswith("Soutien des membres")
+    ]
+    records, seen = [], set()
+    for description in descriptions:
+        if "en Belgique" in description:
+            variant = "in"
+            summary = (
+                "Institutional support for visiting academic, scientific "
+                "or administrative staff from Maghreb-Lebanon institutions."
+            )
+        elif "en Amérique latine" in description:
+            variant = "out"
+            summary = (
+                "Institutional mobility support for FWB higher education "
+                "staff collaborating with overseas partner institutions."
+            )
+        else:
+            raise AdapterError("Unclassified WBI mobility route", "parse")
+        if variant in seen:
+            raise AdapterError("Duplicate WBI mobility route", "parse")
+        seen.add(variant)
+        record = wbi_record(
+            native, title + " — " + {"in": "Incoming", "out": "Outgoing"}
+            [variant], url, "grants", "institutional-grant", summary,
+            legacy_track="mobility-" + variant,
+            deadline=wbi_explicit_deadline(body.text()),
+        )
+        if variant == "in":
+            record["host_countries"] = ["BE"]
+        records.append(record)
+    if seen != {"in", "out"}:
+        raise AdapterError("Incomplete WBI mobility route inventory", "parse")
+    validate_records(records)
+    return records
+
+
+def wbi_specialisation_records(native, title, body, url):
+    exemption = [
+        node for node in nodes(body, "h2")
+        if "Québec" in node.text() and "exemption" in node.text()
+    ]
+    one(exemption, "WBI separately named Quebec fee exemption")
+    if not re.search(r"étudiants belges francophones", body.text()):
+        raise AdapterError("Unverified WBI fee exemption eligibility", "parse")
+    records = [wbi_record(
+        native, title, url, "scholarships", "programme-overview",
+        "WBI lists academic specialisation scholarships abroad; "
+        "destination-specific requirements apply.",
+        legacy_track="specialisation",
+        deadline=wbi_explicit_deadline(body.text()),
+    ), wbi_record(
+        native, "Québec tuition fee exemption", url,
+        "scholarships", "programme-overview",
+        "A separately described tuition fee exemption for qualifying "
+        "French-speaking Belgian students at Quebec universities.",
+        legacy_track="quebec-exemption",
+    )]
+    records[1]["host_countries"] = ["CA"]
+    records[1]["eligible_countries"] = ["BE"]
+    validate_records(records)
+    return records
+
+
+_WBI_LEGACY_SINGLE_TRACKS = {
+    "734": "explort", "715": "language", "8277": "nearby",
+    "24526": "hague", "1197": "assistants", "1195": "louisiana",
+    "728": "oi", "24604": "circ-postdoc", "716": "research",
+    "729": "company", "8641": "tournesol",
+}
+
+
+def wbi_single_record(native, title, body, url):
+    """Classify current source wording, without projecting stale profiles."""
+    wording = title.lower()
+    facts = body.text().lower()
+    if "stage" in wording:
+        category = "internships"
+    elif "bourse" in wording or (
+        "doctin" in wording and "aide financière" in facts
+    ) or ("langue étrangère" in wording and "bourse" in facts):
+        category = "scholarships"
+    elif re.search(r"enseignant|formateur|conversation", wording):
+        category = "jobs"
+    elif re.search(r"formation|apprendre|explort", wording):
+        category = "training"
+    elif re.search(r"soutien|fonds|appel.*projets", wording):
+        category = "grants"
+    else:
+        category = "other"
+    deadline = wbi_explicit_deadline(body.text())
+    programme = "/aide-service/" in url
+    kind = "programme-overview" if programme and not deadline else "opportunity"
+    if (
+        category == "grants" and (not programme or native == "8641")
+        and re.search(
+            r"opérateurs|établissements d’enseignement|associations", facts
+        )
+    ):
+        kind = "institutional-grant"
+    if category == "other":
+        kind = "unknown"
+    summaries = {
+        "internships": (
+            "WBI publishes internship support and application information."
+        ),
+        "scholarships": (
+            "WBI publishes study or research funding and application "
+            "information."
+        ),
+        "jobs": "WBI publishes teaching placement and application information.",
+        "training": (
+            "WBI publishes training support and application information."
+        ),
+        "grants": (
+            "WBI publishes project or mobility support and application "
+            "information."
+        ),
+        "other": (
+            "WBI publishes this opportunity in its official catalogue or "
+            "calls index."
+        ),
+    }
+    record = wbi_record(
+        native, title, url, category, kind, summaries[category],
+        legacy_track=_WBI_LEGACY_SINGLE_TRACKS.get(native), deadline=deadline,
+    )
+    validate_records([record])
+    return record
+
+
+def wbi_dynamic_records(root, url):
+    native, title, body = wbi_article(root, url)
+    parsers = {
+        "665": wbi_world_records, "1271": wbi_excellence_in_records,
+        "5214": wbi_mobility_records, "705": wbi_specialisation_records,
+    }
+    if native == "24910":
+        return wbi_unesco_records(native, title, body, url, root)
+    if native in parsers:
+        return parsers[native](native, title, body, url)
+    return [wbi_single_record(native, title, body, url)]
+
+
+def wbi_complete_records(pages):
+    """Reconcile only publisher-linked calls with equal explicit deadlines."""
+    parsed = {}
+    for url, root in pages.items():
+        native, _, _ = wbi_article(root, url)
+        if native in parsed:
+            raise AdapterError("Duplicate WBI canonical article", "parse")
+        parsed[native] = (url, root, wbi_dynamic_records(root, url))
+    programmes = {
+        url: (native, records[0])
+        for native, (url, _, records) in parsed.items()
+        if "/aide-service/" in url and len(records) == 1
+    }
+    aliases = {}
+    for native, (url, root, records) in parsed.items():
+        if "/actualites/" not in url or len(records) != 1:
+            continue
+        deadline = records[0]["deadline"]
+        if deadline is None:
+            continue
+        links = set()
+        for link in nodes(content(root), "a"):
+            href = urllib.parse.urlsplit(link.attrs.get("href", ""))
+            if (
+                href.scheme == "https"
+                and href.hostname in {"wbi.be", "www.wbi.be"}
+                and not href.query and not href.fragment
+                and not href.username and not href.password and not href.port
+            ):
+                links.add("https://www.wbi.be" + href.path)
+        matches = [
+            programmes[target] for target in links
+            if target in programmes
+            and programmes[target][1]["deadline"] == deadline
+        ]
+        if len(matches) > 1:
+            raise AdapterError("Ambiguous WBI linked programme identity", "parse")
+        if not matches:
+            # A distinct cycle or an unknown programme date proves no alias.
+            continue
+        programme_native, programme = matches[0]
+        if programme_native in aliases:
+            raise AdapterError("Multiple WBI calls claim one identity", "parse")
+        aliases[programme_native] = native
+        records[0]["id"] = programme["id"]
+    records = [
+        record for native, (_, _, group) in parsed.items()
+        if native not in aliases for record in group
+    ]
+    validate_records(records)
+    return records
+
+
+def collect_dynamic_wbi():
+    """Walk complete public index pagination, then fetch all detail evidence."""
+    pending = list(_WBI_DYNAMIC_ROOTS)
+    visited, fingerprints, candidates = set(), {}, set()
+    while pending:
+        url = pending.pop(0)
+        if url in visited:
+            continue
+        root = fetch_inventory_page(page, url)
+        details, following = wbi_inventory_page(root, url)
+        fingerprint = hashlib.sha256(
+            json.dumps([details, following], sort_keys=True).encode()
+        ).hexdigest()
+        fingerprint_key = (urllib.parse.urlsplit(url).path, fingerprint)
+        prior = fingerprints.get(fingerprint_key)
+        if prior is not None and prior != url:
+            raise AdapterError("Repeated WBI inventory page", "parse")
+        fingerprints[fingerprint_key] = url
+        visited.add(url)
+        candidates.update(details)
+        pending.extend(target for target in following if target not in visited)
+    for root_url in _WBI_DYNAMIC_ROOTS:
+        path = urllib.parse.urlsplit(root_url).path
+        indices = {
+            int(urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+                .get("page", ["0"])[0])
+            for url in visited if urllib.parse.urlsplit(url).path == path
+        }
+        if indices != set(range(max(indices) + 1)):
+            raise AdapterError("Incomplete WBI page sequence", "parse")
+    # Tournesol remains an actual public programme outside the bourses filter.
+    candidates.add(_WBI_TOURNESOL_URL)
+    pages, dispositions = {}, []
+    checked_at = utc_now()
+    for url in sorted(candidates):
+        expired = wbi_expiry_disposition(url, checked_at)
+        if expired is not None:
+            dispositions.append(expired)
+        else:
+            pages[url] = page(url)
+    # Preserve the entire actual input capture before attempting normalization.
+    records = wbi_complete_records(pages)
+    print(json.dumps({
+        "event": "dynamic_inventory_complete",
+        "inventory_pages": len(visited), "candidates": len(candidates),
+        "detail_pages": len(pages), "expired_exclusions": dispositions,
+        "records": len(records),
+    }), file=sys.stderr)
+    return records
+
+
 def collect_body():
-    return parse_inventory(read_pages())
+    return collect_dynamic_wbi()
 
 
 CATEGORIES = (
@@ -2020,6 +2178,153 @@ _JOURNAL_WRITE_ACK = None
 _OWNED_EXPORT = None
 _VERIFIED_REMOTE_CREATE = None
 _SCANNED_HISTORY = {}
+
+# Reviewed complete pre-access failure ancestry; unknown gaps remain fatal.
+_STARTUP_QUIET_UNTIL = None
+_HISTORY_COMPLETED = []
+_RECOVERY_JOBS = {}
+_PREACCESS_OWNER = (40889063854, 1, SOURCE_ID)
+_PREACCESS_ARTIFACT = (
+    12903619139,
+    "sha256:10f6fe52c39de27726595d551d4adfeab74685983bc5db204db1583adeeb2028",
+)
+_PREACCESS_WORKFLOW_BLOB = "8769177f6248acfbb5f21ebd3213475136d57f61"
+_RECOVERY_WORKFLOW_BLOBS = {_PREACCESS_WORKFLOW_BLOB}
+_PREACCESS_SOURCE_BLOBS = {
+    "5fd9fa82d5d2d5f0871aba653376765a6e00c897":
+        "46ced66a5c36476d3bd5abb8cf38003b0a7285fe",
+    "dd15bee13fc772ecbf6d72fa19ea02f0f6ffd31a":
+        "46ced66a5c36476d3bd5abb8cf38003b0a7285fe",
+}
+_PREACCESS_ATTEMPTS = {
+    41068492690: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124106100773,
+        '2026-10-30T14:03:38Z',
+        '2026-10-30T14:04:07Z',
+    ),
+    41206274937: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124551869581,
+        '2026-10-31T13:35:41Z',
+        '2026-10-31T13:36:07Z',
+    ),
+    41315187976: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        124873612758,
+        '2026-11-01T14:14:24Z',
+        '2026-11-01T14:14:45Z',
+    ),
+    41486816367: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        125419262871,
+        '2026-11-02T16:59:43Z',
+        '2026-11-02T17:00:21Z',
+    ),
+    41659664520: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        125999206152,
+        '2026-11-03T15:02:18Z',
+        '2026-11-03T15:02:52Z',
+    ),
+    41856931986: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        126667982712,
+        '2026-11-04T15:21:52Z',
+        '2026-11-04T15:22:30Z',
+    ),
+    42054804796: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        127340152709,
+        '2026-11-05T15:25:23Z',
+        '2026-11-05T15:25:49Z',
+    ),
+    42238597392: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        127962645577,
+        '2026-11-06T14:57:47Z',
+        '2026-11-06T14:58:19Z',
+    ),
+    42379195981: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        128423023353,
+        '2026-11-07T13:55:56Z',
+        '2026-11-07T13:56:25Z',
+    ),
+    42488886990: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        128756677411,
+        '2026-11-08T14:15:15Z',
+        '2026-11-08T14:15:36Z',
+    ),
+    42664449837: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        129324235607,
+        '2026-11-09T17:25:22Z',
+        '2026-11-09T17:25:52Z',
+    ),
+    42845199694: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        129930700435,
+        '2026-11-10T15:31:25Z',
+        '2026-11-10T15:32:12Z',
+    ),
+    43044964741: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        130606359485,
+        '2026-11-11T15:06:16Z',
+        '2026-11-11T15:06:56Z',
+    ),
+    43253123702: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        131304063725,
+        '2026-11-12T15:56:04Z',
+        '2026-11-12T15:56:40Z',
+    ),
+    43451305232: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        131973871948,
+        '2026-11-13T15:18:40Z',
+        '2026-11-13T15:19:22Z',
+    ),
+    43603011847: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        132471602690,
+        '2026-11-14T14:05:17Z',
+        '2026-11-14T14:05:54Z',
+    ),
+    43725816277: (
+        1,
+        '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+        132847385837,
+        '2026-11-15T14:42:31Z',
+        '2026-11-15T14:43:04Z',
+    ),
+    43913201360: (
+        1,
+        'dd15bee13fc772ecbf6d72fa19ea02f0f6ffd31a',
+        133460313386,
+        '2026-11-16T16:57:41Z',
+        '2026-11-16T16:58:27Z',
+    ),
+}
+
 _SCANNED_JOB_DIGESTS = {}
 _ATTEMPT_HEADS = {}
 _INVENTORY_ACTIVE = False
@@ -3338,10 +3643,12 @@ def validate_budget(state):
     if not isinstance(state, dict):
         raise AdapterError("Invalid publisher state", "access")
     expected = set(empty_budget(0))
+    if state.get("schema") == 4:
+        expected.add("refusal_scope")
     if (
         set(state) != expected
         or type(state["schema"]) is not int
-        or state["schema"] != 3
+        or state["schema"] not in (3, 4)
         or state["family"] != FAMILY
         or any(
             not numeric(state[k])
@@ -3391,6 +3698,8 @@ def validate_budget(state):
         or not supported_epoch(time.time() + state["page_gap"])
     ):
         raise AdapterError("Unsupported retained clock magnitude", "access")
+    if state["schema"] == 4:
+        wbi_validate_scope(state)
     return state
 
 
@@ -3909,6 +4218,7 @@ def merge_budget(left, right):
     )
     result["blocked"] = left["blocked"] or right["blocked"]
     result["in_flight"] = left["in_flight"] or right["in_flight"]
+    wbi_merge_scope(result, left, right)
     return validate_budget(result)
 
 
@@ -3919,7 +4229,7 @@ def remaining():
 
 
 
-def pace(interval=12.2):
+def pace(interval=12.2, *, target_url=None, method="GET"):
     """Hold the physical journal lock through the response completion."""
     lock = locked_budget()
     try:
@@ -3927,7 +4237,9 @@ def pace(interval=12.2):
         if state["in_flight"]:
             raise AdapterError("Unsettled publisher request retained", "access")
         if state["blocked"]:
-            raise AdapterError("Retained actual publisher refusal", "access")
+            if target_url is None:
+                raise AdapterError("Retained actual publisher refusal", "access")
+            wbi_scope_admission(state, target_url, method)
         if state["observed_429_since_transition"] >= 100:
             raise AdapterError(
                 "Unsupported retained429 history; no traffic", "access"
@@ -4131,6 +4443,7 @@ def attempt_completion(identity, attempt, head):
     """Use exact-attempt job completion rather than mutable run updates."""
     total, jobs_seen = None, set()
     finished = []
+    retained_jobs = []
     for page in range(1, 101):
         result = workflow_api(
             f"/actions/runs/{identity}/attempts/{attempt}/jobs"
@@ -4177,6 +4490,7 @@ def attempt_completion(identity, attempt, head):
                 or job.get("status") != "completed"
             ):
                 raise ValueError("Untrusted exact-attempt job")
+            retained_jobs.append(copy.deepcopy(job))
             jobs_seen.add(job["id"])
             value = datetime.fromisoformat(
                 job["completed_at"].replace("Z", "+00:00")
@@ -4185,6 +4499,7 @@ def attempt_completion(identity, attempt, head):
                 raise ValueError("Missing job completion timezone")
             finished.append(value.timestamp())
         if len(jobs_seen) == total:
+            _RECOVERY_JOBS[(identity, attempt)] = (None, retained_jobs)
             return max(finished)
         if len(jobs_seen) > total or len(jobs) != 100:
             raise ValueError("Truncated exact-attempt job inventory")
@@ -4240,6 +4555,9 @@ def completed_identity(run, expected=None, revision=None):
         if not 0 <= began <= finished <= time.time() + 1:
             raise ValueError("Invalid attempt chronology")
         _ATTEMPT_HEADS[(identity, attempt)] = run["head_sha"]
+        _RECOVERY_JOBS[(identity, attempt)] = (
+            copy.deepcopy(run), _RECOVERY_JOBS[(identity, attempt)][1]
+        )
         return finished, began, identity, attempt, source
     except Exception:
         raise AdapterError(
@@ -4902,8 +5220,7 @@ def apply_robots_policy(text, url, state=None):
     try:
         delay = robots_policy(text, url)
     except RobotsDisallow:
-        state["blocked"] = True
-        state["observed_at"] = time.time()
+        wbi_retain_new_hold(state, url, 0, "robots_disallow")
         write_budget(state)
         raise
     state["interval"] = max(state["interval"], delay)
@@ -4942,6 +5259,8 @@ def physical_request_bytes(
         raise AdapterError(
             "Robots purpose requires literal robots.txt", "access"
         )
+    if wbi_retired_resource(url):
+        raise AdapterError("Retained WBI resource refusal", "access")
     host = (urllib.parse.urlsplit(url).hostname or "").lower()
     publisher = host in _PUBLISHER_HOSTS
     if not publisher and not infrastructure:
@@ -4960,9 +5279,13 @@ def physical_request_bytes(
         )
     if publisher:
         collection_lock_authority()
+        wait_startup_quiet()
     if publisher and _INVENTORY_ACTIVE and not robots:
         inventory_guard()
-    lock, state = pace(interval) if publisher else (None, None)
+    lock, state = (
+        pace(interval, target_url=url, method=method)
+        if publisher else (None, None)
+    )
     attempted = response_received = response_constraints_saved = False
     retryable_connection_failure = False
     try:
@@ -4993,6 +5316,11 @@ def physical_request_bytes(
         if publisher:
             collection_lock_authority()
             locked_journal_authority()
+            if (_STARTUP_QUIET_UNTIL is None
+                    or time.monotonic() < _STARTUP_QUIET_UNTIL):
+                raise AdapterError(
+                    "Publisher startup quiet shortened", "access"
+                )
         try:
             attempted = True
             response = _OPENER.open(request, timeout=timeout)
@@ -5057,7 +5385,9 @@ def physical_request_bytes(
                         state["rate_limit_until"], state["until"]
                     )
                 if status in (401, 403, 451) and not robots:
-                    state["blocked"] = True
+                    wbi_retain_new_hold(
+                        state, url, status, "content_status"
+                    )
                 state["observed_at"] = time.time()
                 write_budget(state)
                 if status == 429:
@@ -5106,7 +5436,9 @@ def physical_request_bytes(
             if challenge:
                 response_constraints_saved = True
                 if not robots or status == 429:
-                    state["blocked"] = True
+                    wbi_retain_new_hold(
+                        state, url, status, "visible_refusal"
+                    )
                 raise AdapterError(
                     "Visible publisher verification or refusal", "access"
                 )
@@ -5211,6 +5543,8 @@ def local_workflow_definition():
 def scan_family_history():
     """Read complete producer history and rank exact job completion."""
     global _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS
+    global _HISTORY_COMPLETED, _RECOVERY_JOBS
+    _HISTORY_COMPLETED, _RECOVERY_JOBS = [], {}
     _SCANNED_HISTORY, _SCANNED_JOB_DIGESTS, _ATTEMPT_HEADS = {}, {}, {}
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     current = current_run_identity() if hosted else (None, None)
@@ -5338,6 +5672,7 @@ def scan_family_history():
         raise AdapterError("Existing publisher history missing", "access")
     if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
         raise AdapterError("Ambiguous actual family completion", "access")
+    _HISTORY_COMPLETED = ordered
     return ordered[-1][2:]
 
 
@@ -5695,7 +6030,7 @@ def enter_phase(name, seconds):
 def execution():
     """Freeze admission once; publication owns its original HTTP alarms."""
     global _RUN_END, _SOURCE_END, _PHASE_END, _PHASE_NAME
-    global _COLLECTION_PREPARED
+    global _COLLECTION_PREPARED, _STARTUP_QUIET_UNTIL
     if _RUN_END is not None:
         raise AdapterError("Nested execution refused", "access")
     _RUN_END = time.monotonic() + RUN_TIMEOUT
@@ -5704,6 +6039,7 @@ def execution():
         min(time.monotonic() + 180, _SOURCE_END - 30), "restore"
     )
     _COLLECTION_PREPARED = False
+    _STARTUP_QUIET_UNTIL = None
     try:
         yield
     finally:
@@ -5903,46 +6239,530 @@ def reviewed_migration_state():
 
 
 
+def recovery_contents(path, head, cache):
+    """Read immutable source evidence once per revision during this scan."""
+    key = (path, head)
+    if key not in cache:
+        item = workflow_api(f"/contents/{path}?ref={head}")
+        try:
+            if item.get("encoding") != "base64":
+                raise ValueError()
+            body = base64.b64decode(item["content"])
+            blob = hashlib.sha1(
+                b"blob " + str(len(body)).encode() + b"\0" + body
+            ).hexdigest()
+            if (item.get("sha") != blob or not body
+                or item.get("path") != path
+                or type(item.get("size")) is not int
+                or item["size"] != len(body)
+                or len(body) > 5_000_000):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise AdapterError("Incomplete no-access code evidence", "access")
+        cache[key] = (blob, body)
+    return cache[key]
+
+
+def prove_no_publisher_access(row, cache):
+    """Require a finite historical proof or the exact current quiet code."""
+    finished, _, run_id, attempt, source = row
+    head = _ATTEMPT_HEADS[(run_id, attempt)]
+    exact, jobs = _RECOVERY_JOBS[(run_id, attempt)]
+    if len(jobs) != 1:
+        raise AdapterError("Missing exact single collect job", "access")
+    try:
+        start = datetime.fromisoformat(
+            jobs[0]["started_at"].replace("Z", "+00:00")
+        )
+        end = datetime.fromisoformat(
+            jobs[0]["completed_at"].replace("Z", "+00:00")
+        )
+        if start.utcoffset() is None or end.utcoffset() is None:
+            raise ValueError()
+        duration = end.timestamp() - start.timestamp()
+    except (KeyError, TypeError, ValueError):
+        raise AdapterError("Invalid exact job interval", "access")
+    if (
+        attempt != 1
+        or exact.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("conclusion") != "failure"
+        or not 0 <= duration < 58
+    ):
+        raise AdapterError("Missing state has no no-access proof", "access")
+    source_blob, source_bytes = recovery_contents(
+        "adapters/be-wbi/adapter.py", head, cache
+    )
+    workflow_blob, _ = recovery_contents(
+        ".github/workflows/fetch-be-wbi.yml", head, cache
+    )
+    pin = _PREACCESS_ATTEMPTS.get(run_id)
+    if pin is not None:
+        actual = (
+            attempt, head, jobs[0]["id"], jobs[0]["started_at"],
+            jobs[0]["completed_at"],
+        )
+        if (
+            actual != pin
+            or source_blob != _PREACCESS_SOURCE_BLOBS.get(head)
+            or workflow_blob != _PREACCESS_WORKFLOW_BLOB
+        ):
+            raise AdapterError("Historical no-access proof changed", "access")
+        return
+    if (
+        hashlib.sha256(source_bytes).hexdigest()
+        != source_file_digest()
+        or workflow_blob not in _RECOVERY_WORKFLOW_BLOBS
+    ):
+        raise AdapterError("Unreviewed artifactless source revision", "access")
+
+
+def restoration_owner(latest):
+    """Cross only positively proved no-access attempts, never unknown gaps."""
+    rows = list(reversed(_HISTORY_COMPLETED))
+    if not rows or rows[0][2:] != latest:
+        raise AdapterError("Restoration chronology changed", "access")
+    skipped, cache = [], {}
+    for row in rows:
+        identity = row[2:]
+        run_id, attempt, source = identity
+        result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        artifacts = result.get("artifacts")
+        if (
+            not isinstance(artifacts, list)
+            or len(artifacts) > 100
+            or type(result.get("total_count")) is not int
+            or result["total_count"] != len(artifacts)
+            or any(not isinstance(item, dict) for item in artifacts)
+        ):
+            raise AdapterError(
+                "Incomplete recovery artifact inventory", "access"
+            )
+        matches = [item for item in artifacts if item.get("name") ==
+                   _ARTIFACT_NAME + "-" + str(attempt)]
+        if matches:
+            historical = {
+                item[2] for item in skipped if item[2] in _PREACCESS_ATTEMPTS
+            }
+            if (historical or identity == _PREACCESS_OWNER) and (
+                historical != set(_PREACCESS_ATTEMPTS)
+                or identity != _PREACCESS_OWNER
+                or len(matches) != 1
+                or (matches[0].get("id"), matches[0].get("digest"))
+                != _PREACCESS_ARTIFACT
+            ):
+                raise AdapterError(
+                    "Incomplete historical recovery chain", "access"
+                )
+            return (
+                identity, result,
+                max((item[0] for item in skipped), default=0),
+            )
+        if artifacts:
+            raise AdapterError(
+                "Unexpected artifactless attempt outputs", "access"
+            )
+        prove_no_publisher_access(row, cache)
+        skipped.append(row)
+    raise AdapterError("No actual owned publisher state remains", "access")
+
+
+def preserve_recovery_bounds(incoming, finished):
+    """Retain elapsed job bounds without fabricating publisher receipts."""
+    state = copy.deepcopy(validate_budget(incoming))
+    if finished:
+        state["until"] = max(
+            state["until"],
+            finished + max(state["interval"], state["page_gap"]),
+        )
+        state["observed_at"] = max(state["observed_at"], finished)
+    return validate_budget(state)
+
+
+def wait_startup_quiet():
+    """A wall-clock adjustment cannot shorten the first-access quiet floor."""
+    if _STARTUP_QUIET_UNTIL is None:
+        raise AdapterError("Publisher startup quiet is unproved", "access")
+    while time.monotonic() < _STARTUP_QUIET_UNTIL:
+        check_deadline()
+        time.sleep(max(0, min(1, _STARTUP_QUIET_UNTIL - time.monotonic())))
+
+
+
+# Activated only by an independently reviewed public maintenance decision.
+_WBI_HANDOFF_DECISION = {
+    "schema": 1,
+    "source": "be-wbi",
+    "evidence": (
+        "https://github.com/YouthOpps/data-pipeline/issues/373"
+        "#issuecomment-6942897042"
+    ),
+    "state_sha256": (
+        "afb4dfdf4a796db523e1f5c10cac913c1883bb095f476202f91376e1840def10"
+    ),
+    "native_sha256": (
+        "f2b80e070da2f7023e7519e97d25a657de050f78769db3dfa7f9844a5964908e"
+    ),
+    "witness_sha256": (
+        "34f8daf029205bc7a567fb25eb59caefe06ea3a4d0d512329f10ba49e3fdde4c"
+    ),
+}
+_WBI_HANDOFF_SHA256 = (
+    "afb4dfdf4a796db523e1f5c10cac913c1883bb095f476202f91376e1840def10"
+)
+_WBI_HANDOFF_NATIVE = (
+    "f2b80e070da2f7023e7519e97d25a657de050f78769db3dfa7f9844a5964908e"
+)
+_WBI_HANDOFF_WITNESSES = (
+    "34f8daf029205bc7a567fb25eb59caefe06ea3a4d0d512329f10ba49e3fdde4c"
+)
+_WBI_HANDOFF_BYTES = (
+    "eyJibG9ja2VkIjp0cnVlLCJjb21wbGV0ZWQiOjE3OTQ5MDI3ODMuOTEwODg5NiwiZmFt"
+    "aWx5IjoieW91dGhvcHBzLWJlLXdiaS1wdWJsaXNoZXItdjEiLCJpbl9mbGlnaHQiOmZh"
+    "bHNlLCJpbnRlcnZhbCI6MTIuMiwiaW52ZW50b3J5X2NvbXBsZXRlZCI6MTc5NDkwMjQ3"
+    "NC4wNTkyNjEzLCJsZWdhY3lfNDI5X2hpc3RvcnkiOiJ1bmtub3duIiwibGVnYWN5X2Fj"
+    "Y2Vzc19oaXN0b3J5X3Vua25vd24iOnRydWUsImxlZ2FjeV9hY2Nlc3Nfb2JzZXJ2YXRp"
+    "b25zIjpbXSwibGVnYWN5X2hvbGRfaGlzdG9yeSI6InVubG9nZ2VkX2ZpZWxkc191bmtu"
+    "b3duIiwib2JzZXJ2ZWRfNDI5X3NpbmNlX3RyYW5zaXRpb24iOjAsIm9ic2VydmVkX2F0"
+    "IjoxNzk0OTAyNzgzLjkxMDg4OTYsInBhZ2VfZ2FwIjozMCwicmF0ZV9saW1pdF91bnRp"
+    "bCI6MCwicmVmdXNhbF9zY29wZSI6eyJhZGRpdGlvbmFsX2hvbGRzIjpbXSwiZGVjaXNp"
+    "b24iOnsiZGV0YWlsX3ByZWZpeGVzIjpbIi9mci9hY3R1YWxpdGVzLyIsIi9mci9haWRl"
+    "LXNlcnZpY2UvIl0sImV2aWRlbmNlIjoiaHR0cHM6Ly9naXRodWIuY29tL1lvdXRoT3Bw"
+    "cy9kYXRhLXBpcGVsaW5lL2lzc3Vlcy8zNzMjaXNzdWVjb21tZW50LTY5MjU2MDAxMzci"
+    "LCJoZWxkX3NoYTI1NiI6ImFhNTQ0MTAxNzY1ZTY1YzdmMzEyNjUwMWNjZThlNjc4ODEw"
+    "NjJjY2JlZmVjNzdmYjE5MzBjZDVlZmFiMjZlMGMiLCJtaWdyYXRpb25fcmV2aXNpb24i"
+    "OiJ3YmkzNzMtY29udGVudC1zY29wZS12MSIsIm5hdGl2ZV9yZXZpc2lvbiI6IjA2Y2M4"
+    "YjBkZTgzMmI0ZjA1NWMzNGE0N2JmMTZjNDM1ZGM3NTM2NWQwMjYwZWUyNjBjZDM3YTg3"
+    "NjYwMzQwODYiLCJwYXRocyI6WyIvcm9ib3RzLnR4dCIsIi9lbi9ib3Vyc2VzIiwiL2Vu"
+    "L3RheG9ub215L3Rlcm0vODQzIiwiL2VuL3RheG9ub215L3Rlcm0vODQ0IiwiL2VuL3Rh"
+    "eG9ub215L3Rlcm0vODQ2IiwiL2VuL3RheG9ub215L3Rlcm0vODQ3IiwiL2ZyL2FwcGVs"
+    "cy1hLXByb2pldHMiLCIvYWN0dWFsaXRlcyIsIi9mci9hY3R1YWxpdGVzIiwiL2ZyL3Jz"
+    "cy1mZWVkcyJdLCJyZXNwb25zZV9zaGEyNTYiOiJiZWZkNGU0YTg0M2E3MGI0MTVlOGI5"
+    "OWQ0Nzk4MjA1OThhMzIyZTRiNDA0YzhjNjNlMjQ2NGUyYmFiZTZkOTE3Iiwic2NoZW1h"
+    "IjoxLCJzb3VyY2UiOiJiZS13YmkifSwiZXh0ZW5zaW9ucyI6W3siZXZpZGVuY2UiOiJo"
+    "dHRwczovL2dpdGh1Yi5jb20vWW91dGhPcHBzL2RhdGEtcGlwZWxpbmUvaXNzdWVzLzM3"
+    "MyNpc3N1ZWNvbW1lbnQtNjk0MTQxNzYzOCIsImhlbGRfc2hhMjU2IjoiYWE1NDQxMDE3"
+    "NjVlNjVjN2YzMTI2NTAxY2NlOGU2Nzg4MTA2MmNjYmVmZWM3N2ZiMTkzMGNkNWVmYWIy"
+    "NmUwYyIsIm1pZ3JhdGlvbl9yZXZpc2lvbiI6IndiaTM3My1jb250ZW50LXNjb3BlLXYy"
+    "IiwicGFyZW50X2RlY2lzaW9uX3NoYTI1NiI6IjA0ZWJjOTNmYjRkZDc4ODc4MmRiYWE0"
+    "NDY4NDE0ZjQ4Mjc2MDM5ODg5ZTkzZWY0ZDI1NTE4MzdkM2JhZDUyNmEiLCJwYXRocyI6"
+    "WyIvZnIvV0JJLVdvcmxkIl0sInByaW9yX2pvdXJuYWxfc2hhMjU2IjoiMjcxNjY3ZjJm"
+    "Mzk1OGFmNWNjMjE3ZjExNDNjZjNmZTU2ZDUzYzU4NWZhYjYyMGJjYWYyYWZmMmNmMTQ1"
+    "OWM1MyIsInJlc3BvbnNlX3NoYTI1NiI6ImJlZmQ0ZTRhODQzYTcwYjQxNWU4Yjk5ZDQ3"
+    "OTgyMDU5OGEzMjJlNGI0MDRjOGM2M2UyNDY0ZTJiYWJlNmQ5MTciLCJzY2hlbWEiOjEs"
+    "InNvdXJjZSI6ImJlLXdiaSJ9XSwiaW5pdGlhbF9yZWZ1c2FsIjp7ImJvZHlfc2hhMjU2"
+    "IjoiYmVmZDRlNGE4NDNhNzBiNDE1ZThiOTlkNDc5ODIwNTk4YTMyMmU0YjQwNGM4YzYz"
+    "ZTI0NjRlMmJhYmU2ZDkxNyIsImNvbXBsZXRlZCI6MTc5NDg1MTc5My43NDQyODY4LCJu"
+    "YXRpdmVfcmV2aXNpb24iOiIwNmNjOGIwZGU4MzJiNGYwNTVjMzRhNDdiZjE2YzQzNWRj"
+    "NzUzNjVkMDI2MGVlMjYwY2QzN2E4NzY2MDM0MDg2Iiwibm9kZV9pZCI6MjUxMDgsIm9y"
+    "aWdpbnMiOlsiaHR0cHM6Ly93YmkuYmUiLCJodHRwczovL3d3dy53YmkuYmUiXSwicmVz"
+    "b3VyY2Vfc2x1ZyI6Im9mZnJlLXN0YWdlLWNlbnRyZS1pbnRlcm5hdGlvbmFsLXJlY2hl"
+    "cmNoZS1jYW5jZXItY2lyYyIsInN0YXR1cyI6NDAzLCJ1cmwiOiJodHRwczovL3d3dy53"
+    "YmkuYmUvZnIvYWN0dWFsaXRlcy9vZmZyZS1zdGFnZS1jZW50cmUtaW50ZXJuYXRpb25h"
+    "bC1yZWNoZXJjaGUtY2FuY2VyLWNpcmMifSwib3JpZ2luYWxfam91cm5hbF9iYXNlNjQi"
+    "OiJleUp6WTJobGJXRWlPak1zSW1aaGJXbHNlU0k2SW5sdmRYUm9iM0J3Y3kxaVpTMTNZ"
+    "bWt0Y0hWaWJHbHphR1Z5TFhZeElpd2liR1ZuWVdONVgyaHZiR1JmYUdsemRHOXllU0k2"
+    "SW5WdWJHOW5aMlZrWDJacFpXeGtjMTkxYm10dWIzZHVJaXdpYkdWbllXTjVYMkZqWTJW"
+    "emMxOW9hWE4wYjNKNVgzVnVhMjV2ZDI0aU9uUnlkV1VzSW14bFoyRmplVjloWTJObGMz"
+    "TmZiMkp6WlhKMllYUnBiMjV6SWpwYlhTd2ljbVZ6WldGeVkyaGZjSEp2ZG1WdVlXNWpa"
+    "U0k2ZXlKaVlYTmxiR2x1WlY5amIyeHNaV04wYVc5dVgyeHZZMnNpT2lKT1QxOVBVa2xI"
+    "U1U1QlRGOURUMHhNUlVOVVNVOU9YMHhQUTB0ZlNVNWZRa0ZUUlV4SlRrVWlMQ0pqYjIx"
+    "d2JHVjBaVjloZEhSbGJYQjBjeUk2TWpjc0ltUmhkR0ZmYzI5MWNtTmxYM0JwYmlJNklt"
+    "RTJOekV6WlRReE9XRXhabVJqWVRNeU9UbGtOakJqWlRneE1EZ3daRFJrTXpJeU0ySmpN"
+    "RGNpTENKbGVHVmpkWFJsWkY5cWIySmZZMjl0Y0d4bGRHbHZibDkxY0hCbGNsOWliM1Z1"
+    "WkhNaU9sdDdJbUYwZEdWdGNIUWlPakVzSW1wdllsOXBaQ0k2TVRFMk5USXdNek14TVRn"
+    "ekxDSnJhVzVrSWpvaVlXTjBkV0ZzWDJwdllsOWpiMjF3YkdWMGFXOXVYMVZRVUVWU1gw"
+    "SlBWVTVFWDI1dmRGOXdkV0pzYVhOb1pYSmZkMmx5WlNJc0luSjFibDlwWkNJNk16ZzNO"
+    "ak0wTVRrME9UTXNJblJwYldVaU9qRTNPVEl3T0RBeE1Ea3VNSDBzZXlKaGRIUmxiWEIw"
+    "SWpveExDSnFiMkpmYVdRaU9qRXhOak0zTmpFd05qRTJNaXdpYTJsdVpDSTZJbUZqZEhW"
+    "aGJGOXFiMkpmWTI5dGNHeGxkR2x2Ymw5VlVGQkZVbDlDVDFWT1JGOXViM1JmY0hWaWJH"
+    "bHphR1Z5WDNkcGNtVWlMQ0p5ZFc1ZmFXUWlPak00TnpJeE1qVTVOakV5TENKMGFXMWxJ"
+    "am94TnpreU1EWXhNRFF6TGpCOUxIc2lZWFIwWlcxd2RDSTZNU3dpYW05aVgybGtJam94"
+    "TVRZME1qSXhPVE0wTnpnc0ltdHBibVFpT2lKaFkzUjFZV3hmYW05aVgyTnZiWEJzWlhS"
+    "cGIyNWZWVkJRUlZKZlFrOVZUa1JmYm05MFgzQjFZbXhwYzJobGNsOTNhWEpsSWl3aWNu"
+    "VnVYMmxrSWpvek9EY3lNREE0TkRFeU9Td2lkR2x0WlNJNk1UYzVNakEyTnpZeU15NHdm"
+    "U3g3SW1GMGRHVnRjSFFpT2pFc0ltcHZZbDlwWkNJNk1URTJNekEzTkRZNU5UY3pMQ0py"
+    "YVc1a0lqb2lZV04wZFdGc1gycHZZbDlqYjIxd2JHVjBhVzl1WDFWUVVFVlNYMEpQVlU1"
+    "RVgyNXZkRjl3ZFdKc2FYTm9aWEpmZDJseVpTSXNJbkoxYmw5cFpDSTZNemcyT1RrMU16"
+    "VTNOallzSW5ScGJXVWlPakUzT1RJd05UQXpOakF1TUgwc2V5SmhkSFJsYlhCMElqb3hM"
+    "Q0pxYjJKZmFXUWlPakV4TmpJMU5UVTNNemMzT1N3aWEybHVaQ0k2SW1GamRIVmhiRjlx"
+    "YjJKZlkyOXRjR3hsZEdsdmJsOVZVRkJGVWw5Q1QxVk9SRjl1YjNSZmNIVmliR2x6YUdW"
+    "eVgzZHBjbVVpTENKeWRXNWZhV1FpT2pNNE5qZzBNak0xT0RRd0xDSjBhVzFsSWpveE56"
+    "a3lNRFF3TmprekxqQjlMSHNpWVhSMFpXMXdkQ0k2TVN3aWFtOWlYMmxrSWpveE1UWXhO"
+    "VFkyTlRVNU9EQXNJbXRwYm1RaU9pSmhZM1IxWVd4ZmFtOWlYMk52YlhCc1pYUnBiMjVm"
+    "VlZCUVJWSmZRazlWVGtSZmJtOTBYM0IxWW14cGMyaGxjbDkzYVhKbElpd2ljblZ1WDJs"
+    "a0lqb3pPRFkxTXpFNE5UazJNaXdpZEdsdFpTSTZNVGM1TWpBeU1EQTRNQzR3ZlN4N0lt"
+    "RjBkR1Z0Y0hRaU9qRXNJbXB2WWw5cFpDSTZNVEUyTURNMk1UZ3lPVFEyTENKcmFXNWtJ"
+    "am9pWVdOMGRXRnNYMnB2WWw5amIyMXdiR1YwYVc5dVgxVlFVRVZTWDBKUFZVNUVYMjV2"
+    "ZEY5d2RXSnNhWE5vWlhKZmQybHlaU0lzSW5KMWJsOXBaQ0k2TXpnMk1UYzBOemszTWpJ"
+    "c0luUnBiV1VpT2pFM09USXdNRE0xT0RJdU1IMHNleUpoZEhSbGJYQjBJam94TENKcWIy"
+    "SmZhV1FpT2pFeE5UZzVNREEyT0RJM01pd2lhMmx1WkNJNkltRmpkSFZoYkY5cWIySmZZ"
+    "Mjl0Y0d4bGRHbHZibDlWVUZCRlVsOUNUMVZPUkY5dWIzUmZjSFZpYkdsemFHVnlYM2Rw"
+    "Y21VaUxDSnlkVzVmYVdRaU9qTTROVGMxTVRFNU5UQXhMQ0owYVcxbElqb3hOemt4T1Rn"
+    "MU9UazRMakI5TEhzaVlYUjBaVzF3ZENJNk1Td2lhbTlpWDJsa0lqb3hNVFUzTmpJNU9U"
+    "Z3hPRFlzSW10cGJtUWlPaUpoWTNSMVlXeGZhbTlpWDJOdmJYQnNaWFJwYjI1ZlZWQlFS"
+    "VkpmUWs5VlRrUmZibTkwWDNCMVlteHBjMmhsY2w5M2FYSmxJaXdpY25WdVgybGtJam96"
+    "T0RVek5EYzFOalF6TlN3aWRHbHRaU0k2TVRjNU1UazJOemN4TUM0d2ZTeDdJbUYwZEdW"
+    "dGNIUWlPakVzSW1wdllsOXBaQ0k2TVRFMU56UXhNRE0wTWpVeExDSnJhVzVrSWpvaVlX"
+    "TjBkV0ZzWDJwdllsOWpiMjF3YkdWMGFXOXVYMVZRVUVWU1gwSlBWVTVFWDI1dmRGOXdk"
+    "V0pzYVhOb1pYSmZkMmx5WlNJc0luSjFibDlwWkNJNk16ZzFNekExTWpFeE5qTXNJblJw"
+    "YldVaU9qRTNPVEU1TmpReE9EZ3VNSDBzZXlKaGRIUmxiWEIwSWpveExDSnFiMkpmYVdR"
+    "aU9qRXhOVFl3TURFNU56QTBNaXdpYTJsdVpDSTZJbUZqZEhWaGJGOXFiMkpmWTI5dGNH"
+    "eGxkR2x2Ymw5VlVGQkZVbDlDVDFWT1JGOXViM1JmY0hWaWJHbHphR1Z5WDNkcGNtVWlM"
+    "Q0p5ZFc1ZmFXUWlPak00TkRnMk1UVTJNemsxTENKMGFXMWxJam94TnpreE9UTTFNek0z"
+    "TGpCOUxIc2lZWFIwWlcxd2RDSTZNU3dpYW05aVgybGtJam94TVRVMU1UYzNOekF6T0Rr"
+    "c0ltdHBibVFpT2lKaFkzUjFZV3hmYW05aVgyTnZiWEJzWlhScGIyNWZWVkJRUlZKZlFr"
+    "OVZUa1JmYm05MFgzQjFZbXhwYzJobGNsOTNhWEpsSWl3aWNuVnVYMmxrSWpvek9EUTJN"
+    "VFUyTnpVek1Td2lkR2x0WlNJNk1UYzVNVGt5TWpnek15NHdmU3g3SW1GMGRHVnRjSFFp"
+    "T2pFc0ltcHZZbDlwWkNJNk1URTFNakk0TURjNU9UQTNMQ0pyYVc1a0lqb2lZV04wZFdG"
+    "c1gycHZZbDlqYjIxd2JHVjBhVzl1WDFWUVVFVlNYMEpQVlU1RVgyNXZkRjl3ZFdKc2FY"
+    "Tm9aWEpmZDJseVpTSXNJbkoxYmw5cFpDSTZNemd6Tnpjd09Ea3dNamdzSW5ScGJXVWlP"
+    "akUzT1RFNE9EUXhOemd1TUgwc2V5SmhkSFJsYlhCMElqb3hMQ0pxYjJKZmFXUWlPakV4"
+    "TlRBeU9UVTFNVEEyTXl3aWEybHVaQ0k2SW1GamRIVmhiRjlxYjJKZlkyOXRjR3hsZEds"
+    "dmJsOVZVRkJGVWw5Q1QxVk9SRjl1YjNSZmNIVmliR2x6YUdWeVgzZHBjbVVpTENKeWRX"
+    "NWZhV1FpT2pNNE16RTFNRFF6TVRNMkxDSjBhVzFsSWpveE56a3hPRFF6TWpBeExqQjlM"
+    "SHNpWVhSMFpXMXdkQ0k2TVN3aWFtOWlYMmxrSWpveE1UUTNORFV6TURjM01UWXNJbXRw"
+    "Ym1RaU9pSmhZM1IxWVd4ZmFtOWlYMk52YlhCc1pYUnBiMjVmVlZCUVJWSmZRazlWVGtS"
+    "ZmJtOTBYM0IxWW14cGMyaGxjbDkzYVhKbElpd2ljblZ1WDJsa0lqb3pPREl5T1RVek5E"
+    "VXdNQ3dpZEdsdFpTSTZNVGM1TVRjNU56RTVOUzR3ZlN4N0ltRjBkR1Z0Y0hRaU9qRXNJ"
+    "bXB2WWw5cFpDSTZNVEUwTmpBMk5UTTROVGcxTENKcmFXNWtJam9pWVdOMGRXRnNYMnB2"
+    "WWw5amIyMXdiR1YwYVc5dVgxVlFVRVZTWDBKUFZVNUVYMjV2ZEY5d2RXSnNhWE5vWlhK"
+    "ZmQybHlaU0lzSW5KMWJsOXBaQ0k2TXpneE9EVTBNRFV6TURBc0luUnBiV1VpT2pFM09U"
+    "RTNOakkwTnpRdU1IMHNleUpoZEhSbGJYQjBJam94TENKcWIySmZhV1FpT2pFeE5EVTBP"
+    "RGt5TkRNNE9Td2lhMmx1WkNJNkltRmpkSFZoYkY5cWIySmZZMjl0Y0d4bGRHbHZibDlW"
+    "VUZCRlVsOUNUMVZPUkY5dWIzUmZjSFZpYkdsemFHVnlYM2RwY21VaUxDSnlkVzVmYVdR"
+    "aU9qTTRNVFkyTVRFMk9URTNMQ0owYVcxbElqb3hOemt4TnpRMU16Z3dMakI5TEhzaVlY"
+    "UjBaVzF3ZENJNk1Td2lhbTlpWDJsa0lqb3hNVFEwTXpNd09ETXhPVFFzSW10cGJtUWlP"
+    "aUpoWTNSMVlXeGZhbTlpWDJOdmJYQnNaWFJwYjI1ZlZWQlFSVkpmUWs5VlRrUmZibTkw"
+    "WDNCMVlteHBjMmhsY2w5M2FYSmxJaXdpY25WdVgybGtJam96T0RFeU5qa3hOakV4TXl3"
+    "aWRHbHRaU0k2TVRjNU1UY3dPVFV6TVM0d2ZTeDdJbUYwZEdWdGNIUWlPakVzSW1wdlls"
+    "OXBaQ0k2TVRFME16UXhNVGMxTkRNNUxDSnJhVzVrSWpvaVlXTjBkV0ZzWDJwdllsOWpi"
+    "MjF3YkdWMGFXOXVYMVZRVUVWU1gwSlBWVTVFWDI1dmRGOXdkV0pzYVhOb1pYSmZkMmx5"
+    "WlNJc0luSjFibDlwWkNJNk16Z3dPVFUzTlRNeE1UWXNJblJwYldVaU9qRTNPVEUyTnpV"
+    "M05EUXVNSDBzZXlKaGRIUmxiWEIwSWpveExDSnFiMkpmYVdRaU9qRXhOREk0TlRNMk9U"
+    "UTFNaXdpYTJsdVpDSTZJbUZqZEhWaGJGOXFiMkpmWTI5dGNHeGxkR2x2Ymw5VlVGQkZV"
+    "bDlDVDFWT1JGOXViM1JmY0hWaWJHbHphR1Z5WDNkcGNtVWlMQ0p5ZFc1ZmFXUWlPak00"
+    "TURjMk9EQXhOREUwTENKMGFXMWxJam94TnpreE5qVTNPVEExTGpCOUxIc2lZWFIwWlcx"
+    "d2RDSTZNU3dpYW05aVgybGtJam94TVRReU56UTVOVEEyTnprc0ltdHBibVFpT2lKaFkz"
+    "UjFZV3hmYW05aVgyTnZiWEJzWlhScGIyNWZWVkJRUlZKZlFrOVZUa1JmYm05MFgzQjFZ"
+    "bXhwYzJobGNsOTNhWEpsSWl3aWNuVnVYMmxrSWpvek9EQTNNVGcwTURJNE1Td2lkR2x0"
+    "WlNJNk1UYzVNVFkxTkRjMk5DNHdmU3g3SW1GMGRHVnRjSFFpT2pFc0ltcHZZbDlwWkNJ"
+    "Nk1URTBNVGMwTURnNE56YzJMQ0pyYVc1a0lqb2lZV04wZFdGc1gycHZZbDlqYjIxd2JH"
+    "VjBhVzl1WDFWUVVFVlNYMEpQVlU1RVgyNXZkRjl3ZFdKc2FYTm9aWEpmZDJseVpTSXNJ"
+    "bkoxYmw5cFpDSTZNemd3TXpnMU56STJNRFlzSW5ScGJXVWlPakUzT1RFMk1qRTNOVEF1"
+    "TUgwc2V5SmhkSFJsYlhCMElqb3hMQ0pxYjJKZmFXUWlPakV4TkRBM09UUTRNRFl3T1N3"
+    "aWEybHVaQ0k2SW1GamRIVmhiRjlxYjJKZlkyOXRjR3hsZEdsdmJsOVZVRkJGVWw5Q1Qx"
+    "Vk9SRjl1YjNSZmNIVmliR2x6YUdWeVgzZHBjbVVpTENKeWRXNWZhV1FpT2pNNE1EQTNO"
+    "RGN3TVRBMExDSjBhVzFsSWpveE56a3hOVGt3T1RBNExqQjlMSHNpWVhSMFpXMXdkQ0k2"
+    "TVN3aWFtOWlYMmxrSWpveE1UTTVPVEUyTkRVME9ETXNJbXRwYm1RaU9pSmhZM1IxWVd4"
+    "ZmFtOWlYMk52YlhCc1pYUnBiMjVmVlZCUVJWSmZRazlWVGtSZmJtOTBYM0IxWW14cGMy"
+    "aGxjbDkzYVhKbElpd2ljblZ1WDJsa0lqb3pOems0TVRFek5UWTFPQ3dpZEdsdFpTSTZN"
+    "VGM1TVRVM05EWTNNUzR3ZlN4N0ltRjBkR1Z0Y0hRaU9qRXNJbXB2WWw5cFpDSTZNVEV6"
+    "TnpVME56azFNalU1TENKcmFXNWtJam9pWVdOMGRXRnNYMnB2WWw5amIyMXdiR1YwYVc5"
+    "dVgxVlFVRVZTWDBKUFZVNUVYMjV2ZEY5d2RXSnNhWE5vWlhKZmQybHlaU0lzSW5KMWJs"
+    "OXBaQ0k2TXpjNU1EazVPREF6TVRJc0luUnBiV1VpT2pFM09URTFNemM0T1RVdU1IMHNl"
+    "eUpoZEhSbGJYQjBJam94TENKcWIySmZhV1FpT2pFeE16WXlORGc0TmpRNE5Td2lhMmx1"
+    "WkNJNkltRmpkSFZoYkY5cWIySmZZMjl0Y0d4bGRHbHZibDlWVUZCRlVsOUNUMVZPUkY5"
+    "dWIzUmZjSFZpYkdsemFHVnlYM2RwY21VaUxDSnlkVzVmYVdRaU9qTTNPRFk1TkRrNU5q"
+    "TXpMQ0owYVcxbElqb3hOemt4TlRBNU16Z3dMakI5TEhzaVlYUjBaVzF3ZENJNk1Td2lh"
+    "bTlpWDJsa0lqb3hNVE0yTWpNNU9UZzJNek1zSW10cGJtUWlPaUpoWTNSMVlXeGZhbTlp"
+    "WDJOdmJYQnNaWFJwYjI1ZlZWQlFSVkpmUWs5VlRrUmZibTkwWDNCMVlteHBjMmhsY2w5"
+    "M2FYSmxJaXdpY25WdVgybGtJam96TnpnMk9UUTNPRE15TlN3aWRHbHRaU0k2TVRjNU1U"
+    "VXdPVEUzTWk0d2ZWMHNJbVp5WlhOb1gyaHBjM1J2Y25sZmMyaGhNalUySWpvaU1HUmxP"
+    "REUyTURZNFlqWTVNRE5qTm1Sa1ptRTBaR1U1WWpZMVltWTROV1psTXpkak9HTTVObVUw"
+    "Wmpsa05XUTVNV016TlRjMU0yTXdOVEUxWmpKaE5pSXNJbTFsZEdGa1lYUmhYM05vWVRJ"
+    "MU5pSTZJakEyTkRoaFl6STRZVFZsTVdVMVpqUTJaamMzWVRZNU9XSmhOVFEyWXpKall6"
+    "WmtNamMwTkRnek1URXpOemcwTmpnM1pXRXpZalpsTTJKbE1EZ3lPVElpTENKdmNtbG5h"
+    "VzVoYkY5c1pXZGhZM2xmYjJKelpYSjJZWFJwYjI0aU9uc2lZMjlzYkdWamRHbHZibDlz"
+    "YjJOclgySmxabTl5WlY5bGJuUnllU0k2ZXlKemRHRjBkWE1pT2lKT1QxOVBVa2xIU1U1"
+    "QlRGOURUMHhNUlVOVVNVOU9YMHhQUTB0ZlNVNWZRa0ZUUlV4SlRrVWlmU3dpYm1GdFpY"
+    "TndZV05sSWpvaWQySnBMWEIxWW14cGMyaGxjaTF3WVdOcGJtY2lMQ0p6ZEdGMGRYTWlP"
+    "aUpCUWxORlRsUmZUazlVWDFwRlVrOWZTRWxUVkU5U1dTSjlMQ0p6ZEdGMGRYTWlPaUpT"
+    "VDA5VVgxSkZRVVJQVGt4WlgwWlZURXd5TjE5S1QwSlRYMHhGUjBGRFdWOU5SVlJCUkVG"
+    "VVFWOU5RVmhmVUZKUFVFOVRRVXdpTENKMWJtdHViM2R1WDJOdmJuTjBjbUZwYm5Seklq"
+    "b2lkVzVzYjJkblpXUWdhR2x6ZEc5eWFXTmhiQ0J3ZFdKc2FYTm9aWElnWVdOalpYTnpM"
+    "M0psWm5WellXd3ZOREk1SUdobFlXUmxjbk1nY21WdFlXbHVJSFZ1YTI1dmQyNDdJSHBs"
+    "Y204Z2IySnpaWEoyWldRZ2MzUnlhV3RsY3lCdmJteDVJR0ZtZEdWeUlHVjRjR3hwWTJs"
+    "MElIUnlZVzV6YVhScGIyNGlmU3dpYzNSaGNuUnpJanBiTVRjNU5EZzFNVGMzTmk0d05E"
+    "RTBNakk0TERFM09UUTROVEUzT1RJdU5USTVNREk0WFN3aWFXNTBaWEoyWVd3aU9qRXlM"
+    "aklzSW5WdWRHbHNJam94TnprME9EVXhOekExTGpBMk1qWXhOelVzSW5CaFoyVmZaMkZ3"
+    "SWpvek1Dd2lZMjl0Y0d4bGRHVmtJam94TnprME9EVXhOemt6TGpjME5ESTROamdzSW1s"
+    "dWRtVnVkRzl5ZVY5amIyMXdiR1YwWldRaU9qRTNPVE14T1RZMU1URXVNRFExTmpNMkxD"
+    "SmliRzlqYTJWa0lqcDBjblZsTENKcGJsOW1iR2xuYUhRaU9tWmhiSE5sTENKc1pXZGhZ"
+    "M2xmTkRJNVgyaHBjM1J2Y25raU9pSjFibXR1YjNkdUlpd2liMkp6WlhKMlpXUmZOREk1"
+    "WDNOcGJtTmxYM1J5WVc1emFYUnBiMjRpT2pBc0luSmhkR1ZmYkdsdGFYUmZkVzUwYVd3"
+    "aU9qQXNJbTlpYzJWeWRtVmtYMkYwSWpveE56azBPRFV4TnprekxqYzBOREk0TmpoOSJ9"
+    "LCJyZXNlYXJjaF9wcm92ZW5hbmNlIjp7ImJhc2VsaW5lX2NvbGxlY3Rpb25fbG9jayI6"
+    "Ik5PX09SSUdJTkFMX0NPTExFQ1RJT05fTE9DS19JTl9CQVNFTElORSIsImNvbXBsZXRl"
+    "X2F0dGVtcHRzIjoyNywiZGF0YV9zb3VyY2VfcGluIjoiYTY3MTNlNDE5YTFmZGNhMzI5"
+    "OWQ2MGNlODEwODBkNGQzMjIzYmMwNyIsImV4ZWN1dGVkX2pvYl9jb21wbGV0aW9uX3Vw"
+    "cGVyX2JvdW5kcyI6W3siYXR0ZW1wdCI6MSwiam9iX2lkIjoxMTY1MjAzMzExODMsImtp"
+    "bmQiOiJhY3R1YWxfam9iX2NvbXBsZXRpb25fVVBQRVJfQk9VTkRfbm90X3B1Ymxpc2hl"
+    "cl93aXJlIiwicnVuX2lkIjozODc2MzQxOTQ5MywidGltZSI6MTc5MjA4MDEwOS4wfSx7"
+    "ImF0dGVtcHQiOjEsImpvYl9pZCI6MTE2Mzc2MTA2MTYyLCJraW5kIjoiYWN0dWFsX2pv"
+    "Yl9jb21wbGV0aW9uX1VQUEVSX0JPVU5EX25vdF9wdWJsaXNoZXJfd2lyZSIsInJ1bl9p"
+    "ZCI6Mzg3MjEyNTk2MTIsInRpbWUiOjE3OTIwNjEwNDMuMH0seyJhdHRlbXB0IjoxLCJq"
+    "b2JfaWQiOjExNjQyMjE5MzQ3OCwia2luZCI6ImFjdHVhbF9qb2JfY29tcGxldGlvbl9V"
+    "UFBFUl9CT1VORF9ub3RfcHVibGlzaGVyX3dpcmUiLCJydW5faWQiOjM4NzIwMDg0MTI5"
+    "LCJ0aW1lIjoxNzkyMDY3NjIzLjB9LHsiYXR0ZW1wdCI6MSwiam9iX2lkIjoxMTYzMDc0"
+    "Njk1NzMsImtpbmQiOiJhY3R1YWxfam9iX2NvbXBsZXRpb25fVVBQRVJfQk9VTkRfbm90"
+    "X3B1Ymxpc2hlcl93aXJlIiwicnVuX2lkIjozODY5OTUzNTc2NiwidGltZSI6MTc5MjA1"
+    "MDM2MC4wfSx7ImF0dGVtcHQiOjEsImpvYl9pZCI6MTE2MjU1NTczNzc5LCJraW5kIjoi"
+    "YWN0dWFsX2pvYl9jb21wbGV0aW9uX1VQUEVSX0JPVU5EX25vdF9wdWJsaXNoZXJfd2ly"
+    "ZSIsInJ1bl9pZCI6Mzg2ODQyMzU4NDAsInRpbWUiOjE3OTIwNDA2OTMuMH0seyJhdHRl"
+    "bXB0IjoxLCJqb2JfaWQiOjExNjE1NjY1NTk4MCwia2luZCI6ImFjdHVhbF9qb2JfY29t"
+    "cGxldGlvbl9VUFBFUl9CT1VORF9ub3RfcHVibGlzaGVyX3dpcmUiLCJydW5faWQiOjM4"
+    "NjUzMTg1OTYyLCJ0aW1lIjoxNzkyMDIwMDgwLjB9LHsiYXR0ZW1wdCI6MSwiam9iX2lk"
+    "IjoxMTYwMzYxODI5NDYsImtpbmQiOiJhY3R1YWxfam9iX2NvbXBsZXRpb25fVVBQRVJf"
+    "Qk9VTkRfbm90X3B1Ymxpc2hlcl93aXJlIiwicnVuX2lkIjozODYxNzQ3OTcyMiwidGlt"
+    "ZSI6MTc5MjAwMzU4Mi4wfSx7ImF0dGVtcHQiOjEsImpvYl9pZCI6MTE1ODkwMDY4Mjcy"
+    "LCJraW5kIjoiYWN0dWFsX2pvYl9jb21wbGV0aW9uX1VQUEVSX0JPVU5EX25vdF9wdWJs"
+    "aXNoZXJfd2lyZSIsInJ1bl9pZCI6Mzg1NzUxMTk1MDEsInRpbWUiOjE3OTE5ODU5OTgu"
+    "MH0seyJhdHRlbXB0IjoxLCJqb2JfaWQiOjExNTc2Mjk5ODE4Niwia2luZCI6ImFjdHVh"
+    "bF9qb2JfY29tcGxldGlvbl9VUFBFUl9CT1VORF9ub3RfcHVibGlzaGVyX3dpcmUiLCJy"
+    "dW5faWQiOjM4NTM0NzU2NDM1LCJ0aW1lIjoxNzkxOTY3NzEwLjB9LHsiYXR0ZW1wdCI6"
+    "MSwiam9iX2lkIjoxMTU3NDEwMzQyNTEsImtpbmQiOiJhY3R1YWxfam9iX2NvbXBsZXRp"
+    "b25fVVBQRVJfQk9VTkRfbm90X3B1Ymxpc2hlcl93aXJlIiwicnVuX2lkIjozODUzMDUy"
+    "MTE2MywidGltZSI6MTc5MTk2NDE4OC4wfSx7ImF0dGVtcHQiOjEsImpvYl9pZCI6MTE1"
+    "NjAwMTk3MDQyLCJraW5kIjoiYWN0dWFsX2pvYl9jb21wbGV0aW9uX1VQUEVSX0JPVU5E"
+    "X25vdF9wdWJsaXNoZXJfd2lyZSIsInJ1bl9pZCI6Mzg0ODYxNTYzOTUsInRpbWUiOjE3"
+    "OTE5MzUzMzcuMH0seyJhdHRlbXB0IjoxLCJqb2JfaWQiOjExNTUxNzc3MDM4OSwia2lu"
+    "ZCI6ImFjdHVhbF9qb2JfY29tcGxldGlvbl9VUFBFUl9CT1VORF9ub3RfcHVibGlzaGVy"
+    "X3dpcmUiLCJydW5faWQiOjM4NDYxNTY3NTMxLCJ0aW1lIjoxNzkxOTIyODMzLjB9LHsi"
+    "YXR0ZW1wdCI6MSwiam9iX2lkIjoxMTUyMjgwNzk5MDcsImtpbmQiOiJhY3R1YWxfam9i"
+    "X2NvbXBsZXRpb25fVVBQRVJfQk9VTkRfbm90X3B1Ymxpc2hlcl93aXJlIiwicnVuX2lk"
+    "IjozODM3NzA4OTAyOCwidGltZSI6MTc5MTg4NDE3OC4wfSx7ImF0dGVtcHQiOjEsImpv"
+    "Yl9pZCI6MTE1MDI5NTUxMDYzLCJraW5kIjoiYWN0dWFsX2pvYl9jb21wbGV0aW9uX1VQ"
+    "UEVSX0JPVU5EX25vdF9wdWJsaXNoZXJfd2lyZSIsInJ1bl9pZCI6MzgzMTUwNDMxMzYs"
+    "InRpbWUiOjE3OTE4NDMyMDEuMH0seyJhdHRlbXB0IjoxLCJqb2JfaWQiOjExNDc0NTMw"
+    "NzcxNiwia2luZCI6ImFjdHVhbF9qb2JfY29tcGxldGlvbl9VUFBFUl9CT1VORF9ub3Rf"
+    "cHVibGlzaGVyX3dpcmUiLCJydW5faWQiOjM4MjI5NTM0NTAwLCJ0aW1lIjoxNzkxNzk3"
+    "MTk1LjB9LHsiYXR0ZW1wdCI6MSwiam9iX2lkIjoxMTQ2MDY1Mzg1ODUsImtpbmQiOiJh"
+    "Y3R1YWxfam9iX2NvbXBsZXRpb25fVVBQRVJfQk9VTkRfbm90X3B1Ymxpc2hlcl93aXJl"
+    "IiwicnVuX2lkIjozODE4NTQwNTMwMCwidGltZSI6MTc5MTc2MjQ3NC4wfSx7ImF0dGVt"
+    "cHQiOjEsImpvYl9pZCI6MTE0NTQ4OTI0Mzg5LCJraW5kIjoiYWN0dWFsX2pvYl9jb21w"
+    "bGV0aW9uX1VQUEVSX0JPVU5EX25vdF9wdWJsaXNoZXJfd2lyZSIsInJ1bl9pZCI6Mzgx"
+    "NjYxMTY5MTcsInRpbWUiOjE3OTE3NDUzODAuMH0seyJhdHRlbXB0IjoxLCJqb2JfaWQi"
+    "OjExNDQzMzA4MzE5NCwia2luZCI6ImFjdHVhbF9qb2JfY29tcGxldGlvbl9VUFBFUl9C"
+    "T1VORF9ub3RfcHVibGlzaGVyX3dpcmUiLCJydW5faWQiOjM4MTI2OTE2MTEzLCJ0aW1l"
+    "IjoxNzkxNzA5NTMxLjB9LHsiYXR0ZW1wdCI6MSwiam9iX2lkIjoxMTQzNDExNzU0Mzks"
+    "ImtpbmQiOiJhY3R1YWxfam9iX2NvbXBsZXRpb25fVVBQRVJfQk9VTkRfbm90X3B1Ymxp"
+    "c2hlcl93aXJlIiwicnVuX2lkIjozODA5NTc1MzExNiwidGltZSI6MTc5MTY3NTc0NC4w"
+    "fSx7ImF0dGVtcHQiOjEsImpvYl9pZCI6MTE0Mjg1MzY5NDUyLCJraW5kIjoiYWN0dWFs"
+    "X2pvYl9jb21wbGV0aW9uX1VQUEVSX0JPVU5EX25vdF9wdWJsaXNoZXJfd2lyZSIsInJ1"
+    "bl9pZCI6MzgwNzY4MDE0MTQsInRpbWUiOjE3OTE2NTc5MDUuMH0seyJhdHRlbXB0Ijox"
+    "LCJqb2JfaWQiOjExNDI3NDk1MDY3OSwia2luZCI6ImFjdHVhbF9qb2JfY29tcGxldGlv"
+    "bl9VUFBFUl9CT1VORF9ub3RfcHVibGlzaGVyX3dpcmUiLCJydW5faWQiOjM4MDcxODQw"
+    "MjgxLCJ0aW1lIjoxNzkxNjU0NzY0LjB9LHsiYXR0ZW1wdCI6MSwiam9iX2lkIjoxMTQx"
+    "NzQwODg3NzYsImtpbmQiOiJhY3R1YWxfam9iX2NvbXBsZXRpb25fVVBQRVJfQk9VTkRf"
+    "bm90X3B1Ymxpc2hlcl93aXJlIiwicnVuX2lkIjozODAzODU3MjYwNiwidGltZSI6MTc5"
+    "MTYyMTc1MC4wfSx7ImF0dGVtcHQiOjEsImpvYl9pZCI6MTE0MDc5NDgwNjA5LCJraW5k"
+    "IjoiYWN0dWFsX2pvYl9jb21wbGV0aW9uX1VQUEVSX0JPVU5EX25vdF9wdWJsaXNoZXJf"
+    "d2lyZSIsInJ1bl9pZCI6MzgwMDc0NzAxMDQsInRpbWUiOjE3OTE1OTA5MDguMH0seyJh"
+    "dHRlbXB0IjoxLCJqb2JfaWQiOjExMzk5MTY0NTQ4Mywia2luZCI6ImFjdHVhbF9qb2Jf"
+    "Y29tcGxldGlvbl9VUFBFUl9CT1VORF9ub3RfcHVibGlzaGVyX3dpcmUiLCJydW5faWQi"
+    "OjM3OTgxMTM1NjU4LCJ0aW1lIjoxNzkxNTc0NjcxLjB9LHsiYXR0ZW1wdCI6MSwiam9i"
+    "X2lkIjoxMTM3NTQ3OTUyNTksImtpbmQiOiJhY3R1YWxfam9iX2NvbXBsZXRpb25fVVBQ"
+    "RVJfQk9VTkRfbm90X3B1Ymxpc2hlcl93aXJlIiwicnVuX2lkIjozNzkwOTk4MDMxMiwi"
+    "dGltZSI6MTc5MTUzNzg5NS4wfSx7ImF0dGVtcHQiOjEsImpvYl9pZCI6MTEzNjI0ODg2"
+    "NDg1LCJraW5kIjoiYWN0dWFsX2pvYl9jb21wbGV0aW9uX1VQUEVSX0JPVU5EX25vdF9w"
+    "dWJsaXNoZXJfd2lyZSIsInJ1bl9pZCI6Mzc4Njk0OTk2MzMsInRpbWUiOjE3OTE1MDkz"
+    "ODAuMH0seyJhdHRlbXB0IjoxLCJqb2JfaWQiOjExMzYyMzk5ODYzMywia2luZCI6ImFj"
+    "dHVhbF9qb2JfY29tcGxldGlvbl9VUFBFUl9CT1VORF9ub3RfcHVibGlzaGVyX3dpcmUi"
+    "LCJydW5faWQiOjM3ODY5NDc4MzI1LCJ0aW1lIjoxNzkxNTA5MTcyLjB9XSwiZnJlc2hf"
+    "aGlzdG9yeV9zaGEyNTYiOiIwZGU4MTYwNjhiNjkwM2M2ZGRmYTRkZTliNjViZjg1ZmUz"
+    "N2M4Yzk2ZTRmOWQ1ZDkxYzM1NzUzYzA1MTVmMmE2IiwibWV0YWRhdGFfc2hhMjU2Ijoi"
+    "MDY0OGFjMjhhNWUxZTVmNDZmNzdhNjk5YmE1NDZjMmNjNmQyNzQ0ODMxMTM3ODQ2ODdl"
+    "YTNiNmUzYmUwODI5MiIsIm9yaWdpbmFsX2xlZ2FjeV9vYnNlcnZhdGlvbiI6eyJjb2xs"
+    "ZWN0aW9uX2xvY2tfYmVmb3JlX2VudHJ5Ijp7InN0YXR1cyI6Ik5PX09SSUdJTkFMX0NP"
+    "TExFQ1RJT05fTE9DS19JTl9CQVNFTElORSJ9LCJuYW1lc3BhY2UiOiJ3YmktcHVibGlz"
+    "aGVyLXBhY2luZyIsInN0YXR1cyI6IkFCU0VOVF9OT1RfWkVST19ISVNUT1JZIn0sInN0"
+    "YXR1cyI6IlJPT1RfUkVBRE9OTFlfRlVMTDI3X0pPQlNfTEVHQUNZX01FVEFEQVRBX01B"
+    "WF9QUk9QT1NBTCIsInVua25vd25fY29uc3RyYWludHMiOiJ1bmxvZ2dlZCBoaXN0b3Jp"
+    "Y2FsIHB1Ymxpc2hlciBhY2Nlc3MvcmVmdXNhbC80MjkgaGVhZGVycyByZW1haW4gdW5r"
+    "bm93bjsgemVybyBvYnNlcnZlZCBzdHJpa2VzIG9ubHkgYWZ0ZXIgZXhwbGljaXQgdHJh"
+    "bnNpdGlvbiJ9LCJzY2hlbWEiOjQsInN0YXJ0cyI6WzE3OTMyODMyMTIuOTYxNzU1OCwx"
+    "NzkzMjgzMjU2LjAxODQ3ODQsMTc5NDg1MTcwNS4wNjQ2NzAzLDE3OTQ4NTE3NzYuMDQx"
+    "NDIyOCwxNzk0ODUxNzkyLjUyOTAyOCwxNzk0ODU0NjYyLjM4MTg3MzQsMTc5NDg1NDcy"
+    "OS4zNDQ2OTYsMTc5NDg1NDc2My42NzQyMTk2LDE3OTQ4NTQ3OTYuMjg2MjcxNiwxNzk0"
+    "ODk5OTEzLjQ0MjI5NjUsMTc5NDg5OTk3Mi4wNTE3NTQ3LDE3OTQ4OTk5ODcuMTU0NjE2"
+    "NiwxNzk0OTAwMDAyLjEyMzA3MSwxNzk0OTAwMDE4LjAxMjY5NTYsMTc5NDkwMDAzMi4y"
+    "MTA5NzM3LDE3OTQ5MDAwNDYuMTEyMDQxLDE3OTQ5MDAwNjIuNjAwNzQ4LDE3OTQ5MDAw"
+    "NzYuNjMxODY5NiwxNzk0OTAwNjYxLjUzMzA1MTUsMTc5NDkwMDcyMi42MzMzNzQ3LDE3"
+    "OTQ5MDA3MzguMjE5MTA0LDE3OTQ5MDA3NTIuOTQyOTQ4OCwxNzk0OTAwNzY4LjYxODY0"
+    "NCwxNzk0OTAwNzg1LjIwNjA1MSwxNzk0OTAwODAwLjc2NzE5NTIsMTc5NDkwMDgxNS4x"
+    "MTcwNjY0LDE3OTQ5MDA4MjguODgxOTY2NCwxNzk0OTAwODQzLjExMzYyNDgsMTc5NDkw"
+    "MDg1Ny4xMjkyMjIyLDE3OTQ5MDA4NzIuMDI5MjI0OSwxNzk0OTAwODg1LjgyNzgzODcs"
+    "MTc5NDkwMDg5OS43NTE2MjgsMTc5NDkwMTEwNi41MzE1ODM1LDE3OTQ5MDExNjQuOTgz"
+    "Nzc2LDE3OTQ5MDIzNDguODIyNzM5NiwxNzk0OTAyNDA3LjQ3NTQxMzYsMTc5NDkwMjQ0"
+    "MC45MzM2NDQzLDE3OTQ5MDI0NzIuMzkwNzY4LDE3OTQ5MDI0ODYuMjU5NDg4LDE3OTQ5"
+    "MDI1MDEuMDM4MjE1NiwxNzk0OTAyNTE0LjkwMDE3MTUsMTc5NDkwMjUzMC44MjIxODUz"
+    "LDE3OTQ5MDI1NDUuMDgyOTE0NCwxNzk0OTAyNTU5LjYxNDgyOTMsMTc5NDkwMjU3NC42"
+    "NDYyNDU3LDE3OTQ5MDI1OTAuMTQ1MDQwMywxNzk0OTAyNjA4LjIyMzI0MTMsMTc5NDkw"
+    "MjYyNS4wOTA4MTY1LDE3OTQ5MDI2NDAuODkzOTc4LDE3OTQ5MDI2NTcuNTMwMjg0Niwx"
+    "Nzk0OTAyNjcxLjMyNDI1MzYsMTc5NDkwMjY4NS4zMDA4ODE2LDE3OTQ5MDI2OTkuMzY1"
+    "NTc5OCwxNzk0OTAyNzEzLjEzNDg1MDcsMTc5NDkwMjcyNy4zMTU2Mzc4LDE3OTQ5MDI3"
+    "NDEuMTI0NDEwNCwxNzk0OTAyNzU0LjgzMDU4MjYsMTc5NDkwMjc2OC42OTE0NzEzLDE3"
+    "OTQ5MDI3ODIuNTM5ODY4XSwidW50aWwiOjE3OTQ5MDIzNDguODIwMDc3NH0="
+)
+
+
+def reviewed_wbi_handoff():
+    """Decode only the exact independently reviewed complete native MAX."""
+    decision = _WBI_HANDOFF_DECISION
+    if (
+        not isinstance(decision, dict)
+        or set(decision) != {
+            "schema", "source", "evidence", "state_sha256",
+            "native_sha256", "witness_sha256",
+        }
+        or type(decision["schema"]) is not int
+        or decision["schema"] != 1
+        or decision["source"] != SOURCE_ID
+        or decision["state_sha256"] != _WBI_HANDOFF_SHA256
+        or decision["native_sha256"] != _WBI_HANDOFF_NATIVE
+        or decision["witness_sha256"] != _WBI_HANDOFF_WITNESSES
+        or not isinstance(decision["evidence"], str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/373"
+            r"#issuecomment-[1-9][0-9]*", decision["evidence"]
+        )
+    ):
+        raise AdapterError("WBI native MAX handoff is unapproved", "access")
+    try:
+        raw = base64.b64decode(_WBI_HANDOFF_BYTES, validate=True)
+        if (
+            not 0 < len(raw) <= 16384
+            or hashlib.sha256(raw).hexdigest() != _WBI_HANDOFF_SHA256
+        ):
+            raise ValueError()
+        state = validate_budget(json.loads(raw))
+        if (
+            state["schema"] != 4 or not state["blocked"]
+            or state["in_flight"]
+            or state["refusal_scope"]["additional_holds"]
+        ):
+            raise ValueError()
+    except (ValueError, TypeError, KeyError):
+        raise AdapterError("WBI native MAX payload changed", "access") from None
+    return state
+
+
 def restore_family_artifact():
     """Exact reviewed zero-artifact ancestry, then strict newest owned state."""
     global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
-    global _VERIFIED_REMOTE_CREATE
+    global _VERIFIED_REMOTE_CREATE, _STARTUP_QUIET_UNTIL
     _STATE_TRUSTED = False
+    _STARTUP_QUIET_UNTIL = None
     latest = latest_family_run()
+    raw_latest = latest
     run_id, attempt, source = latest
     if run_id in _LEGACY_ATTEMPTS:
-        expected = {
-            (identity, 1): (value["head_sha"], value["workflow_id"])
-            for identity, value in _LEGACY_ATTEMPTS.items()
-        }
-        if (
-            latest != (38763419493, 1, SOURCE_ID)
-            or _SCANNED_HISTORY != expected
-        ):
-            raise AdapterError(
-                "Reviewed complete legacy history changed", "access"
-            )
-        for identity, value in _LEGACY_ATTEMPTS.items():
-            if (
-                _SCANNED_JOB_DIGESTS.get((identity, 1, 1))
-                != value["jobs_sha256"]
-            ):
-                raise AdapterError(
-                    "Reviewed exact legacy jobs changed", "access"
-                )
-            artifacts = workflow_api(
-                f"/actions/runs/{identity}/artifacts?per_page=100"
-            )
-            if (
-                artifacts.get("total_count") != 0
-                or artifacts.get("artifacts") != []
-            ):
-                raise AdapterError(
-                    "Reviewed zero-artifact history changed", "access"
-                )
-        incoming = reviewed_migration_state()
+        raise AdapterError("Modern owned WBI artifact required", "access")
     else:
-        value = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+        latest, value, recovery_bound = restoration_owner(latest)
+        run_id, attempt, source = latest
         artifacts = value.get("artifacts")
         if (
             not isinstance(artifacts, list)
@@ -5972,11 +6792,20 @@ def restore_family_artifact():
             or not re.fullmatch(r"sha256:[0-9a-f]{64}", item.get("digest", ""))
         ):
             raise AdapterError("Newest artifact binding invalid", "access")
-        incoming = download_inert_artifact(latest, item["id"], item["digest"])
+        incoming = preserve_recovery_bounds(
+            download_inert_artifact(latest, item["id"], item["digest"]),
+            recovery_bound,
+        )
+    # This never replaces ownership: the exact modern decoder ran above.
+    incoming = merge_budget(incoming, reviewed_wbi_handoff())
     _VERIFIED_REMOTE_CREATE = incoming
     try:
         with locked_budget():
             local = load_budget()
+            if (local["schema"] == 3 and local["blocked"]
+                    and _WBI_SCOPE_DECISION is not None):
+                local = wbi_migrate_scope(_JOURNAL_ACK[1])
+            local = wbi_upgrade_scope(local, _JOURNAL_ACK[1])
             combined = merge_budget(local, incoming)
             combined["until"] = max(combined["until"], time.time() + 60)
             write_budget(combined)
@@ -5984,12 +6813,13 @@ def restore_family_artifact():
                 raise AdapterError("Unsettled newest publisher state", "access")
     finally:
         _VERIFIED_REMOTE_CREATE = None
-    _RESTORED_LATEST = latest
+    _RESTORED_LATEST = raw_latest
     _RESTORED_HISTORY = (
         copy.deepcopy(_SCANNED_HISTORY),
         copy.deepcopy(_SCANNED_JOB_DIGESTS),
         copy.deepcopy(_ATTEMPT_HEADS),
     )
+    _STARTUP_QUIET_UNTIL = time.monotonic() + 60
     _RESTORED = _STATE_TRUSTED = True
 
 
@@ -6101,11 +6931,12 @@ def start_source_phase():
 def page(url):
     global _INVENTORY_ACTIVE
     previous = _INVENTORY_ACTIVE
-    inventory = {
-        value for key, value in PAGES.items()
-        if key.startswith("listing") or key.startswith("category")
+    inventory_paths = {
+        urllib.parse.urlsplit(value).path for value in _WBI_DYNAMIC_ROOTS
     }
-    _INVENTORY_ACTIVE = previous or url in inventory
+    _INVENTORY_ACTIVE = previous or (
+        urllib.parse.urlsplit(url).path in inventory_paths
+    )
     try:
         check_deadline()
         delay = check_robots(url)

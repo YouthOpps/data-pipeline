@@ -191,7 +191,10 @@ renewal is needed. Missing or inconsistent proof fails closed.
 
 Every guarded publication call and the current-job proof call on the reviewed
 Ubuntu/Python path has a total alarm guard of at most 30 seconds, plus a
-remaining-time socket timeout, including its bounded body read. Existing or
+remaining-time socket timeout, including its bounded body read. A deadline
+rearms a fixed 250-millisecond cancellation grace so a stalled response close
+cannot outlive unwinding. This grace grants no additional collection or
+publication time. Existing or
 unsupported timers stop before transport. Writes and retry waits stop 60
 seconds before the job deadline, final outcome reads stop 30 seconds before
 it, leaving a cleanup/export allowance. These publication reserves do not
@@ -213,6 +216,10 @@ Validation uses inert external controls; no source fetch, GitHub test write or
 production invocation is claimed.
 
 ## Durable pacing migration (#305)
+
+The earlier transitions in this section are historical evidence. Issue #387
+below supersedes the environment-based maintenance approval; copying its old
+JSON cannot activate the current source-committed native MAX gate.
 
 This implementation remains nonpublishing preparation. The maintainer approved
 only the first LOCAL transition in [decision 6208426057](https://github.com/YouthOpps/data-pipeline/issues/305#issuecomment-6208426057).
@@ -286,8 +293,8 @@ Proof/restore/initial snapshot receive at most 30/180/120 seconds, subject to
 remaining reserves. Success publication and one nonrenewing failure owner each
 reserve 180 seconds, with 30 seconds for export. Failure ownership starts before
 the first fallback snapshot and covers all later fallback reads, writes and
-outcome handling. No competing outer alarm is installed over the unchanged
-per-call publication alarms. No Harno-style publisher cooldown is introduced;
+outcome handling. No competing outer alarm is installed over the existing
+per-call publication deadlines. No Harno-style publisher cooldown is introduced;
 the snapshot allocation is unrelated to source request pacing.
 
 Owned artifact output retains original directory/file identities through
@@ -421,25 +428,122 @@ is certified here. Root owns the reviewed corrective merge and controlled
 activation before its sole automatic run.
 
 
-## Header-only HTTP 429 stop — issue #328
+## Assessed HTTP 429 and REP boundaries — issue #387
 
-A received publisher HTTP 429 now stops after the existing header constraints
-are retained, before reading any response body. The response must close
-successfully before this intentional stop is assessed. A close or persistence
-failure follows the existing failure handling; they cannot establish a healthy
-collection. Previously retained holds, numeric MAX constraints, Retry-After
-and unknown history remain. An unread 429 body provides no new challenge
-classification.
+This section supersedes the issue #328 header-only stop. Received
+HTTP 429 first durably retains adaptive doubling, strike count and
+minimum embargo. Every Retry-After value contributes its supported
+MAX before body reads. Recognized positive but unrepresentable holds
+stop unassessed and pending, retaining both adaptive constraints and any other
+supported larger header. No deliberate rate-limit request is made.
 
-This paragraph supersedes earlier 429 body-inspection descriptions. This
-conditional repair preserves non-429 responses, REP selection, the full
-collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
-caps, workflow, state schema and finite migration markers. It does not add
-missing pending ownership or upgrade a legacy source to a modern continuity
-protocol.
+The bounded body is then inspected for visible challenges, including
+literal robots responses. An ordinary throttle settles a timed stop
+only after complete body assessment and verified closure; a visible
+challenge retains a durable blocked hold. Read, close, header or REP
+assessment failures remain pending and sticky. A deadline also marks a body
+whose close is incomplete as unassessed, preserving its pending owner without
+a fabricated completion receipt. Successfully verified
+original owned pending journals are retained without fabricated
+completion receipts. Storage-integrity failures cannot use this exception.
 
-Private ordinary transport/state controls and protected normal-AST comparisons
-qualify this change. Earlier genuine native evidence retains its original code
-and date attribution; no new publisher collection, current factual review,
-complete native replay or production run is claimed. The maintainer alone owns
-workflow/state coordination and the maintenance rollout for issue #328.
+Successful robots responses require plain-text MIME and structurally
+valid REP, while empty/comment-only policies remain valid. Applicable
+fractional numeric policies are retained, including a supported 600.5-second
+delay. Malformed or unrepresentable applicable timing cannot silently
+fall back to the ordinary interval. Group specificity and existing stronger
+publisher constraints remain unchanged. No new policy permission is inferred.
+
+## Owned-state continuity recovery — issue #387
+
+The actual modern owner is run `40921676739/1`. Its original artifact
+`12919351309` is 653 bytes, SHA256
+`c79282a0961d93a0bcef0d2c0fe694c4dd66c22c9f633063898a466c04ff28b0`.
+It contains healthy, settled schema-3 state with five rolling starts and
+retained unknown historical rate/policy information. Recovery restores that
+archive through the original owner/digest/ZIP validation and merges the
+existing approved MAX state. It does not create a fresh allowance.
+
+All 65 family runs and their complete exact job/artifact inventories were
+reviewed. The 18 later failed attempts exported no artifacts: the first
+seven-second job failed its publication deadline proof before collection;
+the other 17 failed during restoration of the newest owned artifact.
+Several lasted 60–66 seconds, so their exact immutable code and actual
+pre-access error stages establish the finite proof, not a blanket duration
+assumption. Complete run/head/job/time/code/zero-artifact pins are required.
+Administrative completion bounds remain conservative observations,
+not invented physical starts. Retired legacy transitions cannot
+replace the established modern owner when its history is absent.
+
+Future artifactless attempts are omitted only after positive hosted proof:
+a failed first attempt, a sole failed collect job shorter than 58 seconds,
+authenticated executing-source bytes, the reviewed production workflow and
+complete zero-artifact inventory. A monotonic 60-second startup floor is
+established after full state restoration and rechecked before actual sends.
+Wall-clock changes cannot release that gate. Unknown, longer, rerun,
+changed-code/workflow or missing-owner histories remain fail closed.
+
+GitHub metadata GETs have at most three transient retries within frozen
+phase deadlines. Safe diagnostics expose API route/status and numeric
+rate metadata or transport class, never bodies, credentials or
+query strings. A missing historical file returns a negative proof
+only in optional current-code eligibility; required proofs, other
+HTTP errors and a newest unowned missing-file attempt still block.
+Offline hosted-history controls use authenticated file metadata for all
+23 real historical heads, rather than assuming arbitrary heads contain
+the current source.
+
+This continuity change preserves publisher policy, discovery, exclusions,
+parsing, stable IDs, date interpretation and expiry cleanup. Genuine native
+collection, current consumer acceptance, final local MAX handoff and actual
+production/live-site verification remain separate acceptance steps; no new
+publisher collection or output count is claimed by the offline controls.
+
+Local collection requires the existing nonempty family journal and both locks.
+The verified directory and journal remain pinned before remote restoration;
+missing, empty, replaced or pending local state cannot bootstrap an older owned
+artifact. A missing whole family directory is refused without recreating it.
+Fresh hosted state still requires the authenticated owned remote restoration.
+Any exceptional first local initialization is a separately reviewed, exclusive
+machine/source-bound transition retaining the exact owned state and all proved
+administrative completion bounds; it is not an adapter bootstrap option.
+
+## Current full-native and committed MAX handoff (#387)
+
+The genuine complete nonpublishing test at source SHA256 `02000605281fd6e801b3b0c705cb528a6104c17d474961702ee665a7ec1328fa`
+passed with 25 complete HTTP 200 responses, 24 programme/sitemap documents and
+33 validated raw records. Independent full-input replay reproduced every
+material record field; the current website consumer accepted 33 raw, 30
+filtered and zero valid-empty IDs. The three excluded records are the explicitly
+closed Arctic Initiative III and the two Danish Inger tracks with their own
+passed 2023/2024 application clause. Undated future reopening announcements and
+the American Inger tracks' externally delegated deadlines remain unknown.
+The 30 retained IDs match the previous publication; this restores fresh source
+health rather than claiming 30 newly discovered programmes.
+
+All 221 actual raw journal witnesses were independently verified. The settled
+final journal SHA256 is `fd86373f69a5565a65cfe76c2918cc3e33fa993b1c8075a1acd255cfde00fa0d`.
+The proposed committed MAX unions all observed native reservations, the exact
+858-byte initialization and 18 administrative completion bounds, and the full
+previous issue #305 environment approval. It retains 181 timing values in the
+`starts` field and both unknown-history flags in a 4,002-byte state. The 151
+legacy conservative observations are not 151 proven publisher requests; this
+native performed exactly 25 physical requests. No earlier stronger
+constraint or protective observation is discarded. Intermediate observed
+owners have actual later settlements; unresolved incoming owners and holds are
+never cleared by this baseline.
+
+`_HOSTED_NATIVE_MAX` remains OFF until a separate maintainer approves the exact
+candidate under issue #387. The loader validates its source/family, genuine
+native source/journal identities, exact canonical state digest and public
+decision before merging restrictions. It is reached only after the newest
+applicable owned artifact has passed original history, owner, digest and ZIP
+checks. Missing or invalid remote ownership never falls back to the committed
+MAX. Every later modern owner still restores normally, and its stronger limits,
+refusals, pending identities and unknown history prevail.
+
+The obsolete workflow environment bootstrap is removed; the sole application
+command, existing daily schedule and serialized family remain unchanged. Native
+acceptance and committed handoff readiness do not establish successful hosted
+publication or live indexing. Those require the actual post-merge producer,
+owned artifact, data-source pair and website verification.

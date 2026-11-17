@@ -405,3 +405,45 @@ qualify this change. Earlier genuine native evidence retains its original code
 and date attribution; no new publisher collection, current factual review,
 complete native replay or production run is claimed. The maintainer alone owns
 workflow/state coordination and the maintenance rollout for issue #328.
+
+
+The first merged production attempt, `44037339739/1`, failed while reading
+GitHub workflow metadata before `main()` entered `run_body()`. Its full log
+reported `Workflow pacing state unavailable`; the sole collect job ran for
+66 seconds and exported no artifact. This does not establish an HTTP status,
+rate limit, or publisher failure. The exact immutable head, source/workflow
+blobs, job identity and timestamps, and empty artifact inventory are separately
+reviewed pre-access evidence; this attempt is not covered by the generic
+58-second proof. It continues from the same actual owned artifact and the
+54-point local MAX approval, retaining all completion bounds and restrictions.
+
+Metadata GETs now try at most three times for transport errors and selected
+transient HTTP statuses, within the existing execution/phase deadlines.
+Server Retry-After holds are respected; unsupported or longer holds stop
+without a premature retry. Permanent HTTP failures and invalid JSON stop.
+Failure messages expose the bounded API route, HTTP status, numeric rate-limit
+metadata, or transport exception class. They omit query strings, response
+bodies, credentials and signed locations. These diagnostics establish the
+actual failure on a later attempt instead of guessing its cause. Publisher
+collection, expiry decisions, and the reviewed native result are unchanged.
+
+
+The actionable diagnostic from attempt `44039351512/1` established HTTP 404
+for the adapter contents route, with 4,554 API requests still available.
+Authenticated inspection confirms that old failed eight-second run
+`37776255637/1` at commit `18acb393d6f8a8baa4eb36a33678017e51943c40`
+predates this adapter file. Optional generic short-job eligibility previously
+tried to read that absent file and aborted restoration. The earlier offline
+metadata fixture incorrectly supplied a matching file for every unknown
+historical head; it now models this real historical 404 explicitly.
+
+Only the optional short-job code proof treats HTTP 404 as a negative proof.
+That historical run remains in the complete ancestry and is never omitted;
+a newest run with the same missing-file condition still blocks missing-state
+restoration. Required code proofs, other HTTP statuses and transport failures
+remain errors. The second exact production failure has its own immutable
+head/source/workflow/job/time/empty-artifact binding; its 62-second duration
+is not treated as a generic short job. Strict hosted restoration across all
+63 completed actual attempts retains all 19 no-access completion bounds,
+the actual owned artifact and the complete 54-point MAX seed. No new publisher
+collection is claimed by these offline controls.

@@ -351,8 +351,13 @@ Ubuntu/Python path has a total alarm guard of at most 30 seconds, plus a
 remaining-time socket timeout, including its bounded body read. Unowned or
 unsupported timers stop before transport. The source-owned lifecycle alarm
 composes with the original publication call guard without renewing either
-deadline. Writes and retry waits stop 60 seconds before the job deadline,
-final outcome reads stop 30 seconds before it, leaving a cleanup/export
+deadline. Deadline cancellation repeats at 50-millisecond intervals while
+response cleanup unwinds, bounding a blocked close after an interrupted body.
+Nested publication guards retain the earliest active absolute deadline and
+restore that same deadline; neither cleanup nor nesting grants extra time.
+Pending publisher ownership and failed export gates remain effective when
+closure cannot complete. Writes and retry waits stop 60 seconds before the job
+deadline, final outcome reads stop 30 seconds before it, leaving a cleanup/export
 allowance. These publication reserves do not guarantee export after an
 overlong collection, runner death or an uninterruptible native call; the
 existing job timeout remains the outer bound. No API call receives a fresh
@@ -386,10 +391,23 @@ headers, bounded body assessment, closure and applicable policy persistence.
 Cached robots decisions have their own pending policy transaction, even when
 no wire request occurs. A received 429 doubles BOTH CURRENT retained physical
 and inventory gaps, saves its strike count and maximum embargo before reading
-a body, and stops the collection without reading it. A failed response close
-retains the pending owner and cannot enter the connection retry. The embargo
+a body. It then assesses the bounded body and stops the collection; a visible
+verification challenge retains a durable access hold as well as the cooldown.
+Body-read and response-close failures retain the pending owner and cannot enter
+the connection retry. The embargo
 includes at least 1,800 seconds, exponentially increased for observed repeat
-strikes, any longer valid header and all stronger retained constraints.
+strikes, the maximum of every observed Retry-After field and all stronger
+retained constraints. Known status restrictions are saved before header parsing;
+positive unrepresentable timing retains pending state. Successful robots200
+requires one explicit plain-text representation and no HTML body, including
+valid-looking policy lines embedded in HTML. Valid empty and comment-only plain
+policies remain supported. Local collection requires an existing retained family
+namespace; whole-directory loss cannot bootstrap an older remote budget.
+The original journal inode and byte generation remain pinned across metadata
+restoration; replacement or in-place modification stops before publisher access.
+Infrastructure traffic is restricted to the GitHub API and supported signed
+artifact-storage origins. Artifact targets are checked before any destination
+request, and storage requests carry neither API authorization nor cookies.
 Technical body, TLS, storage or policy assessment failures retain unresolved
 pending state and prevent a retry or healthy export. Ordinary typed
 pre-response connection failures retain the original two-attempt bound. A
