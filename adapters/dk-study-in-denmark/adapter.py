@@ -255,14 +255,7 @@ def source_facts(key, root):
             if totals != [len(inventory)]:
                 raise AdapterError("News inventory total mismatch", "parse")
         if key == "events":
-            totals = [
-                v.get("total")
-                for v in state["querystringsearch"]["subrequests"].values()
-            ]
-            if totals != [0]:
-                raise AdapterError(
-                    "New current events require award review", "parse"
-                )
+            review_current_events(state)
         return json.dumps([data.get("title"), inventory], ensure_ascii=False)
     text = view(root).text()
     if key != "privacy":
@@ -448,8 +441,8 @@ CONDITIONS = {
     "news": "6b7eb74dd4909c00b911fc0df9975792432f179a22f9f06814926178cce7a378",
     "events": "1b0b5107f236abc5523e4be8e2a571ed9597c73a03bd0c728b94f3cea0d2fa08",
     "tuition": "af3b10592236d7cb3c1456fe071c533fdca739f5c1535387fa407222f61c2253",
-    "application": "e935d90f388c6a3c1a6d423ec7a1407d6dcb132dfc7f6943b91cc93ca12821d9",
-    "study-types": "13e94bb6180d0cd602f8082dbd91e438e20d9bb76df3d4ae7bce2f36e49eac9d",
+    "application": "372e696f546d25811685a9284d165cd0ee120539c9582e037f72feb2298a5842",
+    "study-types": "7d28c422dfedc7703a47ca1f18b41653025f90ca43805c8ecd8a9ef614c90255",
     "phd": "479e1e4a17f35d589cb09e975fe385b0abf8fad746df9465f1acc244120f9dec",
     "masters": "6cb135e7d7b630f52d1760a069e5784f64b040eb259f06cc1b6085405c5a1ce1",
     "exchange": "539be0c965f42bcd7d2067a4338cdbfbb4c92f9e8194b1560de22561ffa92665",
@@ -636,6 +629,11 @@ def parse_inventory(pages):
     for key, root in pages.items():
         digest = hashlib.sha256(source_facts(key, root).encode()).hexdigest()
         if digest != CONDITIONS[key]:
+            if key in {"application", "study-types"}:
+                raise DataReviewDeferred(
+                    "Source context requires factual review: " + key,
+                    "context-" + key,
+                )
             raise AdapterError(
                 "Source facts/inventory changed: " + key, "parse"
             )
@@ -1165,6 +1163,7 @@ def original_publication_http_guard(deadline):
     previous = signal.getsignal(signal.SIGALRM)
 
     def exhausted(signum, frame):
+        signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
         raise AdapterError("Publication call deadline exhausted", "publish")
 
     try:
@@ -1252,6 +1251,7 @@ def original_prove_publication_window():
         raise ValueError("Invalid job context constant")
 
     proof_stage = "response time headers"
+    proof_stage = "server Date headers"
     try:
         dates = headers.get_all("Date", [])
         ages = headers.get_all("Age", [])
@@ -1275,6 +1275,7 @@ def original_prove_publication_window():
         if len(body) > 65536:
             raise ValueError("Oversized job context")
         proof_stage = "job response JSON"
+        proof_stage = "bounded exact job JSON"
         decoded = json.loads(
             body.decode("utf-8"),
             object_pairs_hook=unique_object,
@@ -1288,6 +1289,7 @@ def original_prove_publication_window():
             or len(decoded["jobs"]) != 1
         ):
             raise ValueError("Incomplete or ambiguous current jobs")
+        proof_stage = "exact running job identity"
         proof_stage = "exact running job identity"
         job = decoded["jobs"][0]
         if (
@@ -1311,6 +1313,7 @@ def original_prove_publication_window():
         ):
             raise ValueError("Current running job identity mismatch")
         proof_stage = "job start timestamp"
+        proof_stage = "UTC job start and fixed remaining budget"
         clock_type = getattr(datetime, "datetime", datetime)
         started = clock_type.fromisoformat(
             job["started_at"].replace("Z", "+00:00")
@@ -2011,7 +2014,12 @@ class PhaseExpired(BaseException):
 
 
 def alarm_expired(signum, frame):
-    raise PhaseExpired()
+    signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
+    for frame in _REQUEST_FRAMES:
+        frame["assessed"] = False
+    error = PhaseExpired()
+    error._response_unassessed = True
+    raise error
 
 
 def arm_alarm(deadline):
@@ -2126,7 +2134,7 @@ def numeric(value):
 
 
 def budget_file():
-    """Admit only an actually new leaf or the existing original namespace."""
+    """Create hosted state only; retain an existing mature local namespace."""
     global _STATE_PATH, _STATE_LOCK, _STATE_DIR_FD, _STATE_DIR_ID
     global _STATE_INITIALIZING
     if _STATE_PATH:
@@ -2144,11 +2152,12 @@ def budget_file():
             raise AdapterError("Temporary parent changed", "access")
         leaf = FAMILY + "-" + str(os.getuid())
         created = False
-        try:
-            os.mkdir(leaf, 0o700, dir_fd=parent)
-            created = True
-        except FileExistsError:
-            pass
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            try:
+                os.mkdir(leaf, 0o700, dir_fd=parent)
+                created = True
+            except FileExistsError:
+                pass
         linked = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
         identity = (linked.st_dev, linked.st_ino)
         descriptor = os.open(
@@ -2293,7 +2302,7 @@ def close_journal():
 
 
 @contextlib.contextmanager
-def locked_budget():
+def locked_budget(*, verify_exit=False):
     """Retain the actual stable lock without relabelling policy body errors."""
     global _JOURNAL_LOCK_ID
     budget_file()
@@ -2333,6 +2342,12 @@ def locked_budget():
         raise
     try:
         yield descriptor
+        if verify_exit:
+            verify_journal()
+    except BaseException:
+        if verify_exit:
+            journal_failure()
+        raise
     finally:
         primary = sys.exc_info()[1]
         _JOURNAL_LOCKS.pop(descriptor, None)
@@ -2379,6 +2394,10 @@ def save_budget(state):
         )
     try:
         state = validate_budget(state)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            retained = production_maintenance_state(state)
+            state.clear()
+            state.update(retained)
         if (
             not state["in_flight"]
             and _ACTIVE_FLIGHT_ID is not None
@@ -2491,8 +2510,48 @@ def secure_file(name, flags):
         raise
 
 
+def http_date_patterns():
+    """Complete HTTP date forms, including obsolete RFC850 and asctime."""
+    day = r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)"
+    weekday = r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)"
+    month = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+    clock = r"[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    return (
+        day + r", *[0-9]{2} " + month + r" [0-9]{4,} " + clock + r" GMT",
+        weekday + r", *[0-9]{2}-" + month + r"-[0-9]{2} " + clock + r" GMT",
+        day + " " + month + r" (?:[0-9]{2}| [0-9]) " + clock
+        + r" [0-9]{4,}",
+    )
+
+
+def parse_http_date(value, now):
+    """Reject email-parser prefixes; only HTTP asctime may imply UTC."""
+    form = next((index for index, pattern in enumerate(http_date_patterns())
+                 if re.fullmatch(pattern, value, re.I)), None)
+    if form is None:
+        return None
+    parsed = parsedate_to_datetime(value)
+    if form == 1:
+        year = int(re.search(r"-([0-9]{2}) ", value)[1])
+        reference = datetime.fromtimestamp(now, timezone.utc)
+        year += reference.year // 100 * 100
+        parsed = parsed.replace(year=year)
+        if (parsed.year, parsed.month, parsed.day, parsed.hour,
+                parsed.minute, parsed.second) > (
+                    reference.year + 50, reference.month, reference.day,
+                    reference.hour, reference.minute, reference.second):
+            parsed = parsed.replace(year=year - 100)
+    if parsed.utcoffset() is None:
+        if form != 2:
+            return None
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed.utcoffset() != timedelta(0):
+        return None
+    return parsed
+
+
 def retry_after_until(value, now):
-    """Accept only a finite supported positive delay or aware future date."""
+    """Accept a finite positive delay or complete supported HTTP-date."""
     if not isinstance(value, str):
         return None
     try:
@@ -2500,11 +2559,10 @@ def retry_after_until(value, now):
         if re.fullmatch(r"[0-9]+", value):
             if len(value) > 10:
                 return None
-            delay = int(value)
-            until = now + delay
+            until = now + int(value)
         else:
-            parsed = parsedate_to_datetime(value)
-            if parsed.utcoffset() is None:
+            parsed = parse_http_date(value, now)
+            if parsed is None:
                 return None
             until = parsed.timestamp()
         if not numeric(until) or not now < until <= 253402300799:
@@ -2822,28 +2880,65 @@ def validate_family_identity(run, expected=None):
 
 
 def workflow_api(path):
-    """Read real public family metadata using existing authentication."""
+    """Read bounded GitHub metadata with safe, actionable diagnostics."""
     token = os.environ.get("GITHUB_TOKEN", "")
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = "Bearer " + token
-    try:
-        separator = "&" if "?" in path else "?"
-        status, _, body = infrastructure_request_bytes(
-            _WORKFLOW_GITHUB
-            + path
-            + separator
-            + "_fresh="
-            + str(time.time_ns()),
-            headers=headers,
-        )
-        if status != 200:
-            raise ValueError("Workflow API status")
-        return json.loads(body)
-    except Exception:
-        raise AdapterError(
-            "Workflow pacing state unavailable", "access"
-        ) from None
+    route = urllib.parse.urlsplit(path).path
+    # Never include query strings, response bodies, signed URLs or credentials.
+    route = re.sub(r"[^a-zA-Z0-9_./-]", "?", route)[:160]
+    detail = "transport unavailable"
+    final_status = None
+    for attempt in range(3):
+        check_deadline()
+        retry = False
+        final_status = None
+        delay = attempt + 1
+        try:
+            separator = "&" if "?" in path else "?"
+            status, response_headers, body = infrastructure_request_bytes(
+                _WORKFLOW_GITHUB + path + separator + "_fresh="
+                + str(time.time_ns()), headers=headers,
+            )
+            final_status = status
+            detail = "HTTP " + str(status)
+            for key in ("X-RateLimit-Remaining", "X-RateLimit-Reset"):
+                value = response_headers.get(key, "")
+                if (
+                    isinstance(value, str)
+                    and re.fullmatch(r"[0-9]{1,12}", value)
+                ):
+                    detail += " " + key + "=" + value
+            if status == 200:
+                try:
+                    return json.loads(body)
+                except (ValueError, UnicodeError):
+                    detail += " invalid JSON"
+            else:
+                retry = status in (408, 429, 500, 502, 503, 504)
+                retry_after = response_headers.get("Retry-After")
+                if retry_after is not None:
+                    # Never retry earlier than an advertised server hold.
+                    if re.fullmatch(r"[0-9]{1,6}", retry_after):
+                        delay = max(delay, int(retry_after))
+                    else:
+                        retry = False
+        except (urllib.error.URLError, OSError) as error:
+            detail = "transport " + type(error).__name__
+            retry = True
+        except AdapterError:
+            detail = "bounded infrastructure read rejected"
+        if not retry or attempt == 2:
+            break
+        remaining = min(active_deadline(), _RUN_END) - time.monotonic()
+        if delay > 5 or remaining <= delay + 1:
+            break
+        time.sleep(delay)
+    raise AdapterError(
+        "Workflow pacing state unavailable: " + route + " " + detail,
+        "access", final_status,
+    )
 
 
 def current_run_identity():
@@ -2911,6 +3006,7 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                 raise ValueError("Expected artifact redirect")
             destination = response.headers.get("Location", "")
             response.read(1001)
+        infrastructure_url(destination, storage_only=True)
         parsed = urllib.parse.urlsplit(destination)
         if (
             parsed.scheme != "https"
@@ -2957,15 +3053,10 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                 raise ValueError("State symlink")
             raw = archive.read(entry)
         envelope = json.loads(raw)
-        if not isinstance(envelope, dict) or set(envelope) != {
-            "head_sha",
-            "schema",
-            "repository",
-            "run_id",
-            "run_attempt",
-            "source",
-            "state",
-        }:
+        common = {"head_sha", "schema", "repository", "run_id",
+                  "run_attempt", "source", "state"}
+        modern = common | {"adapter_sha256", "state_sha256"}
+        if not isinstance(envelope, dict) or set(envelope) not in (common, modern):
             raise ValueError("Invalid artifact envelope")
         run_id, attempt, source, head = identity
         if (
@@ -2980,6 +3071,21 @@ def download_inert_artifact(identity, artifact_id, digest=None):
             or envelope["head_sha"] != head
         ):
             raise ValueError("Artifact ownership mismatch")
+        if set(envelope) == common:
+            if (identity != (39128750508, 1, SOURCE_ID,
+                             "46fe9e001ccd2f684b6d4941dbb69bcbc63f598b")
+                    or artifact_id != 12137342762
+                    or digest != "sha256:864face5ba6a31748b137c15b7e4f4e48ad3a851e8dc48465dbeb2a9011e045e"):
+                raise ValueError("Unreviewed legacy artifact")
+        else:
+            if identity[:2] == (39128750508, 1):
+                raise ValueError("Original legacy owner cannot be modern")
+            if (envelope["adapter_sha256"] != producer_source_digest(head)
+                    or envelope["state_sha256"] != hashlib.sha256(json.dumps(
+                        envelope["state"], sort_keys=True,
+                        separators=(",", ":")).encode()).hexdigest()):
+                raise ValueError("Modern producer/state digest mismatch")
+            require_modern_native_floor(envelope["state"])
         return validate_budget(envelope["state"])
     except Exception:
         raise AdapterError(
@@ -3044,37 +3150,88 @@ def workflow_mode_guard():
             )
 
 
-def production_maintenance_state(incoming):
-    """Preserve full native MAX on the first production family transition."""
-    raw = os.environ.get("STUDY_DENMARK_PACING_MAINTENANCE", "")
-    if not raw:
-        if os.environ.get("GITHUB_ACTIONS") == "true":
-            raise AdapterError(
-                "Full-native Study in Denmark MAX approval required",
-                "access",
-            )
-        return incoming
-    try:
-        approval = json.loads(raw)
-        if (
-            not isinstance(approval, dict)
-            or set(approval) != {"schema", "family", "evidence", "state"}
-            or type(approval["schema"]) is not int
-            or approval["schema"] != 1
-            or approval["family"] != FAMILY
-            or not isinstance(approval["evidence"], str)
-            or not re.fullmatch(
-                r"https://github\.com/YouthOpps/data-pipeline/issues/327"
-                r"#issuecomment-[1-9][0-9]*",
-                approval["evidence"],
-            )
-        ):
-            raise ValueError("Untrusted full-native approval")
-        return merge_budgets(incoming, approval["state"], time.time())
-    except Exception:
+def reviewed_native_floor():
+    """Return the accepted native MAX without approving production."""
+    if _HOSTED_NATIVE_EVIDENCE != (
+            "https://github.com/YouthOpps/data-pipeline/issues/401"
+            "#issuecomment-6952200367"):
+        raise AdapterError("Native evidence binding changed", "access")
+    candidate = validate_budget(copy.deepcopy(_HOSTED_NATIVE_MAX))
+    raw = json.dumps(candidate, sort_keys=True,
+                     separators=(",", ":")).encode()
+    if (len(raw) != 3750 or hashlib.sha256(raw).hexdigest()
+            != ("f0cf4c731955762b42d3cdd8c16e5fd4"
+                "433adc4e87f04e62d71b555e3c61c863")):
+        raise AdapterError("Reviewed native MAX changed", "access")
+    return candidate
+
+
+def require_modern_native_floor(state):
+    """A successor producer must export its known native MAX, even if idle."""
+    state, floor = validate_budget(state), reviewed_native_floor()
+    keys = ("observed_at", "not_before", "interval", "completed",
+            "page_interval", "last_inventory_completed", "rate_limit_strikes",
+            "rate_limit_until")
+    if (any(state[key] < floor[key] for key in keys)
+            or not set(floor["starts"]) <= set(state["starts"])):
         raise AdapterError(
-            "Invalid full-native Study in Denmark approval", "access"
-        ) from None
+            "Modern producer lost the native MAX floor", "access")
+    return state
+
+
+def production_maintenance_state(incoming, *, legacy_owner=False):
+    """Keep every native constraint and the actual newest owner lifecycle."""
+    incoming = validate_budget(incoming)
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return incoming
+    expected = {
+        "kind": "reviewed-study-denmark-native-max-handoff",
+        "issue": 401,
+        "native_source_sha256": (
+            "2e72fd51a14d3d738c4ce7a868fe18ff"
+            "c0ae9107ff6300d11b58e027d74050aa"),
+        "native_controller_sha256": (
+            "457929100cb855bc00d678c10a8770d2"
+            "4f4af6a41159284bfc1a9f68776828ca"),
+        "native_final_state_sha256": (
+            "e53d0362c29b7b11e65cef8edb658489"
+            "f5dc286f055ed50b8c1a0f0d562fc826"),
+        "state_sha256": (
+            "f0cf4c731955762b42d3cdd8c16e5fd4"
+            "433adc4e87f04e62d71b555e3c61c863"),
+        "native_evidence": _HOSTED_NATIVE_EVIDENCE,
+    }
+    decision = _HOSTED_HANDOFF_DECISION
+    if (not isinstance(decision, dict)
+            or set(decision) != set(expected) | {"evidence"}
+            or any(decision[key] != value for key, value in expected.items())
+            or not isinstance(decision["evidence"], str)
+            or not re.fullmatch(
+                r"https://github\.com/YouthOpps/data-pipeline/issues/401"
+                r"#issuecomment-[1-9][0-9]*", decision["evidence"])
+            or decision["evidence"] in {
+                _HOSTED_NATIVE_EVIDENCE,
+                ("https://github.com/YouthOpps/data-pipeline/issues/401"
+                 "#issuecomment-6951763417"),
+                ("https://github.com/YouthOpps/data-pipeline/issues/401"
+                 "#issuecomment-6950328945")}):
+        raise AdapterError(
+            "Final hosted native MAX approval is absent", "access")
+    floor = reviewed_native_floor()
+    # Only the exact old seven-key bootstrap uses the newer reviewed native
+    # lifecycle. An authenticated successor or an unsettled incoming owner is
+    # always authoritative for identity, irrespective of its clock values.
+    result = copy.deepcopy(
+        floor if legacy_owner and not incoming["in_flight"] else incoming)
+    for key in ("observed_at", "not_before", "interval", "completed",
+                "page_interval", "last_inventory_completed",
+                "rate_limit_strikes", "rate_limit_until"):
+        result[key] = max(incoming[key], floor[key])
+    result["starts"] = sorted(set(incoming["starts"] + floor["starts"]))
+    result["blocked"] = incoming["blocked"] or floor["blocked"]
+    result["in_flight"] = incoming["in_flight"] or floor["in_flight"]
+    return validate_budget(result)
+
 
 
 def restored_state():
@@ -3082,11 +3239,13 @@ def restored_state():
     latest = latest_family_run()
     if latest is None:
         raise AdapterError("Study in Denmark family history missing", "access")
-    if all(
-        legacy_attempt_pin(row[2], row[3], row[5]) is not None
-        for row in _HISTORY_COMPLETED
-    ):
-        return production_maintenance_state(legacy_transition_state())
+    expected = {(run, 1) for run in _NO_ACCESS_ATTEMPTS}
+    if not expected <= set(_NO_ACCESS_BOUNDS):
+        raise AdapterError("Reviewed29-gap ancestry is incomplete", "access")
+    if latest[:2] != (39128750508, 1) and _HISTORY_COMPLETED[-1][0] <= max(
+            value[0] for key, value in _NO_ACCESS_BOUNDS.items()
+            if key in expected):
+        raise AdapterError("Post-gap actual owner missing", "access")
     run_id, attempt, source, head = latest
     result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
     artifacts = result.get("artifacts")
@@ -3123,18 +3282,26 @@ def restored_state():
         raise AdapterError(
             "Invalid Study in Denmark artifact binding", "access"
         )
-    return production_maintenance_state(
-        download_inert_artifact(latest, artifact["id"], artifact["digest"])
-    )
+    if latest[:2] == (39128750508, 1) and (
+            artifact["id"] != 12137342762
+            or artifact["digest"] != "sha256:864face5ba6a31748b137c15b7e4f4e48ad3a851e8dc48465dbeb2a9011e045e"
+            or artifact["size_in_bytes"] != 646):
+        raise AdapterError("Exact original Study owner changed", "access")
+    return production_maintenance_state(preserve_no_access_bounds(
+        download_inert_artifact(latest, artifact["id"], artifact["digest"])),
+        legacy_owner=latest[:2] == (39128750508, 1))
 
 
 def prepare_collection():
     global _COLLECTION_STARTED, _STATE_TRUSTED, _COLLECTION_LOCK_FD, _RESTORED
-    global _COLLECTION_LOCK_ID, _RESTORED_HISTORY_SIGNATURE
+    global _COLLECTION_LOCK_ID, _RESTORED_HISTORY_SIGNATURE, _STARTUP_QUIET_UNTIL
     if _PUBLISHER_GATE_FAILED:
         raise AdapterError("Publisher completion persistence failed", "access")
     if _RESTORED:
         return
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        require_existing_local_state()
+    _STARTUP_QUIET_UNTIL = time.monotonic() + 60
     workflow_mode_guard()
     current_job_context()
     incoming = restored_state()
@@ -3214,7 +3381,7 @@ def export_family_artifact():
     def payload():
         run_id, attempt = current_run_identity()
         with locked_budget():
-            state = load_budget()
+            state = production_maintenance_state(load_budget())
             if state["in_flight"]:
                 raise AdapterError(
                     "Unsettled publisher owner cannot export", "access"
@@ -3226,6 +3393,10 @@ def export_family_artifact():
             "run_attempt": attempt,
             "source": SOURCE_ID,
             "head_sha": os.environ["GITHUB_SHA"],
+            "adapter_sha256": hashlib.sha256(
+                source_file_bytes()).hexdigest(),
+            "state_sha256": hashlib.sha256(json.dumps(
+                state, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
             "state": state,
         }
 
@@ -3481,7 +3652,7 @@ def publisher_healthy(state):
 
 
 def fail_policy(state=None):
-    """Never heal an unassessed response, failed calculation or failed save."""
+    """Retain unassessed response ownership without healing receipts."""
     global _PUBLISHER_GATE_FAILED, _FAILED_BUDGET
     _PUBLISHER_GATE_FAILED = True
     if state is not None:
@@ -3489,6 +3660,26 @@ def fail_policy(state=None):
     elif _FAILED_BUDGET is None:
         with contextlib.suppress(BaseException):
             _FAILED_BUDGET = copy.deepcopy(load_budget())
+    error = sys.exc_info()[1]
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if (
+            getattr(error, "_header429_unassessed", False)
+            or getattr(error, "_response_unassessed", False)
+        ):
+            try:
+                verify_journal()
+                retained = load_budget()
+                if (
+                    retained["in_flight"]
+                    and retained["flight_id"] == _ACTIVE_FLIGHT_ID
+                ):
+                    return
+            except BaseException:
+                pass
+            break
+        error = error.__context__
     with contextlib.suppress(BaseException):
         invalidate_budget()
 
@@ -3500,38 +3691,41 @@ def begin_transaction(kind):
         raise AdapterError(
             "Healthy restored publisher state required", "access"
         )
-    with locked_budget():
+    deferred = None
+    with locked_budget(verify_exit=True):
         state = load_budget()
         if state["in_flight"] or state["blocked"]:
             raise AdapterError(
                 "Publisher state requires reviewed recovery", "access"
             )
         now = time.time()
-        if state["rate_limit_until"] > now:
-            raise AdapterError("Retained timed publisher cooldown", "access")
         if state["rate_limit_strikes"] >= 100:
             raise AdapterError("Publisher rate counter exhausted", "access")
         ready = max(state["not_before"], state["completed"] + state["interval"])
-        if ready + 120 > now + (active_deadline() - time.monotonic()):
-            raise AdapterError(
-                "Known publisher guard exceeds phase budget", "access"
+        if state["rate_limit_until"] > now:
+            deferred = "Retained timed publisher cooldown"
+        elif ready + 120 > now + (active_deadline() - time.monotonic()):
+            deferred = "Known publisher guard exceeds phase budget"
+        if deferred is None:
+            ident = os.urandom(16).hex()
+            if ident == state["flight_id"]:
+                raise AdapterError(
+                    "Publisher transaction identity collision", "access"
+                )
+            state.update(
+                in_flight=True,
+                flight_id=ident,
+                flight_started=now,
+                flight_kind=kind,
+                observed_at=now,
             )
-        ident = os.urandom(16).hex()
-        if ident == state["flight_id"]:
-            raise AdapterError(
-                "Publisher transaction identity collision", "access"
-            )
-        state.update(
-            in_flight=True,
-            flight_id=ident,
-            flight_started=now,
-            flight_kind=kind,
-            observed_at=now,
-        )
-        # This fsynced owner remains True across original no-response retries,
-        # all redirect validation and new/cached robots policy assessment.
-        save_budget(state)
-        _ACTIVE_FLIGHT_ID = ident
+            # Keep the owner across retries, redirects and REP assessment.
+            save_budget(state)
+            _ACTIVE_FLIGHT_ID = ident
+    if deferred is not None:
+        # A failed generation check or lock close above remains a hard error.
+        # Only a clean, unreserved timed decision can retain exportable state.
+        raise PreRequestDeferral(deferred, "access")
 
 
 def durable_transaction(kind):
@@ -3557,6 +3751,9 @@ def durable_transaction(kind):
                 return result
             except PolicyStop:
                 settled = not _PUBLISHER_GATE_FAILED
+                raise
+            except DataReviewDeferred as error:
+                settled = data_review_transport_assessed(error, kind, outer)
                 raise
             finally:
                 _TRANSACTION_DEPTH -= 1
@@ -3636,7 +3833,11 @@ def pace():
             target = max(target, starts[-5] + 60)
         while True:
             check_deadline()
-            wait = max(0, target - time.time())
+            wait = max(
+                0, target - time.time(),
+                _STARTUP_QUIET_UNTIL - time.monotonic()
+                if _STARTUP_QUIET_UNTIL is not None else 0,
+            )
             if _PUBLISHER_COMPLETED_MONOTONIC is not None:
                 wait = max(
                     wait,
@@ -3761,48 +3962,120 @@ def publisher_attempt(inventory=False):
 
 
 def record_retry_after(value, status=None):
+    """Persist adaptive 429 constraints before stronger headers."""
     try:
+        fields = value if isinstance(value, (list, tuple)) else [value]
+        values = []
+        for raw in fields:
+            if isinstance(raw, str) and re.fullmatch(
+                    r"\s*[0-9]+(?:\s*,\s*[0-9]+)+\s*", raw):
+                values.extend(part.strip() for part in raw.split(","))
+            else:
+                values.append(raw)
         now = time.time()
-        until = retry_after_until(value, now)
-        if status != 429 and until is None:
-            return
         with locked_budget():
             state = load_budget()
             publisher_healthy(state)
             if status == 429:
                 strikes = state["rate_limit_strikes"] + 1
                 if strikes > 100:
-                    fail_policy(state)
-                    raise AdapterError(
-                        "Publisher rate counter exhausted", "access"
-                    )
+                    raise AdapterError("Rate counter exhausted", "access")
+                unsupported = False
+
+                def retain_constraint(key, constraint):
+                    nonlocal unsupported
+                    if (not numeric(constraint)
+                            or constraint > 253402300799):
+                        unsupported = True
+                    else:
+                        state[key] = max(state[key], constraint)
+
+                # The received status is already known. Commit every supported
+                # CURRENT doubling and minimum hold before exponential math.
+                clock_supported = numeric(now) and now <= 253402300799
+                retain_constraint("interval", state["interval"] * 2)
+                retain_constraint("page_interval", state["page_interval"] * 2)
+                retain_constraint(
+                    "rate_limit_until",
+                    now + 1800 if clock_supported else None)
                 state["rate_limit_strikes"] = strikes
-                factor = 2**strikes
-                interval = max(state["interval"] * 2, 12.2 * factor)
-                page = max(state["page_interval"] * 2, 30 * factor)
-                fallback = now + 1800 * 2 ** (strikes - 1)
-                if any(
-                    not numeric(v) or v > 253402300799
-                    for v in (interval, page, fallback)
-                ):
-                    fail_policy(state)
-                    raise AdapterError(
-                        "Unsupported observed rate constraint", "access"
-                    )
-                state.update(
-                    rate_limit_strikes=strikes,
-                    interval=interval,
-                    page_interval=page,
-                )
-                state["rate_limit_until"] = max(
-                    state["rate_limit_until"], fallback, until or 0
-                )
-            state["not_before"] = max(
-                state["not_before"], state["rate_limit_until"], until or 0
-            )
-            state["observed_at"] = now
-            save_budget(state)
-    except BaseException:
+                if clock_supported:
+                    state["observed_at"] = max(state["observed_at"], now)
+                state["not_before"] = max(
+                    state["not_before"], state["rate_limit_until"])
+                save_budget(state)
+                known = copy.deepcopy(state)
+                for key, calculate in (
+                        ("interval", lambda: 12.2 * 2 ** strikes),
+                        ("page_interval", lambda: 30 * 2 ** strikes),
+                        ("rate_limit_until",
+                         lambda: now + 1800 * 2 ** (strikes - 1))):
+                    try:
+                        retain_constraint(key, calculate())
+                    except (OverflowError, TypeError, ValueError):
+                        unsupported = True
+                state["not_before"] = max(
+                    state["not_before"], state["rate_limit_until"])
+                if state != known:
+                    save_budget(state)
+                if unsupported:
+                    raise AdapterError("Unrepresentable rate hold", "access")
+            header_error = None
+            supported = []
+            date_pattern = "(?:" + "|".join(http_date_patterns()) + ")"
+            for raw in values:
+                if (isinstance(raw, str) and "," in raw
+                        and not re.fullmatch(date_pattern, raw.strip(), re.I)):
+                    # Preserve all recognizable complete components before
+                    # refusing their ambiguous combined representation.
+                    supported.extend(match[1] for match in re.finditer(
+                        r"(?:^|,\s*)(" + date_pattern
+                        + r"|[0-9]+)(?=\s*(?:,|$))", raw.strip(), re.I))
+                    header_error = AdapterError(
+                        "Ambiguous combined Retry-After values", "access")
+                else:
+                    supported.append(raw)
+            for raw in supported:
+                try:
+                    if not isinstance(raw, str):
+                        continue
+                    text = raw.strip()
+                    if re.fullmatch(r"[0-9]+", text):
+                        if len(text) > 12:
+                            raise AdapterError(
+                                "Unrepresentable Retry-After delay", "access"
+                            )
+                        until = now + int(text)
+                        if not numeric(until) or until > 253402300799:
+                            raise AdapterError(
+                                "Unrepresentable Retry-After delay", "access"
+                            )
+                    else:
+                        until = retry_after_until(text, now)
+                        if until is None and re.fullmatch(
+                                date_pattern, text, re.I):
+                            try:
+                                parsed = parse_http_date(text, now)
+                                if parsed is None:
+                                    raise ValueError()
+                                parsed.timestamp()
+                            except (ValueError, TypeError, OverflowError):
+                                raise AdapterError(
+                                    "Unrepresentable Retry-After date", "access"
+                                ) from None
+                    if until is not None and until > now:
+                        state["rate_limit_until"] = max(
+                            state["rate_limit_until"], until
+                        )
+                        state["not_before"] = max(state["not_before"], until)
+                        state["observed_at"] = now
+                        save_budget(state)
+                except AdapterError as error:
+                    header_error = error
+            if header_error is not None:
+                raise header_error
+    except BaseException as error:
+        error._response_unassessed = True
         fail_policy()
         raise
 
@@ -3903,6 +4176,12 @@ def infrastructure_request_bytes(
         raise AdapterError(
             "Publisher cannot use infrastructure transport", "access"
         )
+    infrastructure_url(url)
+    if urllib.parse.urlsplit(url).hostname != "api.github.com":
+        if method != "GET" or payload is not None:
+            raise AdapterError("Signed artifact requires public GET", "access")
+        headers = {key: value for key, value in (headers or {}).items()
+                   if key.lower() not in {"authorization", "cookie"}}
     request = urllib.request.Request(
         url,
         data=payload,
@@ -3925,10 +4204,11 @@ class PublisherResponse:
 
     _failure = None
 
-    def __init__(self, response, publisher=True, frame=None):
+    def __init__(self, response, publisher=True, frame=None, robots=False):
         self.response = response
         self.publisher = publisher
         self.frame = frame
+        self.robots = robots
 
     @classmethod
     def check(cls, publisher=True):
@@ -3940,6 +4220,7 @@ class PublisherResponse:
     def fail(self, error):
         if not self.publisher:
             return
+        error._response_unassessed = True
         if type(self)._failure is None:
             type(self)._failure = error
         if self.frame is not None:
@@ -3953,6 +4234,11 @@ class PublisherResponse:
         if not self.publisher:
             return self.response.__enter__()
         try:
+            if self.response.status == 429:
+                # Persist known status before response/header entry can fail.
+                record_retry_after([], 429)
+            elif not self.robots and self.response.status in (401, 403, 451):
+                retain_publisher_hold()
             return self.response.__enter__()
         except BaseException as error:
             self.fail(error)
@@ -3996,7 +4282,7 @@ class PublisherResponse:
                     "Publisher response body failed", "access"
                 ) from error
             return False
-        if error is not None and not isinstance(error, AdapterError):
+        if error is not None and not isinstance(error, PolicyStop):
             self.fail(error)
             if self.publisher and isinstance(
                 error, (OSError, urllib.error.URLError)
@@ -4101,6 +4387,9 @@ def request_bytes(
             verify_collection()
             frame["started"] = True
             PublisherResponse.check()
+            if (_STARTUP_QUIET_UNTIL is None
+                    or time.monotonic() < _STARTUP_QUIET_UNTIL):
+                raise AdapterError("Publisher startup quiet incomplete", "access")
             response = _OPENER.open(request, timeout=request_timeout(True))
         except urllib.error.HTTPError as error:
             response = error
@@ -4111,28 +4400,9 @@ def request_bytes(
                 ) from None
             raise
         frame["received"] = True
-        if response.status == 429:
-            try:
-                record_retry_after(response.headers.get("Retry-After"), 429)
-            except BaseException:
-                fail_policy()
-                try:
-                    response.close()
-                except BaseException:
-                    fail_policy()
-                raise
-            try:
-                response.close()
-            except BaseException:
-                fail_policy()
-                raise
-            # Only our intentional stop after healthy close is assessed.
-            raise PolicyStop("Publisher stopped: HTTP 429", "fetch", 429)
-        with PublisherResponse(response, frame=frame):
+        with PublisherResponse(response, frame=frame, robots=robots):
             status, response_headers = response.status, response.headers
-            record_retry_after(response_headers.get("Retry-After"), status)
-            if not robots and status in (401, 403, 451):
-                retain_publisher_hold()
+            record_retry_after(response_headers.get_all("Retry-After", []))
             body = response.read(5_000_001)
             if len(body) > 5_000_000:
                 raise AdapterError("Response exceeds 5 MB", "fetch")
@@ -4144,14 +4414,7 @@ def request_bytes(
                     body, response_headers, challenge_only=status == 429
                 )
             if robots and status == 200:
-                groups = parse_robots(body)
-                target_origin, target = _REP_TARGETS.get(
-                    origin, (origin, SOURCE_URL)
-                )
-                apply_robots_policy(target, groups)
-                # Preserve the original caller-origin cache. A later content
-                # redirect to an alias must still check that origin's REP.
-                _ROBOTS[target_origin] = groups
+                assess_robots_response(origin, body, response_headers)
             if robots:
                 caller_origin, target = _REP_TARGETS.get(
                     origin, (origin, SOURCE_URL)
@@ -4426,11 +4689,11 @@ def main():
     _PUBLISHING = args.publish
     with execution():
         try:
+            with phase("restore", 180):
+                prepare_collection()
             if args.publish:
                 with phase("proof", 30):
                     publication_window()
-            with phase("restore", 180):
-                prepare_collection()
             return run_body(args.publish)
         finally:
             with phase("export", EXPORT_TIMEOUT):
@@ -4519,6 +4782,9 @@ def completed_identity(run, expected=None):
             ).encode()
         ).hexdigest(),
     }
+    if proven_no_access_attempt(exact, jobs):
+        _NO_ACCESS_BOUNDS[(run_id, attempt)] = (max(finished), min(began))
+        return None
     return max(finished), min(began), *identity
 
 
@@ -4596,6 +4862,7 @@ def scan_family_history():
         if os.environ.get("GITHUB_ACTIONS") == "true"
         else None
     )
+    _NO_ACCESS_BOUNDS.clear()
     initial = family_wrappers()
     candidates = []
     for run in initial:
@@ -9183,6 +9450,676 @@ _LEGACY_JOB_PINS = {
     },
 }
 
+
+
+
+def require_existing_local_state():
+    """Pin the mature local journal before any remote restoration."""
+    try:
+        budget_file()
+        with locked_budget():
+            state = load_budget()
+            if state["in_flight"]:
+                raise AdapterError(
+                    "Local Study in Denmark flight is unsettled", "access"
+                )
+    except BaseException:
+        journal_failure()
+        raise
+
+
+def assess_robots_response(origin, body, headers):
+    """Reject unsupported REP200 representations before settling the owner."""
+    values = headers.get_all("Content-Type", [])
+    if (len(values) != 1
+            or values[0].split(";", 1)[0].strip().lower() != "text/plain"
+            or re.search(br"<\s*(?:[A-Za-z!?]|/\s*[A-Za-z])", body)):
+        raise AdapterError("Unsupported robots representation", "access")
+    groups = parse_robots(body)
+    target_origin, target = _REP_TARGETS.get(origin, (origin, SOURCE_URL))
+    apply_robots_policy(target, groups)
+    _ROBOTS[target_origin] = groups
+
+_STARTUP_QUIET_UNTIL = None
+
+
+_NO_ACCESS_ATTEMPTS = {39281149968: {'completed_at': '2026-10-19T15:52:39Z',
+               'head': '46fe9e001ccd2f684b6d4941dbb69bcbc63f598b',
+               'job': 118155459451,
+               'log_sha256': '22496b46e9653c5cc3b8cdb66b7ca478d3744bfe373867b8b5e2eebc631d7bf8',
+               'source_blob': 'f88fa71c5c476cee8e80a08c9f4b81e8123bd352',
+               'started_at': '2026-10-19T15:52:03Z'},
+ 39433950972: {'completed_at': '2026-10-20T13:51:34Z',
+               'head': '46fe9e001ccd2f684b6d4941dbb69bcbc63f598b',
+               'job': 118665925786,
+               'log_sha256': '9ad8d28e5f2cca06fc39a9cf3cfdee7e96b6ff81c66f76d52fe90fc3c41da918',
+               'source_blob': 'f88fa71c5c476cee8e80a08c9f4b81e8123bd352',
+               'started_at': '2026-10-20T13:50:54Z'},
+ 39614018165: {'completed_at': '2026-10-21T14:07:23Z',
+               'head': '46fe9e001ccd2f684b6d4941dbb69bcbc63f598b',
+               'job': 119270080276,
+               'log_sha256': '133ffb59f9829cdee89ce51db646ac7c93662f0021aa5fc58006ef44f74051ec',
+               'source_blob': 'f88fa71c5c476cee8e80a08c9f4b81e8123bd352',
+               'started_at': '2026-10-21T14:07:14Z'},
+ 39792781900: {'completed_at': '2026-10-22T14:06:11Z',
+               'head': '46fe9e001ccd2f684b6d4941dbb69bcbc63f598b',
+               'job': 119872695326,
+               'log_sha256': '1a3f23116afd1774ce23bf993caeb76f22a8137cc5ec40c8d068e38cfd890c26',
+               'source_blob': 'f88fa71c5c476cee8e80a08c9f4b81e8123bd352',
+               'started_at': '2026-10-22T14:06:02Z'},
+ 39964297642: {'completed_at': '2026-10-23T13:49:19Z',
+               'head': '46fe9e001ccd2f684b6d4941dbb69bcbc63f598b',
+               'job': 120450011578,
+               'log_sha256': '122e29a5c3c47ed7287837546b55f2a03e5f98c1d042f5cbf668504d2e2e7699',
+               'source_blob': 'f88fa71c5c476cee8e80a08c9f4b81e8123bd352',
+               'started_at': '2026-10-23T13:48:44Z'},
+ 40095932947: {'completed_at': '2026-10-24T12:56:00Z',
+               'head': '46fe9e001ccd2f684b6d4941dbb69bcbc63f598b',
+               'job': 120878081103,
+               'log_sha256': 'e3cfd965bed70028b15d4afa5ac8b9bcee36c902ab45cb568fb8cd14433ebd59',
+               'source_blob': 'f88fa71c5c476cee8e80a08c9f4b81e8123bd352',
+               'started_at': '2026-10-24T12:55:20Z'},
+ 40197206960: {'completed_at': '2026-10-25T13:21:31Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 121180518889,
+               'log_sha256': '0f7e9a537f58d0e4030c2a8ed758c6b52d5d686428c938734aabdb65a4659f89',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-10-25T13:21:07Z'},
+ 40349577157: {'completed_at': '2026-10-26T15:28:51Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 121665635960,
+               'log_sha256': '56e951ddcfc510f85938fa0dbc20272907af1f267e0b2a5b6d2836713bad012c',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-10-26T15:28:02Z'},
+ 40525705971: {'completed_at': '2026-10-27T14:55:23Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 122264570015,
+               'log_sha256': '74eab497c1599407ea26e8efa14bd9339c0c711cde76fc3693a2613ccb8b3d89',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-10-27T14:54:42Z'},
+ 40716032117: {'completed_at': '2026-10-28T15:27:29Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 122913844904,
+               'log_sha256': '398167c526a61e513e876961517f096dcf2110f585edc06d477b71bf57ff88a3',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-10-28T15:26:53Z'},
+ 40902644200: {'completed_at': '2026-10-29T15:33:27Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 123548815618,
+               'log_sha256': '7f21390eb27838e134aa5a078a26b2fbb564aeeb0f8343961edc586697eb0d2e',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-10-29T15:32:47Z'},
+ 41079720415: {'completed_at': '2026-10-30T15:20:39Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 124145289717,
+               'log_sha256': 'f82e3e09694db03596408b6f526b9727a8f79fe4e647bac1b067080a6d9d0548',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-10-30T15:20:03Z'},
+ 41211534135: {'completed_at': '2026-10-31T14:45:15Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 124567390925,
+               'log_sha256': '4fdef7078ef0dd16f7e15e3b323ff508c2f026024e67b2a451e965564e8a5a84',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-10-31T14:44:39Z'},
+ 41321277434: {'completed_at': '2026-11-01T15:27:45Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 124891842233,
+               'log_sha256': 'c3e9d0b1ecc9b6f28e22db612cbe8180d4f2ae86594aecd235d10126986db07e',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-01T15:27:03Z'},
+ 41504262131: {'completed_at': '2026-11-02T18:50:40Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 125479370813,
+               'log_sha256': '11a58c3792bd42cb32c5ca18af96dc7c517e83ccd14bcd3c124d4158595b264a',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-02T18:50:01Z'},
+ 41675235687: {'completed_at': '2026-11-03T16:33:12Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 126053958529,
+               'log_sha256': '957819e8d231444d6a267bd779b17c34d75a27eb357c79e7dcc89d50debc37d1',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-03T16:32:29Z'},
+ 41868635608: {'completed_at': '2026-11-04T16:35:26Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 126709329956,
+               'log_sha256': '1145bb92514392c71d2e671f6bc73fdd14293a00e1a50fcee43b8d8642cc6674',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-04T16:34:33Z'},
+ 42068558891: {'completed_at': '2026-11-05T16:50:57Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 127389605614,
+               'log_sha256': '40086b86713f3c5f430ed0bc211e5b3250e1145570d736d6371e10e2616c8a58',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-05T16:50:23Z'},
+ 42250957203: {'completed_at': '2026-11-06T16:18:16Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 128005582388,
+               'log_sha256': 'cedfec77ab8d5cec189c68a0fd90e2c77536d00bee14131f09d23afc0e80bafe',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-06T16:17:22Z'},
+ 42384887369: {'completed_at': '2026-11-07T15:08:55Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 128440073424,
+               'log_sha256': '18a86ab21f477c613fc881d17e6c7a558292c830ac5d2d309cd6700a18efe559',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-07T15:08:11Z'},
+ 42495578041: {'completed_at': '2026-11-08T15:36:17Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 128777067512,
+               'log_sha256': 'c65c56a22bbab3c40db2f7451d0566224167e44f602a5268f2a7fca7c901dcc8',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-08T15:35:26Z'},
+ 42680326910: {'completed_at': '2026-11-09T19:08:24Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 129372793184,
+               'log_sha256': '5c54e1434fc306fb6101c5bc2dc64fdaec7833c0b0e95def62fd6551ce007d01',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-09T19:07:37Z'},
+ 42856236978: {'completed_at': '2026-11-10T16:37:42Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 129969903653,
+               'log_sha256': '10a7e712574c686abfdb9808e2d07c49e616d0b2f6b4d04da4d5424d339cc6f4',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-10T16:36:38Z'},
+ 43059953519: {'completed_at': '2026-11-11T16:37:26Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 130659471942,
+               'log_sha256': 'b1fdfcbb2493ecbf498016fa7f56160d318850babc0ee93a6f285ebfb1fbc051',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-11T16:36:16Z'},
+ 43265428330: {'completed_at': '2026-11-12T17:04:58Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 131347588754,
+               'log_sha256': 'f5f2f74f947baa4421948ffc8fa083cc1a6fccc1696fdd0a851d3b174ab8ea4b',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-12T17:03:59Z'},
+ 43465565618: {'completed_at': '2026-11-13T16:44:18Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 132023642134,
+               'log_sha256': 'e61ce6054ef97ce7a3011426f2720ce60981f30b78d3d7af4cea0e04317a9d32',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-13T16:43:27Z'},
+ 43609640344: {'completed_at': '2026-11-14T15:21:28Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 132491629081,
+               'log_sha256': '5beb78b44347db551a6c1df71e8ed5fe0a1ff916c4505c1ef1b4a88ae829610e',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-14T15:20:23Z'},
+ 43732281316: {'completed_at': '2026-11-15T15:53:07Z',
+               'head': '5fd9fa82d5d2d5f0871aba653376765a6e00c897',
+               'job': 132867147425,
+               'log_sha256': 'b648c43432f06cb144ce4df5c119465902fce51ff6e7b778b02894a1b3af540e',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-15T15:52:24Z'},
+ 43933754727: {'completed_at': '2026-11-16T18:55:35Z',
+               'head': '9e8e59d64d479829912bc343fc23b526f6519aea',
+               'job': 133532760243,
+               'log_sha256': '6001969715c94d8376cf7bf3a3756be24b47e34d915887136f435307042285cf',
+               'source_blob': 'a734a59629e228b1ee117de2ae19e386f7b50da1',
+               'started_at': '2026-11-16T18:54:37Z'}}
+_NO_ACCESS_BOUNDS = {}
+_IMMUTABLE_CODE_PROOFS = set()
+_PRODUCER_SHA256 = {}
+_NO_ACCESS_WORKFLOW_BLOB = '8708bc925429748b6f2eed27ee68e764e5bf3016'
+_REVIEWED_PRODUCER_WORKFLOW_BLOB = '0ed1544aa7e6d0f7ad942de529f92b11c761da60'
+_REVIEWED_WORKFLOW_BLOB = _REVIEWED_PRODUCER_WORKFLOW_BLOB
+
+
+def verified_code_identity(head, source_blob, workflow_blob=None):
+    """Bind exact immutable source and sole unchanged producer workflow."""
+    workflow_blob = workflow_blob or _REVIEWED_PRODUCER_WORKFLOW_BLOB
+    key = (head, source_blob, workflow_blob)
+    if key in _IMMUTABLE_CODE_PROOFS:
+        return True
+    for path, expected in (
+        ("adapters/dk-study-in-denmark/adapter.py", source_blob),
+        (".github/workflows/fetch-dk-study-in-denmark.yml",
+         workflow_blob),
+    ):
+        item = workflow_api("/contents/" + path + "?ref=" + head)
+        if item.get("sha") != expected:
+            return False
+    _IMMUTABLE_CODE_PROOFS.add(key)
+    return True
+
+
+def proven_no_access_attempt(run, jobs):
+    """Admit only pinned pre-access failures or positive current-code proof."""
+    if (run.get("run_attempt") != 1 or run.get("status") != "completed"
+            or run.get("conclusion") != "failure" or len(jobs) != 1
+            or jobs[0].get("name") != "collect"
+            or jobs[0].get("status") != "completed"
+            or jobs[0].get("conclusion") != "failure"):
+        return False
+    job = jobs[0]
+    pin = _NO_ACCESS_ATTEMPTS.get(run["id"])
+    if pin is not None:
+        if (run["head_sha"] != pin["head"]
+                or any(job.get(k) != pin[k] for k in
+                       ("started_at", "completed_at"))
+                or job["id"] != pin["job"]
+                or not re.fullmatch(r"[0-9a-f]{64}", pin["log_sha256"])
+                or not verified_code_identity(pin["head"], pin["source_blob"],
+                                               _NO_ACCESS_WORKFLOW_BLOB)):
+            raise AdapterError("Reviewed pre-access attempt changed", "access")
+    else:
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            return False
+        start, end = (datetime.fromisoformat(job[k].replace("Z", "+00:00"))
+                      for k in ("started_at", "completed_at"))
+        if not 0 <= (end - start).total_seconds() < 58:
+            return False
+        with open(__file__, "rb") as stream:
+            raw = stream.read(1_000_001)
+        if len(raw) > 1_000_000:
+            raise AdapterError("Current code exceeds proof bound", "access")
+        blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw,
+                            usedforsecurity=False).hexdigest()
+        if (not verified_code_identity(run["head_sha"], blob)
+                or not verified_code_identity(os.environ["GITHUB_SHA"], blob)):
+            return False
+    inventory = workflow_api(
+        f"/actions/runs/{run['id']}/artifacts?per_page=100")
+    if (type(inventory.get("total_count")) is not int
+            or not isinstance(inventory.get("artifacts"), list)
+            or inventory["total_count"] != len(inventory["artifacts"])):
+        raise AdapterError("Incomplete pre-access artifact inventory", "access")
+    if pin is not None and inventory["total_count"] != 0:
+        raise AdapterError("Reviewed gap acquired an artifact", "access")
+    return inventory["total_count"] == 0
+
+
+def preserve_no_access_bounds(state):
+    """Retain administrative bounds without invented physical receipts."""
+    result = copy.deepcopy(validate_budget(state))
+    historical = copy.deepcopy(_HOSTED_LEGACY_TRANSITION["state"])
+    raw = json.dumps(historical, sort_keys=True, separators=(",", ":")).encode()
+    if hashlib.sha256(raw).hexdigest() != (
+            "a99f07b096fad88ebe26be5542e16dcdf1e"
+            "3c09d07f8d84f559da6007f9ee413"):
+        raise AdapterError("Reviewed original workflow MAX changed", "access")
+    result = merge_budgets(result, validate_budget(historical), time.time())
+    if _NO_ACCESS_BOUNDS:
+        end = max(v[0] for v in _NO_ACCESS_BOUNDS.values())
+        result["not_before"] = max(result["not_before"], end + max(
+            result["interval"], result["page_interval"]))
+        result["observed_at"] = max(result["observed_at"], end)
+    return validate_budget(result)
+
+
+def producer_source_digest(head):
+    """Authenticate the exact producer bytes rather than mutable current code."""
+    if head in _PRODUCER_SHA256:
+        return _PRODUCER_SHA256[head]
+    item = workflow_api(
+        "/contents/adapters/dk-study-in-denmark/adapter.py?ref=" + head)
+    if (item.get("type") != "file" or item.get("encoding") != "base64"
+            or type(item.get("size")) is not int
+            or not 0 < item["size"] <= 1_000_000):
+        raise AdapterError("Invalid immutable producer file", "access")
+    raw = base64.b64decode(item["content"])
+    if (len(raw) != item["size"] or hashlib.sha1(
+            b"blob " + str(len(raw)).encode() + b"\0" + raw,
+            usedforsecurity=False).hexdigest() != item.get("sha")):
+        raise AdapterError("Immutable producer bytes differ", "access")
+    _PRODUCER_SHA256[head] = hashlib.sha256(raw).hexdigest()
+    return _PRODUCER_SHA256[head]
+
+
+_HOSTED_NATIVE_EVIDENCE = (
+    "https://github.com/YouthOpps/data-pipeline/issues/401"
+    "#issuecomment-6952200367"
+)
+_HOSTED_HANDOFF_DECISION = {
+    'kind': 'reviewed-study-denmark-native-max-handoff',
+    'issue': 401,
+    'native_source_sha256': (
+        '2e72fd51a14d3d738c4ce7a868fe18ffc0ae9107'
+        'ff6300d11b58e027d74050aa'
+    ),
+    'native_controller_sha256': (
+        '457929100cb855bc00d678c10a8770d24f4af6a4'
+        '1159284bfc1a9f68776828ca'
+    ),
+    'native_final_state_sha256': (
+        'e53d0362c29b7b11e65cef8edb658489f5dc286f'
+        '055ed50b8c1a0f0d562fc826'
+    ),
+    'state_sha256': (
+        'f0cf4c731955762b42d3cdd8c16e5fd4433adc4e'
+        '87f04e62d71b555e3c61c863'
+    ),
+    'native_evidence': (
+        'https://github.com/YouthOpps/data-pipeli'
+        'ne/issues/401#issuecomment-6952200367'
+    ),
+    'evidence': (
+        'https://github.com/YouthOpps/data-pipeli'
+        'ne/issues/401#issuecomment-6954162466'
+    ),
+}
+_HOSTED_NATIVE_MAX = {'blocked': False,
+ 'completed': 1794928320.6635768,
+ 'completed_flight_id': 'f806c2bbdfa33ab11d39dd8dc8cec353',
+ 'completed_request_id': '618be7cf42ab30bf1caf985310cc1f95',
+ 'family': 'youthopps-dk-study-in-denmark-publisher-v1',
+ 'flight_id': 'f806c2bbdfa33ab11d39dd8dc8cec353',
+ 'flight_kind': 'policy',
+ 'flight_started': 1794927805.3608558,
+ 'in_flight': False,
+ 'interval': 12.2,
+ 'last_inventory_completed': 1794928320.2536874,
+ 'legacy_policy_history_unknown': True,
+ 'legacy_rate_history_unknown': True,
+ 'not_before': 1794928332.863577,
+ 'observed_at': 1794928320.6635768,
+ 'page_interval': 30,
+ 'rate_limit_strikes': 0,
+ 'rate_limit_until': 0,
+ 'request_id': '618be7cf42ab30bf1caf985310cc1f95',
+ 'request_inventory': True,
+ 'request_outcome': 'response_assessed',
+ 'request_started': 1794928318.683037,
+ 'schema': 3,
+ 'starts': [1791512447.0,
+            1791512618.0,
+            1791538519.0,
+            1791574810.0,
+            1791591300.0,
+            1791622448.0,
+            1791654553.0,
+            1791658134.0,
+            1791675923.0,
+            1791709974.0,
+            1791745715.0,
+            1791762764.0,
+            1791797898.0,
+            1791843338.0,
+            1791884495.0,
+            1791922972.0,
+            1791935473.0,
+            1791964622.0,
+            1791969172.0,
+            1791986331.0,
+            1792003823.0,
+            1792020249.0,
+            1792042450.0,
+            1792050496.0,
+            1792060886.0,
+            1792061225.0,
+            1792079652.0,
+            1792148078.9533362,
+            1792148104.8406699,
+            1792148104.8422296,
+            1792148105.5759268,
+            1792148117.7765877,
+            1792148117.7802382,
+            1792148117.7823892,
+            1792148119.7591364,
+            1792148149.7683485,
+            1792148149.7721283,
+            1792148149.7739372,
+            1792148151.7989542,
+            1792148181.8165355,
+            1792148181.8200421,
+            1792148181.8223696,
+            1792148183.6710532,
+            1792148213.6802664,
+            1792148213.6841779,
+            1792148213.6880767,
+            1792148216.2218199,
+            1792148228.465275,
+            1792148231.7989163,
+            1792148232.53702,
+            1792148245.1024752,
+            1792148258.4049585,
+            1792148258.4071941,
+            1792148258.4091108,
+            1792148260.545423,
+            1792148290.5802946,
+            1792148290.5825093,
+            1792148290.5839107,
+            1792148291.886799,
+            1792148304.0949204,
+            1792148304.102868,
+            1792148304.1068294,
+            1792148305.4461205,
+            1792148317.6593502,
+            1792148317.6627917,
+            1792148317.6642103,
+            1792148319.0833418,
+            1792148331.2920501,
+            1792148331.298469,
+            1792148331.3009331,
+            1792148333.0377493,
+            1792148345.263529,
+            1792148345.2664971,
+            1792148345.2684128,
+            1792148346.8241396,
+            1792148359.0502698,
+            1792148359.0693548,
+            1792148359.0726573,
+            1792148360.4593155,
+            1792148372.6669562,
+            1792148372.6692326,
+            1792148372.6706836,
+            1792148374.1376119,
+            1792148386.3429136,
+            1792148386.3548,
+            1792148386.3595123,
+            1792148387.666594,
+            1792148399.8755858,
+            1792148399.8784413,
+            1792148399.87971,
+            1792148400.1518226,
+            1792148430.353523,
+            1792148430.626486,
+            1792148430.6488929,
+            1792148431.642742,
+            1792328011.5708895,
+            1792328025.242657,
+            1792328039.0146224,
+            1792328069.5283666,
+            1794924610.5848567,
+            1794924723.737286,
+            1794924737.3426733,
+            1794924737.3435876,
+            1794924769.7217972,
+            1794924769.7255979,
+            1794924801.4518118,
+            1794924801.4543905,
+            1794924832.9698076,
+            1794924832.9720933,
+            1794924846.5448587,
+            1794924846.5461726,
+            1794924864.3478377,
+            1794924864.3502755,
+            1794924895.5832129,
+            1794924895.5859275,
+            1794924909.344375,
+            1794924909.3485346,
+            1794924922.7041934,
+            1794924922.7075574,
+            1794924936.1826746,
+            1794924936.1905787,
+            1794924949.6676075,
+            1794924949.671187,
+            1794924963.1334982,
+            1794924963.134391,
+            1794924976.270122,
+            1794924976.272608,
+            1794924989.5296006,
+            1794924989.5303702,
+            1794925002.7518592,
+            1794925002.7525916,
+            1794925033.0133924,
+            1794925033.0141351,
+            1794927865.360684,
+            1794928003.1393552,
+            1794928017.2101717,
+            1794928017.2165985,
+            1794928048.7991278,
+            1794928048.7997258,
+            1794928081.2840497,
+            1794928081.2847512,
+            1794928113.5134523,
+            1794928113.5165627,
+            1794928128.5791688,
+            1794928128.5852797,
+            1794928146.3819091,
+            1794928146.3843074,
+            1794928178.2830725,
+            1794928178.285657,
+            1794928192.388763,
+            1794928192.3979013,
+            1794928206.2518406,
+            1794928206.255855,
+            1794928220.327574,
+            1794928220.3284354,
+            1794928234.0402205,
+            1794928234.0447917,
+            1794928247.6353388,
+            1794928247.6367342,
+            1794928261.4116383,
+            1794928261.4154406,
+            1794928274.767378,
+            1794928274.7694285,
+            1794928288.3646114,
+            1794928288.365553,
+            1794928318.683037,
+            1794928318.6838915]}
+
+
+def source_file_bytes():
+    """Read this fixed standalone source within its immutable code bound."""
+    with open(__file__, "rb") as stream:
+        value = stream.read(1_000_001)
+    if not 0 < len(value) <= 1_000_000:
+        raise AdapterError("Source code bound exceeded", "access")
+    return value
+
+
+
+
+def infrastructure_url(value, *, storage_only=False):
+    """Admit only GitHub API or its supported signed artifact storage."""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        host = parsed.hostname or ""
+        labels = host.split(".")
+        storage = host.endswith((
+            ".blob.core.windows.net", ".actions.githubusercontent.com"))
+        if (parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.netloc.lower() != host
+                or parsed.port is not None or parsed.fragment
+                or re.search(r"[\x00-\x20\\]", value)
+                or any(not re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?", label)
+                       for label in labels)
+                or not (storage or not storage_only
+                        and host == "api.github.com")):
+            raise ValueError("Untrusted infrastructure destination")
+    except (ValueError, TypeError):
+        raise AdapterError("Untrusted GitHub infrastructure destination",
+                           "access") from None
+    return value
+
+
+
+
+class PreRequestDeferral(AdapterError):
+    """Healthy retained timing prevents a new, unreserved transaction."""
+
+
+class DataReviewDeferred(AdapterError):
+    """A catalog review remains a failed refresh after healthy transport."""
+
+    def __init__(self, message, reason):
+        super().__init__(message, "parse")
+        self.reason = reason
+
+
+def review_current_events(state):
+    """Audit the complete current query; exclude only academic information."""
+    queries = state["querystringsearch"]["subrequests"]
+    if not isinstance(queries, dict) or len(queries) != 1:
+        raise AdapterError("Ambiguous current event inventory", "parse")
+    query = next(iter(queries.values()))
+    items = query.get("items")
+    if (type(query.get("total")) is not int or not isinstance(items, list)
+            or query["total"] != len(items) or query.get("error")
+            or query.get("loading") or query.get("loaded") is not True):
+        raise AdapterError("Incomplete current event inventory", "parse")
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise AdapterError("Invalid current event entry", "parse")
+        title, description, path = (
+            item.get("title"), item.get("description"), item.get("@id"))
+        if (item.get("@type") != "Event" or not isinstance(title, str)
+                or not title.strip() or not isinstance(description, str)
+                or not description.strip()
+                or not isinstance(path, str) or path in seen
+                or not re.fullmatch(r"/events/[A-Za-z0-9][A-Za-z0-9/-]*", path)):
+            raise AdapterError("Unclassified current event schema", "parse")
+        seen.add(path)
+        try:
+            times = [datetime.fromisoformat(item[key].replace("Z", "+00:00"))
+                     for key in ("start", "end")]
+            if (any(value.utcoffset() is None for value in times)
+                    or times[1] < times[0]):
+                raise ValueError("Untrusted event timing")
+        except (TypeError, ValueError, KeyError, AttributeError):
+            raise AdapterError("Ambiguous current event dates", "parse") from None
+        text = title + " " + description
+        if re.search(
+                r"\b(?:scholarship|fellowship|grant|fund|bursar|stipend|award|"
+                r"prize|competition|internship|traineeship|subsid)\w*\b|"
+                r"(?:tuition|fee)[- ](?:waiver|reduction)|financial (?:aid|support)|"
+                r"free tuition",
+                text, re.I):
+            raise DataReviewDeferred(
+                "Current event requires award review", "current-event-award")
+        informative = re.search(
+            r"\b(?:open (?:day|house)|information (?:meeting|session)|"
+            r"admission (?:webinar|session)|how to apply)\b", title, re.I)
+        academic = re.search(
+            r"\b(?:MSc|bachelor|master|doctoral|PhD|degree|admission|university|"
+            r"college|programme|program)s?\b", text, re.I)
+        if not informative or not academic:
+            raise DataReviewDeferred(
+                "Unclassified current event requires review",
+                "current-event-purpose",
+            )
+    return len(items)
+
+
+def data_review_transport_assessed(error, kind, outer):
+    """A specific catalog deferral cannot heal I/O, policy or lock failures."""
+    if (type(error) is not DataReviewDeferred or error.reason not in {
+            "current-event-award", "current-event-purpose",
+            "context-application", "context-study-types"}
+            or not outer or kind != "policy" or _TRANSACTION_DEPTH != 1
+            or _PUBLISHER_GATE_FAILED or not _STATE_TRUSTED
+            or _REQUEST_FRAMES or _ACTIVE_REQUEST_ID is not None
+            or PublisherResponse._failure is not None):
+        return False
+    with locked_budget():
+        state = load_budget()
+        publisher_healthy(state)
+        if (not state["in_flight"] or state["flight_kind"] != "policy"
+                or not _ACTIVE_FLIGHT_ID
+                or state["flight_id"] != _ACTIVE_FLIGHT_ID
+                or state["blocked"] or not state["request_id"]
+                or state["request_id"] != state["completed_request_id"]
+                or state["request_outcome"] != "response_assessed"
+                or state["request_started"] < state["flight_started"]
+                or state["completed"] < state["request_started"]):
+            return False
+    # Exiting the lock and both authority checks must succeed before settlement.
+    verify_journal()
+    verify_collection()
+    return True
 
 if __name__ == "__main__":
     try:
