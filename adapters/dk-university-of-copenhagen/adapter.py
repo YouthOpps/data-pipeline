@@ -3566,6 +3566,13 @@ def budget_file():
     if _STATE_PARENT_FD is not None:
         state_parent(directory)
     else:
+        if (
+            os.environ.get("GITHUB_ACTIONS") != "true"
+            and not os.path.lexists(directory)
+        ):
+            raise AdapterError(
+                "Reviewed existing local publisher state required", "access"
+            )
         try:
             os.mkdir(directory, mode=0o700)
         except FileExistsError:
@@ -3969,24 +3976,73 @@ def pace(interval=12.2):
 
 
 def retry_embargo(value):
-    """Return finite future timing without mutating malformed input."""
+    """Retain supported future timing; never discard positive overflow."""
     if value is None:
         return 0
+    if not isinstance(value, str):
+        raise AdapterError("Unsupported Retry-After field", "access")
+    value = value.strip()
+    numeric_form = re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value)
+    if numeric_form:
+        try:
+            delay = float(value)
+            until = time.time() + delay
+            if not numeric(delay) or not supported_epoch(until):
+                raise ValueError("Unsupported positive duration")
+        except (ValueError, OverflowError, OSError):
+            raise AdapterError("Unsupported positive Retry-After duration",
+                               "access") from None
+        return until if delay > 0 and until > time.time() else 0
+    # Numeric-looking positive extensions cannot establish an unbounded grant.
+    if (re.fullmatch(r"\+?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+                     r"(?:[eE][+-]?[0-9]+)?", value)
+            or value.lower() in {"inf", "+inf", "infinity", "+infinity"}):
+        raise AdapterError("Unsupported positive Retry-After syntax", "access")
     try:
-        value = value.strip()
-        if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value):
-            until = time.time() + float(value)
-        else:
-            date = email.utils.parsedate_to_datetime(value)
-            if date.utcoffset() is None:
-                return 0
-            until = date.timestamp()
-        if not numeric(until) or until <= time.time():
-            return 0
-        datetime.fromtimestamp(until, timezone.utc)
-        return until
-    except (ValueError, TypeError, OverflowError, OSError, AttributeError):
+        date = email.utils.parsedate_to_datetime(value)
+    except (ValueError, TypeError, OverflowError):
+        # An explicitly out-of-range future year is restrictive but cannot
+        # be represented in this runtime's durable timestamp schema.
+        year = re.search(r"\b[0-9]{1,2} [A-Za-z]{3} ([0-9]{5,})\b", value)
+        if year:
+            raise AdapterError("Unsupported Retry-After date", "access")
         return 0
+    if date.utcoffset() is None:
+        return 0
+    try:
+        until = date.timestamp()
+        if not supported_epoch(until):
+            raise ValueError("Unsupported date timestamp")
+    except (ValueError, OverflowError, OSError):
+        raise AdapterError("Unsupported Retry-After date", "access") from None
+    return until if until > time.time() else 0
+
+
+def retry_after_constraints(headers):
+    """Inspect every observed field, retaining MAX even alongside overflow."""
+    if hasattr(headers, "get_all"):
+        values = headers.get_all("Retry-After") or []
+    else:
+        values = [value for key, value in headers.items()
+                  if key.lower() == "retry-after"]
+    maximum, unsupported = 0, False
+    for value in values:
+        # Combined numeric fields contain no date comma ambiguity.
+        parts = (value.split(",") if isinstance(value, str) and re.fullmatch(
+            r"\s*[0-9]+(?:\.[0-9]+)?"
+            r"(?:\s*,\s*[0-9]+(?:\.[0-9]+)?)+\s*", value) else [value])
+        if (len(parts) == 1 and isinstance(value, str) and "," in value
+                and not re.fullmatch(r"[A-Za-z]{3,9},[^,]+", value.strip())):
+            # The email date parser accepts prefixes. Do not silently lose a
+            # second combined field or guess how ambiguous dates were joined.
+            unsupported = True
+            continue
+        for part in parts:
+            try:
+                maximum = max(maximum, retry_embargo(part))
+            except AdapterError:
+                unsupported = True
+    return maximum, unsupported
 
 
 
@@ -4291,6 +4347,30 @@ def source_revision_digest(head, source):
 
 
 
+def infrastructure_url(value, *, storage_only=False):
+    """Admit only GitHub API or its supported signed artifact storage."""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        host = parsed.hostname or ""
+        labels = host.split(".")
+        storage = host.endswith((
+            ".blob.core.windows.net", ".actions.githubusercontent.com"))
+        if (parsed.scheme != "https" or parsed.username or parsed.password
+                or parsed.netloc.lower() != host
+                or parsed.port is not None or parsed.fragment
+                or re.search(r"[\x00-\x20\\]", value)
+                or any(not re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?", label)
+                       for label in labels)
+                or not (storage or not storage_only
+                        and host == "api.github.com")):
+            raise ValueError("Untrusted infrastructure destination")
+    except (ValueError, TypeError):
+        raise AdapterError("Untrusted GitHub infrastructure destination",
+                           "access") from None
+    return value
+
+
 def download_inert_artifact(identity, artifact_id, digest=None):
     (
         "Download a bounded authenticated artifact, stripping "
@@ -4324,6 +4404,7 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                 raise ValueError("Expected artifact redirect")
             destination = response.headers.get("Location", "")
             response.read(1001)
+        infrastructure_url(destination, storage_only=True)
         parsed = urllib.parse.urlsplit(destination)
         if (
             parsed.scheme != "https"
@@ -4658,6 +4739,23 @@ def export_family_artifact():
 
 
 
+def robots_response_text(headers, body):
+    """An HTTP200 policy needs one explicit plaintext representation."""
+    if hasattr(headers, "get_all"):
+        types = headers.get_all("Content-Type") or []
+    else:
+        types = [value for key, value in headers.items()
+                 if key.lower() == "content-type"]
+    if (len(types) != 1 or not isinstance(types[0], str)
+            or types[0].split(";", 1)[0].strip().lower() != "text/plain"):
+        raise AdapterError("Unsupported robots representation", "access")
+    text = body.decode(headers.get_content_charset() or "utf-8", "strict")
+    meaningful = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    if re.search(r"<!--|-->|<!doctype\b|</?[A-Za-z][^>]*>", meaningful, re.I):
+        raise AdapterError("HTML is not a robots policy", "access")
+    return text
+
+
 def apply_robots_policy(text, url, state=None):
     """Keep policy application pending until restrictive state is durable."""
     if state is None:
@@ -4722,10 +4820,20 @@ def physical_request_bytes(
             "Explicit infrastructure transport required", "access"
         )
     if infrastructure:
+        infrastructure_url(url)
         if publisher:
             raise AdapterError(
                 "Publisher cannot use metadata purpose", "access"
             )
+        if host != "api.github.com":
+            if method != "GET" or payload is not None:
+                raise AdapterError(
+                    "Signed artifact requires public GET", "access"
+                )
+            headers = {
+                key: value for key, value in (headers or {}).items()
+                if key.lower() not in {"authorization", "cookie"}
+            }
         infrastructure_pace(url)
     if publisher and (not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
         raise AdapterError(
@@ -4835,10 +4943,6 @@ def physical_request_bytes(
                     url, response.headers.get("Retry-After")
                 )
             if publisher:
-                state["until"] = max(
-                    state["until"],
-                    retry_embargo(response.headers.get("Retry-After")),
-                )
                 if status == 429:
                     strikes = state["observed_429_since_transition"] + 1
                     state["observed_429_since_transition"] = strikes
@@ -4856,8 +4960,24 @@ def physical_request_bytes(
                     )
                 if status in (401, 403, 451) and not robots:
                     state["blocked"] = True
+                # Save known status restrictions before assessing any header.
                 state["observed_at"] = time.time()
                 write_budget(state)
+                embargo, unsupported = retry_after_constraints(response.headers)
+                if embargo > state["until"]:
+                    state["until"] = embargo
+                    if status == 429:
+                        state["rate_limit_until"] = max(
+                            state["rate_limit_until"], embargo
+                        )
+                    state["observed_at"] = time.time()
+                    write_budget(state)
+                if unsupported:
+                    raise AdapterError(
+                        "Unsupported Retry-After; pending state retained",
+                        "access",
+                        status,
+                    )
             declared = response.headers.get("Content-Length")
             if declared and (
                 not declared.isdigit() or int(declared) > byte_limit
@@ -4920,9 +5040,7 @@ def physical_request_bytes(
                     if _ROBOTS_CONTEXT is not None
                     else SOURCE_URL
                 )
-                text = body.decode(
-                    response.headers.get_content_charset() or "utf-8"
-                )
+                text = robots_response_text(response.headers, body)
                 try:
                     delay = apply_robots_policy(text, target, state)
                 except RobotsDisallow:
@@ -4935,7 +5053,9 @@ def physical_request_bytes(
     except BaseException as error:
         if publisher and response_received and not response_exit_completed:
             response_constraints_saved = False
-            if isinstance(error, (urllib.error.URLError, TimeoutError, OSError)):
+            if isinstance(
+                error, (urllib.error.URLError, TimeoutError, OSError)
+            ):
                 raise AdapterError(
                     "Received publisher response failed; no connection retry",
                     "access",
@@ -5113,6 +5233,40 @@ def scan_family_history():
 
 
 
+def require_existing_local_state():
+    """A mature local namespace cannot be recreated from an older artifact."""
+    directory = os.path.join(tempfile.gettempdir(),
+                             FAMILY + "-" + str(os.getuid()))
+    descriptor = info = None
+    try:
+        # Retain this parent through subsequent startup, preventing a race
+        # from turning a removed directory into a new initialization grant.
+        parent = state_parent(directory)
+        descriptor = os.open("state.json", os.O_RDWR | os.O_NOFOLLOW |
+                             os.O_NONBLOCK, dir_fd=parent)
+        info = os.fstat(descriptor)
+        validate_state_descriptor(descriptor, parent, "state.json")
+        if not 0 < info.st_size <= 16384:
+            raise AdapterError("Existing local journal is empty or oversized",
+                               "access")
+        budget_file()
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        journal_retain(descriptor)
+    except BaseException:
+        fail_publisher_cleanup()
+        raise
+    finally:
+        if descriptor is not None and info is not None:
+            primary = sys.exc_info()[0] is not None
+            try:
+                close_retained_descriptor(descriptor,
+                                          (info.st_dev, info.st_ino))
+            except BaseException:
+                fail_publisher_cleanup()
+                if not primary:
+                    raise
+
+
 def prepare_collection():
     """Verify the source producer before any family state initialization."""
     global _COLLECTION_LOCK_FD, _COLLECTION_LOCK_CONTEXT
@@ -5123,6 +5277,7 @@ def prepare_collection():
     if os.environ.get("GITHUB_ACTIONS") == "true":
         authenticate_current_job()
     else:
+        require_existing_local_state()
         local_workflow_definition()
     if _COLLECTION_LOCK_FD is None:
         _LEGACY_COLLECTION_OBSERVATION = legacy_collection_observation()
@@ -5382,6 +5537,9 @@ def request_bytes(
             infrastructure=True,
         )
     if not publisher and host not in _PUBLISHER_HOSTS:
+        infrastructure_url(url)
+        if host != "api.github.com":
+            raise AdapterError("Explicit artifact transport required", "access")
         clamp_publication_window()
         if _RUN_END is not None:
             check_deadline()
