@@ -39,7 +39,7 @@ They also state that the website is for personal use only. These clauses are rea
 
 One shared serialized family, `youthopps-bmw-group-publisher-v1`, controls all publisher requests. Physical starts are at least 12.2 seconds apart, with at most five starts in a rolling 60 seconds and a conservative wait after the previous response completes. Inventory pages, including the home inventory configuration, wait at least 30 seconds after the preceding page completes. This separate page guard does not slow every policy/detail request to 30 seconds. Stronger persisted limits prevail.
 
-429 stops the current run, doubles both actual retained physical/page gaps and persists at least 30 minutes of cooldown without a valid stronger Retry-After. Repeated 429 increases cooldown exponentially. A timed 429 alone does not create a permanent hard hold: a later bounded run can retry after the embargo at the slower retained pace. Content denials remain hard holds, including a clear human-verification challenge inside a 429 HTML response; its adaptive embargo is retained too. Only finite positive supported Retry-After delays or timezone-aware future dates can extend the embargo; malformed, stale, negative or unrepresentable values preserve the exponential minimum and known MAX state. Cooldown continues to increase beyond the ninth event; unsupported extreme counter states fail before another request rather than overflowing or resetting history. Research history is merged into native state without resetting starts, completion, embargoes or stronger intervals.
+429 stops the current run, doubles both actual retained physical/page gaps and persists at least 30 minutes of cooldown without a valid stronger Retry-After. Repeated 429 increases cooldown exponentially. A timed 429 alone does not create a permanent hard hold: a later bounded run can retry after the embargo at the slower retained pace. Content denials remain hard holds, including a clear human-verification challenge inside a 429 HTML response; its adaptive embargo is retained too. Every observed Retry-After field contributes its supported positive delay or timezone-aware future date to the retained MAX. Malformed, stale or negative fields do not weaken the known embargo. Positive overflow, unsupported time magnitude or ambiguous combined dates preserve pending ownership and stop before body reading; known status restrictions and other supported header values are already durable. Cooldown continues to increase beyond the ninth event; unsupported extreme counter states fail before another request rather than overflowing or resetting history. Research history is merged into native state without resetting starts, completion, embargoes or stronger intervals.
 
 Collection has a fixed 25-minute phase, with a 30-minute workflow job and daily 18:05 UTC schedule. A traversal preflight includes both complete frontiers and a 120-second reserve. Slower retained post-429 pacing can make a complete traversal infeasible; the adapter fails closed rather than increasing caps, dropping pages or claiming every later attempt must succeed. The source App token is created before collection; the normal bounded collection remains within its lifetime.
 
@@ -77,8 +77,11 @@ original held lock are checked throughout writes and cleanup. These are
 advisory-lock ownership checks, not filesystem compare-and-swap guarantees.
 
 This repair supersedes the historical header-only 429 stop from #328. The
-adaptive cooldown, stronger Retry-After and status-based refusal are durable
-before reading at most 64 KiB of a 429 body. Only a completely read, assessed
+adaptive cooldown and status-based refusal are durable before any header
+parsing. All duplicate Retry-After fields are then assessed, and supported
+stronger MAX values are durable before reading at most 64 KiB of a 429 body.
+Unsupported positive values cannot erase a known 403 hold or the doubled
+current 429 gaps, strike and minimum cooldown. They leave the request pending. Only a completely read, assessed
 and closed response can settle its reservation. A genuine visible challenge
 retains a hard hold as well as the timed embargo; an incomplete body or close
 remains pending. Robots-specific 4xx semantics do not weaken content refusal

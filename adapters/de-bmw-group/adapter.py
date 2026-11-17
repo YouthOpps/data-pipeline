@@ -2246,24 +2246,73 @@ def pace(interval=12.2):
 
 
 def retry_embargo(value):
-    """Return finite future timing without mutating malformed input."""
+    """Retain supported future timing; never discard positive overflow."""
     if value is None:
         return 0
+    if not isinstance(value, str):
+        raise AdapterError("Unsupported Retry-After field", "access")
+    value = value.strip()
+    numeric_form = re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value)
+    if numeric_form:
+        try:
+            delay = float(value)
+            until = time.time() + delay
+            if not numeric(delay) or not supported_epoch(until):
+                raise ValueError("Unsupported positive duration")
+        except (ValueError, OverflowError, OSError):
+            raise AdapterError("Unsupported positive Retry-After duration",
+                               "access") from None
+        return until if delay > 0 and until > time.time() else 0
+    # Numeric-looking positive extensions cannot establish an unbounded grant.
+    if (re.fullmatch(r"\+?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+                     r"(?:[eE][+-]?[0-9]+)?", value)
+            or value.lower() in {"inf", "+inf", "infinity", "+infinity"}):
+        raise AdapterError("Unsupported positive Retry-After syntax", "access")
     try:
-        value = value.strip()
-        if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value):
-            until = time.time() + float(value)
-        else:
-            date = email.utils.parsedate_to_datetime(value)
-            if date.utcoffset() is None:
-                return 0
-            until = date.timestamp()
-        if not numeric(until) or until <= time.time():
-            return 0
-        datetime.fromtimestamp(until, timezone.utc)
-        return until
-    except (ValueError, TypeError, OverflowError, OSError, AttributeError):
+        date = email.utils.parsedate_to_datetime(value)
+    except (ValueError, TypeError, OverflowError):
+        # An explicitly out-of-range future year is restrictive but cannot
+        # be represented in this runtime's durable timestamp schema.
+        year = re.search(r"\b[0-9]{1,2} [A-Za-z]{3} ([0-9]{5,})\b", value)
+        if year:
+            raise AdapterError("Unsupported Retry-After date", "access")
         return 0
+    if date.utcoffset() is None:
+        return 0
+    try:
+        until = date.timestamp()
+        if not supported_epoch(until):
+            raise ValueError("Unsupported date timestamp")
+    except (ValueError, OverflowError, OSError):
+        raise AdapterError("Unsupported Retry-After date", "access") from None
+    return until if until > time.time() else 0
+
+
+def retry_after_constraints(headers):
+    """Inspect every observed field, retaining MAX even alongside overflow."""
+    if hasattr(headers, "get_all"):
+        values = headers.get_all("Retry-After") or []
+    else:
+        values = [value for key, value in headers.items()
+                  if key.lower() == "retry-after"]
+    maximum, unsupported = 0, False
+    for value in values:
+        # Combined numeric fields contain no date comma ambiguity.
+        parts = (value.split(",") if isinstance(value, str) and re.fullmatch(
+            r"\s*[0-9]+(?:\.[0-9]+)?"
+            r"(?:\s*,\s*[0-9]+(?:\.[0-9]+)?)+\s*", value) else [value])
+        if (len(parts) == 1 and isinstance(value, str) and "," in value
+                and not re.fullmatch(r"[A-Za-z]{3,9},[^,]+", value.strip())):
+            # The email date parser accepts prefixes. Do not silently lose a
+            # second combined field or guess how ambiguous dates were joined.
+            unsupported = True
+            continue
+        for part in parts:
+            try:
+                maximum = max(maximum, retry_embargo(part))
+            except AdapterError:
+                unsupported = True
+    return maximum, unsupported
 
 
 def infrastructure_pace(url):
@@ -2687,10 +2736,6 @@ def physical_request_bytes(
                 retain_infrastructure_retry(url,
                                             response.headers.get("Retry-After"))
             if publisher:
-                state["until"] = max(
-                    state["until"],
-                    retry_embargo(response.headers.get("Retry-After")),
-                )
                 if status == 429:
                     strikes = state["observed_429_since_transition"] + 1
                     state["observed_429_since_transition"] = strikes
@@ -2704,8 +2749,22 @@ def physical_request_bytes(
                                                     state["until"])
                 if status in (401, 403, 451) and not robots:
                     state["blocked"] = True
+                # Known status restrictions are durable before parsing any
+                # possibly unsupported or duplicated Retry-After field.
                 state["observed_at"] = time.time()
                 write_budget(state)
+                embargo, unsupported = retry_after_constraints(response.headers)
+                if embargo > state["until"]:
+                    state["until"] = embargo
+                    if status == 429:
+                        state["rate_limit_until"] = max(
+                            state["rate_limit_until"], embargo)
+                    state["observed_at"] = time.time()
+                    write_budget(state)
+                if unsupported:
+                    raise AdapterError(
+                        "Unsupported Retry-After; pending state retained",
+                        "access", status)
             if publisher and status == 429:
                 byte_limit = min(byte_limit, 65536)
             declared = response.headers.get("Content-Length")
