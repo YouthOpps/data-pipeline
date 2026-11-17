@@ -150,7 +150,10 @@ use; one-use initialization/native claims cannot be reset by the adapter.
 Future owned envelopes bind head, immutable adapter bytes and exact state bytes.
 A narrowly typed pre-request metadata-failure receipt carries **no state or
 allowance**. It is emitted only before any possible source open or journal
-mutation, with healthy infrastructure closure. A future consumer must prove the
+mutation, with healthy infrastructure closure and independently proved absence of the whole
+local family before and after export under the same temporary parent. An existing
+family object, including unknown bytes, pending work or stronger retained state,
+blocks a zero-state receipt. A future consumer must prove the
 full chronology back to an authenticated older owned state. Missing evidence,
 unknown gaps or a possible publisher path cannot use that receipt.
 

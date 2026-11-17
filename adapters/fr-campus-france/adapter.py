@@ -1944,6 +1944,10 @@ def export_family_artifact():
         and _GUARD_FD is None
         and _COLLECTION_LOCK_FD is None
     ):
+        receipt_parent = prewire_namespace_absent()
+        if receipt_parent is None:
+            invalidate_export()
+            return
         envelope.update(
             kind="pre-request-metadata-failure",
             zero_publisher_reachability=True,
@@ -1952,6 +1956,66 @@ def export_family_artifact():
         invalidate_export()
         return
     write_export_payload(envelope)
+    if "kind" in envelope:
+        try:
+            if prewire_namespace_absent() != receipt_parent:
+                raise AdapterError(
+                    "Campus France family appeared during receipt export",
+                    "access",
+                )
+        except BaseException:
+            invalidate_export()
+            raise
+
+
+def prewire_namespace_absent():
+    """A zero-state receipt cannot hide any unexported local family owner."""
+    global _INFRA_CLOSE_FAILED
+    if _STATE_PATH is not None:
+        return None
+    root = tempfile.gettempdir()
+    if not os.path.isabs(root) or root != os.path.realpath(root):
+        raise AdapterError("Unsafe Campus France temporary parent", "access")
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        version = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            value.st_uid,
+            value.st_gid,
+            stat.S_IMODE(value.st_mode),
+        )
+        if not stat.S_ISDIR(info.st_mode) or not (
+            info.st_uid in (0, os.getuid())
+            and not info.st_mode & 0o022
+            or stat.S_IMODE(info.st_mode) == 0o1777
+        ):
+            raise AdapterError(
+                "Unsafe Campus France temporary parent", "access"
+            )
+        absent = False
+        try:
+            os.stat(
+                FAMILY + "-" + str(os.getuid()),
+                dir_fd=descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            absent = True
+        if version(info) != version(os.fstat(descriptor)) or version(
+            info
+        ) != version(os.stat(root, follow_symlinks=False)):
+            raise AdapterError(
+                "Campus France temporary parent changed", "access"
+            )
+        return version(info) if absent else None
+    finally:
+        try:
+            os.close(descriptor)
+        except BaseException:
+            _INFRA_CLOSE_FAILED = True
+            raise
 
 
 def prepare_collection():
