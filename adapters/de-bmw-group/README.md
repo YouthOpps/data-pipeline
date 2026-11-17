@@ -136,8 +136,9 @@ reuse of that accepted run: its responses had no Retry-After and its sole REP
 response was supported plaintext. Actual-function private-journal controls
 exercise the new restrictive paths, and full captured-input replay preserves
 all 501 material records. This is not a second native run or production proof.
-The final hosted handoff is implemented behind a source-committed decision
-that remains disabled pending independent review. Its exact 2,284-byte typed
+The final hosted handoff is activated by the [exact independent maintainer
+decision](https://github.com/YouthOpps/data-pipeline/issues/391#issuecomment-6947746096)
+committed in the source. Its exact 2,284-byte typed
 MAX combines the original owned state, all 41 research journal witnesses and
 all 164 native witnesses. Its 50 starts are actual durable reservations;
 28 physical and 26 cached-policy native episodes have complete settlement
