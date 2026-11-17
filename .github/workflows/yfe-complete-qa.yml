@@ -1,0 +1,53 @@
+name: Youth for Europe complete nonpublishing QA
+on:
+  push:
+    branches: [qa/yfe-365-complete-frontier]
+    paths: [.github/workflows/yfe-complete-qa.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: youthopps-youth-for-europe-publisher-v1
+  cancel-in-progress: false
+jobs:
+  observe:
+    if: github.event.created && github.event.before == '0000000000000000000000000000000000000000' && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/yfe-365-complete-frontier' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 7da2b3eb81853707def0ff67de64f8d43773fe87
+          path: .qa-website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Execute the original test and validate its complete RAM capture
+        id: observe
+        run: python -B .github/yfe-complete-qa.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          YFE_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+      - name: Retain exact successor pacing state
+        if: always() && steps.observe.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: yfe-complete-pacing-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          retention-days: 90
+          if-no-files-found: error
+      - name: Retain encrypted complete native observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yfe-complete-observations-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/yfe-complete-evidence.cms
+            ${{ runner.temp }}/yfe-complete-observations.json
+          retention-days: 3
+          if-no-files-found: error
