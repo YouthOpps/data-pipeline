@@ -585,3 +585,41 @@ unsupported exponential value leaves ownership pending. Known-status
 persistence and response-entry errors close under the existing nonrenewable
 operation bound, retain the original primary error and preserve pending/hold
 state. No healthy-response behavior or actual native data changed.
+
+
+### HTTP-date limits and healthy owned exports (#411)
+
+Retry-After accepts the complete IMF-fixdate, obsolete RFC850 and asctime HTTP
+date forms. Only a complete asctime form may imply UTC; arbitrary naive dates
+and email-parser prefixes do not become HTTP dates. RFC850 resolves the
+two-digit year using HTTP's 50-year rule around the current clock, including a
+future date crossing a century boundary.
+
+Separate fields retain the strongest supported delay or date. Ambiguous
+combined fields retain every recognizable complete date/delta component before
+leaving ownership pending; an unsupported component cannot erase a stronger
+known MAX. Existing 429 counters, current-interval/page doubling, minimum hold,
+body assessment, closure, uncertainty and receipt rules are unchanged.
+
+The previous parser ignored a valid three-hour asctime hold and settled with
+only the thirty-minute 429 fallback; RFC850 and mixed asctime fields retained
+pending but lost the stronger known limit. Isolated actual HTTPResponse/socketpair
+controls cover those cases without another larger field masking a loss.
+
+This narrow correction reuses the independently accepted 54-response/481-journal
+native evidence from issue 405 and successful producer 44121438723: 45 material
+records, 13 current records and 32 actual expired records removed. All 54 retained
+responses have no Retry-After field; actual no-header assessment retains exact
+journal bytes. Complete captured-input replay and the current consumer retain
+45 raw / 13 cleaned / 0 valid-empty results, including 32 actual-expired→0 cleanup. No new
+publisher requests or initialization are part of this correction's validation.
+
+
+Owned artifact finalization tracks exceptions raised by that export itself.
+An unrelated exception still propagating in its caller no longer invalidates
+an otherwise eligible verified artifact. Genuine artifact writes, generation
+changes, output-signal failures and descriptor/parent closure errors still
+invalidate readiness through the existing guards. Publisher pending/refusal
+state and deadline handling are unchanged; no caller exception grants access
+or clears an existing gate. Private real-IO probes cover healthy exports under
+active and propagating caller exceptions plus genuine write/close faults.
