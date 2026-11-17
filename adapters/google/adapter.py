@@ -6,6 +6,7 @@ prohibit automated extraction, so delegated IIE eligibility is never imported.
 """
 
 import argparse
+from pathlib import Path
 import base64
 import contextlib
 import copy
@@ -25,6 +26,7 @@ import ssl
 import stat
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -59,7 +61,7 @@ FAMILY_SOURCES = {"google"}
 COLLECTION_TIMEOUT = 900
 RUN_TIMEOUT = 1290
 EXPORT_TIMEOUT = 30
-_STATE_SCHEMA = 2
+_STATE_SCHEMA = 3
 _ARTIFACT_NAME = "google-pacing-state"
 _REQUEST_STARTS = 0
 MAX_PUBLISHER_STARTS = 100
@@ -229,6 +231,11 @@ def request_timeout(publisher=False):
 
 
 def alarm_expired(signum, frame):
+    signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
+    for request_frame in _REQUEST_FRAMES:
+        request_frame["assessed"] = False
+    if _REQUEST_FRAMES:
+        fail_policy()
     raise PhaseExpired()
 
 
@@ -243,8 +250,25 @@ def arm_alarm(deadline):
 @contextlib.contextmanager
 def execution():
     global _RUN_END, _COLLECTION_LOCK_FD
+    global _REQUEST_STARTS, _COLLECTION_BYTES, _RESTORED, _STATE_TRUSTED
+    global _STARTUP_QUIET_UNTIL, _LOCAL_FIRST_WIRE_VERIFIED
     if _RUN_END is not None:
         raise AdapterError("Nested execution context refused", "access")
+    if (
+        _PUBLISHER_GATE_FAILED
+        or _JOURNAL_FATAL
+        or _ACTIVE_FLIGHT_ID
+        or _ACTIVE_REQUEST_ID
+        or _REQUEST_FRAMES
+    ):
+        raise AdapterError("Google publisher failure remains sticky", "access")
+    _REQUEST_STARTS = _COLLECTION_BYTES = 0
+    _RESTORED = _STATE_TRUSTED = _LOCAL_FIRST_WIRE_VERIFIED = False
+    _STARTUP_QUIET_UNTIL = None
+    _ROBOTS.clear()
+    _REP_PROVENANCE.clear()
+    _REP_TARGETS.clear()
+    _LOCAL_CLAIMS.clear()
     previous = signal.getsignal(signal.SIGALRM)
     if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
         raise AdapterError("Existing process alarm refused", "access")
@@ -254,10 +278,24 @@ def execution():
     try:
         yield
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
-        _RUN_END = None
-        journal_release()
+        primary = sys.exc_info()[1]
+        try:
+            try:
+                journal_release()
+            finally:
+                close_state_authorities()
+        except BaseException:
+            with contextlib.suppress(BaseException):
+                journal_invalidate_export()
+            if primary is None:
+                raise
+        finally:
+            if _PUBLISHER_GATE_FAILED or _JOURNAL_FATAL:
+                with contextlib.suppress(BaseException):
+                    journal_invalidate_export()
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+            _RUN_END = None
 
 
 @contextlib.contextmanager
@@ -289,89 +327,122 @@ def numeric(value):
 
 
 def validate_budget(state):
-    """Upgrade exact legacy state without inventing known rate history."""
-    legacy = {
-        "schema", "family", "observed_at", "not_before", "starts", "blocked"
-    }
-    if not isinstance(state, dict):
-        raise AdapterError("Invalid publisher pacing state", "access")
-    version = state.get("schema")
-    if type(version) is not int or version not in (1, _STATE_SCHEMA):
-        raise AdapterError("Unsupported publisher pacing schema", "access")
-    if version == 1:
-        if set(state) - {"interval"} != legacy:
-            raise AdapterError(
-                "Invalid legacy publisher pacing state", "access"
-            )
-        maximum, minimum = 10, 6
-    else:
-        if set(state) != set(empty_budget(0)):
-            raise AdapterError("Invalid publisher pacing state", "access")
-        maximum, minimum = 512, 12.2
+    """Accept only complete modern state; legacy migration is explicit."""
     if (
-        state.get("family") != FAMILY
-        or not numeric(state.get("observed_at"))
-        or not numeric(state.get("not_before"))
-        or type(state.get("blocked")) is not bool
-        or not numeric(state.get("interval", 6))
-        or state.get("interval", 6) < minimum
-        or not isinstance(state.get("starts"), list)
-        or len(state["starts"]) > maximum
-        or any(not numeric(t) for t in state["starts"])
-        or state["starts"] != sorted(set(state["starts"]))
-        or any(t > state["observed_at"] for t in state["starts"])
-    ):
-        raise AdapterError("Invalid publisher pacing history", "access")
-    if time.time() + 1 < state["observed_at"]:
-        raise AdapterError("Publisher pacing clock moved backwards", "access")
-    if version == 1:
-        upgraded = empty_budget(state["observed_at"])
-        upgraded.update(state)
-        upgraded.update(
-            schema=_STATE_SCHEMA,
-            interval=max(12.2, state.get("interval", 6)),
-            completed=state["observed_at"],
-            last_inventory_completed=state["observed_at"],
-            legacy_rate_history_unknown=True,
+        type(state) is not dict
+        or set(state) != set(empty_budget(0))
+        or type(state["schema"]) is not int
+        or state["schema"] != 3
+        or state["family"] != FAMILY
+        or any(
+            type(state[k]) is not bool
+            for k in ("blocked", "in_flight", "request_inventory")
         )
-        return upgraded
+        or state["legacy_rate_history_unknown"] is not True
+        or state["legacy_policy_history_unknown"] is not True
+    ):
+        raise AdapterError("Untrusted Google journal schema", "access")
+    numeric_keys = (
+        "observed_at",
+        "not_before",
+        "completed",
+        "interval",
+        "page_interval",
+        "last_inventory_completed",
+        "rate_limit_until",
+        "flight_started",
+        "request_started",
+    )
     if (
-        any(not numeric(state[key]) for key in (
-            "completed", "page_interval", "last_inventory_completed",
-            "rate_limit_until"
-        ))
+        any(
+            not numeric(state[k]) or state[k] > 253402300799
+            for k in numeric_keys
+        )
+        or state["interval"] < 12.2
         or state["page_interval"] < 30
-        or state["completed"] > state["observed_at"]
-        or state["last_inventory_completed"] > state["observed_at"]
         or type(state["rate_limit_strikes"]) is not int
         or not 0 <= state["rate_limit_strikes"] <= 100
-        or type(state["legacy_rate_history_unknown"]) is not bool
+        or type(state["starts"]) is not list
+        or len(state["starts"]) > 512
+        or any(
+            not numeric(v) or v > state["observed_at"] for v in state["starts"]
+        )
+        or state["starts"] != sorted(set(state["starts"]))
+        or state["completed"] > state["observed_at"]
+        or state["last_inventory_completed"] > state["observed_at"]
+        or state["observed_at"] > time.time() + 1
     ):
-        raise AdapterError("Invalid durable rate history", "access")
-    return dict(state, starts=list(state["starts"]))
+        raise AdapterError("Untrusted Google timing constraints", "access")
+    for key in (
+        "flight_id",
+        "completed_flight_id",
+        "request_id",
+        "completed_request_id",
+    ):
+        if state[key] is not None and not (
+            isinstance(state[key], str)
+            and re.fullmatch("[0-9a-f]{32}", state[key])
+        ):
+            raise AdapterError(
+                "Untrusted Google transaction identity", "access"
+            )
+    if state["flight_kind"] not in (None, "policy"):
+        raise AdapterError("Untrusted Google policy owner", "access")
+    if state["in_flight"] and (
+        not state["flight_id"] or state["flight_kind"] != "policy"
+    ):
+        raise AdapterError("Missing Google pending owner", "access")
+    if state["request_outcome"] not in (
+        None,
+        "reserved",
+        "response_assessed",
+        "no_response",
+    ):
+        raise AdapterError("Untrusted Google request outcome", "access")
+    if state["request_outcome"] is not None and not state["request_id"]:
+        raise AdapterError("Missing Google physical owner", "access")
+    if (
+        state["request_outcome"] == "reserved"
+        and not state["in_flight"]
+        or state["request_outcome"] == "response_assessed"
+        and state["request_id"] != state["completed_request_id"]
+    ):
+        raise AdapterError("Unresolved Google physical owner", "access")
+    return copy.deepcopy(state)
 
 
 def merge_budgets(local, incoming, now):
-    """Preserve every known start and numeric MAX, plus both durable holds."""
+    """MAX restrictions and union observations without settling any owner."""
     local, incoming = validate_budget(local), validate_budget(incoming)
-    combined = empty_budget(now)
+    if local["in_flight"] or incoming["in_flight"]:
+        if local != incoming:
+            raise AdapterError(
+                "Unresolved Google state cannot be merged", "access"
+            )
+        return local
+    combined = copy.deepcopy(
+        local if local["observed_at"] >= incoming["observed_at"] else incoming
+    )
     for key in (
-        "not_before", "interval", "completed", "page_interval",
-        "last_inventory_completed", "rate_limit_strikes", "rate_limit_until"
+        "observed_at",
+        "not_before",
+        "interval",
+        "completed",
+        "page_interval",
+        "last_inventory_completed",
+        "rate_limit_strikes",
+        "rate_limit_until",
     ):
         combined[key] = max(local[key], incoming[key])
+    combined["observed_at"] = max(combined["observed_at"], now)
     combined["blocked"] = local["blocked"] or incoming["blocked"]
-    combined["legacy_rate_history_unknown"] = (
-        local["legacy_rate_history_unknown"]
-        or incoming["legacy_rate_history_unknown"]
-    )
     combined["starts"] = sorted(set(local["starts"] + incoming["starts"]))
     return validate_budget(combined)
 
 
 def empty_budget(now):
     return {
-        "schema": _STATE_SCHEMA,
+        "schema": 3,
         "family": FAMILY,
         "observed_at": now,
         "not_before": now,
@@ -383,14 +454,42 @@ def empty_budget(now):
         "last_inventory_completed": 0,
         "rate_limit_strikes": 0,
         "rate_limit_until": 0,
-        "legacy_rate_history_unknown": False,
+        "legacy_rate_history_unknown": True,
+        "legacy_policy_history_unknown": True,
+        "in_flight": False,
+        "flight_id": None,
+        "flight_started": 0,
+        "flight_kind": None,
+        "completed_flight_id": None,
+        "request_id": None,
+        "request_started": 0,
+        "request_inventory": False,
+        "completed_request_id": None,
+        "request_outcome": None,
     }
 
 
 def verify_state_directory():
-    """Bind the mature leaf to its retained descriptor before each operation."""
+    parent = os.fstat(_STATE_PARENT_FD)
+    parent_name = os.stat(
+        os.path.dirname(os.path.dirname(_STATE_PATH)), follow_symlinks=False
+    )
+    if (
+        not stat.S_ISDIR(parent.st_mode)
+        or (parent.st_dev, parent.st_ino) != _STATE_PARENT_ID
+        or (parent_name.st_dev, parent_name.st_ino) != _STATE_PARENT_ID
+        or (parent.st_uid, stat.S_IMODE(parent.st_mode))
+        != _STATE_PARENT_METADATA
+        or (parent_name.st_uid, stat.S_IMODE(parent_name.st_mode))
+        != _STATE_PARENT_METADATA
+    ):
+        raise AdapterError("Original Google parent changed", "access")
     info = os.fstat(_STATE_DIR_FD)
-    current = os.stat(os.path.dirname(_STATE_PATH), follow_symlinks=False)
+    current = os.stat(
+        os.path.basename(os.path.dirname(_STATE_PATH)),
+        dir_fd=_STATE_PARENT_FD,
+        follow_symlinks=False,
+    )
     if (
         not stat.S_ISDIR(info.st_mode)
         or info.st_uid != os.getuid()
@@ -399,9 +498,7 @@ def verify_state_directory():
         or (info.st_dev, info.st_ino) != _STATE_DIR_ID
         or (current.st_dev, current.st_ino) != _STATE_DIR_ID
     ):
-        raise AdapterError(
-            "Publisher state directory identity changed", "access"
-        )
+        raise AdapterError("Original Google family changed", "access")
 
 
 def secure_file(name, flags):
@@ -412,38 +509,57 @@ def secure_file(name, flags):
 
 def budget_file():
     global _STATE_PATH, _STATE_LOCK, _STATE_DIR_FD, _STATE_DIR_ID
-    global _STATE_INITIALIZING
+    global _STATE_INITIALIZING, _STATE_PARENT_FD, _STATE_PARENT_ID
+    global _STATE_PARENT_METADATA
     if _STATE_PATH:
         verify_state_directory()
         return
     temporary = tempfile.gettempdir()
-    named_temporary = os.stat(temporary, follow_symlinks=False)
-    temporary_id = (named_temporary.st_dev, named_temporary.st_ino)
+    named = os.stat(temporary, follow_symlinks=False)
     parent = os.open(temporary, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    identity = (named.st_dev, named.st_ino)
+    metadata = (named.st_uid, stat.S_IMODE(named.st_mode))
+    shared_sticky = metadata[1] == 0o1777
+    if (
+        (named.st_uid not in (0, os.getuid()) and not shared_sticky)
+        or named.st_mode & 0o022
+        and not shared_sticky
+        or (os.fstat(parent).st_dev, os.fstat(parent).st_ino) != identity
+    ):
+        os.close(parent)
+        raise AdapterError("Unsafe Google journal parent", "access")
     try:
-        info = os.fstat(parent)
-        if (info.st_dev, info.st_ino) != temporary_id:
-            raise AdapterError("Temporary directory FD changed", "access")
         leaf = FAMILY + "-" + str(os.getuid())
         created = False
-        try:
-            os.mkdir(leaf, 0o700, dir_fd=parent)
-            created = True
-        except FileExistsError:
-            pass
-        descriptor, identity = journal_open_directory(
-            os.path.join(temporary, leaf)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            try:
+                os.mkdir(leaf, 0o700, dir_fd=parent)
+                created = True
+            except FileExistsError:
+                pass
+        linked = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        descriptor = os.open(
+            leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent
         )
         info = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700
+            or info.st_nlink < 2
+            or (linked.st_dev, linked.st_ino) != (info.st_dev, info.st_ino)
+        ):
+            os.close(descriptor)
+            raise AdapterError("Unsafe Google journal family", "access")
+        _STATE_DIR_FD, _STATE_DIR_ID = descriptor, (info.st_dev, info.st_ino)
+        _STATE_PARENT_FD = os.dup(parent)
+        _STATE_PARENT_ID, _STATE_PARENT_METADATA = identity, metadata
         _STATE_INITIALIZING = created
-        _STATE_DIR_FD = descriptor
-        _STATE_DIR_ID = (info.st_dev, info.st_ino)
-        directory = os.path.join(temporary, leaf)
-        _STATE_PATH = os.path.join(directory, "state.json")
-        _STATE_LOCK = os.path.join(directory, "state.lock")
+        _STATE_PATH = os.path.join(temporary, leaf, "state.json")
+        _STATE_LOCK = os.path.join(temporary, leaf, "state.lock")
         verify_state_directory()
     finally:
-        journal_close_acquired(parent, temporary_id)
+        os.close(parent)
 
 
 def locked_budget():
@@ -452,12 +568,16 @@ def locked_budget():
 
 
 def load_budget():
+    global _JOURNAL_PRESERVE_UNKNOWN
+    raw = journal_read()
+    if not raw and _JOURNAL_NEW and _JOURNAL_BOOTSTRAP_ALLOWED:
+        return empty_budget(time.time())
     try:
-        raw = journal_read()
-        if not raw and _JOURNAL_NEW and _JOURNAL_BOOTSTRAP_ALLOWED:
-            return empty_budget(time.time())
         return validate_budget(json.loads(raw))
-    except BaseException:
+    except (ValueError, UnicodeError, AdapterError):
+        # Unknown local history already blocks admission. Preserve it for
+        # review rather than replacing it with an empty allowance/barrier.
+        _JOURNAL_PRESERVE_UNKNOWN = True
         journal_failure()
         raise
 
@@ -467,30 +587,41 @@ def save_budget(state):
     journal_write(state)
 
 
-def pace():
-    global _REQUEST_STARTS, _PUBLISHER_INTERVAL
-    ("Serialize every publisher request start across the complete " "origin set.")
+def pace(*, inventory=False):
+    global _REQUEST_STARTS, _PUBLISHER_INTERVAL, _ACTIVE_REQUEST_ID
     check_deadline()
-    if _REQUEST_STARTS >= MAX_PUBLISHER_STARTS:
-        raise AdapterError("Publisher request-start cap reached", "access")
+    if (
+        _REQUEST_STARTS >= MAX_PUBLISHER_STARTS
+        or _PUBLISHER_GATE_FAILED
+        or not _ACTIVE_FLIGHT_ID
+    ):
+        raise AdapterError("Google physical admission unavailable", "access")
     with locked_budget():
         state = load_budget()
-        if state["rate_limit_strikes"] >= 100:
+        if (
+            not state["in_flight"]
+            or state["flight_id"] != _ACTIVE_FLIGHT_ID
+            or state["blocked"]
+            or state["request_outcome"] == "reserved"
+            or state["rate_limit_strikes"] >= 100
+        ):
             raise AdapterError(
-                "Rate counter exhausted; state retained", "access"
-            )
-        if state["blocked"]:
-            raise AdapterError(
-                ("Publisher backoff requires reviewed recovery"), ("access")
+                "Unresolved Google physical admission", "access"
             )
         now = time.time()
-        starts = [t for t in state["starts"] if t > now - 60]
-        _PUBLISHER_INTERVAL = max(_PUBLISHER_INTERVAL, state.get("interval", 6))
-        target = max(now, state["not_before"], state["rate_limit_until"])
-        target = max(target, state["completed"] + _PUBLISHER_INTERVAL)
+        starts = [v for v in state["starts"] if v > now - 60]
+        _PUBLISHER_INTERVAL = max(_PUBLISHER_INTERVAL, state["interval"])
+        wait_until = max(
+            state["not_before"],
+            state["rate_limit_until"],
+            state["completed"] + _PUBLISHER_INTERVAL,
+            now,
+        )
+        if len(starts) >= 5:
+            wait_until = max(wait_until, starts[-5] + 60)
         if _PUBLISHER_COMPLETED_MONOTONIC is not None:
-            target = max(
-                target,
+            wait_until = max(
+                wait_until,
                 now
                 + max(
                     0,
@@ -499,23 +630,14 @@ def pace():
                     - time.monotonic(),
                 ),
             )
-        if starts:
-            target = max(target, starts[-1] + state.get("interval", 6))
-        if len(starts) >= 5:
-            target = max(target, starts[-5] + 60)
-        if target + 120 > time.time() + (_PHASE_END - time.monotonic()):
-            raise AdapterError(
-                "Publisher backoff exceeds phase budget", "access"
-            )
-        if _COLLECTION_STARTED is not None and (
-            target + 120 > _COLLECTION_STARTED + COLLECTION_TIMEOUT
-        ):
-            raise AdapterError(
-                ("Publisher backoff exceeds collection budget"), ("access")
+        if _STARTUP_QUIET_UNTIL is not None:
+            wait_until = max(
+                wait_until,
+                now + max(0, _STARTUP_QUIET_UNTIL - time.monotonic()),
             )
         while True:
             check_deadline()
-            wait = max(0, target - time.time())
+            wait = max(0, wait_until - time.time())
             if _PUBLISHER_COMPLETED_MONOTONIC is not None:
                 wait = max(
                     wait,
@@ -523,147 +645,276 @@ def pace():
                     + _PUBLISHER_INTERVAL
                     - time.monotonic(),
                 )
+            if _STARTUP_QUIET_UNTIL is not None:
+                wait = max(wait, _STARTUP_QUIET_UNTIL - time.monotonic())
             if wait <= 0:
                 break
-            if wait + 120 > _PHASE_END - time.monotonic():
+            if wait + 120 > min(_PHASE_END, _RUN_END) - time.monotonic():
                 raise AdapterError(
-                    "Publisher backoff exceeds phase budget", "access"
-                )
-            if _COLLECTION_STARTED is not None and (
-                time.time() + wait + 120 > _COLLECTION_STARTED + COLLECTION_TIMEOUT
-            ):
-                raise AdapterError(
-                    "Publisher backoff exceeds collection budget", "access"
+                    "Google physical guard exceeds phase", "access"
                 )
             time.sleep(wait)
         now = time.time()
-        if now < target:
-            raise AdapterError(
-                ("Publisher pacing clock moved backwards"), ("access")
-            )
-        check_deadline()
-        if (
-            _PUBLISHER_COMPLETED_MONOTONIC is not None
-            and time.monotonic() < _PUBLISHER_COMPLETED_MONOTONIC + _PUBLISHER_INTERVAL
-        ):
-            raise AdapterError(
-                "Publisher physical completion gate not elapsed", "access"
-            )
-        state["starts"] = [t for t in starts if t > now - 60] + [now]
+        ident = os.urandom(16).hex()
+        if ident == state["request_id"]:
+            raise AdapterError("Google physical identity collision", "access")
+        state.update(
+            request_id=ident,
+            request_started=now,
+            request_outcome="reserved",
+            request_inventory=inventory,
+            observed_at=max(state["observed_at"], now),
+        )
+        if hosted_qa_mode():
+            # The original pacing calculation still uses the separate rolling
+            # minute. Retain all older classified continuity observations.
+            state["starts"] = sorted(set(state["starts"] + [now]))
+        else:
+            state["starts"] = [v for v in starts if v > now - 60] + [now]
         state["interval"] = _PUBLISHER_INTERVAL
-        state["not_before"] = max(state["not_before"], now + state.get("interval", 6))
-        state["observed_at"] = now
+        state["not_before"] = max(
+            state["not_before"], now + _PUBLISHER_INTERVAL
+        )
         save_budget(state)
+        _ACTIVE_REQUEST_ID = ident
         _REQUEST_STARTS += 1
 
 
 @contextlib.contextmanager
 def publisher_attempt(publisher, inventory=False):
-    """Persist a completion gate around every physical publisher attempt."""
-    global _PUBLISHER_COMPLETED_MONOTONIC, _PUBLISHER_GATE_FAILED
-    global _INVENTORY_COMPLETED_MONOTONIC
+    global _ACTIVE_REQUEST_ID, _PUBLISHER_COMPLETED_MONOTONIC
+    global _INVENTORY_COMPLETED_MONOTONIC, _LAST_RESPONSE_RECEIPT
+    global _LAST_RESPONSE_URL
     if not publisher:
-        yield
+        yield None
         return
-    if _COLLECTION_LOCK_FD is None or _PUBLISHER_GATE_FAILED:
-        raise AdapterError(
-            "Exclusive healthy publisher collector required", "access"
-        )
-    check_deadline()
-    if (
-        _PUBLISHER_COMPLETED_MONOTONIC is not None
-        and time.monotonic()
-        < _PUBLISHER_COMPLETED_MONOTONIC + _PUBLISHER_INTERVAL
-    ):
-        raise AdapterError(
-            "Publisher physical completion gate not elapsed", "access"
-        )
+    frame = {
+        "id": _ACTIVE_REQUEST_ID,
+        "assessed": False,
+        "received": False,
+        "inventory": inventory,
+        "no_response": False,
+    }
+    _REQUEST_FRAMES.append(frame)
     try:
-        yield
+        yield frame
     finally:
         primary = sys.exc_info()[1]
-        if not _JOURNAL_FATAL:
+        _REQUEST_FRAMES.pop()
+        if not frame["assessed"] and not frame["no_response"]:
+            fail_policy()
+        elif not _PUBLISHER_GATE_FAILED and not _JOURNAL_FATAL:
             try:
-                _PUBLISHER_COMPLETED_MONOTONIC = time.monotonic()
-                _PUBLISHER_GATE_FAILED = True
                 with locked_budget():
                     state = load_budget()
+                    if (
+                        state["flight_id"] != _ACTIVE_FLIGHT_ID
+                        or state["request_id"] != frame["id"]
+                        or state["request_outcome"] != "reserved"
+                    ):
+                        raise AdapterError(
+                            "Google receipt owner changed", "access"
+                        )
                     now = time.time()
-                    state["not_before"] = max(
-                        state["not_before"], now + _PUBLISHER_INTERVAL
+                    state.update(
+                        completed=max(state["completed"], now),
+                        observed_at=max(state["observed_at"], now),
+                        request_outcome=(
+                            "no_response"
+                            if frame["no_response"]
+                            else "response_assessed"
+                        ),
+                        completed_request_id=frame["id"],
                     )
-                    state["completed"] = now
+                    state["not_before"] = max(
+                        state["not_before"],
+                        state["completed"] + state["interval"],
+                    )
                     if inventory:
-                        state["last_inventory_completed"] = now
-                        _INVENTORY_COMPLETED_MONOTONIC = time.monotonic()
-                    state["observed_at"] = now
+                        state["last_inventory_completed"] = max(
+                            state["last_inventory_completed"], now
+                        )
                     save_budget(state)
-                _PUBLISHER_GATE_FAILED = False
+                _PUBLISHER_COMPLETED_MONOTONIC = time.monotonic()
+                if inventory:
+                    _INVENTORY_COMPLETED_MONOTONIC = time.monotonic()
+                _LAST_RESPONSE_RECEIPT = frame["id"]
+                _LAST_RESPONSE_URL = frame["url"]
+                _ACTIVE_REQUEST_ID = None
             except BaseException:
-                journal_failure()
-                if primary is None:
-                    raise
-        elif primary is None:
-            raise AdapterError("Publisher journal gate is sticky", "access")
+                fail_policy()
+                raise
+        if (
+            primary is None
+            and not frame["assessed"]
+            and not frame["no_response"]
+        ):
+            raise AdapterError(
+                "Google response was not fully assessed", "access"
+            )
 
 
 def retry_after_until(value, now):
-    """Accept only a finite supported positive delay or aware future date."""
     if not isinstance(value, str):
-        return None
-    try:
-        value = value.strip()
-        if re.fullmatch(r"[0-9]+", value):
-            if len(value) > 10:
-                return None
-            delay = int(value)
-            until = now + delay
-        else:
-            parsed = parsedate_to_datetime(value)
-            if parsed.utcoffset() is None:
-                return None
-            until = parsed.timestamp()
-        if not numeric(until) or not now < until <= 253402300799:
-            return None
-        return until
-    except (ValueError, TypeError, OverflowError):
-        return None
-
-
-def record_retry_after(value, status=None):
-    """Persist timed slowdown before body reads; invalid headers add no hold."""
-    now = time.time()
-    until = retry_after_until(value, now)
-    if status != 429 and until is None:
-        return
-    with locked_budget():
-        state = load_budget()
-        if status == 429:
-            if state["rate_limit_strikes"] >= 100:
-                raise AdapterError(
-                    "Rate counter exhausted; state retained", "access"
-                )
-            strikes = state["rate_limit_strikes"] + 1
-            factor = 2 ** strikes
-            interval = max(state["interval"] * 2, 12.2 * factor)
-            page_interval = max(state["page_interval"] * 2, 30 * factor)
-            fallback = now + 1800 * (2 ** (strikes - 1))
-            if any(not numeric(v) or v > 253402300799 for v in (
-                interval, page_interval, fallback
-            )):
-                raise AdapterError(
-                    "Rate budget exceeds supported clock", "access"
-                )
-            state["rate_limit_strikes"] = strikes
-            state["interval"], state["page_interval"] = interval, page_interval
-            state["rate_limit_until"] = max(
-                state["rate_limit_until"], fallback, until or 0
-            )
-        state["not_before"] = max(
-            state["not_before"], state["rate_limit_until"], until or 0
+        raise AdapterError("Unassessed Retry-After type", "access")
+    value = value.strip()
+    if re.fullmatch("[0-9]+", value):
+        if len(value) > 12:
+            raise AdapterError("Unsupported positive Retry-After", "access")
+        until = now + int(value)
+        if not numeric(until) or until > 253402300799:
+            raise AdapterError("Unsupported positive Retry-After", "access")
+        return until if until > now else None
+    if re.fullmatch(r"\+?[0-9]+\.[0-9]+", value):
+        raise AdapterError(
+            "Unassessed positive Retry-After precision", "access"
         )
-        state["observed_at"] = now
-        save_budget(state)
+    if re.fullmatch(_HTTP_DATE_PATTERN, value, re.I):
+        try:
+            parsed = parsedate_to_datetime(value)
+            if re.search(r"[0-9]{2}-[A-Za-z]{3}-[0-9]{2} ", value):
+                current_year = datetime.fromtimestamp(now, timezone.utc).year
+                year = current_year // 100 * 100 + parsed.year % 100
+                if year < current_year - 50:
+                    year += 100
+                if year > current_year + 50:
+                    year -= 100
+                parsed = parsed.replace(year=year)
+            if parsed.utcoffset() is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            until = parsed.timestamp()
+        except (ValueError, TypeError, OverflowError):
+            raise AdapterError(
+                "Unassessed Retry-After date", "access"
+            ) from None
+        if not math.isfinite(until) or until > 253402300799:
+            raise AdapterError("Unsupported Retry-After date", "access")
+        return until if until > now else None
+    if re.fullmatch(
+        _HTTP_DATE_PATTERN.replace("[0-9]{4}", "[0-9]{4,}"), value, re.I
+    ):
+        raise AdapterError("Unsupported Retry-After clock", "access")
+    return None
+
+
+def record_retry_after(values, status=None, *, strike=True):
+    """Persist received status first, then MAX every assessable field."""
+    now = time.time()
+    if status == 429 and strike:
+        with locked_budget():
+            state = load_budget()
+            count = state["rate_limit_strikes"] + 1
+            if count > 100:
+                raise AdapterError("Google rate counter exhausted", "access")
+            current_interval, current_page = (
+                state["interval"] * 2,
+                state["page_interval"] * 2,
+            )
+            unsupported = any(
+                not numeric(v) or v > 253402300799
+                for v in (current_interval, current_page, now + 1800)
+            )
+            state.update(rate_limit_strikes=count, observed_at=now)
+            if numeric(current_interval) and current_interval <= 253402300799:
+                state["interval"] = max(state["interval"], current_interval)
+            if numeric(current_page) and current_page <= 253402300799:
+                state["page_interval"] = max(
+                    state["page_interval"], current_page
+                )
+            state["rate_limit_until"] = max(
+                state["rate_limit_until"], state["not_before"], now + 1800
+            )
+            state["not_before"] = max(
+                state["not_before"], state["rate_limit_until"]
+            )
+            # Commit what the received status already establishes before any
+            # stronger exponential calculation or header/body callback.
+            save_budget(state)
+            interval = 12.2 * (2**count)
+            page_interval = 30 * (2**count)
+            fallback = now + 1800 * (2 ** (count - 1))
+            unsupported = unsupported or any(
+                not numeric(v) or v > 253402300799
+                for v in (interval, page_interval, fallback)
+            )
+            changed = False
+            for key, value in (
+                ("interval", interval),
+                ("page_interval", page_interval),
+                ("rate_limit_until", fallback),
+            ):
+                if (
+                    numeric(value)
+                    and value <= 253402300799
+                    and value > state[key]
+                ):
+                    state[key] = value
+                    changed = True
+            if changed:
+                state["not_before"] = max(
+                    state["not_before"], state["rate_limit_until"]
+                )
+                save_budget(state)
+            if unsupported:
+                raise AdapterError(
+                    "Unsupported Google rate arithmetic", "access"
+                )
+    if isinstance(values, str):
+        values = [values]
+    if values is None:
+        values = []
+    if not isinstance(values, (tuple, list)):
+        raise AdapterError("Unassessed Retry-After fields", "access")
+    maximum, error = 0, None
+    for field in values:
+        try:
+            # A legal HTTP-date contains a comma. Joined dates/delays are
+            # ambiguous: retain every visible numeric constraint, then stop.
+            if not isinstance(field, str):
+                raise AdapterError("Unassessed Retry-After field", "access")
+            if re.fullmatch(r"\s*[0-9]+(?:\s*,\s*[0-9]+)+\s*", field):
+                pieces = field.split(",")
+            elif re.fullmatch(_HTTP_DATE_PATTERN, field.strip(), re.I):
+                pieces = [field]
+            else:
+                dates = list(
+                    re.finditer(_HTTP_DATE_COMPONENT_PATTERN, field, re.I)
+                )
+                if dates or "," in field:
+                    pieces = [match.group(1) for match in dates]
+                    remainder = re.sub(
+                        _HTTP_DATE_COMPONENT_PATTERN, " ", field, flags=re.I
+                    )
+                    pieces.extend(
+                        v for v in remainder.split(",") if v.strip().isdigit()
+                    )
+                    error = AdapterError(
+                        "Ambiguous combined Retry-After", "access"
+                    )
+                else:
+                    pieces = [field]
+            for piece in pieces:
+                try:
+                    maximum = max(maximum, retry_after_until(piece, now) or 0)
+                except (AdapterError, OverflowError, ValueError) as problem:
+                    error = problem
+        except (AdapterError, OverflowError, ValueError) as problem:
+            error = problem
+    if maximum:
+        with locked_budget():
+            state = load_budget()
+            changed = maximum > state["not_before"]
+            state["not_before"] = max(state["not_before"], maximum)
+            if status == 429:
+                changed = changed or maximum > state["rate_limit_until"]
+                state["rate_limit_until"] = max(
+                    state["rate_limit_until"], maximum
+                )
+            if changed:
+                state["observed_at"] = max(state["observed_at"], now)
+                save_budget(state)
+    if error is not None:
+        raise error
 
 
 def retain_publisher_hold():
@@ -881,7 +1132,9 @@ def has_429_head_refusal(body, headers):
     ))
 
 
-def reject_visible_challenge(body, headers, *, challenge_only=False):
+def reject_visible_challenge(
+    body, headers, *, challenge_only=False, unavailable_rep=False
+):
     if challenge_only and has_429_head_refusal(body, headers):
         retain_publisher_hold()
         raise AdapterError("Visible publisher challenge or denial", "access")
@@ -905,7 +1158,7 @@ def reject_visible_challenge(body, headers, *, challenge_only=False):
         "enable javascript and cookies to continue",
         "checking your browser",
     )
-    if not challenge_only:
+    if not challenge_only and not unavailable_rep:
         phrases += (
             "access denied",
             "permission denied",
@@ -976,26 +1229,8 @@ def decode_observed_gzip(body, byte_limit):
     return decoded
 
 
-def header_rate_limit_failure_guard(function):
-    """Preserve a marked HTTP 429 error through failing cleanup."""
-    def invoke(*args, **kwargs):
-        try:
-            return function(*args, **kwargs)
-        except BaseException as error:
-            current, seen = error, set()
-            while current is not None and id(current) not in seen:
-                seen.add(id(current))
-                if getattr(current, "_header429_unassessed", False):
-                    raise current
-                current = current.__context__
-            raise
-    invoke.__name__ = function.__name__
-    invoke.__doc__ = function.__doc__
-    invoke.__wrapped__ = function
-    return invoke
 
 
-@header_rate_limit_failure_guard
 def request_bytes(
     url,
     method="GET",
@@ -1006,15 +1241,21 @@ def request_bytes(
     robots=False,
     inventory=False,
 ):
-    """Bound every physical response and validate purpose before transport."""
-    headers = {
-        key: value
-        for key, value in (headers or {}).items()
-        if key.lower() != "user-agent"
+    """Bound complete physical responses; keep ambiguous results pending."""
+    request_headers = {
+        k: v
+        for k, v in (headers or {}).items()
+        if k.lower() not in ("user-agent", "cookie")
     }
-    headers["User-Agent"] = _USER_AGENT
+    if publisher:
+        request_headers = {
+            k: v
+            for k, v in request_headers.items()
+            if k.lower() not in ("authorization", "proxy-authorization")
+        }
+    request_headers["User-Agent"] = _USER_AGENT
     current = url
-    for redirect in range(6):
+    for hop in range(6):
         check_deadline()
         if publisher:
             public_url(current)
@@ -1022,139 +1263,184 @@ def request_bytes(
             if (
                 method != "GET"
                 or payload is not None
-                or (
-                    robots
-                    and (
-                        parsed.path != "/robots.txt"
-                        or parsed.query
-                        or inventory
-                    )
-                )
+                or robots
+                and (parsed.path != "/robots.txt" or parsed.query or inventory)
             ):
                 raise AdapterError(
-                    "Invalid publisher request purpose", "access"
+                    "Invalid Google publisher purpose", "access"
                 )
+            if not robots:
+                check_robots(current)
             if inventory:
                 wait_inventory_page()
-            pace()
+            pace(inventory=inventory)
+        else:
+            infrastructure_url(current)
         request = urllib.request.Request(
-            current, data=payload, headers=headers, method=method
+            current, data=payload, headers=request_headers, method=method
         )
-        with publisher_attempt(publisher, inventory):
-            try:
-                if publisher:
-                    journal_before_wire()
-                response = _OPENER.open(
-                    request, timeout=request_timeout(publisher)
-                )
-            except urllib.error.HTTPError as error:
-                response = error
-            except (urllib.error.URLError, OSError) as error:
-                if publisher:
-                    raise publisher_transport_error(error, current) from None
-                raise
-            with (
-                header_rate_limit_response(response)
-                if publisher and response.status == 429
-                else response
-            ):
-                status, response_headers = response.status, response.headers
-                if publisher:
-                    record_retry_after(
-                        response_headers.get("Retry-After"), status
-                    )
-                    if not robots and status in (401, 403, 451):
-                        retain_publisher_hold()
-                    if status == 429:
-                        raise HeaderRateLimitStop(
-                            "Publisher stopped: HTTP 429", "access", 429
-                        )
-                location = response_headers.get("Location")
-                declared = response_headers.get("Content-Length")
-                if declared and (
-                    not declared.isdigit() or int(declared) > byte_limit
-                ):
-                    raise AdapterError(
-                        "Oversized or invalid response length", "fetch"
-                    )
+        with publisher_attempt(publisher, inventory) as frame:
+            if publisher:
+                frame["url"] = current
+            with operation_guard(publisher):
                 try:
-                    body = response.read(byte_limit + 1)
-                except (urllib.error.URLError, OSError) as error:
                     if publisher:
-                        raise publisher_transport_error(
-                            error, current
-                        ) from None
+                        journal_before_wire()
+                    response = _OPENER.open(
+                        request, timeout=request_timeout(publisher)
+                    )
+                except urllib.error.HTTPError as error:
+                    response = error
+                except (urllib.error.URLError, OSError) as error:
+                    # Record a proven pre-response opener failure separately;
+                    # do not create an additional retry or hide TLS failures.
+                    cause = (
+                        error.reason
+                        if isinstance(error, urllib.error.URLError)
+                        else error
+                    )
+                    retryable = isinstance(
+                        cause, (ConnectionError, TimeoutError)
+                    ) and not isinstance(cause, ssl.SSLError)
+                    if publisher and retryable:
+                        frame["no_response"] = True
                     raise
-                if (
-                    len(body) > byte_limit
-                    or declared
-                    and len(body) != int(declared)
-                ):
-                    raise AdapterError(
-                        "Incomplete or oversized response", "fetch"
-                    )
                 if publisher:
-                    account_collection_bytes(len(body))
-                encoding = response_headers.get("Content-Encoding", "identity")
-                if publisher and encoding == "gzip":
-                    body = decode_observed_gzip(body, byte_limit)
-                    account_collection_bytes(len(body))
-                elif encoding != "identity":
-                    raise AdapterError("Unsupported response encoding", "fetch")
-                if publisher and not robots:
-                    reject_visible_challenge(
-                        body, response_headers, challenge_only=status == 429
+                    frame["received"] = True
+                with assessed_response(response, publisher, robots) as status:
+                    response_headers = response.headers
+                    if publisher:
+                        record_retry_after(
+                            response_headers.get_all("Retry-After", []),
+                            status,
+                            strike=False,
+                        )
+                    lengths = response_headers.get_all("Content-Length", [])
+                    transfers = response_headers.get_all(
+                        "Transfer-Encoding", []
                     )
+                    encodings = response_headers.get_all(
+                        "Content-Encoding", []
+                    )
+                    chunked = (
+                        len(transfers) == 1
+                        and transfers[0].strip().lower() == "chunked"
+                        and not lengths
+                        and getattr(response, "chunked", False) is True
+                    )
+                    if (
+                        len(lengths) > 1
+                        or transfers
+                        and not chunked
+                        or any(
+                            not v.isdigit()
+                            or len(v) > 10
+                            or int(v) > byte_limit
+                            for v in lengths
+                        )
+                        or len(encodings) > 1
+                    ):
+                        raise AdapterError(
+                            "Ambiguous Google response framing", "fetch"
+                        )
+                    declared = int(lengths[0]) if lengths else None
+                    location = response_headers.get("Location")
+                    body = response.read(byte_limit + 1)
+                    if (
+                        len(body) > byte_limit
+                        or declared is not None
+                        and len(body) != declared
+                    ):
+                        raise AdapterError(
+                            "Incomplete or oversized response", "fetch"
+                        )
+                    if publisher:
+                        account_collection_bytes(len(body))
+                    encoding = (
+                        encodings[0].strip().lower()
+                        if encodings
+                        else "identity"
+                    )
+                    if publisher and encoding == "gzip":
+                        body = decode_observed_gzip(body, byte_limit)
+                        account_collection_bytes(len(body))
+                    elif encoding not in ("", "identity"):
+                        raise AdapterError(
+                            "Unsupported response encoding", "fetch"
+                        )
+                    if publisher:
+                        try:
+                            reject_visible_challenge(
+                                body,
+                                response_headers,
+                                challenge_only=status == 429,
+                                unavailable_rep=(
+                                    robots and 400 <= status < 500
+                                    and status != 429
+                                ),
+                            )
+                        except AdapterError:
+                            if robots:
+                                raise
+                            with locked_budget():
+                                if not load_budget()["blocked"]:
+                                    raise
+                            stop = True
+                        else:
+                            stop = False
+                    else:
+                        stop = False
+                if publisher:
+                    frame["assessed"] = True
                 if publisher and (
-                    status == 429 or not robots and status in (401, 403, 451)
+                    stop
+                    or status == 429
+                    or not robots
+                    and status in (401, 403, 451)
                 ):
-                    raise AdapterError(
-                        "Publisher stopped: HTTP "
-                        + str(status)
-                        + ": "
-                        + current,
-                        "access",
-                        status,
+                    raise PublisherStop(
+                        "Google publisher refusal", "access", status
                     )
         if status in (301, 302, 303, 307, 308):
-            if not location or redirect == 5:
+            if not location or hop == 5:
                 raise AdapterError("Invalid redirect chain", "access")
             destination = urllib.parse.urljoin(current, location)
-            old, new = (
-                urllib.parse.urlsplit(current),
-                urllib.parse.urlsplit(destination),
-            )
             if publisher:
                 public_url(destination)
                 if (
-                    new.scheme != "https"
-                    or robots
-                    and (new.path != "/robots.txt" or new.query)
+                    robots
+                    and urllib.parse.urlsplit(destination).path
+                    != "/robots.txt"
                 ):
                     raise AdapterError(
-                        "Invalid publisher redirect purpose", "access"
+                        "Invalid Google robots redirect", "access"
                     )
                 if not robots:
                     check_robots(destination)
             else:
-                if new.scheme != "https" or new.username or new.password:
-                    raise AdapterError(
-                        "Unsafe authenticated redirect", "publish"
-                    )
-                if new.netloc != old.netloc:
-                    headers = {
-                        key: value
-                        for key, value in headers.items()
-                        if key.lower() != "authorization"
-                    }
-                if urllib.parse.urlsplit(url).hostname == "api.github.com":
+                infrastructure_url(destination)
+                old, new = urllib.parse.urlsplit(
+                    current
+                ), urllib.parse.urlsplit(destination)
+                if old.hostname == "api.github.com":
                     raise AdapterError(
                         "Unexpected GitHub API redirect", "publish"
                     )
+                if new.netloc != old.netloc:
+                    request_headers = {
+                        k: v
+                        for k, v in request_headers.items()
+                        if k.lower()
+                        not in (
+                            "authorization",
+                            "cookie",
+                            "proxy-authorization",
+                        )
+                    }
             current = destination
             continue
         return status, response_headers, body
-    raise AdapterError("Unresolved redirect", "access")
+    raise AdapterError("Unresolved redirect chain", "access")
 
 
 def wait_inventory_page():
@@ -1233,39 +1519,45 @@ def fetch_public(url):
                 mark_inventory_completed()
                 wait_inventory_page()
             continue
-        key = next(
-            (key for key, info in INPUTS.items() if info["url"] == url),
-            "unmapped-public-input",
-        )
+        key = reviewed
         parsed = urllib.parse.urlsplit(reviewed)
         provenance = parsed.scheme + "://" + parsed.netloc + parsed.path
         raise AdapterError(
-            f"Required publisher input {key} returned HTTP {status}: " + provenance,
+            f"Required publisher input {key} returned HTTP {status}: "
+            + provenance,
             "fetch",
             status,
         )
 
 
 def workflow_api(path):
-    """Read real public family metadata using existing authentication."""
     token = os.environ.get("GITHUB_TOKEN", "")
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = "Bearer " + token
-    try:
-        separator = "&" if "?" in path else "?"
-        status, _, body = request_bytes(
-            _WORKFLOW_GITHUB + path + separator
-            + "_fresh=" + str(time.time_ns()),
-            headers=headers,
-        )
-        if status != 200:
-            raise ValueError("Workflow API status")
-        return json.loads(body)
-    except Exception:
+    separator = "&" if "?" in path else "?"
+    status, _, raw = request_bytes(
+        _WORKFLOW_GITHUB + path + separator + "_fresh=" + str(time.time_ns()),
+        headers=headers,
+        byte_limit=2 * 1024 * 1024,
+    )
+    if status != 200:
+        try:
+            message = json.loads(raw).get("message", "")
+        except (ValueError, AttributeError):
+            message = ""
         raise AdapterError(
-            "Workflow pacing state unavailable", "access"
-        ) from None
+            "GitHub workflow API HTTP "
+            + str(status)
+            + ": "
+            + safe_error(message)[:400],
+            "access",
+            status,
+        )
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise AdapterError("Invalid workflow API JSON", "access") from None
 
 
 def current_run_identity():
@@ -1297,14 +1589,18 @@ def validate_family_identity(run, expected=None):
     head = run.get("head_sha")
     if (
         source != SOURCE_ID
-        or type(identity) is not int or identity <= 0
-        or type(attempt) is not int or attempt <= 0
+        or run.get("workflow_id") != _WORKFLOW_ID
+        or type(identity) is not int
+        or identity <= 0
+        or type(attempt) is not int
+        or attempt <= 0
         or run.get("repository", {}).get("full_name")
         != "YouthOpps/data-pipeline"
         or run.get("head_repository", {}).get("full_name")
         != "YouthOpps/data-pipeline"
         or run.get("head_branch") != "main"
-        or not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head)
+        or not isinstance(head, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", head)
         or expected is not None
         and (identity, attempt, source, head) != expected
     ):
@@ -1379,7 +1675,7 @@ def latest_family_run():
 
 def scan_family_history():
     """Exhaust the singleton family and completed queued-rerun history."""
-    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true" and not hosted_qa_mode()
     current = current_run_identity() if hosted else None
     candidates, seen_ids = [], set()
     total, scanned, current_seen = None, 0, False
@@ -1455,11 +1751,10 @@ def scan_family_history():
 
 
 def download_inert_artifact(identity, artifact_id, digest=None):
-    ("Download a bounded authenticated artifact, stripping " "cross-origin auth.")
+    """Decode the exact legacy ZIP or a bound modern owned envelope."""
     token = os.environ.get("GITHUB_TOKEN", "")
-    url = _WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip"
     request = urllib.request.Request(
-        url,
+        _WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip",
         headers={
             "User-Agent": _USER_AGENT,
             "Accept": "application/vnd.github+json",
@@ -1467,86 +1762,101 @@ def download_inert_artifact(identity, artifact_id, digest=None):
         },
     )
     try:
-        try:
-            response = _OPENER.open(request, timeout=request_timeout())
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            if response.status != 302:
-                raise ValueError("Expected artifact redirect")
-            destination = response.headers.get("Location", "")
-            response.read(1001)
-        parsed = urllib.parse.urlsplit(destination)
-        if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-            or parsed.port
-            or not parsed.hostname.endswith((
-                ".blob.core.windows.net", ".actions.githubusercontent.com"
-            ))
-        ):
-            raise ValueError("Unsafe artifact URL")
-        if "." not in parsed.hostname or parsed.hostname.endswith(
-            ((".local"), (".internal"), (".localhost"))
-        ):
-            raise ValueError("Private artifact hostname")
-        try:
-            ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            pass
-        else:
-            raise ValueError("Literal artifact address")
-        # Signed URL is never stored or included in exceptions; no auth header.
+        with operation_guard():
+            try:
+                response = _OPENER.open(request, timeout=request_timeout())
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                if response.status != 302:
+                    raise AdapterError(
+                        "Artifact redirect unavailable",
+                        "access",
+                        response.status,
+                    )
+                locations = response.headers.get_all("Location", [])
+                if len(locations) != 1:
+                    raise AdapterError(
+                        "Ambiguous artifact destination", "access"
+                    )
+                destination = locations[0]
+                if len(response.read(1001)) > 1000:
+                    raise AdapterError(
+                        "Oversized artifact redirect body", "access"
+                    )
+        infrastructure_url(destination)
+        if urllib.parse.urlsplit(destination).hostname == "api.github.com":
+            raise AdapterError("Artifact storage origin required", "access")
+        # A fresh request carries no API or publication credential.
         status, _, body = request_bytes(destination, byte_limit=32768)
-        if status != 200 or len(body) > 32768:
-            raise ValueError("Invalid artifact response")
-        if digest is not None:
-            if (
-                not isinstance(digest, str)
-                or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
-                or digest[7:] != hashlib.sha256(body).hexdigest()
-            ):
-                raise ValueError("Artifact digest mismatch")
+        if (
+            status != 200
+            or not isinstance(digest, str)
+            or not re.fullmatch("sha256:[0-9a-f]{64}", digest)
+            or hashlib.sha256(body).hexdigest() != digest[7:]
+        ):
+            raise AdapterError("Artifact bytes/digest differ", "access")
         with zipfile.ZipFile(io.BytesIO(body)) as archive:
             entries = archive.infolist()
             if len(entries) != 1 or entries[0].filename != "pacing-state.json":
-                raise ValueError("Unexpected artifact members")
+                raise AdapterError("Unexpected artifact members", "access")
             entry = entries[0]
-            if entry.file_size > 16384 or entry.flag_bits & 1:
-                raise ValueError("Oversized or encrypted state")
-            if entry.external_attr >> 16 & 0o170000 == 0o120000:
-                raise ValueError("State symlink")
-            raw = archive.read(entry)
-        envelope = json.loads(raw)
-        if not isinstance(envelope, dict) or set(envelope) - {"head_sha"} != {
+            if (
+                entry.file_size > 16384
+                or entry.flag_bits & 1
+                or entry.external_attr >> 16 & 0o170000 == 0o120000
+            ):
+                raise AdapterError("Unsafe artifact entry", "access")
+            envelope = json.loads(archive.read(entry))
+        run_id, attempt, source, head = identity
+        common = {
             "schema",
             "repository",
             "run_id",
             "run_attempt",
             "source",
+            "head_sha",
             "state",
-        }:
-            raise ValueError("Invalid artifact envelope")
-        run_id, attempt, source, head = identity
+        }
         if (
-            type(envelope["schema"]) is not int
+            type(envelope) is not dict
+            or type(envelope.get("schema")) is not int
             or envelope["schema"] != 1
-            or envelope["repository"] != "YouthOpps/data-pipeline"
-            or type(envelope["run_id"]) is not int
-            or type(envelope["run_attempt"]) is not int
+            or envelope.get("repository") != "YouthOpps/data-pipeline"
+            or type(envelope.get("run_id")) is not int
             or envelope["run_id"] != run_id
+            or type(envelope.get("run_attempt")) is not int
             or envelope["run_attempt"] != attempt
-            or envelope["source"] != source
-            or "head_sha" in envelope and envelope["head_sha"] != head
+            or envelope.get("source") != source
+            or envelope.get("head_sha") != head
         ):
-            raise ValueError("Artifact ownership mismatch")
+            raise AdapterError("Artifact ownership differs", "access")
+        producer = hashlib.sha256(verified_source(head)).hexdigest()
+        if set(envelope) == common:
+            reviewed_transition()
+            if (
+                tuple(identity) != _LEGACY_OWNER
+                or artifact_id != _LEGACY_ARTIFACT_ID
+                or digest != "sha256:" + _LEGACY_ZIP_SHA
+                or producer != _LEGACY_SOURCE_SHA
+                or hashlib.sha256(
+                    canonical_state(envelope["state"])
+                ).hexdigest()
+                != _LEGACY_STATE_SHA
+            ):
+                raise AdapterError("Unreviewed legacy Google owner", "access")
+            return upgrade_legacy_budget(envelope["state"])
+        if (
+            set(envelope)
+            != common | {"producer_source_sha256", "state_sha256"}
+            or envelope["producer_source_sha256"] != producer
+            or envelope["state_sha256"]
+            != hashlib.sha256(canonical_state(envelope["state"])).hexdigest()
+        ):
+            raise AdapterError("Untrusted modern Google envelope", "access")
         return validate_budget(envelope["state"])
-    except Exception:
-        raise AdapterError(
-            ("Invalid or unavailable family pacing artifact"), ("access")
-        ) from None
+    except (ValueError, TypeError, KeyError, zipfile.BadZipFile) as error:
+        raise AdapterError("Invalid Google owned ZIP", "access") from error
 
 
 def restore_family_artifact():
@@ -1589,45 +1899,30 @@ def restore_family_artifact():
         or not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact["digest"])
     ):
         raise AdapterError("Invalid family artifact binding", "access")
-    incoming = download_inert_artifact(
-        latest, artifact["id"], artifact["digest"]
-    )
-    raw = os.environ.get("GOOGLE_PACING_MAINTENANCE", "")
-    if raw:
-        try:
-            approval = json.loads(raw)
-            if (
-                not isinstance(approval, dict)
-                or set(approval) != {"schema", "family", "evidence", "state"}
-                or type(approval["schema"]) is not int
-                or approval["schema"] != 1
-                or approval["family"] != FAMILY
-                or not isinstance(approval["evidence"], str)
-                or not re.fullmatch(
-                    r"https://github\.com/YouthOpps/data-pipeline/issues/219"
-                    r"#issuecomment-[1-9][0-9]*",
-                    approval["evidence"],
-                )
-                or type(approval["state"].get("schema")) is not int
-                or approval["state"]["schema"] != _STATE_SCHEMA
-            ):
-                raise ValueError("Invalid maintenance approval")
-            incoming = merge_budgets(incoming, approval["state"], time.time())
-        except Exception:
-            raise AdapterError(
-                "Invalid full-state maintenance approval", "access"
-            ) from None
-    elif os.environ.get("GITHUB_ACTIONS") == "true":
-        raise AdapterError(
-            "Full-native-MAX production approval required", "access"
-        )
+    qa = hosted_qa_mode()
+    if qa and (latest != _LEGACY_OWNER or artifact["id"] != _LEGACY_ARTIFACT_ID
+               or artifact["digest"] != "sha256:" + _LEGACY_ZIP_SHA
+               or artifact["size_in_bytes"] != 505 or not _STATE_INITIALIZING):
+        raise AdapterError("Original Google407 producer owner or new runner namespace differs", "access")
+    incoming = download_inert_artifact(latest, artifact["id"], artifact["digest"])
+    if incoming["in_flight"]:
+        raise AdapterError("Newest Google owner is unresolved", "access")
+    incoming = hosted_floor(incoming)
     _JOURNAL_BOOTSTRAP_ALLOWED = (
         _STATE_INITIALIZING
         and not _JOURNAL_SAVE_ATTEMPTED
         and os.environ.get("GITHUB_ACTIONS") == "true"
     )
     with locked_budget():
-        combined = merge_budgets(load_budget(), incoming, time.time())
+        previous = load_budget()
+        if qa:
+            if not _JOURNAL_NEW or previous["starts"]:
+                raise AdapterError("Google407 QA refuses a prior runner journal", "access")
+            # The fresh runner's empty default is only a creation sentinel.
+            # Its current observed_at must not outrank the exact v5 owner.
+            save_budget(incoming)
+        combined = incoming if qa else merge_budgets(previous, incoming, time.time())
+        combined = copy.deepcopy(combined)
         combined["not_before"] = max(combined["not_before"], time.time() + 60)
         combined["observed_at"] = time.time()
         save_budget(combined)
@@ -1640,7 +1935,8 @@ def mark_pacing_artifact_ready(runner_parent, runner_root):
 
 
 def export_family_artifact():
-    """Export the unchanged owned envelope under retained journal authority."""
+    if hosted_qa_mode():
+        raise AdapterError("Google407 QA cannot export a production owner", "access")
     path = os.environ.get("GOOGLE_PACING_ARTIFACT_PATH")
     if not path:
         return
@@ -1650,64 +1946,86 @@ def export_family_artifact():
 
     def payload():
         run_id, attempt = current_run_identity()
+        head = os.environ["GITHUB_SHA"]
+        if _HOSTED_IDENTITY != (run_id, attempt, SOURCE_ID, head):
+            raise AdapterError(
+                "Unverified current Google export owner", "access"
+            )
         with locked_budget():
             state = load_budget()
-        envelope = {
+            if state["in_flight"]:
+                raise AdapterError(
+                    "Pending Google state cannot be exported", "access"
+                )
+        verify_legacy_claims()
+        producer = hashlib.sha256(verified_source(head)).hexdigest()
+        return {
             "schema": 1,
             "repository": "YouthOpps/data-pipeline",
             "run_id": run_id,
             "run_attempt": attempt,
             "source": SOURCE_ID,
-            "head_sha": os.environ["GITHUB_SHA"],
+            "head_sha": head,
             "state": state,
+            "producer_source_sha256": producer,
+            "state_sha256": hashlib.sha256(canonical_state(state)).hexdigest(),
         }
-        return envelope
 
-    journal_export_envelope(
-        path,
-        payload,
-        atomic=False,
-        signal=True,
-    )
+    journal_export_envelope(path, payload, atomic=False, signal=True)
 
 
 def prepare_collection():
     global _COLLECTION_STARTED, _STATE_TRUSTED, _COLLECTION_LOCK_FD
-    if _JOURNAL_FATAL or _PUBLISHER_GATE_FAILED:
-        raise AdapterError("Publisher journal gate is sticky", "access")
-    _COLLECTION_STARTED = time.time()
-    budget_file()
-    if _COLLECTION_LOCK_FD is None:
-        descriptor = journal_lifecycle_open(
-            os.path.join(os.path.dirname(_STATE_PATH), "collection.lock"),
-            _STATE_INITIALIZING,
-        )
-        try:
-            journal_descriptor(descriptor, _JOURNAL_ACQUIRED_IDS[descriptor])
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            journal_bind_collection(
-                descriptor, _JOURNAL_ACQUIRED_IDS[descriptor]
+    global _STARTUP_QUIET_UNTIL, _COLLECTION_FLOCK_GUARD, _COLLECTION_GUARD_ID
+    try:
+        if _JOURNAL_FATAL or _PUBLISHER_GATE_FAILED:
+            raise AdapterError("Google publisher gate is sticky", "access")
+        _COLLECTION_STARTED = time.time()
+        # Pin the local generation through subsequent metadata callbacks.
+        require_existing_local_state()
+        workflow_mode_guard()
+        claim_local_attempt()
+        current_job_context()
+        budget_file()
+        if _COLLECTION_LOCK_FD is None:
+            descriptor = journal_lifecycle_open(
+                os.path.join(os.path.dirname(_STATE_PATH), "collection.lock"),
+                _STATE_INITIALIZING,
             )
-        except BaseException as error:
-            journal_failure()
-            with contextlib.suppress(BaseException):
-                journal_close_acquired(
-                    descriptor, _JOURNAL_ACQUIRED_IDS.get(descriptor)
+            try:
+                journal_descriptor(
+                    descriptor, _JOURNAL_ACQUIRED_IDS[descriptor]
                 )
-            if isinstance(error, OSError):
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                journal_bind_collection(
+                    descriptor, _JOURNAL_ACQUIRED_IDS[descriptor]
+                )
+                _COLLECTION_FLOCK_GUARD = os.dup(descriptor)
+                _COLLECTION_GUARD_ID = _JOURNAL_ACQUIRED_IDS[descriptor]
+            except BaseException:
+                journal_failure()
+                with contextlib.suppress(BaseException):
+                    journal_close_acquired(
+                        descriptor, _JOURNAL_ACQUIRED_IDS.get(descriptor)
+                    )
+                raise
+            _COLLECTION_LOCK_FD = descriptor
+        restore_family_artifact()
+        preserve_legacy_pacing()
+        with locked_budget():
+            state = load_budget()
+            if state["in_flight"] or state["blocked"]:
                 raise AdapterError(
-                    "Another local family collector is active", "access"
-                ) from None
-            raise
-        _COLLECTION_LOCK_FD = descriptor
-    restore_family_artifact()
-    preserve_legacy_pacing()
-    with locked_budget():
-        state = load_budget()
-        state["not_before"] = max(state["not_before"], time.time() + 60)
-        state["observed_at"] = time.time()
-        save_budget(state)
-    _STATE_TRUSTED = True
+                    "Restored Google state requires review", "access"
+                )
+            state["not_before"] = max(state["not_before"], time.time() + 60)
+            state["observed_at"] = max(state["observed_at"], time.time())
+            save_budget(state)
+        _STARTUP_QUIET_UNTIL = time.monotonic() + 60
+        _STATE_TRUSTED = True
+    except BaseException:
+        fail_policy()
+        raise
 
 
 def document_root(text, complete=True):
@@ -1751,7 +2069,7 @@ def remove_expired_records(records, checked_at):
     return retained
 
 
-def validate_records(records, published=False):
+def validate_records(records, published=False, previous=False):
     """Validate all real records against the source and consumer contracts."""
     if not isinstance(records, list) or (not records and not published):
         raise AdapterError(
@@ -1872,7 +2190,7 @@ def validate_records(records, published=False):
         ):
             raise AdapterError("Invalid classification evidence", "validate")
 
-    validate_owned_records(records, published=published)
+    validate_owned_records(records, published=published, previous=previous)
 
 
 def github(method, path, payload=None, missing_ok=False):
@@ -2154,7 +2472,9 @@ def run_body(publishing):
                 if candidate["files"]["data.json"] is not None:
                     candidate_records = json.loads(candidate["files"]["data.json"])
                     candidate_metadata = json.loads(candidate["files"]["metadata.json"])
-                    validate_records(candidate_records, published=True)
+                    validate_records(
+                        candidate_records, published=True, previous=True
+                    )
                     validate_prior_metadata(candidate_metadata, candidate_records)
                     old, previous = candidate_records, candidate_metadata
                 snapshot = candidate
@@ -2244,6 +2564,8 @@ def run_lifecycle(publishing):
 
 
 def main():
+    if hosted_qa_mode():
+        raise AdapterError("Google407 hosted QA uses the original nonpublishing test", "access")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--publish", action="store_true")
     args = parser.parse_args()
@@ -2402,131 +2724,147 @@ def rep_allowed(body, url, agent=None):
 
 
 def check_robots(url):
-    """Honor fresh ordinary robots policies with query-aware REP matching."""
+    """Preserve Google's query/wildcard matcher with actual REP provenance."""
     parsed = urllib.parse.urlsplit(public_url(url))
     origin = parsed.scheme + "://" + parsed.netloc
     if parsed.path == "/robots.txt":
         return
     if origin not in _ROBOTS:
-        status, _, body = request_bytes(
-            origin + "/robots.txt", publisher=True,
-            byte_limit=65536, robots=True
+        status, headers, body = request_bytes(
+            origin + "/robots.txt",
+            publisher=True,
+            byte_limit=65536,
+            robots=True,
         )
         if 400 <= status < 500 and status != 429:
             _ROBOTS[origin] = None
+            body_digest = None
         elif status == 200:
+            types = headers.get_all("Content-Type", [])
+            if (
+                len(types) != 1
+                or types[0].split(";", 1)[0].strip().lower() != "text/plain"
+            ):
+                raise AdapterError(
+                    "Google REP requires explicit text/plain", "access"
+                )
+            text = body.decode("utf-8-sig", "strict")
+            if re.search(r"<\s*[A-Za-z!/?]", text):
+                raise AdapterError("Markup is not Google REP", "access")
             groups(body)
             _ROBOTS[origin] = body
+            body_digest = hashlib.sha256(body).hexdigest()
         else:
-            raise AdapterError(
-                "Publisher robots policy unavailable", "access", status
-            )
+            raise AdapterError("Google REP is unavailable", "access", status)
+        _REP_PROVENANCE[origin] = {
+            "status": status,
+            "body_sha256": body_digest,
+            "request_id": _LAST_RESPONSE_RECEIPT,
+            "url": _LAST_RESPONSE_URL,
+        }
     body = _ROBOTS[origin]
-    if body is None:
-        return
-    if not (
-        rep_allowed(body, url) and rep_allowed(body, url, agent="YouthOpps")
-    ):
-        raise AdapterError("Publisher robots excludes required input", "access")
-    # Unknown rate extensions never silently relax retained family limits.
-    for raw in body.decode("utf-8-sig", "strict").splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if re.match(r"(?i)^(crawl-delay|request-rate)\s*:", line):
-            raise AdapterError(
-                "Publisher rate directive requires scoped review", "access"
-            )
+    if origin not in _REP_PROVENANCE:
+        raise AdapterError("Google REP provenance is missing", "access")
+    if body is not None:
+        if not (
+            rep_allowed(body, url)
+            and rep_allowed(body, url, agent="YouthOpps")
+        ):
+            raise AdapterError("Google REP excludes required input", "access")
+        for raw in body.decode("utf-8-sig", "strict").splitlines():
+            if re.match(
+                r"(?i)^(crawl-delay|request-rate)\s*:",
+                raw.split("#", 1)[0].strip(),
+            ):
+                raise AdapterError(
+                    "Google REP rate directive requires review", "access"
+                )
+    _REP_TARGETS[url] = copy.deepcopy(_REP_PROVENANCE[origin])
 
 
 def preserve_legacy_pacing():
-    """Merge all four actual research states, preserving each original inode."""
+    """Read and retain all original research flocks without rewriting files."""
+    global _LEGACY_ROOT_ABSENT
     root = os.path.join(tempfile.gettempdir(), "issue111-google-research")
     try:
         parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except FileNotFoundError:
+        _LEGACY_ROOT_ABSENT = True
         return
-    descriptors = [parent]
-    try:
-        info = os.fstat(parent)
-        if info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise AdapterError("Unsafe legacy Google directory", "access")
-        incoming = []
-        for host in LEGACY_HOSTS:
-            try:
-                fd = os.open(
-                    host + ".budget.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent
-                )
-            except FileNotFoundError:
-                continue
-            descriptors.append(fd)
-            info = os.fstat(fd)
-            if (
-                info.st_uid != os.getuid()
-                or not stat.S_ISREG(info.st_mode)
-                or info.st_mode & 0o077
-                or info.st_nlink != 1
-            ):
-                raise AdapterError("Unsafe legacy Google pacing file", "access")
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                raise AdapterError(
-                    "Legacy Google collector active", "access"
-                ) from None
-            raw = os.read(fd, 16385)
-            try:
-                state = json.loads(raw)
-                if (
-                    len(raw) > 16384
-                    or not isinstance(state, dict)
-                    or not {"starts", "until", "blocked"} <= set(state)
-                    or set(state) - {"starts", "until", "blocked", "interval"}
-                    or not numeric(state["until"])
-                    or not numeric(state.get("interval", 6))
-                    or state.get("interval", 6) < 6
-                    or type(state["blocked"]) is not bool
-                    or not isinstance(state["starts"], list)
-                    or len(state["starts"]) > 10
-                    or any(
-                        not numeric(t) or t > time.time() + 1 for t in state["starts"]
-                    )
-                    or state["starts"] != sorted(set(state["starts"]))
-                ):
-                    raise ValueError()
-            except (ValueError, TypeError, KeyError):
-                raise AdapterError(
-                    "Invalid legacy Google pacing state", "access"
-                ) from None
-            incoming.append(state)
-        with locked_budget():
-            state = load_budget()
-            starts = set(state["starts"])
-            for prior in incoming:
-                state["interval"] = max(
-                    state.get("interval", 6), prior.get("interval", 6)
-                )
-                state["not_before"] = max(state["not_before"], prior["until"])
-                state["blocked"] = state["blocked"] or prior["blocked"]
-                starts.update(prior["starts"])
-            ordered = sorted(starts)
-            if ordered:
-                state["not_before"] = max(
-                    state["not_before"], ordered[-1] + state["interval"]
-                )
-                if len(ordered) > 10:
-                    # Retained capacity is ten; wait until every merged start ages.
-                    state["not_before"] = max(state["not_before"], ordered[-1] + 60)
-            if len(ordered) > 512:
-                raise AdapterError(
-                    "Legacy start union exceeds retained bound", "access"
-                )
-            state["starts"] = ordered
-            if incoming:
-                state["legacy_rate_history_unknown"] = True
-            state["observed_at"] = time.time()
-            save_budget(state)
-    finally:
-        for fd in reversed(descriptors):
-            os.close(fd)
+    info = os.fstat(parent)
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        os.close(parent)
+        raise AdapterError("Unsafe legacy Google parent", "access")
+    _LEGACY_CLAIMS.append(
+        (parent, root, (info.st_dev, info.st_ino), None, None)
+    )
+    incoming = []
+    for host in LEGACY_HOSTS:
+        name = host + ".budget.json"
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                dir_fd=parent,
+            )
+        except FileNotFoundError:
+            _LEGACY_MISSING.append((parent, name))
+            continue
+        info = os.fstat(descriptor)
+        identity = (info.st_dev, info.st_ino)
+        _LEGACY_CLAIMS.append(
+            (descriptor, os.path.join(root, name), identity, b"", None)
+        )
+        journal_descriptor(descriptor, identity)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        verify_lock_description(descriptor, identity)
+        raw = os.pread(descriptor, 16385, 0)
+        after = os.fstat(descriptor)
+        named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (
+            len(raw) > 16384
+            or journal_version(info) != journal_version(after)
+            or (named.st_dev, named.st_ino) != identity
+        ):
+            raise AdapterError("Legacy Google generation changed", "access")
+        state = json.loads(raw)
+        if (
+            type(state) is not dict
+            or not {"starts", "until", "blocked"} <= set(state)
+            or set(state) - {"starts", "until", "blocked", "interval"}
+            or not numeric(state["until"])
+            or state["until"] > 253402300799
+            or type(state["blocked"]) is not bool
+            or not numeric(state.get("interval", 6))
+            or not 6 <= state.get("interval", 6) <= 253402300799
+            or type(state["starts"]) is not list
+            or len(state["starts"]) > 10
+            or any(
+                not numeric(v) or v > time.time() + 1 for v in state["starts"]
+            )
+            or state["starts"] != sorted(set(state["starts"]))
+        ):
+            raise AdapterError("Untrusted legacy Google constraints", "access")
+        _LEGACY_CLAIMS[-1] = (
+            descriptor,
+            os.path.join(root, name),
+            identity,
+            raw,
+            journal_version(after),
+        )
+        incoming.append(state)
+    with locked_budget():
+        state = load_budget()
+        for prior in incoming:
+            state["interval"] = max(
+                state["interval"], prior.get("interval", 6)
+            )
+            state["not_before"] = max(state["not_before"], prior["until"])
+            state["blocked"] = state["blocked"] or prior["blocked"]
+            state["starts"] = sorted(set(state["starts"] + prior["starts"]))
+        state["observed_at"] = max(state["observed_at"], time.time())
+        save_budget(state)
+    verify_legacy_claims()
 
 
 class MaterialFacts(HTMLParser):
@@ -2629,19 +2967,80 @@ def public_url(value):
 
 
 def read_input(url):
-    info = INPUTS[url]
-    with inventory_page(url):
-        return read_guarded_input(url, info)
+    with policy_operation():
+        with inventory_page(url):
+            return read_guarded_input(url, INPUTS[url])
+
+
+def terms_fingerprint(headers, root):
+    """Review the complete substantive terms independently of page chrome."""
+    url = "https://policies.google.com/terms"
+    document = one(nodes(root, "html"), "Google terms document")
+    main = one([node for node in document.walk() if node.attrs.get("role") == "main"],
+               "Google terms primary content")
+    canonical = one([node for node in nodes(document, "link")
+                     if node.attrs.get("rel", "").casefold() == "canonical"],
+                    "Google terms canonical link")
+    base = one(nodes(document, "base"), "Google terms link base")
+    base_url = "https://policies.google.com/"
+    if (document.duplicate_attrs or document.attrs.get("lang") != "en-US"
+            or main.duplicate_attrs or canonical.duplicate_attrs
+            or urllib.parse.urljoin(url, canonical.attrs.get("href", "")) != url + "?hl=en-US"
+            or base.duplicate_attrs or base.attrs != {"href": base_url} or nodes(document, "iframe")):
+        raise AdapterError("Google terms document or access boundary changed", "parse")
+
+    policies = []
+    for node in nodes(document, "meta"):
+        purpose = node.attrs.get("name", "").casefold()
+        if node.attrs.get("http-equiv", "").casefold() == "refresh":
+            raise AdapterError("Google terms client redirect changed", "parse")
+        if purpose == "robots" or purpose.endswith("bot"):
+            if node.duplicate_attrs:
+                raise AdapterError("Google terms crawler policy metadata is ambiguous", "parse")
+            policies.append((purpose, " ".join(node.attrs.get("content", "").lower().split())))
+    directives = (headers.get_all("X-Robots-Tag", []) if hasattr(headers, "get_all")
+                  else [headers[k] for k in headers if k.casefold() == "x-robots-tag"])
+    policies.extend(("x-robots-tag", " ".join(value.lower().split())) for value in directives)
+
+    # Known website chrome is omitted from the main text comparison. It cannot
+    # introduce an unreviewed direct automation or reuse notice outside main.
+    def outside(node):
+        if node is main or node.tag in {"script", "style"}:
+            return ""
+        return " ".join(outside(item) if isinstance(item, Node) else item for item in node.children)
+
+    outer = " ".join(outside(document).split()).casefold()
+    access = re.compile(r"\b(?:automat\w*|programmatic\w*|systematic\w*|scrap\w*|crawl\w*|"
+                        r"spider\w*|extract\w*|machine[- ]readable|robots\.txt|reuse|"
+                        r"republication|bulk collection|permission to access)\b")
+    notices = [outer[max(0, match.start() - 80):match.end() + 80] for match in access.finditer(outer)]
+    links = []
+    for node in nodes(main, "a"):
+        href = node.attrs.get("href", "")
+        if href and not href.startswith("#"):
+            if node.duplicate_attrs:
+                raise AdapterError("Google terms substantive link is ambiguous", "parse")
+            links.append((node.text(), urllib.parse.urljoin(base_url, href)))
+    if not main.text() or not links:
+        raise AdapterError("Incomplete Google substantive terms", "parse")
+    forms = sorted((node.attrs.get("action", ""), node.attrs.get("method", "").casefold())
+                   for node in nodes(document, "form"))
+    payload = {"main_text": main.text(), "main_links": links, "forms": forms,
+               "crawler_directives": sorted(policies), "outside_access_indicators": notices}
+    fingerprint = hashlib.sha256(canonical_state(payload)).hexdigest()
+    return fingerprint, [node.text() for node in nodes(main, "h1")]
 
 
 def read_guarded_input(url, info):
-    _, _, body = fetch_public(url)
+    _, headers, body = fetch_public(url)
     if info["format"] == "embedded-html":
         digest, h1 = html_fingerprint(embedded_html(body))
     elif info["format"] == "html":
         text = body.decode("utf-8", "strict")
         root = document_root(
-            text, complete=urllib.parse.urlsplit(url).hostname != "policies.google.com"
+            text,
+            complete=urllib.parse.urlsplit(url).hostname
+            != "policies.google.com",
         )
         if url == SOURCE_URL:
             scripts = [
@@ -2658,10 +3057,13 @@ def read_guarded_input(url, info):
                 raise AdapterError(
                     "Changed original Google redirect script link", "parse"
                 )
-        digest, h1 = html_fingerprint(text)
+        digest, h1 = (
+            terms_fingerprint(headers, root) if url == "https://policies.google.com/terms"
+            else html_fingerprint(text)
+        )
     elif info["format"] == "redirect-js":
         text = body.decode("utf-8", "strict")
-        # Review original redirect script as bytes: no execution or downloaded code.
+        # Review literal redirect-script bytes without executing code.
         digest, h1 = hashlib.sha256(body).hexdigest(), []
         if 'const Q="' + WEBSITE_URL + '"' not in text:
             raise AdapterError(
@@ -2670,6 +3072,19 @@ def read_guarded_input(url, info):
     else:
         raise AdapterError("Invalid guarded Google input type", "parse")
     if digest != info["sha256"] or h1 != info["h1"]:
+        if (
+            url in INPUTS
+            and info == INPUTS[url]
+            and info["format"] == "embedded-html"
+            and reviewable_embedded_material(body, h1, info["h1"])
+        ):
+            raise DataReviewDeferred(
+                "Current Google programme/directory material requires review: "
+                + url,
+                "configured-material",
+                url,
+                _LAST_RESPONSE_RECEIPT,
+            )
         raise AdapterError(
             "Reviewed Google material facts/frontier changed: " + url, "parse"
         )
@@ -2685,7 +3100,9 @@ def profile_identity(profile):
     return hashlib.sha256((SOURCE_ID + "|" + profile["url"]).encode()).hexdigest()[:24]
 
 
-def validate_owned_records(records, published=False):
+def validate_owned_records(records, published=False, previous=False):
+    if previous and not published:
+        raise AdapterError("Prior material requires snapshot mode", "validate")
     profiles = {profile_identity(profile): profile for profile in PROFILES}
     identities = {record["id"] for record in records}
     if not identities <= set(profiles) or (
@@ -2704,9 +3121,14 @@ def validate_owned_records(records, published=False):
     for record in records:
         profile = profiles[record["id"]]
         expected = dict(profile["fields"], id=profile_identity(profile))
-        if {
+        material = {
             key: value for key, value in record.items() if key not in temporal
-        } != expected:
+        }
+        old_apm = (
+            previous and profile["key"] == "apm"
+            and material == {**expected, **_GOOGLE407_PREVIOUS_APM}
+        )
+        if material != expected and not old_apm:
             raise AdapterError(
                 "Changed owned Google record material fields", "validate"
             )
@@ -2832,7 +3254,9 @@ INPUTS = {
     },
     "https://www.google.com/about/careers/applications/programs/apm/": {
         "format": "embedded-html",
-        "sha256": "3decc2b97de2f6da9ecbce68bb2efb7699feceb55feae8491c3ae55234b0773c",
+        "sha256": (
+            "e92a7a8834e747279a892b12245fdae1bcd5d7ea9704e4d965c6bbe1406064e3"
+        ),
         "h1": ["Google " "Associate " "Product " "Manager " "Program"],
     },
     "https://www.google.com/about/careers/applications/buildyourfuture/programs/lsi/": {
@@ -2862,7 +3286,7 @@ INPUTS = {
     },
     "https://www.google.com/about/careers/applications/buildyourfuture/programs/americas-sales-associate/": {
         "format": "embedded-html",
-        "sha256": "d7d4d59d9fee6f696217c0eef4d12de5a7ac4555b3b8a8f1595ec8f75da8c555",
+        "sha256": "f2ff9ff457738699fa7b2d116a4544f41bcfb3cbda2c86011f27d09586726cf2",
         "h1": ["Americas " "Sales " "Associate " "Program"],
     },
     "https://www.google.com/about/careers/applications/programs/spark/": {
@@ -2890,22 +3314,7 @@ INPUTS = {
         "sha256": "74cd3fb423f468938fbbb5a31693d0698bc171bb7213f3b9ed5994794e0b16f3",
         "h1": [],
     },
-    "https://policies.google.com/terms": {
-        "format": "html",
-        "sha256": "635543b17b2fa9d38d9587c93a86c9bede0bef528bd298278441ab1a22c74e20",
-        "h1": [
-            "Privacy & Terms",
-            "Google Terms of Service",
-            "Terms",
-            "Your relationship with Google",
-            "Using Google services",
-            "Content in Google services",
-            "Software in Google services",
-            "In case of problems or disagreements",
-            "About these terms",
-            "Definitions",
-        ],
-    },
+    'https://policies.google.com/terms': {'format': 'html', 'sha256': '05700da7039f8e03d5936ce1c61b07f75786886c8b051a2c560624848d6c7cc5', 'h1': ['', '', 'Privacy & Terms', 'Google Terms of Service', 'Terms', 'Your relationship with Google', 'Using Google services', 'Content in Google services', 'Software in Google services', 'In case of problems or disagreements', 'About these terms', 'Definitions']},
     "https://buildyourfuture.withgoogle.com/main.9ca0c65bf5ce4c16.js": {
         "format": "redirect-js",
         "sha256": "5a9c216c54299e5a67467f5fa8584e2fc5ce14cb5177a85a9aef0a2e514e1c7d",
@@ -3107,15 +3516,16 @@ PROFILES = [
             "source": "google",
             "source_url": "https://buildyourfuture.withgoogle.com/",
             "published_at": None,
-            "summary": "APM offers recent graduates two one-year product-management "
-            "rotations, mentors and professional development; summer "
-            "interns join one team for 12 weeks. Internship applicants "
-            "must graduate within 12 months after the internship. "
-            "Technical understanding, product judgement, analysis and "
-            "communication matter. U.S. applications are listed as "
-            "September 22-October 6 and London internships October "
-            "5-November 12, without a year; other graduate intake dates "
-            "are unknown. Check actual role requirements.",
+            "summary": "APM gives new and recent graduates two one-year "
+            "product-management rotations, mentorship and training; summer "
+            "interns join one team for 12 weeks and must graduate within 12 "
+            "months after the internship. Technical understanding, product "
+            "sense, analysis and communication matter. U.S. internship and "
+            "graduate applications are closed for 2027 cohorts. The page "
+            "lists London internships October 5-November 12 and Bengaluru "
+            "graduate roles October 30-November 24, without explicit years. "
+            "2027 London/EMEA graduate intake details remain unannounced. "
+            "Check each role's eligibility and timing.",
             "tags": [],
             "location": None,
             "deadline": None,
@@ -3124,7 +3534,7 @@ PROFILES = [
             "category": "jobs",
             "categories": ["jobs", "internships"],
             "kind": "programme-overview",
-            "host_countries": ["US", "GB", "DE", "CH", "JP"],
+            "host_countries": ['US', 'GB', 'DE', 'CH', 'JP', 'IN'],
             "eligible_countries": [],
             "publisher_country": "US",
             "status": "unknown",
@@ -3689,16 +4099,24 @@ def journal_descriptor(descriptor, identity, directory=False, unlinked=False):
 
 
 def journal_parent():
+    verify_state_directory()
     journal_descriptor(_JOURNAL_PARENT_FD, _JOURNAL_PARENT_ID, True)
     named = os.stat(os.path.dirname(_JOURNAL_PATH), follow_symlinks=False)
     if (named.st_dev, named.st_ino) != _JOURNAL_PARENT_ID:
-        raise AdapterError("Original publisher directory changed", "access")
+        raise AdapterError(
+            "Original Google journal directory changed", "access"
+        )
 
 
 def journal_poison():
     """Invalidate the held original only; preserve unrelated generations."""
-    if _JOURNAL_FD is None:
+    if (
+        _JOURNAL_FD is None
+        or not _JOURNAL_AUTHORITY
+        or _JOURNAL_PRESERVE_UNKNOWN
+    ):
         return
+    verify_lock_description(_JOURNAL_GUARD_FD, _JOURNAL_GUARD_ID)
     journal_parent()
     info = journal_descriptor(_JOURNAL_FD, _JOURNAL_ID, unlinked=True)
     if not _JOURNAL_DIRTY and journal_version(info) != _JOURNAL_VERSION:
@@ -3737,6 +4155,8 @@ def journal_verify(generation=True):
         if _JOURNAL_FATAL:
             raise AdapterError("Publisher journal gate is sticky", "access")
         journal_parent()
+        if _JOURNAL_AUTHORITY:
+            verify_journal_flocks()
         info = journal_descriptor(_JOURNAL_FD, _JOURNAL_ID)
         named = os.stat(
             os.path.basename(_JOURNAL_PATH),
@@ -3746,7 +4166,9 @@ def journal_verify(generation=True):
         if (named.st_dev, named.st_ino) != _JOURNAL_ID or (
             generation and journal_version(info) != _JOURNAL_VERSION
         ):
-            raise AdapterError("Publisher journal generation changed", "access")
+            raise AdapterError(
+                "Publisher journal generation changed", "access"
+            )
         if _JOURNAL_LOCK_FD is not None:
             journal_descriptor(_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID)
             if _JOURNAL_LOCK_ID != _JOURNAL_ID:
@@ -3756,7 +4178,9 @@ def journal_verify(generation=True):
                     follow_symlinks=False,
                 )
                 if (lock.st_dev, lock.st_ino) != _JOURNAL_LOCK_ID:
-                    raise AdapterError("Publisher state lock changed", "access")
+                    raise AdapterError(
+                        "Publisher state lock changed", "access"
+                    )
         return info
     except BaseException:
         journal_failure()
@@ -3815,11 +4239,17 @@ def journal_acquire():
 
 @contextlib.contextmanager
 def journal_locked():
-    global _JOURNAL_DEPTH
+    global _JOURNAL_DEPTH, _JOURNAL_AUTHORITY
+    global _JOURNAL_GUARD_FD, _JOURNAL_GUARD_ID
     journal_acquire()
-    if _JOURNAL_DEPTH == 0:
+    outer = _JOURNAL_DEPTH == 0
+    if outer:
         try:
-            fcntl.flock(_JOURNAL_LOCK_FD, fcntl.LOCK_EX)
+            fcntl.flock(_JOURNAL_LOCK_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _JOURNAL_GUARD_FD = os.dup(_JOURNAL_LOCK_FD)
+            _JOURNAL_GUARD_ID = _JOURNAL_LOCK_ID
+            _JOURNAL_AUTHORITY = True
+            verify_journal_flocks()
         except BaseException:
             journal_failure()
             raise
@@ -3830,15 +4260,21 @@ def journal_locked():
     finally:
         primary = sys.exc_info()[1]
         _JOURNAL_DEPTH -= 1
-        if _JOURNAL_DEPTH == 0:
+        if outer:
             try:
-                journal_descriptor(_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID)
+                journal_verify()
+                verify_journal_flocks()
                 fcntl.flock(_JOURNAL_LOCK_FD, fcntl.LOCK_UN)
+                _JOURNAL_AUTHORITY = False
                 journal_descriptor(_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID)
+                journal_close_descriptor(_JOURNAL_GUARD_FD, _JOURNAL_GUARD_ID)
+                _JOURNAL_GUARD_FD = None
             except BaseException:
                 journal_failure()
                 if primary is None:
                     raise
+            finally:
+                _JOURNAL_AUTHORITY = False
 
 
 def journal_read():
@@ -3920,7 +4356,8 @@ def journal_bind_collection(descriptor, expected=None):
 
 
 def journal_verify_collection():
-    journal_descriptor(_COLLECTION_LOCK_FD, _JOURNAL_COLLECTION_ID)
+    verify_lock_description(_COLLECTION_LOCK_FD, _JOURNAL_COLLECTION_ID)
+    verify_lock_description(_COLLECTION_FLOCK_GUARD, _COLLECTION_GUARD_ID)
 
     named = os.stat(
         os.path.join(os.path.dirname(_JOURNAL_PATH), "collection.lock"),
@@ -3931,13 +4368,56 @@ def journal_verify_collection():
 
 
 def journal_before_wire():
+    global _LOCAL_FIRST_WIRE_VERIFIED
     try:
-        if _PUBLISHER_GATE_FAILED:
-            raise AdapterError("Publisher completion gate is sticky", "access")
+        if (
+            _PUBLISHER_GATE_FAILED
+            or _JOURNAL_FATAL
+            or not _ACTIVE_FLIGHT_ID
+            or not _ACTIVE_REQUEST_ID
+            or _STARTUP_QUIET_UNTIL is None
+            or time.monotonic() < _STARTUP_QUIET_UNTIL
+        ):
+            raise AdapterError(
+                "Google physical admission gate is closed", "access"
+            )
         journal_verify()
         journal_verify_collection()
+        verify_legacy_claims()
+        verify_local_claims()
+        if hosted_qa_mode():
+            _GOOGLE407_QA_WITNESS()
+        if (
+            (os.environ.get("GITHUB_ACTIONS") != "true" or hosted_qa_mode())
+            and not _LOCAL_FIRST_WIRE_VERIFIED
+        ):
+            workflow_mode_guard()
+            if hosted_qa_mode():
+                verify_google407_producer_history()
+                if verify_google407_qa() != _GOOGLE407_QA_CONTEXT:
+                    raise AdapterError("Google407 hosted owner changed during startup quiet", "access")
+                workflow_mode_guard()
+            journal_verify()
+            journal_verify_collection()
+            verify_legacy_claims()
+            verify_local_claims()
+            _LOCAL_FIRST_WIRE_VERIFIED = True
+        journal_verify()
+        journal_verify_collection()
+        with locked_budget():
+            state = load_budget()
+            if (
+                not state["in_flight"]
+                or state["flight_id"] != _ACTIVE_FLIGHT_ID
+                or state["request_id"] != _ACTIVE_REQUEST_ID
+                or state["request_outcome"] != "reserved"
+                or state["blocked"]
+            ):
+                raise AdapterError(
+                    "Google physical reservation differs", "access"
+                )
     except BaseException:
-        journal_failure()
+        fail_policy()
         raise
 
 
@@ -4257,7 +4737,7 @@ def journal_export_envelope(path, envelope, atomic=False, signal=False):
                 os.unlink(name, dir_fd=parent)
                 named_id = None
         check_deadline()
-        journal_before_wire()
+        journal_output_authority()
         if callable(envelope):
             envelope = envelope()
         temporary = ".owned-pacing-" + os.urandom(16).hex() if atomic else name
@@ -4289,7 +4769,9 @@ def journal_export_envelope(path, envelope, atomic=False, signal=False):
             written = os.pwrite(descriptor, raw[offset:], offset)
             output_identity(descriptor, identity)
             if written <= 0:
-                raise AdapterError("Incomplete pacing artifact write", "access")
+                raise AdapterError(
+                    "Incomplete pacing artifact write", "access"
+                )
             offset += written
         output_identity(descriptor, identity)
         os.ftruncate(descriptor, len(raw))
@@ -4313,21 +4795,21 @@ def journal_export_envelope(path, envelope, atomic=False, signal=False):
             os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
             temporary = None
         os.fsync(parent)
-        journal_before_wire()
+        journal_output_authority()
         if signal:
             journal_output_signal("true")
-        journal_before_wire()
+        journal_output_authority()
         output_parent(parent, root, parent_id)
         current = os.stat(name, dir_fd=parent, follow_symlinks=False)
         output_identity(descriptor, identity)
         output_identity(guard, identity)
         if (current.st_dev, current.st_ino) != identity:
             raise AdapterError("Final pacing artifact was replaced", "access")
-    except BaseException:
+    except BaseException as error:
+        primary = error
         journal_failure()
         raise
     finally:
-        primary = sys.exc_info()[1]
         errors = []
         failed = primary is not None or _JOURNAL_FATAL
         if failed:
@@ -4512,24 +4994,1643 @@ def journal_lifecycle_open(path, create):
                 raise
 
 
-class HeaderRateLimitStop(AdapterError):
-    """A header-only HTTP 429 stop assessed after safe closure."""
 
+
+
+
+_GOOGLE407_DECISION = {
+    "owner": [
+        43985597132,
+        1,
+        'google',
+        '9e8e59d64d479829912bc343fc23b526f6519aea',
+    ],
+    "artifact_sha256": (
+        '5867da89e99ad5b2271766ca81461a3b0cf3990e0510a26ea311adeb37b9'
+        '2403'
+    ),
+    "legacy_state_sha256": (
+        'fb4cd8075eeb83701170d3b9447e967be98c26941151d036a9e533f25735'
+        'd5b9'
+    ),
+    "legacy_source_sha256": (
+        '65c40228bfb0f43323f1050fd634799b9c344c651ff10b8aed597825bdd3'
+        '4db9'
+    ),
+    "evidence": (
+        'https://github.com/YouthOpps/data-pipeline/issues/407#issuec'
+        'omment-6956512566'
+    ),
+    "artifact_id": 14284968983,
+}
+_GOOGLE407_LOCAL_SEED = None
+_GOOGLE407_HOSTED_STATE = None
+_GOOGLE407_HOSTED_EVIDENCE = None
+_STATE_PARENT_FD = _STATE_PARENT_ID = _STATE_PARENT_METADATA = None
+_ACTIVE_FLIGHT_ID = _ACTIVE_REQUEST_ID = None
+_TRANSACTION_DEPTH = 0
+_REQUEST_FRAMES = []
+_STARTUP_QUIET_UNTIL = None
+_LOCAL_FIRST_WIRE_VERIFIED = False
+_OPERATION_END = None
+_LOCAL_CLAIMS = {}
+
+def upgrade_legacy_budget(state):
+    """Import exact legacy fields while retaining unknown policy history."""
+    legacy_keys = {
+        "schema",
+        "family",
+        "observed_at",
+        "not_before",
+        "starts",
+        "blocked",
+        "interval",
+        "completed",
+        "page_interval",
+        "last_inventory_completed",
+        "rate_limit_strikes",
+        "rate_limit_until",
+        "legacy_rate_history_unknown",
+    }
+    if (
+        type(state) is not dict
+        or set(state) != legacy_keys
+        or type(state["schema"]) is not int
+        or state["schema"] != 2
+        or type(state["legacy_rate_history_unknown"]) is not bool
+    ):
+        raise AdapterError("Unreviewed legacy Google journal", "access")
+    incoming = empty_budget(state["observed_at"])
+    incoming.update(copy.deepcopy(state))
+    incoming.update(
+        schema=3,
+        legacy_rate_history_unknown=True,
+        legacy_policy_history_unknown=True,
+    )
+    return validate_budget(incoming)
+
+def require_existing_local_state():
+    """Pin the mature nonempty generation before metadata callbacks."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    if _GOOGLE407_LOCAL_SEED is None:
+        verify_native3_namespace()
+    budget_file()
+    with locked_budget():
+        state = load_budget()
+        if state["in_flight"] or state["blocked"]:
+            raise AdapterError(
+                "Google journal requires reviewed recovery", "access"
+            )
+        journal_verify()
+
+def fail_policy():
+    """Keep the last durable pending owner; revoke this process's access."""
+    global _PUBLISHER_GATE_FAILED
+    _PUBLISHER_GATE_FAILED = True
+
+def begin_transaction():
+    global _ACTIVE_FLIGHT_ID
+    check_deadline()
+    if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED or _JOURNAL_FATAL:
+        raise AdapterError(
+            "Healthy restored Google journal required", "access"
+        )
+    refusal = None
+    with locked_budget():
+        state = load_budget()
+        if (
+            state["in_flight"]
+            or state["blocked"]
+            or state["rate_limit_strikes"] >= 100
+        ):
+            raise AdapterError(
+                "Google journal requires reviewed recovery", "access"
+            )
+        now = time.time()
+        ready = max(
+            state["not_before"], state["completed"] + state["interval"]
+        )
+        if state["rate_limit_until"] > now:
+            refusal = "Retained Google cooldown"
+        elif ready + 120 > now + min(_PHASE_END, _RUN_END) - time.monotonic():
+            refusal = "Known Google guard exceeds phase budget"
+        journal_verify()
+        if refusal is None:
+            ident = os.urandom(16).hex()
+            if ident == state["flight_id"]:
+                raise AdapterError("Google owner identity collision", "access")
+            state.update(
+                in_flight=True,
+                flight_id=ident,
+                flight_kind="policy",
+                flight_started=now,
+                observed_at=now,
+            )
+            save_budget(state)
+            _ACTIVE_FLIGHT_ID = ident
+    if refusal:
+        raise AdapterError(refusal, "access")
 
 @contextlib.contextmanager
-def header_rate_limit_response(response):
-    """Retain existing barriers when closing an HTTP 429 fails."""
+def policy_operation():
+    global _TRANSACTION_DEPTH, _ACTIVE_FLIGHT_ID
+    outer = _TRANSACTION_DEPTH == 0
+    if outer:
+        begin_transaction()
+    _TRANSACTION_DEPTH += 1
+    assessed = False
     try:
-        with response:
-            yield
-    except HeaderRateLimitStop:
+        yield
+        assessed = True
+    except PublisherStop:
+        assessed = not _PUBLISHER_GATE_FAILED and not _JOURNAL_FATAL
         raise
+    except DataReviewDeferred as error:
+        assessed = data_review_transport_assessed(error, outer)
+        raise
+    finally:
+        _TRANSACTION_DEPTH -= 1
+        if outer:
+            if not assessed or _PUBLISHER_GATE_FAILED or _JOURNAL_FATAL:
+                fail_policy()
+            else:
+                try:
+                    with locked_budget():
+                        state = load_budget()
+                        if (
+                            not state["in_flight"]
+                            or state["flight_id"] != _ACTIVE_FLIGHT_ID
+                            or state["request_outcome"] != "response_assessed"
+                            or state["request_id"]
+                            != state["completed_request_id"]
+                            or state["request_started"]
+                            < state["flight_started"]
+                            or state["completed"] < state["request_started"]
+                            or _ACTIVE_REQUEST_ID is not None
+                            or _REQUEST_FRAMES
+                        ):
+                            raise AdapterError(
+                                "Google owner changed before completion",
+                                "access",
+                            )
+                        now = time.time()
+                        state.update(
+                            in_flight=False,
+                            completed_flight_id=_ACTIVE_FLIGHT_ID,
+                            completed=max(state["completed"], now),
+                            observed_at=max(state["observed_at"], now),
+                        )
+                        state["not_before"] = max(
+                            state["not_before"],
+                            state["completed"] + state["interval"],
+                        )
+                        save_budget(state)
+                    _ACTIVE_FLIGHT_ID = None
+                except BaseException:
+                    fail_policy()
+                    raise
+
+
+_REP_PROVENANCE = {}
+_REP_TARGETS = {}
+_LAST_RESPONSE_RECEIPT = None
+
+class PublisherStop(AdapterError):
+    """A completely assessed refusal stops collection with retained limits."""
+
+@contextlib.contextmanager
+def operation_guard(publisher=False):
+    """Bound headers, body and closure by the earliest operation end."""
+    global _OPERATION_END
+    check_deadline()
+    previous_end = _OPERATION_END
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    began = time.monotonic()
+    end = min(_PHASE_END, _RUN_END, began + (60 if publisher else 15))
+    if previous_end is not None:
+        end = min(end, previous_end)
+    if previous_timer[0] > 0:
+        end = min(end, began + previous_timer[0])
+    if threading.current_thread() is not threading.main_thread():
+        raise AdapterError("Main-thread operation timer required", "access")
+    _OPERATION_END = end
+
+    def exhausted(signum, frame):
+        for request_frame in _REQUEST_FRAMES:
+            request_frame["assessed"] = False
+        if publisher or _REQUEST_FRAMES:
+            fail_policy()
+        # Repeat during cancellation: body timeout must also bound slow close.
+        signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
+        raise PhaseExpired()
+
+    try:
+        signal.signal(signal.SIGALRM, exhausted)
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            exhausted(None, None)
+        signal.setitimer(signal.ITIMER_REAL, remaining)
+        yield
+        check_deadline()
+        if time.monotonic() >= end:
+            exhausted(None, None)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        _OPERATION_END = previous_end
+        if previous_timer[0] > 0:
+            remaining = previous_timer[0] - (time.monotonic() - began)
+            signal.setitimer(
+                signal.ITIMER_REAL,
+                max(0.001, remaining),
+                previous_timer[1] if remaining > 0 else 0.05,
+            )
+
+
+_SOURCE_PATH = "adapters/google/adapter.py"
+_WORKFLOW_ID = 380770427
+_LEGACY_OWNER = (
+    43985597132,
+    1,
+    "google",
+    "9e8e59d64d479829912bc343fc23b526f6519aea",
+)
+_LEGACY_ARTIFACT_ID = 14284968983
+_LEGACY_ZIP_SHA = (
+    "5867da89e99ad5b2271766ca81461a3b0cf3990e0510a26ea311adeb37b92403"
+)
+_LEGACY_STATE_SHA = (
+    "fb4cd8075eeb83701170d3b9447e967be98c26941151d036a9e533f25735d5b9"
+)
+_LEGACY_SOURCE_SHA = (
+    "65c40228bfb0f43323f1050fd634799b9c344c651ff10b8aed597825bdd34db9"
+)
+_IMMUTABLE_BYTES = {}
+_HOSTED_IDENTITY = None
+
+def canonical_state(state):
+    return json.dumps(state, sort_keys=True, separators=(",", ":")).encode()
+
+def infrastructure_url(value):
+    """Allow exact GitHub API and supported artifact storage origins."""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        host = parsed.hostname or ""
+        if (
+            parsed.scheme != "https"
+            or parsed.username
+            or parsed.password
+            or parsed.port
+            or parsed.fragment
+            or parsed.netloc != host
+            or not parsed.path.startswith("/")
+            or any(ord(c) < 33 for c in value)
+        ):
+            raise ValueError()
+        if host == "api.github.com":
+            if not re.match(
+                r"^/repos/YouthOpps/(?:data-pipeline|data-source)(?:/|$)",
+                parsed.path,
+            ):
+                raise ValueError()
+        elif not (
+            re.fullmatch(r"[a-z0-9]{3,24}\.blob\.core\.windows\.net", host)
+            or re.fullmatch(
+                r"[a-z0-9][a-z0-9-]*\.actions\.githubusercontent\.com", host
+            )
+        ):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise AdapterError(
+            "Unreviewed infrastructure origin", "access"
+        ) from None
+    return value
+
+def verified_source(head):
+    if not isinstance(head, str) or not re.fullmatch("[0-9a-f]{40}", head):
+        raise AdapterError("Invalid producer revision", "access")
+    if head not in _IMMUTABLE_BYTES:
+        result = workflow_api("/contents/" + _SOURCE_PATH + "?ref=" + head)
+        try:
+            raw = base64.b64decode(result["content"], validate=False)
+            expected = hashlib.sha1(
+                b"blob " + str(len(raw)).encode() + b"\0" + raw
+            ).hexdigest()
+            if (
+                result["type"] != "file"
+                or result["encoding"] != "base64"
+                or result["path"] != _SOURCE_PATH
+                or result["sha"] != expected
+                or len(raw) > 1000000
+                or result["size"] != len(raw)
+            ):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise AdapterError(
+                "Untrusted immutable Google producer", "access"
+            ) from None
+        _IMMUTABLE_BYTES[head] = raw
+    return _IMMUTABLE_BYTES[head]
+
+def reviewed_transition():
+    value = copy.deepcopy(_GOOGLE407_DECISION)
+    expected = {
+        "owner": list(_LEGACY_OWNER),
+        "artifact_id": _LEGACY_ARTIFACT_ID,
+        "artifact_sha256": _LEGACY_ZIP_SHA,
+        "legacy_state_sha256": _LEGACY_STATE_SHA,
+        "legacy_source_sha256": _LEGACY_SOURCE_SHA,
+    }
+    if type(value) is not dict:
+        raise AdapterError("Reviewed Google407 transition is OFF", "access")
+    evidence = value.pop("evidence", None)
+    if (
+        value != expected
+        or type(value.get("artifact_id")) is not int
+        or type(value["owner"][0]) is not int
+        or type(value["owner"][1]) is not int
+        or not isinstance(evidence, str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/407"
+            r"#issuecomment-[1-9][0-9]*",
+            evidence,
+        )
+    ):
+        raise AdapterError("Unreviewed Google407 transition", "access")
+    return evidence
+
+def workflow_mode_guard():
+    value = workflow_api("/actions/workflows/fetch-google.yml")
+    expected = (
+        "active"
+        if os.environ.get("GITHUB_ACTIONS") == "true" and not hosted_qa_mode()
+        else "disabled_manually"
+    )
+    if (
+        value.get("id") != _WORKFLOW_ID
+        or value.get("path") != ".github/workflows/fetch-google.yml"
+        or value.get("state") != expected
+    ):
+        raise AdapterError("Google workflow coordination changed", "access")
+
+def current_job_context():
+    global _HOSTED_IDENTITY, _GOOGLE407_QA_CONTEXT
+    if hosted_qa_mode():
+        if _GOOGLE407_QA_CONTEXT is not None:
+            raise AdapterError("Google407 hosted QA cannot reenter collection", "access")
+        _GOOGLE407_QA_CONTEXT = verify_google407_qa()
+        verify_google407_producer_history()
+        return
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        if "DATA_SOURCE_TOKEN" in os.environ:
+            raise AdapterError(
+                "Local Google collection refuses publication token", "access"
+            )
+        return
+    run_id, attempt = current_run_identity()
+    head = os.environ["GITHUB_SHA"]
+    run = workflow_api(f"/actions/runs/{run_id}/attempts/{attempt}")
+    validate_family_identity(run, (run_id, attempt, SOURCE_ID, head))
+    jobs = workflow_api(
+        f"/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"
+    )
+    rows = jobs.get("jobs")
+    if (
+        type(jobs.get("total_count")) is not int
+        or jobs["total_count"] != 1
+        or type(rows) is not list
+        or len(rows) != 1
+        or run.get("status") != "in_progress"
+    ):
+        raise AdapterError("Unexpected current Google job inventory", "access")
+    job = rows[0]
+    if (
+        type(job.get("run_id")) is not int
+        or job["run_id"] != run_id
+        or type(job.get("run_attempt")) is not int
+        or job["run_attempt"] != attempt
+        or job.get("head_sha") != head
+        or job.get("head_branch") != "main"
+        or job.get("status") != "in_progress"
+        or job.get("name") != "collect"
+        or type(job.get("id")) is not int
+        or job["id"] <= 0
+    ):
+        raise AdapterError("Current Google job identity differs", "access")
+    with open(__file__, "rb") as stream:
+        local_source = stream.read(1000001)
+    if (
+        len(local_source) > 1000000
+        or hashlib.sha256(verified_source(head)).hexdigest()
+        != hashlib.sha256(local_source).hexdigest()
+    ):
+        raise AdapterError("Current Google producer bytes differ", "access")
+    _HOSTED_IDENTITY = (run_id, attempt, SOURCE_ID, head)
+
+def hosted_floor(incoming):
+    if hosted_qa_mode():
+        return google407_qa_floor(incoming)
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return incoming
+    if (
+        type(_GOOGLE407_HOSTED_STATE) is not dict
+        or not isinstance(_GOOGLE407_HOSTED_EVIDENCE, str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/407"
+            r"#issuecomment-[1-9][0-9]*",
+            _GOOGLE407_HOSTED_EVIDENCE,
+        )
+    ):
+        raise AdapterError("Google407 hosted MAX handoff is OFF", "access")
+    return merge_budgets(
+        incoming, validate_budget(_GOOGLE407_HOSTED_STATE), time.time()
+    )
+
+
+
+
+def local_seed_claim():
+    evidence = reviewed_transition()
+    packet = _GOOGLE407_LOCAL_SEED
+    if (
+        type(packet) is not dict
+        or set(packet) != {"state_sha256", "machine_sha256"}
+        or any(
+            not isinstance(v, str) or not re.fullmatch("[0-9a-f]{64}", v)
+            for v in packet.values()
+        )
+    ):
+        raise AdapterError("Google407 local initialization is OFF", "access")
+    with open("/etc/machine-id", "rb") as stream:
+        if (
+            hashlib.sha256(stream.read(4097)).hexdigest()
+            != packet["machine_sha256"]
+        ):
+            raise AdapterError("Google initializer machine differs", "access")
+    with open(__file__, "rb") as stream:
+        raw = stream.read(1000001)
+    if len(raw) > 1000000:
+        raise AdapterError(
+            "Google source exceeds initialization bound", "access"
+        )
+    return {
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+        "state_sha256": packet["state_sha256"],
+        "machine_sha256": packet["machine_sha256"],
+        "evidence": evidence,
+        "family": FAMILY,
+    }
+
+def claim_local_attempt():
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    if "DATA_SOURCE_TOKEN" in os.environ:
+        raise AdapterError(
+            "Local Google collection refuses publication token", "access"
+        )
+    if _GOOGLE407_LOCAL_SEED is None:
+        return claim_local_continuation()
+    expected = local_seed_claim()
+    budget_file()
+    name = FAMILY + "-issue407-initialized-" + str(os.getuid()) + ".claim"
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+        dir_fd=_STATE_PARENT_FD,
+    )
+    try:
+        before = os.fstat(descriptor)
+        named = os.stat(name, dir_fd=_STATE_PARENT_FD, follow_symlinks=False)
+        raw = os.pread(descriptor, 4097, 0)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.getuid()
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_nlink != 1
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or journal_version(before) != journal_version(after)
+            or len(raw) > 4096
+            or json.loads(raw) != expected
+        ):
+            raise AdapterError("Google initializer claim differs", "access")
+        _LOCAL_CLAIMS[name] = (
+            _STATE_PARENT_FD,
+            (before.st_dev, before.st_ino),
+            raw,
+        )
+    finally:
+        os.close(descriptor)
+    with locked_budget():
+        state = load_budget()
+        if (
+            state["in_flight"]
+            or state["blocked"]
+            or hashlib.sha256(journal_read()).hexdigest()
+            != expected["state_sha256"]
+        ):
+            raise AdapterError("Initial Google generation differs", "access")
+        descriptor = secure_file(
+            "issue407-native.claim", os.O_RDWR | os.O_CREAT | os.O_EXCL
+        )
+        try:
+            raw = canonical_state(expected)
+            if os.write(descriptor, raw) != len(raw):
+                raise AdapterError("Short Google native claim write", "access")
+            os.fsync(descriptor)
+            if os.pread(descriptor, len(raw) + 1, 0) != raw:
+                raise AdapterError(
+                    "Google native claim readback differs", "access"
+                )
+            os.fsync(_STATE_DIR_FD)
+            info = os.fstat(descriptor)
+            _LOCAL_CLAIMS["issue407-native.claim"] = (
+                _STATE_DIR_FD,
+                (info.st_dev, info.st_ino),
+                raw,
+            )
+        finally:
+            os.close(descriptor)
+
+def verify_local_claims():
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return
+    expected = 5 if _GOOGLE407_LOCAL_SEED is None else 2
+    if len(_LOCAL_CLAIMS) != expected:
+        raise AdapterError("Google exclusive claims missing", "access")
+    for name, (parent, identity, raw) in _LOCAL_CLAIMS.items():
+        descriptor = os.open(
+            name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+        )
+        try:
+            info = os.fstat(descriptor)
+            named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or (info.st_dev, info.st_ino) != identity
+                or (named.st_dev, named.st_ino) != identity
+                or os.pread(descriptor, len(raw) + 1, 0) != raw
+            ):
+                raise AdapterError(
+                    "Original Google exclusive claim changed", "access"
+                )
+        finally:
+            os.close(descriptor)
+    if _GOOGLE407_LOCAL_SEED is None:
+        verify_native3_namespace()
+        verify_native3_witness()
+
+
+_JOURNAL_AUTHORITY = False
+
+def verify_lock_description(descriptor, identity):
+    """Reject an inode-correct FD that no longer owns its original flock."""
+    journal_descriptor(descriptor, identity)
+    with open(
+        "/proc/self/fdinfo/" + str(descriptor), encoding="ascii"
+    ) as stream:
+        entries = stream.read(8193)
+    if len(entries) > 8192 or not re.search(
+        r"^lock:.*FLOCK\s+ADVISORY\s+WRITE\s+", entries, re.M
+    ):
+        raise AdapterError("Original Google flock was released", "access")
+
+_LEGACY_CLAIMS = []
+_LEGACY_MISSING = []
+_LEGACY_ROOT_ABSENT = False
+
+def verify_legacy_claims():
+    root = os.path.join(tempfile.gettempdir(), "issue111-google-research")
+    if _LEGACY_ROOT_ABSENT:
+        if os.path.lexists(root):
+            raise AdapterError(
+                "Legacy Google parent appeared after admission", "access"
+            )
+        return
+    for descriptor, path, identity, raw, version in _LEGACY_CLAIMS:
+        info = os.fstat(descriptor)
+        named = os.stat(path, follow_symlinks=False)
+        if (info.st_dev, info.st_ino) != identity or (
+            named.st_dev,
+            named.st_ino,
+        ) != identity:
+            raise AdapterError(
+                "Original legacy Google identity changed", "access"
+            )
+        if raw is None:
+            journal_descriptor(descriptor, identity, directory=True)
+        else:
+            verify_lock_description(descriptor, identity)
+            if (
+                journal_version(info) != version
+                or os.pread(descriptor, len(raw) + 1, 0) != raw
+            ):
+                raise AdapterError(
+                    "Original legacy Google constraints changed", "access"
+                )
+    for parent, name in _LEGACY_MISSING:
+        try:
+            os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        raise AdapterError(
+            "Legacy Google state appeared after admission", "access"
+        )
+
+def close_state_authorities():
+    """Close retained research and namespace FDs, preserving primary errors."""
+    global _STATE_DIR_FD, _STATE_PARENT_FD, _STATE_DIR_ID, _STATE_PARENT_ID
+    global _STATE_PATH, _STATE_LOCK
+    global _JOURNAL_GUARD_FD, _COLLECTION_FLOCK_GUARD
+    global _LEGACY_ROOT_ABSENT
+    errors = []
+    try:
+        verify_legacy_claims()
     except BaseException as error:
-        error._header429_unassessed = True
-        # Latch before any fallible best-effort diagnostics.
-        with contextlib.suppress(BaseException):
-            journal_failure()
+        fail_policy()
+        errors.append(error)
+    for descriptor, path, identity, raw, version in reversed(_LEGACY_CLAIMS):
+        try:
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) != identity:
+                raise AdapterError(
+                    "Legacy Google descriptor was reused", "access"
+                )
+            os.close(descriptor)
+        except BaseException as error:
+            fail_policy()
+            errors.append(error)
+    _LEGACY_CLAIMS.clear()
+    _LEGACY_MISSING.clear()
+    _LEGACY_ROOT_ABSENT = False
+    for descriptor, identity in (
+        (_STATE_DIR_FD, _STATE_DIR_ID),
+        (_STATE_PARENT_FD, _STATE_PARENT_ID),
+    ):
+        if descriptor is None:
+            continue
+        try:
+            info = os.fstat(descriptor)
+            if (info.st_dev, info.st_ino) != identity or not stat.S_ISDIR(
+                info.st_mode
+            ):
+                raise AdapterError(
+                    "Google namespace descriptor was reused", "access"
+                )
+            os.close(descriptor)
+        except BaseException as error:
+            fail_policy()
+            errors.append(error)
+    _STATE_DIR_FD = _STATE_PARENT_FD = None
+    _STATE_DIR_ID = _STATE_PARENT_ID = None
+    _STATE_PATH = _STATE_LOCK = None
+    for descriptor, identity in (
+        (_JOURNAL_GUARD_FD, _JOURNAL_GUARD_ID),
+        (_COLLECTION_FLOCK_GUARD, _COLLECTION_GUARD_ID),
+    ):
+        if descriptor is None:
+            continue
+        try:
+            journal_close_descriptor(descriptor, identity)
+        except BaseException as error:
+            fail_policy()
+            errors.append(error)
+    _JOURNAL_GUARD_FD = _COLLECTION_FLOCK_GUARD = None
+    if errors:
+        raise errors[0]
+
+@contextlib.contextmanager
+def assessed_response(response, publisher, robots):
+    """Retain received constraints before entry; close even if entry fails."""
+    try:
+        status = response.status
+        if publisher:
+            if status == 429:
+                record_retry_after([], 429)
+            elif not robots and status in (401, 403, 451):
+                retain_publisher_hold()
+        with response:
+            yield status
+    finally:
+        primary = sys.exc_info()[1]
+        try:
+            if not getattr(response, "closed", False):
+                response.close()
+        except BaseException:
+            if publisher:
+                fail_policy()
+            if primary is None:
+                raise
+
+
+class DataReviewDeferred(AdapterError):
+    """Configured material needs review; transport remains a separate gate."""
+
+    def __init__(self, message, reason, target=None, receipt=None):
+        super().__init__(message, "parse")
+        self.reason = reason
+        self.target = target
+        self.receipt = receipt
+
+
+def reviewable_embedded_material(body, headings, expected):
+    """Recognize the same embedded document, never changed access policy."""
+    if not expected or headings != expected:
+        return False
+    document = embedded_html(body)
+    parser = MaterialFacts()
+    parser.feed(document)
+    parser.close()
+    outer = MaterialFacts()
+    outer.feed(body.decode("utf-8", "strict"))
+    outer.close()
+    if parser.skip or outer.skip:
+        return False
+    text = " ".join(parser.text + outer.text)
+    # Changed material with access-policy vocabulary needs policy review, even
+    # when its permission/negation wording is unfamiliar or far apart. This
+    # conservative gate deliberately prefers a hard barrier to inferred consent.
+    policy_vocabulary = (
+        r"\b(?:autom\w*|(?:chat)?bots?|robots?|crawl\w*|spider\w*|scrap\w*|"
+        r"programmatic\w*|harvest\w*|bulk|permission|approv\w*|consent|"
+        r"authori[sz]\w*|licen[cs]\w*|prohibit\w*|forbid\w*|restrict\w*)\b|"
+        r"\b(?:software\s+agents?|non[-\s]+human|manual\s+access|"
+        r"only\s+(?:human|manual)\w*|terms\s+of\s+access|"
+        r"api\s+(?:access|use)|machine[-\s]+(?:access|read\w*)|"
+        r"(?:data|text)[-\s]+mining)\b"
+    )
+    if re.search(policy_vocabulary, text, re.I):
+        return False
+    return bool(text.strip())
+
+
+def data_review_transport_assessed(error, outer):
+    """Semantic review cannot heal received/namespace/persistence failures."""
+    if (
+        type(error) is not DataReviewDeferred
+        or error.reason != "configured-material"
+        or error.target not in INPUTS
+        or INPUTS[error.target]["format"] != "embedded-html"
+        or error.target != _LAST_RESPONSE_URL
+        or not error.receipt
+        or error.receipt != _LAST_RESPONSE_RECEIPT
+        or not outer
+        or _TRANSACTION_DEPTH != 1
+        or not _STATE_TRUSTED
+        or _PUBLISHER_GATE_FAILED
+        or _JOURNAL_FATAL
+        or _REQUEST_FRAMES
+        or _ACTIVE_REQUEST_ID is not None
+    ):
+        return False
+    with locked_budget():
+        state = load_budget()
+        if (
+            not state["in_flight"]
+            or state["flight_kind"] != "policy"
+            or state["flight_id"] != _ACTIVE_FLIGHT_ID
+            or state["blocked"]
+            or not state["request_id"]
+            or state["request_id"] != state["completed_request_id"]
+            or state["completed_request_id"] != error.receipt
+            or state["request_outcome"] != "response_assessed"
+            or state["request_started"] < state["flight_started"]
+            or state["completed"] < state["request_started"]
+        ):
+            return False
+    journal_verify()
+    journal_verify_collection()
+    verify_local_claims()
+    verify_legacy_claims()
+    return True
+
+
+_JOURNAL_PRESERVE_UNKNOWN = False
+
+
+_JOURNAL_GUARD_FD = _JOURNAL_GUARD_ID = None
+_COLLECTION_FLOCK_GUARD = _COLLECTION_GUARD_ID = None
+
+
+def verify_journal_flocks():
+    verify_lock_description(_JOURNAL_LOCK_FD, _JOURNAL_LOCK_ID)
+    verify_lock_description(_JOURNAL_GUARD_FD, _JOURNAL_GUARD_ID)
+
+
+_LAST_RESPONSE_URL = None
+
+
+_HTTP_DATE_PATTERN = (
+    r"(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), [0-9]{2} [A-Z][a-z]{2} "
+    r"[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT|"
+    r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), "
+    r"[0-9]{2}-[A-Z][a-z]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT|"
+    r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) [A-Z][a-z]{2} [ 0-9][0-9] "
+    r"[0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4})"
+)
+
+
+_HTTP_DATE_COMPONENT_PATTERN = (
+    r"(?:^|(?<=,))\s*(" + _HTTP_DATE_PATTERN + r")(?=\s*(?:,|$))"
+)
+
+
+def journal_output_authority():
+    """Verify output ownership without a new publisher reservation."""
+    if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED or _JOURNAL_FATAL:
+        raise AdapterError(
+            "Healthy Google output authority required", "access"
+        )
+    journal_verify()
+    journal_verify_collection()
+    verify_local_claims()
+    verify_legacy_claims()
+
+
+
+_GOOGLE407_PREVIOUS_APM = {
+    "summary": (
+        'APM offers recent graduates two one-year product-management '
+        'rotations, mentors and professional development; summer inte'
+        'rns join one team for 12 weeks. Internship applicants must g'
+        'raduate within 12 months after the internship. Technical und'
+        'erstanding, product judgement, analysis and communication ma'
+        'tter. U.S. applications are listed as September 22-October 6'
+        ' and London internships October 5-November 12, without a yea'
+        'r; other graduate intake dates are unknown. Check actual rol'
+        'e requirements.'
+    ),
+    "host_countries": ['US', 'GB', 'DE', 'CH', 'JP'],
+}
+
+_GOOGLE407_CONTINUATION = None
+
+
+_GOOGLE407_NATIVE3_FLOOR = {'blocked': False,
+ 'completed': 1794943063.2627711,
+ 'completed_flight_id': 'e1aeb891132854a02ca52caa96bbe976',
+ 'completed_request_id': 'f6d914f92dc3028a0943d1a8face61ff',
+ 'family': 'youthopps-google-publisher-v1',
+ 'flight_id': 'e1aeb891132854a02ca52caa96bbe976',
+ 'flight_kind': 'policy',
+ 'flight_started': 1794943049.8722267,
+ 'in_flight': False,
+ 'interval': 12.2,
+ 'last_inventory_completed': 1794942969.0184925,
+ 'legacy_policy_history_unknown': True,
+ 'legacy_rate_history_unknown': True,
+ 'not_before': 1794943075.4627712,
+ 'observed_at': 1794943063.2627711,
+ 'page_interval': 30,
+ 'rate_limit_strikes': 0,
+ 'rate_limit_until': 0,
+ 'request_id': 'f6d914f92dc3028a0943d1a8face61ff',
+ 'request_inventory': False,
+ 'request_outcome': 'response_assessed',
+ 'request_started': 1794943062.0717096,
+ 'schema': 3,
+ 'starts': [1792060933.2197416,
+            1792060939.4147806,
+            1792060945.9070847,
+            1792079865.2485468,
+            1792079871.4669194,
+            1792079877.7242067,
+            1792079883.9553993,
+            1792079890.1697528,
+            1792079896.390569,
+            1792079902.5101707,
+            1792079908.628138,
+            1792079914.9911332,
+            1792079921.462702,
+            1792083810.3543506,
+            1792083810.5581048,
+            1792083823.2867877,
+            1792083823.3464828,
+            1792083853.8944688,
+            1792083853.9168265,
+            1792083884.543068,
+            1792083884.5686438,
+            1792083915.1517706,
+            1792083915.1768608,
+            1792083945.804046,
+            1792083945.8247814,
+            1792083958.4160109,
+            1792083958.4430606,
+            1792083971.0959797,
+            1792083971.125289,
+            1792083983.7918556,
+            1792083983.8174372,
+            1792083996.467733,
+            1792083996.5333624,
+            1792084009.0953674,
+            1792084009.1125574,
+            1792084021.8147693,
+            1792084021.8348918,
+            1792084034.4615664,
+            1792084034.4967043,
+            1792084047.1461682,
+            1792084047.172508,
+            1792084059.8203301,
+            1792084059.8493474,
+            1792084072.4644437,
+            1792084072.4834332,
+            1792084085.0599077,
+            1792084085.0795536,
+            1792084097.721615,
+            1792084097.7457745,
+            1792084110.3657067,
+            1792084110.4038274,
+            1792084123.0697997,
+            1792084123.0958548,
+            1792084135.8883502,
+            1792084135.9074852,
+            1792084148.5881813,
+            1792084148.6411285,
+            1792084161.2249997,
+            1792084161.3315165,
+            1792084173.9378836,
+            1792084173.9742126,
+            1792084186.7428734,
+            1792084186.805952,
+            1792084199.7940655,
+            1792084199.859546,
+            1794874536.1127372,
+            1794874548.5183935,
+            1794874560.9156075,
+            1794874573.471394,
+            1794874585.9206994,
+            1794939082.5930498,
+            1794939083.1968074,
+            1794939096.2314758,
+            1794939096.2378514,
+            1794939127.3270407,
+            1794939127.3286905,
+            1794939158.6089325,
+            1794939158.6125765,
+            1794939189.7574008,
+            1794939189.762089,
+            1794939221.6820674,
+            1794939221.683489,
+            1794939235.727031,
+            1794939235.7311342,
+            1794939248.6512785,
+            1794939248.6584084,
+            1794939262.0902982,
+            1794939262.0980175,
+            1794939275.1871078,
+            1794939275.1893945,
+            1794939288.724466,
+            1794939288.7332008,
+            1794942774.0692103,
+            1794942775.4908984,
+            1794942788.1845622,
+            1794942788.1938713,
+            1794942819.7138402,
+            1794942819.7176027,
+            1794942850.9415843,
+            1794942850.9474866,
+            1794942882.2556329,
+            1794942882.2580929,
+            1794942913.8714826,
+            1794942913.8733876,
+            1794942927.6597743,
+            1794942927.665298,
+            1794942940.3868465,
+            1794942940.3961165,
+            1794942954.1881585,
+            1794942954.1959682,
+            1794942967.5998402,
+            1794942967.6109195,
+            1794942981.2192473,
+            1794942981.221926,
+            1794942995.2310688,
+            1794942995.2394295,
+            1794943008.550879,
+            1794943008.5631301,
+            1794943022.0143259,
+            1794943022.0210276,
+            1794943035.8465614,
+            1794943035.85513,
+            1794943048.4072397,
+            1794943048.4128084,
+            1794943062.0717096,
+            1794943062.0763297]}
+
+_GOOGLE407_NATIVE3_FLOOR_SHA = '51baddd79def7327680acd9045cb2ecd4f5557088860c6d3546c2f26dc235bf1'
+
+_GOOGLE407_NATIVE3_LINEAGE = {'initializer_claim': {'bytes': 382,
+                       'gid': 1000,
+                       'identity': [34, 128488],
+                       'mode': 384,
+                       'path': '/tmp/youthopps-google-publisher-v1-issue407-initialized-1000.claim',
+                       'sha256': '985b4f9f4e6ae6f90707f897aea16f193e20b6e4e9d4878cfa6f32fcfbc0cc42',
+                       'uid': 1000},
+ 'journal': {'bytes': 3134,
+             'gid': 1000,
+             'identity': [34, 128492],
+             'mode': 384,
+             'path': '/tmp/youthopps-google-publisher-v1-1000/state.json',
+             'sha256': '51baddd79def7327680acd9045cb2ecd4f5557088860c6d3546c2f26dc235bf1',
+             'uid': 1000},
+ 'native1_claim': {'bytes': 382,
+                   'gid': 1000,
+                   'identity': [34, 128534],
+                   'mode': 384,
+                   'path': '/tmp/youthopps-google-publisher-v1-1000/issue407-native.claim',
+                   'sha256': '985b4f9f4e6ae6f90707f897aea16f193e20b6e4e9d4878cfa6f32fcfbc0cc42',
+                   'uid': 1000},
+ 'native1_launch': {'bytes': 422,
+                    'gid': 1000,
+                    'identity': [27, 284414],
+                    'mode': 384,
+                    'path': '/workspace/work/google407/native-launch-once.json',
+                    'sha256': '97cca2dc65115215e041067012d5384edde450b0bd8d333a84eaf064ecf41bcd',
+                    'uid': 1000},
+ 'native2_claim': {'bytes': 468,
+                   'gid': 1000,
+                   'identity': [34, 141990],
+                   'mode': 384,
+                   'path': '/tmp/youthopps-google-publisher-v1-1000/issue407-native2.claim',
+                   'sha256': '1928de7cc771bbd1aaa53d87663fb183bd135d0bbe81332530a063d5574a855e',
+                   'uid': 1000},
+ 'native2_launch': {'bytes': 463,
+                    'gid': 1000,
+                    'identity': [27, 284508],
+                    'mode': 384,
+                    'path': '/workspace/work/google407/native2-launch-once.json',
+                    'sha256': 'b8967fdfd83acb362af2daf86164ebbc2b8501b5aa55269a815084ec923a3f7b',
+                    'uid': 1000},
+ 'native2_result': {'bytes': 373,
+                    'gid': 1000,
+                    'identity': [27, 284510],
+                    'mode': 384,
+                    'path': '/workspace/work/google407/native2-launch-result.json',
+                    'sha256': '43ef392ca2c9b178cd24821030b426c3f22dbed3785f18294b5ac23a90e2b008',
+                    'uid': 1000},
+ 'outside_attempt': {'bytes': 1131,
+                     'gid': 1000,
+                     'identity': [27, 284411],
+                     'mode': 384,
+                     'path': '/workspace/work/google407/initialization-process-once.json',
+                     'sha256': '668f7f23c5f0579070cf1258665c4f314fed65ae46e6010658aa2b988526af4f',
+                     'uid': 1000},
+ 'outside_proof': {'bytes': 1916,
+                   'gid': 1000,
+                   'identity': [27, 284379],
+                   'mode': 384,
+                   'path': '/workspace/work/google407/initialization-success-proof.json',
+                   'sha256': 'a4eefbcd200b5871e972fc386b3c0ab5df688e60aa5a4836f419270636a08373',
+                   'uid': 1000},
+ 'root_observed_zero': {'bytes': 444,
+                        'gid': 1000,
+                        'identity': [27, 284413],
+                        'mode': 384,
+                        'path': '/workspace/work/google407/root-observed-initialization-success.json',
+                        'sha256': '50c9fa42a1147eb2548305ed678630725e141a5429a695eaaf949d90d20199eb',
+                        'uid': 1000},
+ 'root_settlement_witness': {'bytes': 1560,
+                             'gid': 1000,
+                             'identity': [27, 284591],
+                             'mode': 384,
+                             'path': '/workspace/work/google407/root-observed-v5-settlement-success.json',
+                             'sha256': 'bfb35c34119027ac7e848a9c7aa880ef747f43151a4859192cdf3f1ecfb7e18f',
+                             'uid': 1000},
+ 'settlement_attempt': {'bytes': 303,
+                        'gid': 1000,
+                        'identity': [27, 284563],
+                        'mode': 384,
+                        'path': '/workspace/work/google407/settlement-v5-process-once.json',
+                        'sha256': '18f68b8ff21d0736ce35989c9314acd6fa3bbd472e9311b1c13fa968f055c0be',
+                        'uid': 1000},
+ 'settlement_claim': {'bytes': 839,
+                      'gid': 1000,
+                      'identity': [34, 185938],
+                      'mode': 384,
+                      'path': '/tmp/youthopps-google-publisher-v1-1000/issue407-native2-logical-settlement.claim',
+                      'sha256': '60c167d5850a5b72fb7f82887828966c4a352c04dd78c8ccec026584b4b2d9f9',
+                      'uid': 1000},
+ 'settlement_proof': {'bytes': 2770,
+                      'gid': 1000,
+                      'identity': [27, 284589],
+                      'mode': 384,
+                      'path': '/workspace/work/google407/settlement-v5-success-proof.json',
+                      'sha256': '86089d0d3aa73ec5b8b75d6fc9781d8f2cbaad31af1e7103a1fd657cca94347d',
+                      'uid': 1000}}
+
+_GOOGLE407_NATIVE3_NAMESPACE = {'collection_lock': {'bytes': 0,
+                     'gid': 1000,
+                     'identity': [34, 128491],
+                     'mode': 384,
+                     'path': '/tmp/youthopps-google-publisher-v1-1000/collection.lock',
+                     'sha256': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+                     'uid': 1000},
+ 'family': {'gid': 1000,
+            'identity': [34, 128489],
+            'mode': 448,
+            'path': '/tmp/youthopps-google-publisher-v1-1000',
+            'uid': 1000},
+ 'outside_root': {'gid': 1000,
+                  'identity': [27, 283900],
+                  'mode': 448,
+                  'path': '/workspace/work/google407',
+                  'uid': 1000},
+ 'state_lock': {'bytes': 0,
+                'gid': 1000,
+                'identity': [34, 128490],
+                'mode': 384,
+                'path': '/tmp/youthopps-google-publisher-v1-1000/state.lock',
+                'sha256': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+                'uid': 1000},
+ 'temporary_parent': {'gid': 65534,
+                      'identity': [34, 1],
+                      'mode': 1023,
+                      'path': '/tmp',
+                      'uid': 65534}}
+
+
+def read_native3_authority(value):
+    """Read one frozen native authority without adopting a new generation."""
+    descriptor = os.open(value["path"], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    primary = None
+    try:
+        before = os.fstat(descriptor)
+        named = os.stat(value["path"], follow_symlinks=False)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != value["uid"]
+            or before.st_uid != os.getuid()
+            or before.st_gid != value["gid"]
+            or stat.S_IMODE(before.st_mode) != value["mode"]
+            or value["mode"] != 0o600
+            or (before.st_dev, before.st_ino) != tuple(value["identity"])
+            or (named.st_dev, named.st_ino) != tuple(value["identity"])
+        ):
+            raise AdapterError("Original Google native3 authority differs", "access")
+        raw = os.pread(descriptor, 16385, 0)
+        after = os.fstat(descriptor)
+        named = os.stat(value["path"], follow_symlinks=False)
+        if (
+            journal_version(before) != journal_version(after)
+            or journal_version(named) != journal_version(after)
+            or len(raw) != value["bytes"]
+            or len(raw) > 16384
+            or hashlib.sha256(raw).hexdigest() != value["sha256"]
+        ):
+            raise AdapterError("Google native3 authority generation differs", "access")
+        return raw
+    except BaseException as error:
+        primary = error
         raise
+    finally:
+        try:
+            os.close(descriptor)
+        except BaseException:
+            if primary is None:
+                raise
+
+
+def verify_native3_namespace():
+    """Reject replacement of the original publisher or outside namespace."""
+    for key in ("temporary_parent", "family", "outside_root"):
+        value = _GOOGLE407_NATIVE3_NAMESPACE[key]
+        descriptor = os.open(
+            value["path"], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        primary = None
+        try:
+            info = os.fstat(descriptor)
+            named = os.stat(value["path"], follow_symlinks=False)
+            if (
+                not stat.S_ISDIR(info.st_mode)
+                or info.st_nlink < 2
+                or (info.st_dev, info.st_ino) != tuple(value["identity"])
+                or (named.st_dev, named.st_ino) != tuple(value["identity"])
+                or (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode))
+                != (value["uid"], value["gid"], value["mode"])
+            ):
+                raise AdapterError("Original Google native3 namespace differs", "access")
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            try:
+                os.close(descriptor)
+            except BaseException:
+                if primary is None:
+                    raise
+    for key in ("state_lock", "collection_lock"):
+        read_native3_authority(_GOOGLE407_NATIVE3_NAMESPACE[key])
+
+
+def verify_native3_witness():
+    """Require the actual original writer and ROOT's post-finalizer witness."""
+    values = _GOOGLE407_NATIVE3_LINEAGE
+    observed = json.loads(read_native3_authority(values["root_settlement_witness"]))
+    proof_raw = read_native3_authority(values["settlement_proof"])
+    proof = json.loads(proof_raw)
+    attempt = json.loads(read_native3_authority(values["settlement_attempt"]))
+    result = observed["result"]
+    if (
+        type(observed["outcome"]) is not int or observed["outcome"] != 0
+        or observed["qualified_success"] is not True
+        or type(observed["child_exit"]) is not int or observed["child_exit"] != 0
+        or observed["proof_sha256"] != hashlib.sha256(proof_raw).hexdigest()
+        or observed["proof_identity"] != values["settlement_proof"]["identity"]
+        or observed["child_pid"] != proof["child_pid"]
+        or observed["supervisor_pid"] != attempt["pid"]
+        or proof["attempt"] != attempt
+        or type(proof["original_child_exit"]) is not int
+        or proof["original_child_exit"] != 0
+        or proof["original_stderr"] != ""
+        or proof["original_stdout"] != (canonical_state(result) + b"\n").decode()
+        or proof["result"] != result
+        or result["state_sha256"] != _GOOGLE407_NATIVE3_FLOOR_SHA
+        or result["state_identity"] != values["journal"]["identity"]
+        or result["observations"] != 126
+        or result["publisher_HTTP"] != 0
+        or result["native_execution"] != 0
+        or result["logical_owner"] != _GOOGLE407_NATIVE3_FLOOR["completed_flight_id"]
+        or result["physical_receipt"] != _GOOGLE407_NATIVE3_FLOOR["completed_request_id"]
+        or observed["root_decision"] != result["evidence"]
+        or proof["root_decision"] != observed["root_decision"]
+        or proof["writer_sha256"] != result["writer_sha256"]
+        or attempt["writer_sha256"] != result["writer_sha256"]
+    ):
+        raise AdapterError("Original Google settlement witness differs", "access")
+
+
+def claim_local_continuation():
+    """One finite native3 claim after the exact separately observed settlement."""
+    global _COLLECTION_LOCK_FD, _COLLECTION_FLOCK_GUARD, _COLLECTION_GUARD_ID
+    evidence = _GOOGLE407_CONTINUATION
+    if (
+        not isinstance(evidence, str)
+        or not re.fullmatch(
+            r"https://github\.com/YouthOpps/data-pipeline/issues/407"
+            r"#issuecomment-[1-9][0-9]*", evidence
+        )
+        or evidence.endswith(("-6956512566", "-6958071051", "-6959251891", "-6960520829"))
+    ):
+        raise AdapterError("Google407 native3 continuation is OFF", "access")
+    with open("/etc/machine-id", "rb") as stream:
+        machine = hashlib.sha256(stream.read(4097)).hexdigest()
+    if machine != "11463ef315e49ed08fa5dcf991991d21efa26dfe0b3fff9a3b5d75d93ec973ab":
+        raise AdapterError("Google native3 machine differs", "access")
+    verify_native3_namespace()
+    verify_native3_witness()
+    floor = validate_budget(_GOOGLE407_NATIVE3_FLOOR)
+    if hashlib.sha256(canonical_state(floor)).hexdigest() != _GOOGLE407_NATIVE3_FLOOR_SHA:
+        raise AdapterError("Google native3 full126 MAX differs", "access")
+    budget_file()
+    if _COLLECTION_LOCK_FD is None:
+        descriptor = journal_lifecycle_open(
+            os.path.join(os.path.dirname(_STATE_PATH), "collection.lock"), False
+        )
+        _COLLECTION_LOCK_FD = descriptor
+        identity = _JOURNAL_ACQUIRED_IDS[descriptor]
+        journal_descriptor(descriptor, identity)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        journal_bind_collection(descriptor, identity)
+        _COLLECTION_FLOCK_GUARD = os.dup(descriptor)
+        _COLLECTION_GUARD_ID = identity
+    for key in ("initializer_claim", "native1_claim", "native2_claim", "settlement_claim"):
+        value = _GOOGLE407_NATIVE3_LINEAGE[key]
+        raw = read_native3_authority(value)
+        parent = _STATE_PARENT_FD if key == "initializer_claim" else _STATE_DIR_FD
+        _LOCAL_CLAIMS[os.path.basename(value["path"])] = (
+            parent, tuple(value["identity"]), raw
+        )
+    with open(__file__, "rb") as stream:
+        source = stream.read(1000001)
+    if len(source) > 1000000:
+        raise AdapterError("Google native3 source too large", "access")
+    with locked_budget():
+        state = load_budget()
+        if (
+            state != floor
+            or state["in_flight"] or state["blocked"]
+            or _JOURNAL_ID != tuple(_GOOGLE407_NATIVE3_LINEAGE["journal"]["identity"])
+            or hashlib.sha256(journal_read()).hexdigest() != _GOOGLE407_NATIVE3_FLOOR_SHA
+        ):
+            raise AdapterError("Exact settled Google native3 boundary differs", "access")
+        verify_native3_namespace()
+        verify_native3_witness()
+        expected = {
+            "family": FAMILY, "source_sha256": hashlib.sha256(source).hexdigest(),
+            "state_sha256": _GOOGLE407_NATIVE3_FLOOR_SHA, "evidence": evidence,
+            "root_settlement_witness_sha256": _GOOGLE407_NATIVE3_LINEAGE[
+                "root_settlement_witness"]["sha256"],
+            "settlement_proof_sha256": _GOOGLE407_NATIVE3_LINEAGE[
+                "settlement_proof"]["sha256"],
+        }
+        descriptor = secure_file("issue407-native3.claim", os.O_RDWR | os.O_CREAT | os.O_EXCL)
+        primary = None
+        try:
+            raw = canonical_state(expected)
+            if os.write(descriptor, raw) != len(raw):
+                raise AdapterError("Short Google native3 claim", "access")
+            os.fsync(descriptor)
+            if os.pread(descriptor, len(raw) + 1, 0) != raw:
+                raise AdapterError("Original Google native3 claim differs", "access")
+            os.fsync(_STATE_DIR_FD)
+            info = os.fstat(descriptor)
+            _LOCAL_CLAIMS["issue407-native3.claim"] = (
+                _STATE_DIR_FD, (info.st_dev, info.st_ino), raw
+            )
+        except BaseException as error:
+            primary = error
+            raise
+        finally:
+            try:
+                os.close(descriptor)
+            except BaseException:
+                if primary is None:
+                    raise
+        journal_verify_collection()
+        verify_local_claims()
+
+
+"""Temporary GitHub Actions authority, inserted only in the QA derivative."""
+
+_GOOGLE407_QA_GRANT = {'scope_sha256': '7b33ac4e1cbe48da6522e0d41546f18081227cb4daacdfccb3ad95c49a87c4e6'}
+_GOOGLE407_QA_CONTEXT = None
+_GOOGLE407_QA_WITNESS = None
+_GOOGLE407_QA_BRANCH = "qa/google407-native-r2"
+_GOOGLE407_QA_PATH = ".github/workflows/qa-google407-native-r2.yml"
+_GOOGLE407_QA_REPO = "YouthOpps/data-pipeline"
+_GOOGLE407_QA_ACCOUNT = 12278069
+
+
+def hosted_qa_mode():
+    return os.environ.get("GITHUB_REF") == "refs/heads/" + _GOOGLE407_QA_BRANCH
+
+
+def verify_google407_qa():
+    """Prove the original QA branch creation, executable and one active job."""
+    repo = _GOOGLE407_QA_REPO
+    ref = "refs/heads/" + _GOOGLE407_QA_BRANCH
+    path = _GOOGLE407_QA_PATH
+    actor = _GOOGLE407_QA_ACCOUNT
+    grant = _GOOGLE407_QA_GRANT
+    head = os.environ.get("GITHUB_SHA", "")
+    run_text = os.environ.get("GITHUB_RUN_ID", "")
+    expected = {
+        "GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": repo, "GITHUB_REF": ref,
+        "GITHUB_WORKFLOW_REF": f"{repo}/{path}@{ref}", "GITHUB_WORKFLOW_SHA": head,
+        "GITHUB_RUN_ATTEMPT": "1", "GITHUB_EVENT_NAME": "push", "GITHUB_JOB": "native",
+        "GITHUB_ACTOR_ID": str(actor),
+    }
+    if (type(grant) is not dict or set(grant) != {"scope_sha256"}
+            or not re.fullmatch(r"[0-9a-f]{64}", grant["scope_sha256"])
+            or not re.fullmatch(r"[0-9a-f]{40}", head)
+            or not re.fullmatch(r"[1-9][0-9]*", run_text)
+            or any(os.environ.get(k) != v for k, v in expected.items())
+            or any(k in os.environ for k in ("DATA_SOURCE_TOKEN", "GOOGLE_PACING_ARTIFACT_PATH"))
+            or not callable(_GOOGLE407_QA_WITNESS)):
+        raise AdapterError("Exact Google407 hosted QA authority is OFF", "access")
+    pins = _GOOGLE407_QA_WITNESS()
+    raw = Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes()
+    if len(raw) > 262144:
+        raise AdapterError("Unexpected Google407 branch creation event", "access")
+    event = json.loads(raw)
+    if (event.get("created") is not True or event.get("deleted") is not False
+            or event.get("forced") is not False or event.get("before") != "0" * 40
+            or event.get("after") != head or event.get("ref") != ref
+            or event.get("sender", {}).get("id") != actor
+            or event.get("sender", {}).get("type") != "User"
+            or event.get("repository", {}).get("full_name") != repo):
+        raise AdapterError("Exact Google407 branch creation differs", "access")
+    scope_path = "qa/google407/scope.json"
+    if pins.get(scope_path) != grant["scope_sha256"]:
+        raise AdapterError("Exact Google407 reviewed evidence differs", "access")
+    verify_r2_settlement_manifest((Path(__file__).resolve().parents[2] / "qa/google407/settlement-witness.json").read_bytes())
+    comments = workflow_api("/issues/407/comments?per_page=100")
+    required = {f"Approved Google407 QA head {head}",
+                f"Google407 QA approval scope {grant['scope_sha256']}"}
+    if not isinstance(comments, list) or len(comments) >= 100:
+        raise AdapterError("Google407 issue grant inventory incomplete", "access")
+    matching = [row for row in comments if required.issubset((row.get("body") or "").splitlines())]
+    if len(matching) != 1:
+        raise AdapterError("Missing unique Google407 exact-head grant", "access")
+    approved = matching[0]
+    comment = approved.get("id")
+    if (type(comment) is not int or comment <= 6963184398
+            or approved.get("issue_url") != _WORKFLOW_GITHUB + "/issues/407"
+            or approved.get("html_url") != f"https://github.com/{repo}/issues/407#issuecomment-{comment}"
+            or approved.get("user", {}).get("id") != actor
+            or approved.get("user", {}).get("type") != "User"
+            or approved.get("created_at", "") <= "2026-11-17T22:45:17Z"
+            or approved.get("updated_at") != approved["created_at"]):
+        raise AdapterError("Google407 issue grant owner or generation differs", "access")
+    run_id = int(run_text)
+    needed = {"id": run_id, "run_attempt": 1, "event": "push", "path": path,
+              "head_sha": head, "head_branch": _GOOGLE407_QA_BRANCH}
+    for poll in range(5):
+        run = workflow_api(f"/actions/runs/{run_id}/attempts/1")
+        if (any(run.get(k) != v for k, v in needed.items())
+                or any(run.get(k, {}).get("full_name") != repo for k in ("repository", "head_repository"))
+                or any(run.get(k, {}).get("id") != actor or run.get(k, {}).get("type") != "User"
+                       for k in ("actor", "triggering_actor"))
+                or run.get("created_at", "") < approved["created_at"]):
+            raise AdapterError("Google407 exact hosted attempt differs", "access")
+        workflow = run.get("workflow_id")
+        if type(workflow) is not int or workflow <= 0 or workflow in {_WORKFLOW_ID, 421935029, 421958094}:
+            raise AdapterError("Google407 temporary workflow owner differs", "access")
+        definition = workflow_api(f"/actions/workflows/{workflow}")
+        if (definition.get("id"), definition.get("path"), definition.get("state")) != (workflow, path, "active"):
+            raise AdapterError("Google407 temporary workflow is not active", "access")
+        inventory = workflow_api(f"/actions/workflows/{workflow}/runs?per_page=100")
+        rows = inventory.get("workflow_runs")
+        jobs = workflow_api(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=100")
+        values = jobs.get("jobs")
+        if (type(rows) is not list or type(values) is not list or len(rows) > 1 or len(values) > 1
+                or inventory.get("total_count") != len(rows) or jobs.get("total_count") != len(values)
+                or (rows and any(rows[0].get(k) != v for k, v in needed.items()))
+                or (values and any(values[0].get(k) != v for k, v in {
+                    "run_id": run_id, "run_attempt": 1, "name": "native", "head_sha": head,
+                    "head_branch": _GOOGLE407_QA_BRANCH}.items()))):
+            raise AdapterError("Google407 temporary attempt is ambiguous", "access")
+        states = [item.get("status") for item in [run, *rows, *values]]
+        if states == ["in_progress"] * 3:
+            break
+        if poll == 4 or any(s not in {"queued", "requested", "waiting", "pending", "in_progress"} for s in states):
+            raise AdapterError("Google407 temporary attempt is not active", "access")
+        time.sleep(poll + 1)
+    branch = workflow_api("/git/ref/heads/" + _GOOGLE407_QA_BRANCH)
+    job = values[0].get("id")
+    if (branch.get("ref") != ref or branch.get("object", {}).get("sha") != head
+            or type(job) is not int or job <= 0
+            or verified_source(head) != Path(__file__).read_bytes()
+            or _GOOGLE407_QA_WITNESS() != pins):
+        raise AdapterError("Exact Google407 QA ref, job or source changed", "access")
+    return {"run_id": run_id, "attempt": 1, "workflow": workflow, "job": job,
+            "head": head, "grant": comment, "scope": grant["scope_sha256"]}
+
+
+def verify_google407_producer_history():
+    """Bind the paused producer and both retired hosted evidence owners."""
+    verify_r2_predecessors()
+    root = Path(__file__).resolve().parents[2] / "qa/google407"
+    expected = json.loads((root / "producer-history.json").read_bytes())
+    inventory = workflow_api(f"/actions/workflows/{_WORKFLOW_ID}/runs?per_page=100")
+    rows = inventory.get("workflow_runs")
+    fields = ("id", "run_attempt", "head_sha", "status", "conclusion")
+    if (type(rows) is not list or len(rows) != inventory.get("total_count") or len(rows) != 42
+            or sorted([row.get(k) for k in fields] for row in rows) != expected):
+        raise AdapterError("Google407 paused production history changed", "access")
+    result = workflow_api(f"/actions/runs/{_LEGACY_OWNER[0]}/artifacts?per_page=100")
+    artifacts = result.get("artifacts")
+    if type(artifacts) is not list or len(artifacts) != result.get("total_count"):
+        raise AdapterError("Google407 original owned archive inventory differs", "access")
+    eligible = [item for item in artifacts if item.get("name") == _ARTIFACT_NAME + "-1"]
+    if len(eligible) != 1:
+        raise AdapterError("Google407 original owned archive is not unique", "access")
+    record = eligible[0]
+    owner = record.get("workflow_run", {})
+    if (record.get("id") != _LEGACY_ARTIFACT_ID or record.get("expired") is not False
+            or record.get("size_in_bytes") != 505 or record.get("digest") != "sha256:" + _LEGACY_ZIP_SHA
+            or owner.get("id") != _LEGACY_OWNER[0] or owner.get("head_sha") != _LEGACY_OWNER[3]):
+        raise AdapterError("Google407 original owned archive changed", "access")
+
+
+def google407_qa_floor(incoming):
+    """Preserve complete 176-observation custody and newer original receipts."""
+    global _GOOGLE407_R2_STATE
+    floor = download_r2_settlement()
+    if (len(floor["starts"]) != 176 or floor["blocked"] or floor["in_flight"]
+            or hashlib.sha256(canonical_state(floor)).hexdigest() != _GOOGLE407_R2_SHA
+            or floor["flight_id"] != floor["completed_flight_id"]
+            or floor["request_id"] != floor["completed_request_id"]
+            or floor["request_outcome"] != "response_assessed"
+            or not set(_GOOGLE407_NATIVE3_FLOOR["starts"]).issubset(floor["starts"])
+            or merge_budgets(floor, incoming, floor["observed_at"]) != floor):
+        raise AdapterError("Original Google407 closed 176-observation floor differs", "access")
+    _GOOGLE407_R2_STATE = copy.deepcopy(floor)
+    return floor
+
+
+"""Exact retired native and zero-wire settlement provenance for hosted R2."""
+
+_GOOGLE407_R2_STATE = None
+_GOOGLE407_R2_SHA = "7fba0b7c94a333f90b0664aa9729f2813702baed98694f9588014906d46b7dae"
+_GOOGLE407_R2_OWNER = {"attempt": 1, "grant": 6963184398,
+    "head": "821a298950ea39f7397be9854b969554855e8f39", "job": 134427155734,
+    "run_id": 44193040407, "workflow": 421958094}
+_GOOGLE407_R2_ORIGINAL = {"attempt": 1, "grant": 6962558398,
+    "head": "22d650621275708029ceac150485aa4440055b30", "job": 134410545737,
+    "run_id": 44188287593, "workflow": 421935029,
+    "scope": "2e99ecbf617e616d4fac077d663d14c93964b6063789cf764fdbeefc4e0cf2ef"}
+_GOOGLE407_R2_ARTIFACT = (14378286261, 2204, "3b90e8cca3f9721239b8deb6acbeb09bd43309d775a827fe52563de8c35cfa07")
+_GOOGLE407_R1_ARTIFACT = (14374724594, 45632642, "a461e9e938bdb12f7a565e03fc50bc22da5ab641480cbf0de6aace04b3311f4d")
+_GOOGLE407_R2_RECEIPT_SHA = "91e0e1c976398f00fade07a030d3c00c247542932fe8e584d7bc86813572dc2c"
+
+
+def verify_r2_settlement_manifest(raw):
+    if hashlib.sha256(raw).hexdigest() != _GOOGLE407_R2_RECEIPT_SHA:
+        raise AdapterError("Google407 zero-wire receipt changed", "access")
+    value = json.loads(raw)
+    old = _GOOGLE407_R1_ARTIFACT
+    if (value.get("new_owner") != _GOOGLE407_R2_OWNER
+            or value.get("original_owner") != _GOOGLE407_R2_ORIGINAL
+            or value.get("original_archive") != {"id": old[0], "size": old[1], "sha256": old[2]}
+            or value.get("settled_sha256") != _GOOGLE407_R2_SHA
+            or value.get("prior_state_sha256") != "73400b4ef6679b11ca7d49889756b8e967a178689b0a92ddb0e98798b5067e68"
+            or value.get("proposed_terms_candidate_sha256") != "445d2e43cad894eda0c8479452f3042c8a907c63d9af9db8cb98e1c017416fe8"
+            or value.get("publisher_requests") != 0 or value.get("authorized_publication") is not False
+            or value.get("adopts_exact_original_closed_physical_boundary") is not True):
+        raise AdapterError("Exact Google407 zero-wire outcome differs", "access")
+    return value
+
+
+def verify_r2_retired_owner(owner, branch, path, conclusion, terminal, job_name, artifact, artifact_name):
+    repo = _GOOGLE407_QA_REPO
+    run, workflow = owner["run_id"], owner["workflow"]
+    definition = workflow_api(f"/actions/workflows/{workflow}")
+    if (definition.get("id"), definition.get("path"), definition.get("state")) != (workflow, path, "disabled_manually"):
+        raise AdapterError("Earlier Google407 hosted workflow is not retired", "access")
+    history = workflow_api(f"/actions/workflows/{workflow}/runs?per_page=100")
+    rows = history.get("workflow_runs")
+    if type(rows) is not list or len(rows) != history.get("total_count") or len(rows) != 1:
+        raise AdapterError("Earlier Google407 hosted attempt history changed", "access")
+    route = f"/actions/runs/{run}/attempts/1"
+    wanted = {"id": run, "run_attempt": 1, "head_sha": owner["head"], "head_branch": branch,
+              "path": path, "event": "push", "status": "completed", "conclusion": conclusion, "workflow_id": workflow}
+    for actual in (rows[0], workflow_api(route)):
+        if (any(actual.get(k) != v for k, v in wanted.items())
+                or any(actual.get(key, {}).get("full_name") != repo for key in ("repository", "head_repository"))):
+            raise AdapterError("Earlier Google407 hosted attempt custody changed", "access")
+    jobs = workflow_api(route + "/jobs?per_page=100")
+    values = jobs.get("jobs")
+    if (type(values) is not list or len(values) != jobs.get("total_count") or len(values) != 1
+            or any(values[0].get(k) != v for k, v in {
+                "id": owner["job"], "name": job_name, "run_id": run, "run_attempt": 1,
+                "head_sha": owner["head"], "head_branch": branch, "status": "completed",
+                "conclusion": conclusion, "completed_at": terminal}.items())):
+        raise AdapterError("Earlier Google407 hosted job custody changed", "access")
+    items = workflow_api(f"/actions/runs/{run}/artifacts?per_page=100")
+    records = items.get("artifacts")
+    if type(records) is not list or len(records) != items.get("total_count") or len(records) != 1:
+        raise AdapterError("Earlier Google407 hosted archive inventory changed", "access")
+    record = records[0]
+    arm = record.get("workflow_run", {})
+    if ((record.get("id"), record.get("size_in_bytes"), record.get("digest")) != (artifact[0], artifact[1], "sha256:" + artifact[2])
+            or record.get("name") != artifact_name or record.get("expired") is not False
+            or (arm.get("id"), arm.get("head_sha"), arm.get("head_branch")) != (run, owner["head"], branch)
+            or arm.get("repository_id") != 1163601208 or arm.get("head_repository_id") != 1163601208):
+        raise AdapterError("Earlier Google407 hosted archive ownership changed", "access")
+
+
+def verify_r2_predecessors():
+    verify_r2_retired_owner(_GOOGLE407_R2_ORIGINAL, "qa/google407-native",
+        ".github/workflows/qa-google407-native.yml", "failure", "2026-11-17T22:24:04Z", "native",
+        _GOOGLE407_R1_ARTIFACT, "google407-native-qa-44188287593-1")
+    verify_r2_retired_owner(_GOOGLE407_R2_OWNER, "qa/google407-terms-settlement",
+        ".github/workflows/qa-google407-terms-settlement.yml", "success", "2026-11-17T22:45:17Z", "settlement",
+        _GOOGLE407_R2_ARTIFACT, "google407-logical-settlement-44193040407-1")
+
+
+def download_r2_settlement():
+    """Use same-repo authorization only for the genuine signed state archive."""
+    artifact_id, length, digest = _GOOGLE407_R2_ARTIFACT
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise AdapterError("Google407 settlement artifact credential unavailable", "access")
+    request = urllib.request.Request(_WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip", headers={
+        "User-Agent": _USER_AGENT, "Accept": "application/vnd.github+json", "Authorization": "Bearer " + token,
+    })
+    with operation_guard():
+        try:
+            response = _OPENER.open(request, timeout=request_timeout())
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            locations = response.headers.get_all("Location", [])
+            if response.status != 302 or len(locations) != 1 or len(response.read(1001)) > 1000:
+                raise AdapterError("Exact Google407 settlement ZIP redirect unavailable", "access")
+    host = urllib.parse.urlsplit(locations[0]).hostname or ""
+    infrastructure_url(locations[0])
+    if not host.endswith((".blob.core.windows.net", ".actions.githubusercontent.com")):
+        raise AdapterError("Unexpected Google407 signed archive origin", "access")
+    code, _, raw = request_bytes(locations[0], byte_limit=length)
+    if code != 200 or len(raw) != length or hashlib.sha256(raw).hexdigest() != digest:
+        raise AdapterError("Exact Google407 zero-wire archive bytes differ", "access")
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        members = archive.infolist()
+        if (len(members) != 2 or set(archive.namelist()) != {"manifest.json", "settled-state.json"}
+                or any(row.flag_bits & 1 or row.file_size <= 0 or row.file_size > 16384
+                       or stat.S_ISLNK(row.external_attr >> 16) for row in members)):
+            raise AdapterError("Unexpected Google407 settled ZIP members", "access")
+        verify_r2_settlement_manifest(archive.read("manifest.json"))
+        state = archive.read("settled-state.json")
+    if len(state) != 4073 or hashlib.sha256(state).hexdigest() != _GOOGLE407_R2_SHA:
+        raise AdapterError("Exact Google407 settled archive state differs", "access")
+    return validate_budget(json.loads(state))
 
 
 if __name__ == "__main__":

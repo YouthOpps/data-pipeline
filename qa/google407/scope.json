@@ -1,0 +1,45 @@
+{
+  "failed_complete_before_terms_guard_owner": {
+    "attempt": 1,
+    "grant": 6962558398,
+    "head": "22d650621275708029ceac150485aa4440055b30",
+    "job": 134410545737,
+    "run_id": 44188287593,
+    "scope": "2e99ecbf617e616d4fac077d663d14c93964b6063789cf764fdbeefc4e0cf2ef",
+    "workflow": 421935029
+  },
+  "first_attempt": 1,
+  "inputs": {
+    ".github/workflows/qa-google407-native-r2.yml": "57e2b2e1917e189ca89c80fe5cb3e89919417bd69b4e7454d01a44fac9547866",
+    "adapters/google/test_adapter.py": "a2b9bd3968a995c0f906fc790ab2ad70ab5469eeba17da7a755a42ed9d6bf718",
+    "qa-website/assets/discovery.js": "39dccc7be14705e2c338ae065044b2f6736d5e0b7bec70436937ad543a8741bb",
+    "qa-website/scripts/data.mjs": "bc9d9f9f83c58061c6d29f3fd3d6b04b56ad1b7503b12a009c2f91e24b4deef3",
+    "qa/google407/consumer.mjs": "46df266915222a1b37a2b07dd8d4e1b7634f157b2e69458af61e57bb8547641f",
+    "qa/google407/observer.py": "a9d83d01e2b4323e0a0d6f0bc0f6173f3c0191bffc0d57fdd6c25a918f167c8f",
+    "qa/google407/producer-history.json": "90fb5508168b77b7721774c273c0fc5e1a4dab3c248ab71f2f764cd245024f6a",
+    "qa/google407/reviewer.pem": "ce84819165a40aaff50de4af170885c58425416dec1a91eeceeb83acae179252",
+    "qa/google407/runner.py": "520275ddaaa9b64bdaf7579fbe4f27755ecf105eb88c9b2ce5e59fd16101f045",
+    "qa/google407/settlement-witness.json": "91e0e1c976398f00fade07a030d3c00c247542932fe8e584d7bc86813572dc2c"
+  },
+  "issue": 407,
+  "maintainer_account": 12278069,
+  "ref": "refs/heads/qa/google407-native-r2",
+  "repository": "YouthOpps/data-pipeline",
+  "settled_observations": 176,
+  "settled_state_sha256": "7fba0b7c94a333f90b0664aa9729f2813702baed98694f9588014906d46b7dae",
+  "settlement_archive": {
+    "bytes": 2204,
+    "id": 14378286261,
+    "sha256": "3b90e8cca3f9721239b8deb6acbeb09bd43309d775a827fe52563de8c35cfa07"
+  },
+  "settlement_owner": {
+    "attempt": 1,
+    "grant": 6963184398,
+    "head": "821a298950ea39f7397be9854b969554855e8f39",
+    "job": 134427155734,
+    "run_id": 44193040407,
+    "workflow": 421958094
+  },
+  "terms_candidate_sha256": "445d2e43cad894eda0c8479452f3042c8a907c63d9af9db8cb98e1c017416fe8",
+  "website_revision": "7da2b3eb81853707def0ff67de64f8d43773fe87"
+}

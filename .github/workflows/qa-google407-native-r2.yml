@@ -1,0 +1,49 @@
+name: Google407 original nonpublishing collection QA
+
+on:
+  push:
+    branches: [qa/google407-native-r2]
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: youthopps-google-publisher-v1
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  native:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.run_attempt == 1 && github.event.created && !github.event.deleted
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 7da2b3eb81853707def0ff67de64f8d43773fe87
+          path: qa-website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run the unchanged sole nonpublishing collection test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/google407/runner.py
+      - name: Retain isolated state and encrypted publisher evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: google407-native-r2-qa-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/google407-native-qa/
+          retention-days: 7
+          if-no-files-found: error
