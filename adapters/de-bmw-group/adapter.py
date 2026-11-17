@@ -3681,6 +3681,9 @@ def require_existing_local_state():
         if not 0 < info.st_size <= 16384:
             raise AdapterError("Existing local journal is empty or oversized",
                                "access")
+        budget_file()
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        journal_retain(descriptor)
     except BaseException:
         fail_publisher_cleanup()
         raise

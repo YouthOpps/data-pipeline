@@ -119,8 +119,9 @@ also interrupts blocked closure/finalizers, retaining pending ownership.
 Local access requires an existing owned family directory and a nonempty
 owned journal before remote restoration; neither a lost whole local namespace
 nor a missing journal may be rebuilt from an older artifact. The existing
-parent descriptor remains pinned across startup, so a removal race cannot
-turn into a new initialization grant. This adapter supplies no fresh-local
+parent descriptor and original journal generation remain pinned across startup,
+so removal, atomic replacement or in-place mutation during metadata retrieval
+cannot turn into a new initialization grant or replace stronger local limits. This adapter supplies no fresh-local
 bootstrap. Normal hosted ephemeral initialization still requires verified
 remote ownership and the approved final MAX handoff. Local access additionally
 requires the exact disabled workflow and terminal family history.
