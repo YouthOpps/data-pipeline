@@ -1,0 +1,42 @@
+name: verify-pl-warsaw-tech-msc-admissions
+on:
+  push:
+    branches:
+      - 'qa/426-warsaw-5b7b9756cb9263cc'
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: youthopps-warsaw-tech-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.run_attempt == 1 && github.event.created && github.event.before == '0000000000000000000000000000000000000000'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: fe54fa839233f34973991584567408acae269487
+          path: _qa/website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run the original sole nonpublishing test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B .github/qa/warsaw426-observer.py
+      - name: Retain original encrypted evidence and exact state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: warsaw426-native-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/warsaw426-native-evidence/
+          if-no-files-found: error
+          retention-days: 3
