@@ -1,6 +1,6 @@
 {
-  "enabled": false,
-  "issue": null,
+  "enabled": true,
+  "issue": 438,
   "maintainer_account": 12278069,
   "reviewer_sha256": "6f6e68b82a80477b4cf8ca7bd4400eb54148d89a4b17d159d2c496222fa0b848",
   "origin": "YouthOpps/data-pipeline",
