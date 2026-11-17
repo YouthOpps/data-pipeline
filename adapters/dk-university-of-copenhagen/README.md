@@ -351,8 +351,13 @@ Ubuntu/Python path has a total alarm guard of at most 30 seconds, plus a
 remaining-time socket timeout, including its bounded body read. Unowned or
 unsupported timers stop before transport. The source-owned lifecycle alarm
 composes with the original publication call guard without renewing either
-deadline. Writes and retry waits stop 60 seconds before the job deadline,
-final outcome reads stop 30 seconds before it, leaving a cleanup/export
+deadline. Deadline cancellation repeats at 50-millisecond intervals while
+response cleanup unwinds, bounding a blocked close after an interrupted body.
+Nested publication guards retain the earliest active absolute deadline and
+restore that same deadline; neither cleanup nor nesting grants extra time.
+Pending publisher ownership and failed export gates remain effective when
+closure cannot complete. Writes and retry waits stop 60 seconds before the job
+deadline, final outcome reads stop 30 seconds before it, leaving a cleanup/export
 allowance. These publication reserves do not guarantee export after an
 overlong collection, runner death or an uninterruptible native call; the
 existing job timeout remains the outer bound. No API call receives a fresh

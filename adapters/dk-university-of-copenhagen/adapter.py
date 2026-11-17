@@ -2055,6 +2055,8 @@ def legacy_publication_http_guard(deadline):
     previous = signal.getsignal(signal.SIGALRM)
 
     def exhausted(signum, frame):
+        # Cancellation must also interrupt response cleanup during unwinding.
+        signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
         raise AdapterError("Publication call deadline exhausted", "publish")
 
     try:
@@ -6330,6 +6332,7 @@ def main():
 
 
 _TIMER_OWNED = False
+_PUBLICATION_HTTP_END = None
 
 
 def timer_owner():
@@ -6343,16 +6346,21 @@ def timer_owner():
 
 
 def phase_alarm(signum, frame):
+    # A consumed one-shot alarm cannot leave a blocked close unbounded.
+    signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
     raise PhaseExpired()
 
 
 def arm_phase_timer(end=None):
     timer_owner()
     limit = min(_RUN_END, _PHASE_END)
+    if _PUBLICATION_HTTP_END is not None:
+        limit = min(limit, _PUBLICATION_HTTP_END)
     if end is not None:
         limit = min(limit, end)
     remaining = limit - time.monotonic()
     if remaining <= 0:
+        signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
         raise PhaseExpired()
     signal.setitimer(signal.ITIMER_REAL, remaining)
 
@@ -6360,22 +6368,31 @@ def arm_phase_timer(end=None):
 @contextlib.contextmanager
 def publication_http_guard(deadline):
     """Compose the original 30-second guard with our owned phase alarm."""
+    global _PUBLICATION_HTTP_END
     if not _TIMER_OWNED:
         with legacy_publication_http_guard(deadline) as end:
             yield end
         return
     timer_owner()
-    end = min(deadline, time.monotonic() + 30, _PHASE_END, _RUN_END)
-    arm_phase_timer(end)
+    now = time.monotonic()
+    active, _ = signal.getitimer(signal.ITIMER_REAL)
+    previous_end = now + active if active else min(_PHASE_END, _RUN_END)
+    previous_guard = _PUBLICATION_HTTP_END
+    end = min(deadline, now + 30, _PHASE_END, _RUN_END, previous_end)
+    if previous_guard is not None:
+        end = min(end, previous_guard)
+    _PUBLICATION_HTTP_END = end
     try:
+        arm_phase_timer(end)
         yield end
         if time.monotonic() >= end:
             raise AdapterError("Publication call deadline exhausted", "publish")
     finally:
         # Restore the same absolute phase deadline, never a fresh allowance.
+        _PUBLICATION_HTTP_END = previous_guard
         primary = sys.exc_info()[0] is not None
         try:
-            arm_phase_timer()
+            arm_phase_timer(previous_end)
         except BaseException:
             if not primary:
                 raise
