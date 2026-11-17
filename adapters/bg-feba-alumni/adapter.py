@@ -1514,6 +1514,16 @@ _NO_ACCESS_HEAD = "5fd9fa82d5d2d5f0871aba653376765a6e00c897"
 _NO_ACCESS_SOURCE_BLOB = "e4ff0ea305db0f171a4ea56a60b707e6d2329b25"
 _NO_ACCESS_WORKFLOW_BLOB = "e7b3bf1c4cffcc2c52ae63e07da3e878d33b46bf"
 _REVIEWED_PRODUCER_WORKFLOW_BLOB = "975382b0944037179bb0f2afa04f7c52ff427592"
+# Actual complete job log in issue #377: workflow_api escaped main's restore
+# before run_body; hosted publisher paths never invoke workflow_api. The 66s
+# job is NOT eligible through the generic short-job proof.
+_RESTORE_FAILURE_PIN = (
+    44037339739, 133883275366,
+    "2026-11-17T07:15:50Z", "2026-11-17T07:16:56Z",
+    "a7848b58f5f94aaab04793e51898a2cfc711c5de",
+    "773765061f007e091baa9f246378a39ad46da7d7",
+    "975382b0944037179bb0f2afa04f7c52ff427592",
+)
 _NO_ACCESS_ATTEMPTS = {
     41114084843: (
         124263659344,
@@ -3176,28 +3186,59 @@ def validate_family_identity(run, expected=None):
 
 
 def workflow_api(path):
-    """Read real public family metadata using existing authentication."""
+    """Read bounded GitHub metadata with safe, actionable diagnostics."""
     token = os.environ.get("GITHUB_TOKEN", "")
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = "Bearer " + token
-    try:
-        separator = "&" if "?" in path else "?"
-        status, _, body = infrastructure_request_bytes(
-            _WORKFLOW_GITHUB
-            + path
-            + separator
-            + "_fresh="
-            + str(time.time_ns()),
-            headers=headers,
-        )
-        if status != 200:
-            raise ValueError("Workflow API status")
-        return json.loads(body)
-    except Exception:
-        raise AdapterError(
-            "Workflow pacing state unavailable", "access"
-        ) from None
+    route = urllib.parse.urlsplit(path).path
+    # Never include query strings, response bodies, signed URLs or credentials.
+    route = re.sub(r"[^a-zA-Z0-9_./-]", "?", route)[:160]
+    detail = "transport unavailable"
+    for attempt in range(3):
+        check_deadline()
+        retry = False
+        delay = attempt + 1
+        try:
+            separator = "&" if "?" in path else "?"
+            status, response_headers, body = infrastructure_request_bytes(
+                _WORKFLOW_GITHUB + path + separator + "_fresh="
+                + str(time.time_ns()), headers=headers,
+            )
+            detail = "HTTP " + str(status)
+            for key in ("X-RateLimit-Remaining", "X-RateLimit-Reset"):
+                value = response_headers.get(key, "")
+                if isinstance(value, str) and re.fullmatch(r"[0-9]{1,12}", value):
+                    detail += " " + key + "=" + value
+            if status == 200:
+                try:
+                    return json.loads(body)
+                except (ValueError, UnicodeError):
+                    detail += " invalid JSON"
+            else:
+                retry = status in (408, 429, 500, 502, 503, 504)
+                retry_after = response_headers.get("Retry-After")
+                if retry_after is not None:
+                    # Never retry earlier than an advertised server hold.
+                    if re.fullmatch(r"[0-9]{1,6}", retry_after):
+                        delay = max(delay, int(retry_after))
+                    else:
+                        retry = False
+        except (urllib.error.URLError, OSError) as error:
+            detail = "transport " + type(error).__name__
+            retry = True
+        except AdapterError:
+            detail = "bounded infrastructure read rejected"
+        if not retry or attempt == 2:
+            break
+        remaining = min(active_deadline(), _RUN_END) - time.monotonic()
+        if delay > 5 or remaining <= delay + 1:
+            break
+        time.sleep(delay)
+    raise AdapterError(
+        "Workflow pacing state unavailable: " + route + " " + detail,
+        "access",
+    )
 
 
 def current_run_identity():
@@ -4888,7 +4929,19 @@ def proven_no_access_attempt(run, jobs):
     ):
         return False
     pin = _NO_ACCESS_ATTEMPTS.get(run["id"])
-    if pin is not None:
+    restore_failure = run["id"] == _RESTORE_FAILURE_PIN[0]
+    if restore_failure:
+        _, job_id, start, end, head, source_blob, workflow_blob = (
+            _RESTORE_FAILURE_PIN
+        )
+        if (
+            run["head_sha"] != head
+            or (jobs[0]["id"], jobs[0]["started_at"],
+                jobs[0]["completed_at"]) != (job_id, start, end)
+            or not verified_code_identity(head, source_blob, workflow_blob)
+        ):
+            raise AdapterError("Reviewed restore failure changed", "access")
+    elif pin is not None:
         if (
             run["head_sha"] != _NO_ACCESS_HEAD
             or (
@@ -4937,7 +4990,7 @@ def proven_no_access_attempt(run, jobs):
         or result["total_count"] != len(result["artifacts"])
     ):
         raise AdapterError("Incomplete no-access artifact proof", "access")
-    if pin is not None and result["total_count"] != 0:
+    if (pin is not None or restore_failure) and result["total_count"] != 0:
         raise AdapterError(
             "Reviewed pre-access artifact inventory changed", "access"
         )
