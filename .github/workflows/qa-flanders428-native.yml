@@ -1,0 +1,43 @@
+name: Study in Flanders original nonpublishing QA
+
+on:
+  push:
+    branches: [qa/428-flanders-native]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: youthopps-studyinflanders-publisher-v1
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  native:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && !github.event.deleted && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 7da2b3eb81853707def0ff67de64f8d43773fe87
+          path: qa-website
+          persist-credentials: false
+          submodules: false
+      - name: Run the original Flanders nonpublishing test and current consumer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/flanders428-native/runner.py
+      - name: Preserve privately encrypted evidence and ownership receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flanders428-native-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/flanders428-native/
+          if-no-files-found: error
+          retention-days: 7

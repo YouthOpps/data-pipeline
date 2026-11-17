@@ -2350,8 +2350,7 @@ def public_url(value):
     return clean
 
 
-def html_fingerprint(body, key):
-    """Guard all substantive own article facts and links, excluding site chrome."""
+def reviewed_article(body, key):
     root = document_root(body.decode("utf-8", "strict"))
     canonical = one(
         [
@@ -2364,6 +2363,12 @@ def html_fingerprint(body, key):
     if canonical.attrs.get("href") != INPUTS[key]["url"]:
         raise AdapterError("Publisher canonical changed: " + key, "parse")
     main = one(nodes(root, "main"), "complete public main article")
+    return root, main
+
+
+def html_fingerprint(body, key):
+    """Guard all substantive own article facts and links, excluding site chrome."""
+    _, main = reviewed_article(body, key)
     links = sorted(
         {
             (node.tag, node.attrs.get("rel", ""), node.attrs["href"])
@@ -2379,10 +2384,171 @@ def html_fingerprint(body, key):
     return hashlib.sha256(facts.encode()).hexdigest()
 
 
+def hub_section_text(node):
+    if node.tag in {"a", "h1", "h2", "script", "style"}:
+        return ""
+    pieces = (
+        hub_section_text(child) if isinstance(child, Node) else child
+        for child in node.children
+    )
+    return " ".join(" ".join(pieces).split())
+
+
+def review_hub_notices(root, headers):
+    """Require review if a new access or reuse signal appears on the hub."""
+    if _REUSE_NOTICE.search(root.text()):
+        raise AdapterError("Scholarship hub text contains a new reuse notice", "access")
+    for name, value in headers.items():
+        if name.lower() == "x-robots-tag" and value.strip():
+            raise AdapterError("Scholarship hub HTTP robot notice changed", "access")
+        if name.lower() == "link" and _POLICY_LINK.search(value):
+            raise AdapterError("Scholarship hub HTTP policy link changed", "access")
+    for meta in nodes(root, "meta"):
+        name = (meta.attrs.get("name") or "").lower()
+        if name in {"robots", "youthoppsbot"} and meta.attrs.get("content"):
+            raise AdapterError("Scholarship hub robot notice changed", "access")
+    policy_routes = {INPUTS[key]["url"] for key in ("privacy", "cookies")}
+    own_routes = {INPUTS[key]["url"] for key in _HUB_OWN_SECTIONS.values()}
+    publisher = urllib.parse.urlsplit(WEBSITE_URL).hostname
+    for link in nodes(root, "a") + nodes(root, "link"):
+        href = link.attrs.get("href") or ""
+        url = urllib.parse.urljoin(WEBSITE_URL, href)
+        address = urllib.parse.urlsplit(url)
+        link_signals = " ".join(
+            (link.text(), address.path, link.attrs.get("rel") or "")
+        )
+        if href not in policy_routes and _POLICY_LINK.search(link_signals):
+            raise AdapterError("Scholarship hub policy route changed", "access")
+        if (
+            address.hostname == publisher
+            and address.path.startswith("/scholarships/")
+            and url not in own_routes
+        ):
+            raise AdapterError("New Study in Flanders scholarship route", "parse")
+    footer = one(nodes(root, "footer"), "scholarship hub footer")
+    notice = one(nodes(footer, "section", "footer"), "scholarship hub policy notice")
+    text = re.sub(r"(?<=© Study in Flanders, )20\d{2}\b", "{year}", notice.text())
+    material = json.dumps(
+        [
+            text,
+            [(link.text(), link.attrs.get("href")) for link in nodes(notice, "a")],
+        ],
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode()
+    if hashlib.sha256(material).hexdigest() != _HUB_NOTICE:
+        raise AdapterError("Scholarship hub footer notice changed", "access")
+
+
+def referral_hosts(links):
+    """Recognize referral ownership without following a destination."""
+    destinations = []
+    for label, value in links:
+        address = urllib.parse.urlsplit(value)
+        if (
+            address.scheme not in {"http", "https"}
+            or not address.hostname
+            or address.netloc.lower() != address.hostname
+        ):
+            raise AdapterError("Unreviewed scholarship hub referral", "parse")
+        destinations.append((label, address.hostname))
+    return destinations
+
+
+def referral_label(label):
+    if label.lower() in _HUB_DETAIL_LABELS:
+        return "detail"
+    if re.fullmatch(r"[0-9]+ eligible countries", label):
+        return "countries"
+    return label
+
+
+def hub_frontier(body, headers):
+    """Return the two own routes only after reviewing every hub section."""
+    root, main = reviewed_article(body, "hub")
+    review_hub_notices(root, headers)
+    controls = {
+        "button", "embed", "form", "iframe", "input", "object", "script",
+        "select", "template",
+    }
+    dynamic_attributes = {"data-url", "data-href", "data-endpoint"}
+    for node in main.walk():
+        if (
+            node.tag in controls
+            or node.attrs.get("role") == "button"
+            or any(
+                name in dynamic_attributes or name.startswith(("on", "hx-"))
+                for name in node.attrs
+            )
+        ):
+            raise AdapterError("Unreviewed scholarship hub controls", "parse")
+
+    articles, quotes = {}, 0
+    for section in main.children:
+        if isinstance(section, str) and not section.strip():
+            continue
+        if not isinstance(section, Node) or section.tag != "section":
+            raise AdapterError("Unreviewed scholarship hub section", "parse")
+        headings = [
+            node for node in section.walk() if re.fullmatch(r"h[1-6]", node.tag)
+        ]
+        links = [
+            (node.text(), node.attrs.get("href") or "")
+            for node in nodes(section, "a")
+        ]
+        if not headings and not links and len(nodes(section, "blockquote")) == 1:
+            quote = one(nodes(section, "div", "quote"), "scholarship hub testimonial")
+            if section.text() != quote.text():
+                raise AdapterError("Text outside scholarship hub testimonial", "parse")
+            quotes += 1
+            continue
+        heading = one(headings, "heading in scholarship hub section")
+        title = heading.text()
+        expected = _HUB_SECTIONS.get(title)
+        if expected is None or title in articles or heading.tag != expected[0]:
+            raise AdapterError("Unreviewed scholarship hub heading", "parse")
+        section_digest = hashlib.sha256(hub_section_text(section).encode()).hexdigest()
+        if section_digest != expected[1]:
+            raise AdapterError("Scholarship hub section facts changed", "parse")
+        articles[title] = links
+    if set(articles) != set(_HUB_SECTIONS) or quotes != 1:
+        raise AdapterError("Incomplete scholarship hub sections", "parse")
+
+    own = []
+    for title, key in _HUB_OWN_SECTIONS.items():
+        label, url = one(articles[title], "own scholarship hub route")
+        if url != INPUTS[key]["url"] or label.lower() not in _HUB_DETAIL_LABELS:
+            raise AdapterError("Scholarship hub own route changed", "parse")
+        own.append(url)
+    if sorted(articles["Scholarships"]) != [
+        ("Home", WEBSITE_URL), ("Scholarships", INPUTS["hub"]["url"]),
+    ]:
+        raise AdapterError("Scholarship hub introductory routes changed", "parse")
+    for title, expected in _HUB_EXTERNAL_SECTIONS.items():
+        found = sorted(
+            (referral_label(label), host)
+            for label, host in referral_hosts(articles[title])
+        )
+        if found != expected:
+            raise AdapterError("Scholarship hub referral ownership changed", "parse")
+    institutions = articles[_HUB_INSTITUTION_SECTION]
+    optional_empty = {
+        ("", "https://www.uhasselt.be/Scholarships"),
+        ("", "mailto:OutgoingStudents@uantwerpen.be"),
+    }
+    labelled = [item for item in institutions if item not in optional_empty]
+    if (
+        len(institutions) != len(set(institutions))
+        or sorted(referral_hosts(labelled)) != sorted(_HUB_INSTITUTIONS.items())
+    ):
+        raise AdapterError("Scholarship hub institution referrals changed", "parse")
+    frontier = json.dumps(sorted(own), separators=(",", ":")).encode()
+    return hashlib.sha256(frontier).hexdigest()
+
+
 def read_input(key):
     info = INPUTS[key]
-    _, _, body = fetch_public(info["url"])
-    digest = html_fingerprint(body, key)
+    _, headers, body = fetch_public(info["url"])
+    digest = hub_frontier(body, headers) if key == "hub" else html_fingerprint(body, key)
     if digest != info["sha256"]:
         raise AdapterError(
             "Reviewed facts or frontier changed: " + key, "parse"
@@ -2684,6 +2850,10 @@ INVENTORY_KEYS = frozenset({"master-mind", "us-programmes", "hub"})
 
 
 INPUTS = {
+    "hub": {
+        "url": "https://www.studyinflanders.be/scholarships",
+        "sha256": "6e02fa196b9412e0bc007b55856329261333f7e2619381f24ca0a71c920f532a",
+    },
     "eligibility": {
         "url": "https://www.studyinflanders.be/scholarships/master-mind-scholarships/eligibility-criteria",
         "sha256": "b9f323c1e10665a04cbe4dd4151843ed56ec054633ffafffd1083e709a6bdaa5",
@@ -2716,10 +2886,6 @@ INPUTS = {
         "url": "https://www.studyinflanders.be/scholarships/us-citizens",
         "sha256": "1b1753a6d8f6d83b4014c83a07acd6b2f36ee87a82ab6693fc2218cf37b07437",
     },
-    "hub": {
-        "url": "https://www.studyinflanders.be/scholarships",
-        "sha256": "2cb0c5d0dc7127268cc4163f51ff327daaceb7e8f7a1f7491bf1b21ca6e0d2b5",
-    },
     "hosts": {
         "url": "https://www.studyinflanders.be/scholarships/master-mind-scholarships/host-institutions",
         "sha256": "c9aa82c61eebf4cd729b28530533777f57027fb83a2849859b4c22fd32744115",
@@ -2727,6 +2893,61 @@ INPUTS = {
 }
 
 INVENTORY_INPUTS = frozenset(INPUTS[key]["url"] for key in INVENTORY_KEYS)
+
+_POLICY_LINK = re.compile(
+    r"(?:\bterms\b|legal[\s_-]+notice|\b(?:licen[cs]e|privacy|copyright|"
+    r"acceptable[\s_-]+use)\b)",
+    re.IGNORECASE,
+)
+_REUSE_NOTICE = re.compile(
+    r"\b(?:automated (?:access|collection|data collection|extraction|use)|"
+    r"(?:web|data) scraping|database extraction|prior (?:written )?permission)\b",
+    re.IGNORECASE,
+)
+_HUB_NOTICE = "74b53edca8527c373a354660d8184e5a0bbfdff661a258521ed1871cefd8a45f"
+_HUB_OWN_SECTIONS = {
+    "Master Mind Scholarships": "master-mind",
+    "Funding opportunities for US citizens": "us-programmes",
+}
+_HUB_DETAIL_LABELS = {"find out more", "learn more", "read more", "more information"}
+_HUB_EXTERNAL_SECTIONS = {
+    "Erasmus Mundus Joint Masters Scholarships": [("detail", "ec.europa.eu")],
+    "VLIRUOS Scholarships": [
+        ("countries", "www.vliruos.be"), ("detail", "www.vliruos.be"),
+    ],
+}
+_HUB_INSTITUTION_SECTION = "Funding opportunities from Flemish higher education institutions"
+_HUB_INSTITUTIONS = {
+    "Ghent University": "www.ugent.be",
+    "Hasselt University": "www.uhasselt.be",
+    "KU Leuven": "www.kuleuven.be",
+    "Thomas More University of Applied Sciences": "thomasmore.be",
+    "University of Antwerp": "www.uantwerpen.be",
+    "Vrije Universiteit Brussel": "www.vub.be",
+    "Institute of Tropical Medicine": "www.itg.be",
+    "Antwerp Management School": "www.antwerpmanagementschool.be",
+    "Vlerick Business School": "www.vlerick.com",
+}
+_HUB_SECTIONS = {
+    "Scholarships": (
+        "h1", "92b1ea3283c4557c3327fec611d5c6f27fe29028adea8a82abbd015e82023d0f",
+    ),
+    "Master Mind Scholarships": (
+        "h2", "80b6bcc3bdab7fb0af8c04fdac2a4aa8eada05f83e29da942494a6ecf7a852e2",
+    ),
+    "Erasmus Mundus Joint Masters Scholarships": (
+        "h2", "879294192b65422476613901f13bed3fc2e113f0115fcf47ac640cd08c5cba2b",
+    ),
+    "VLIRUOS Scholarships": (
+        "h2", "d6b0fcdbedcbb521f4a316d619d76d0084492d3e9baa116f807a2224f8980dbf",
+    ),
+    "Funding opportunities for US citizens": (
+        "h2", "c5c9102e1602153d61c18fd13718851d788aae84ea727812ce72627a25428ca8",
+    ),
+    _HUB_INSTITUTION_SECTION: (
+        "h2", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ),
+}
 
 
 PROFILES = [

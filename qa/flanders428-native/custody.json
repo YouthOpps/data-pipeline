@@ -1,0 +1,58 @@
+{
+  "all_carry_starts": 244,
+  "archive_id": 14373437413,
+  "archive_sha256": "3d33ee1b0e0a4e65dba2deae23b43c6b5253c6124143e1bb0d70e72353ab95c8",
+  "carry_sha256": "72ac638143d0840f1fbe6e6a4aa93a8c57c806160c52ad0834dd6d70005780b7",
+  "cipher_sha256": "425ffb3a21bfaf0081797792f6c9e5a9b570b1f64ca7f9f91c9f365ff97b7808",
+  "exact_journal_sha256": "f57afdb524ddf64518cae96a73d3917544437b3a29426aacf8c34b4bb7434aee",
+  "gap_close_to_next_opener_seconds": 14.650491584000008,
+  "job": 134394644238,
+  "job_ended": "2026-11-17T21:51:10Z",
+  "legacy_hub_fingerprint": "2cb0c5d0dc7127268cc4163f51ff327daaceb7e8f7a1f7491bf1b21ca6e0d2b5",
+  "observed_hub_fingerprint": "9ec48f88d520874de97199e382beebf4e1e36710928189dd7dc51bec8b563f0e",
+  "physical_wires": [
+    {
+      "assessed": true,
+      "body_sha256": "cd9bef3f5200709478b00274a95d567370a7c2e4a241558ad7487aa66ce73294",
+      "bytes": 125,
+      "close_monotonic": 490.498327726,
+      "closed": true,
+      "disposition": "rep-assessed",
+      "opener_monotonic": 489.39917288,
+      "physical_complete": 1794952252.509656,
+      "physical_start": 1794952251.4104764,
+      "reserved_at": 1794952248.8749528,
+      "sequence": 1,
+      "state_sha256": "e0b364c5144b85e610b3e7ae8d26d69bd65bc7c3df749174fbb2db293fc2dc10",
+      "status": 200,
+      "url": "https://www.studyinflanders.be/robots.txt"
+    },
+    {
+      "assessed": true,
+      "body_sha256": "32178245f4df2d4c4bd5792eda341b53febd103d0c5f4b47d100b735b1696678",
+      "bytes": 27782,
+      "close_monotonic": 505.853302429,
+      "closed": true,
+      "disposition": "hub-assessed",
+      "opener_monotonic": 505.14881931,
+      "physical_complete": 1794952267.8646295,
+      "physical_start": 1794952267.1601236,
+      "reserved_at": 1794952264.7098546,
+      "sequence": 2,
+      "state_sha256": "2e65f5d45dff86e31537f78db49e2231d4b4f26c74f467be35ec9e788ffc7b93",
+      "status": 200,
+      "url": "https://www.studyinflanders.be/scholarships"
+    }
+  ],
+  "postcapture_failure": "Original carry validation requires observed_at at or after every appended start.",
+  "production_paused": true,
+  "publisher_requests_during_reconstruction": 0,
+  "qa_retired": true,
+  "rep": {
+    "legacy": true,
+    "newer": true,
+    "unavailable": false
+  },
+  "run": 44183750124,
+  "workflow": 421912393
+}
