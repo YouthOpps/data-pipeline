@@ -358,9 +358,12 @@ historical failed research guard is never cleared. No unknown pending state is
 converted into permission. Future artifacts use the strict nine-key envelope
 with immutable producer head, source digest and canonical state digest.
 
-Validation and production handoff for #384 remain pending until the original
-complete native test, actual consumer/expiry checks and independent review have
-accepted the final implementation. Inert fault controls are not publisher runs.
+The complete original native test for #384 passed in 1,885.989 seconds and
+received independent acceptance in [the issue evidence](https://github.com/YouthOpps/data-pipeline/issues/384#issuecomment-6948839009).
+All 112 responses and 643 journal writes were verified. The exact complete
+replay yields 69 raw records; the actual website consumer accepts 61 current
+records and removes all eight expired records. Production handoff and activation
+remain separate review gates. Inert fault controls are not publisher runs.
 
 GitHub metadata transport accepts only `api.github.com`, without redirects.
 Artifact download permits only the observed `.blob.core.windows.net` and
@@ -417,3 +420,28 @@ retaining the existing publication, failure-state and export reserves. The
 Actions job allows 55 minutes. The 120-second physical-request reserve, all
 pacing constraints and complete-frontier rejection remain unchanged. These
 bounds do not permit truncation or guarantee success if the source grows.
+
+The hosted handoff is committed in this standalone adapter, not supplied as an
+initialization environment variable. It is applied only after fresh family
+history selects the actual newest owned artifact and the strict decoder verifies
+that artifact. An absent, expired, ambiguous or malformed newest artifact still
+refuses collection; the handoff never searches backward or replaces ownership.
+The exact known legacy six-key owner remains separately pinned. Future owners
+require the complete nine-key producer/source/state envelope. Stronger incoming
+constraints, actual refusal and unresolved pending state retain their effects.
+
+The handoff unions 515 observed timing/start witnesses from all available
+journals, 232 later physical receipts and the earlier reviewed research state.
+The first native remains UNVERIFIABLE: only its surviving exact final numeric
+state is retained, and lost response receipts are not invented. The second
+native's genuine failure and the separately assessed HTTP500 research guard
+remain recorded. Unknown legacy access/rate history is preserved. Actual writer,
+rolling-window pruning and exported-envelope controls verify this state without
+changing the established local namespace.
+
+The old workflow blob is historical provenance only. Hosted startup separately
+checks the exact current workflow ID, main workflow reference, executing commit
+and committed workflow bytes. The obsolete `FRSE_PACING_BOOTSTRAP` is removed
+only because the complete conservative state is now retained in source. The
+workflow must remain disabled until independent final handoff review and an
+explicit activation decision.

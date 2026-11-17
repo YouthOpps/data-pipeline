@@ -693,9 +693,12 @@ def scan_family_history():
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     current_id, current_attempt = (current_run_identity() if hosted else
                                    (None, None))
+    if hosted:
+        verify_hosted_workflow()
     definition = workflow_api("/actions/workflows/fetch-" + SOURCE_ID + ".yml")
     expected_path = ".github/workflows/fetch-" + SOURCE_ID + ".yml"
-    if (type(definition.get("id")) is not int or definition["id"] <= 0 or
+    if (type(definition.get("id")) is not int or
+            definition["id"] != _LOCAL_WORKFLOW_ID or
             definition.get("path") != expected_path):
         raise AdapterError("Untrusted family workflow definition", "access")
     if not hosted:
@@ -4397,12 +4400,387 @@ def download_inert_artifact(identity, artifact_id, digest=None):
                            "access") from None
 
 
+_HOSTED_WORKFLOW_BLOB = 'b3a3e5adff1e43268b820dd48363f3378f40598c'
+_NATIVE_HANDOFF_BINDING = {
+    'evidence':
+        'https://github.com/YouthOpps/data-pipeline/issues/384#issuecomment-6948839009',
+    'native_source_sha256':
+        'ef8ae7cd18b6d068236569aeb738d5747331dde7113a08ae4a0278cc1c3a8f96',
+    'native_test_sha256':
+        'cf2fec79b678c1a1d5bda894511f7e96720f7c74a67ad8977b1f597090baa41d',
+    'native_final_state_file_sha256':
+        '7ee053e1b90816152c8f08417146cce658ee88f316158d53dec1186a08519e74',
+    'legacy_owner': [43918525358, 1, 'pl-frse'],
+    'legacy_workflow_blob':
+        'fc1fed50da97540f5a35ae9a4a6ffa7127106c6a',
+    'first_native_outcome':
+        'UNVERIFIABLE; known final numeric state only',
+    'second_native_outcome':
+        'FAIL after96 complete physical responses',
+    'third_native_outcome':
+        'PASS69 raw /61 current /8 actual expired to empty',
+    'state_sha256':
+        '39ea29a652144c9331fd777d72862907f691cb09596030352a6ab079bd835665'
+}
+_NATIVE_HANDOFF_STATE = {
+    'blocked': False,
+    'completed': 1794920406.796552,
+    'family': 'youthopps-frse-publisher-v1',
+    'in_flight': False,
+    'interval': 12.2,
+    'inventory_completed': 1794920406.796552,
+    'legacy_429_history': 'unknown',
+    'legacy_access_history_unknown': True,
+    'legacy_access_observations': [],
+    'legacy_hold_history': 'unlogged_fields_unknown',
+    'legacy_rate_history_unknown': True,
+    'observed_429_since_transition': 0,
+    'observed_at': 1794920406.796552,
+    'page_gap': 30,
+    'rate_limit_until': 1794903520.815605,
+    'research_provenance': {
+        'assessed_http500': {
+            'body_sha256':
+                '598f6e8a8b393bc86654cbbda78ac42c88bd8fc2bfd86dadc95863722c1f7116',
+            'capture':
+                8843,
+            'closed_response':
+                True,
+            'historical_one_use_guard_pending_preserved':
+                True
+        },
+        'captures': [{
+            'controller_sha256':
+                'ba0a3ed96fa19bc1857bfd55ffc5ccf9c787796aacde75606d88f712699262a1',
+            'guard_pending_retained':
+                False,
+            'outcome':
+                'success',
+            'physical_requests':
+                4,
+            'port':
+                8840,
+            'source_sha256':
+                '62d601cd7e4a3dc4b8afe5e6bec3419e9feda9d28f3c65b8b801121b00deb93e'
+        }, {
+            'controller_sha256':
+                '988d2452c01ddc80e10906743f1f1761096155751e5bafccad6b2b118f82bc90',
+            'guard_pending_retained':
+                False,
+            'outcome':
+                'success',
+            'physical_requests':
+                2,
+            'port':
+                8841,
+            'source_sha256':
+                '62d601cd7e4a3dc4b8afe5e6bec3419e9feda9d28f3c65b8b801121b00deb93e'
+        }, {
+            'controller_sha256':
+                '0be4b5c2b45f26adfed06ab044e6d92aaf9eecde64c3353b7015a768a94ab7f6',
+            'guard_pending_retained':
+                False,
+            'outcome':
+                'success',
+            'physical_requests':
+                2,
+            'port':
+                8842,
+            'source_sha256':
+                '62d601cd7e4a3dc4b8afe5e6bec3419e9feda9d28f3c65b8b801121b00deb93e'
+        }, {
+            'controller_sha256':
+                'd242515056aa0c9a1e40f214c31684076c9a74898cfff6b8f1fa0ecf7b2faddb',
+            'guard_pending_retained':
+                True,
+            'outcome':
+                'AdapterError',
+            'physical_requests':
+                2,
+            'port':
+                8843,
+            'source_sha256':
+                '62d601cd7e4a3dc4b8afe5e6bec3419e9feda9d28f3c65b8b801121b00deb93e'
+        }, {
+            'controller_sha256':
+                '63aa134abc9d0c72a9d1c5214661184d59dac2fe6b83ff811e1df992739d6c23',
+            'guard_pending_retained':
+                False,
+            'outcome':
+                'success',
+            'physical_requests':
+                3,
+            'port':
+                8844,
+            'source_sha256':
+                '62d601cd7e4a3dc4b8afe5e6bec3419e9feda9d28f3c65b8b801121b00deb93e'
+        }, {
+            'controller_sha256':
+                '1a0602a6db9aeab3626b834553d6b1b624f3b4966596fe08aaa535072a988145',
+            'guard_pending_retained':
+                False,
+            'outcome':
+                'success',
+            'physical_requests':
+                4,
+            'port':
+                8845,
+            'source_sha256':
+                '62d601cd7e4a3dc4b8afe5e6bec3419e9feda9d28f3c65b8b801121b00deb93e'
+        }, {
+            'controller_sha256':
+                '4008a71f4bcd1bbd7a6a47cfb2cc00adf33c8166a2969f850f291a7c202ee4cc',
+            'guard_pending_retained':
+                False,
+            'outcome':
+                'success',
+            'physical_requests':
+                5,
+            'port':
+                8846,
+            'source_sha256':
+                '62d601cd7e4a3dc4b8afe5e6bec3419e9feda9d28f3c65b8b801121b00deb93e'
+        }],
+        'issue':
+            'https://github.com/YouthOpps/data-pipeline/issues/384',
+        'legacy_local_sha256':
+            '65b884a839e7682b478ea5f6cd5f7dc62eb8ebd57746922e489fb68cb8ac56b6',
+        'original_source_sha256':
+            '62d601cd7e4a3dc4b8afe5e6bec3419e9feda9d28f3c65b8b801121b00deb93e',
+        'owned_artifact_id':
+            14252313258,
+        'owned_run_attempt':
+            1,
+        'owned_run_id':
+            43918525358,
+        'owned_zip_sha256':
+            '6ec4a6eab273ecfc173b2d442521a169ee8d8a272f4cb8b3fb9b3c0e13f92469'
+    },
+    'schema': 3,
+    'starts': [
+        1794850471.5614612, 1794850502.9309325, 1794901180.4157813,
+        1794901180.990424, 1794901194.6395948, 1794901194.6403072,
+        1794901209.4050107, 1794901209.4067895, 1794901223.6452804,
+        1794901223.645775, 1794901511.919073, 1794901512.5181725,
+        1794901526.215107, 1794901526.2156405, 1794901815.2002075,
+        1794901816.6339424, 1794901829.9469776, 1794901829.948365,
+        1794902038.829045, 1794902039.9847674, 1794902054.21241,
+        1794902054.2131186, 1794902525.3217409, 1794902526.422226,
+        1794902539.8254902, 1794902539.8260634, 1794902554.0170557,
+        1794902554.0195885, 1794903000.3604517, 1794903001.6298578,
+        1794903015.208314, 1794903015.2096913, 1794903028.5587125,
+        1794903028.5592196, 1794903041.9237428, 1794903041.9248865,
+        1794903396.2923243, 1794903397.4153707, 1794903410.9364877,
+        1794903410.9375012, 1794903443.3047173, 1794903443.3051763,
+        1794903475.2894254, 1794903475.2904384, 1794903507.1021514,
+        1794903507.1030905, 1794908354.478979, 1794908368.1978664,
+        1794908382.3055253, 1794908396.599178, 1794908410.6519449,
+        1794909495.076783, 1794909496.2113833, 1794909509.9174674,
+        1794909509.9201438, 1794909524.2975724, 1794909524.3003128,
+        1794909537.8279443, 1794909537.8302317, 1794909552.0653782,
+        1794909552.066868, 1794909565.994139, 1794909565.9956565,
+        1794909580.4622283, 1794909580.4648328, 1794909593.9864302,
+        1794909593.9896379, 1794909608.0282578, 1794909608.031769,
+        1794909621.5753157, 1794909621.577349, 1794909635.9593854,
+        1794909635.9608877, 1794909650.3807158, 1794909650.382114,
+        1794909663.890089, 1794909663.891656, 1794909678.2979066,
+        1794909678.2996445, 1794909692.9106302, 1794909692.9135962,
+        1794909725.5032566, 1794909725.5063245, 1794909757.5405853,
+        1794909757.5421267, 1794909789.9979768, 1794909789.99909,
+        1794909822.0801332, 1794909822.0811534, 1794909860.520559,
+        1794909860.5215578, 1794909892.2417595, 1794909892.2433627,
+        1794909924.4022226, 1794909924.4034762, 1794909956.8006876,
+        1794909956.801687, 1794909988.36681, 1794909988.3681705,
+        1794910020.5659218, 1794910020.5670059, 1794910052.461431,
+        1794910052.4624436, 1794910067.4336405, 1794910067.4354224,
+        1794910081.480835, 1794910081.4887166, 1794910095.494809,
+        1794910095.4968905, 1794910109.8184905, 1794910109.8213289,
+        1794910123.8577754, 1794910123.860004, 1794910138.1771874,
+        1794910138.1785214, 1794910152.230334, 1794910152.2332792,
+        1794910166.5763083, 1794910166.5776029, 1794910180.6263227,
+        1794910180.628818, 1794910194.9827993, 1794910194.984115,
+        1794910209.2249696, 1794910209.226268, 1794910223.5343263,
+        1794910223.5367641, 1794910237.5057204, 1794910237.5087373,
+        1794910251.8121212, 1794910251.8150706, 1794910266.081537,
+        1794910266.0835998, 1794910280.1165173, 1794910280.1238046,
+        1794910294.4606, 1794910294.4651687, 1794910308.528418,
+        1794910308.5314364, 1794910322.850168, 1794910322.8537626,
+        1794910336.9183178, 1794910336.9217532, 1794910351.2295225,
+        1794910351.2325666, 1794910365.5463827, 1794910365.5488827,
+        1794910380.0891914, 1794910380.0904875, 1794910394.3647985,
+        1794910394.367884, 1794910408.952885, 1794910408.954402,
+        1794910423.0563335, 1794910423.060997, 1794910437.5812693,
+        1794910437.5841308, 1794910451.6481328, 1794910451.6514142,
+        1794910465.9766676, 1794910465.97859, 1794910480.0674796,
+        1794910480.0724251, 1794910498.868084, 1794910498.8714893,
+        1794910512.9456198, 1794910512.9482574, 1794910527.1553524,
+        1794910527.1591446, 1794910541.2510486, 1794910541.2552507,
+        1794910555.5964005, 1794910555.600123, 1794910569.6094003,
+        1794910569.6128027, 1794910583.9219825, 1794910583.9252093,
+        1794910598.239639, 1794910598.2427573, 1794910612.8492663,
+        1794910612.8525484, 1794910626.9356065, 1794910626.9376771,
+        1794910647.3725905, 1794910647.3739462, 1794910661.6566854,
+        1794910661.6581175, 1794910676.1270628, 1794910676.130292,
+        1794910690.1773412, 1794910690.1828818, 1794910704.4962616,
+        1794910704.4978747, 1794910718.5209544, 1794910718.5239196,
+        1794910733.09941, 1794910733.101885, 1794910747.1923585,
+        1794910747.1958272, 1794910761.550573, 1794910761.55326,
+        1794910775.6447868, 1794910775.6492581, 1794910790.0118132,
+        1794910790.0172818, 1794910804.0893416, 1794910804.0932245,
+        1794910818.4180803, 1794910818.4218373, 1794910832.5132413,
+        1794910832.5148468, 1794910846.836797, 1794910846.8385062,
+        1794910860.9568655, 1794910860.965453, 1794910875.2943969,
+        1794910875.2960038, 1794910889.4070814, 1794910889.4107707,
+        1794910903.4948664, 1794910903.498113, 1794910924.9285774,
+        1794910924.9300663, 1794910938.9993744, 1794910939.0032203,
+        1794910953.3315637, 1794910953.3354888, 1794910967.3878696,
+        1794910967.3921869, 1794910981.5939221, 1794910981.5972536,
+        1794910995.2488515, 1794910995.2503223, 1794911010.1217906,
+        1794911010.1258383, 1794911023.956631, 1794911023.9581656,
+        1794911037.985617, 1794911037.9871955, 1794911051.7924592,
+        1794911051.7955837, 1794911066.061169, 1794911066.062575,
+        1794911944.4848764, 1794911945.6314888, 1794911959.652945,
+        1794911959.6543107, 1794911973.5490572, 1794911973.550283,
+        1794911987.1273105, 1794911987.129564, 1794912001.4128993,
+        1794912001.414173, 1794912015.9722168, 1794912015.9736602,
+        1794912029.6492298, 1794912029.6506732, 1794912043.9703429,
+        1794912043.971703, 1794912057.3463829, 1794912057.3476355,
+        1794912071.8405535, 1794912071.8422048, 1794912086.0398412,
+        1794912086.0410852, 1794912100.558414, 1794912100.55969,
+        1794912115.1871047, 1794912115.1884394, 1794912129.52385,
+        1794912129.5251052, 1794912142.6634653, 1794912142.6647532,
+        1794912156.5257077, 1794912156.526898, 1794917834.5130527,
+        1794917835.0963945, 1794917848.7812002, 1794917848.783679,
+        1794917863.7758617, 1794917863.7814245, 1794917877.3109322,
+        1794917877.315597, 1794917891.9839048, 1794917891.9865391,
+        1794917906.6278994, 1794917906.6300235, 1794917921.2457852,
+        1794917921.251395, 1794917934.8200426, 1794917934.8234522,
+        1794918616.5668283, 1794918617.1594245, 1794918630.9788697,
+        1794918630.9819536, 1794918645.3883057, 1794918645.3911076,
+        1794918658.8228755, 1794918658.826181, 1794918673.073648,
+        1794918673.0752268, 1794918687.0477178, 1794918687.0499325,
+        1794918701.9815354, 1794918701.9846003, 1794918715.4861784,
+        1794918715.4882767, 1794918729.5307665, 1794918729.5329144,
+        1794918743.2286303, 1794918743.2306156, 1794918757.0867,
+        1794918757.088264, 1794918771.2325678, 1794918771.2345333,
+        1794918784.5270212, 1794918784.5287929, 1794918799.4060357,
+        1794918799.4081123, 1794918813.9458776, 1794918813.9476633,
+        1794918846.2190835, 1794918846.2211008, 1794918878.3892105,
+        1794918878.3910375, 1794918911.0660682, 1794918911.0678308,
+        1794918943.8652992, 1794918943.866709, 1794918975.9284036,
+        1794918975.931733, 1794919007.8298979, 1794919007.8342364,
+        1794919039.9529595, 1794919039.9545398, 1794919071.5726738,
+        1794919071.57823, 1794919103.7626307, 1794919103.764776,
+        1794919136.5588226, 1794919136.5613863, 1794919169.054183,
+        1794919169.0557652, 1794919184.4752104, 1794919184.4776778,
+        1794919198.8240767, 1794919198.828147, 1794919212.8444626,
+        1794919212.8465436, 1794919227.1588998, 1794919227.1616318,
+        1794919241.5330374, 1794919241.5381286, 1794919255.8761487,
+        1794919255.887392, 1794919269.9477413, 1794919269.9499228,
+        1794919284.2892976, 1794919284.2943327, 1794919298.6319516,
+        1794919298.6369228, 1794919313.4655964, 1794919313.4698236,
+        1794919328.1192205, 1794919328.1239407, 1794919342.4208646,
+        1794919342.4225655, 1794919357.1889431, 1794919357.1908762,
+        1794919371.9063542, 1794919371.9114847, 1794919386.379244,
+        1794919386.381469, 1794919400.7127283, 1794919400.7146008,
+        1794919415.4226882, 1794919415.4244943, 1794919429.4617615,
+        1794919429.465817, 1794919443.7780507, 1794919443.782092,
+        1794919458.1583846, 1794919458.1629734, 1794919472.2006857,
+        1794919472.2057912, 1794919486.5212789, 1794919486.5256925,
+        1794919501.1810498, 1794919501.1856658, 1794919515.1872628,
+        1794919515.1910207, 1794919529.469421, 1794919529.4736342,
+        1794919543.813946, 1794919543.8157346, 1794919558.2607858,
+        1794919558.262426, 1794919572.960305, 1794919572.9654582,
+        1794919587.4948735, 1794919587.498865, 1794919601.8689349,
+        1794919601.871087, 1794919615.8711834, 1794919615.8750694,
+        1794919630.5883365, 1794919630.5917997, 1794919645.1618567,
+        1794919645.1636634, 1794919659.4252837, 1794919659.4301176,
+        1794919673.8186302, 1794919673.823129, 1794919688.1877334,
+        1794919688.191293, 1794919702.4697738, 1794919702.471642,
+        1794919716.7990665, 1794919716.8016348, 1794919731.146512,
+        1794919731.1504955, 1794919745.220716, 1794919745.2251859,
+        1794919759.5264754, 1794919759.5413246, 1794919773.8556485,
+        1794919773.860054, 1794919788.21098, 1794919788.2150397,
+        1794919802.3321393, 1794919802.3340497, 1794919816.7031832,
+        1794919816.7079167, 1794919831.1133323, 1794919831.1161382,
+        1794919845.4031756, 1794919845.407218, 1794919859.813072,
+        1794919859.81787, 1794919874.1699295, 1794919874.1717691,
+        1794919888.2540128, 1794919888.2561219, 1794919902.7692966,
+        1794919902.774364, 1794919917.1558282, 1794919917.1591477,
+        1794919931.2380953, 1794919931.2402165, 1794919945.5610669,
+        1794919945.562651, 1794919960.1145236, 1794919960.1162703,
+        1794919974.1725938, 1794919974.1786485, 1794919988.4493513,
+        1794919988.454035, 1794920002.7909107, 1794920002.7979536,
+        1794920017.1535645, 1794920017.1596918, 1794920031.1451569,
+        1794920031.1546981, 1794920046.006369, 1794920046.0116162,
+        1794920061.0509753, 1794920061.0566983, 1794920075.6943626,
+        1794920075.6964273, 1794920089.8207421, 1794920089.8267024,
+        1794920103.947134, 1794920103.9489775, 1794920118.5416267,
+        1794920118.5473728, 1794920132.9771905, 1794920132.9827769,
+        1794920147.3572173, 1794920147.3617408, 1794920161.6603158,
+        1794920161.6624882, 1794920175.4538689, 1794920175.4589489,
+        1794920189.3051696, 1794920189.3078284, 1794920203.5753927,
+        1794920203.5774324, 1794920218.1455169, 1794920218.1503248,
+        1794920232.4922738, 1794920232.4986732, 1794920246.9934359,
+        1794920247.005207, 1794920260.8865218, 1794920260.8928304,
+        1794920275.282557, 1794920275.288456, 1794920289.6052015,
+        1794920289.610199, 1794920303.9996936, 1794920304.0066154,
+        1794920318.1281037, 1794920318.133555, 1794920332.0880787,
+        1794920332.0921123, 1794920346.463859, 1794920346.4656177,
+        1794920361.2661357, 1794920361.2683942, 1794920375.3208284,
+        1794920375.3268797, 1794920389.618324, 1794920389.6248791,
+        1794920403.5575247, 1794920403.5634594
+    ],
+    'until': 1794918616.5661173
+}
+
+
 def production_maintenance_state(incoming):
-    """Production remains closed until final native MAX handoff is reviewed."""
+    """Retain reviewed native MAX only after the real newest owned decoder."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return incoming
-    raise AdapterError("Final native publisher MAX handoff is not yet approved",
-                       "access")
+    try:
+        incoming = validate_budget(incoming)
+        state = validate_budget(copy.deepcopy(_NATIVE_HANDOFF_STATE))
+        encoded = json.dumps(state,
+                             sort_keys=True,
+                             separators=(",", ":"),
+                             allow_nan=False).encode()
+        if (len(encoded) > 16384 or hashlib.sha256(encoded).hexdigest()
+                != _NATIVE_HANDOFF_BINDING["state_sha256"]):
+            raise ValueError("Reviewed native MAX bytes changed")
+        return merge_budget(incoming, state)
+    except (ValueError, TypeError, KeyError, AdapterError) as error:
+        raise AdapterError("Invalid committed native MAX handoff",
+                           "access") from error
+
+
+def verify_hosted_workflow():
+    """Bind the executing current workflow, separately from the legacy owner."""
+    head = os.environ.get("GITHUB_SHA", "")
+    path = ".github/workflows/fetch-" + SOURCE_ID + ".yml"
+    if (not re.fullmatch(r"[0-9a-f]{40}", head) or
+            os.environ.get("GITHUB_WORKFLOW_SHA") != head or
+            os.environ.get("GITHUB_WORKFLOW_REF")
+            != "YouthOpps/data-pipeline/" + path + "@refs/heads/main"):
+        raise AdapterError("Current hosted workflow binding differs", "access")
+    value = workflow_api("/contents/" + path + "?ref=" + head)
+    try:
+        if (not isinstance(value, dict) or value.get("type") != "file" or
+                value.get("path") != path or
+                value.get("encoding") != "base64" or
+                type(value.get("size")) is not int or
+                not 0 < value["size"] <= 32768 or
+                value.get("sha") != _HOSTED_WORKFLOW_BLOB):
+            raise ValueError("Unreviewed hosted workflow blob")
+        raw = base64.b64decode("".join(value["content"].split()), validate=True)
+        actual = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" +
+                              raw).hexdigest()
+        if len(raw) != value["size"] or actual != _HOSTED_WORKFLOW_BLOB:
+            raise ValueError("Hosted workflow bytes differ")
+    except (ValueError, TypeError, KeyError) as error:
+        raise AdapterError("Invalid hosted workflow identity",
+                           "access") from error
 
 
 def restore_family_artifact():
@@ -4414,8 +4792,10 @@ def restore_family_artifact():
     expected = _ARTIFACT_NAME + "-" + str(attempt)
     result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
     artifacts = result.get("artifacts")
-    if not isinstance(artifacts, list) or result.get("total_count") != len(
-            artifacts) or len(artifacts) > 100:
+    if (not isinstance(artifacts, list) or
+            type(result.get("total_count")) is not int or
+            result["total_count"] != len(artifacts) or len(artifacts) > 100 or
+            any(not isinstance(item, dict) for item in artifacts)):
         raise AdapterError("Incomplete family artifact inventory", "access")
     matches = [item for item in artifacts if item.get("name") == expected]
     if len(matches) != 1 or matches[0].get("expired") is not False:
@@ -4423,10 +4803,12 @@ def restore_family_artifact():
                            "access")
     artifact = matches[0]
     if (type(artifact.get("id")) is not int or artifact["id"] <= 0 or
-            artifact.get("workflow_run", {}).get("id") != run_id or
-            artifact.get("workflow_run", {}).get("head_sha")
-            != _ATTEMPT_HEADS.get(
-                (run_id, attempt)) or (run_id, attempt) not in _ATTEMPT_HEADS or
+            not isinstance(artifact.get("workflow_run"), dict) or
+            type(artifact["workflow_run"].get("id")) is not int or
+            artifact["workflow_run"]["id"] != run_id or artifact.get(
+                "workflow_run", {}).get("head_sha") != _ATTEMPT_HEADS.get(
+                    (run_id, attempt)) or
+        (run_id, attempt) not in _ATTEMPT_HEADS or
             not re.fullmatch(r"sha256:[0-9a-f]{64}",
                              artifact.get("digest") or "") or
             type(artifact.get("size_in_bytes")) is not int or
@@ -4469,7 +4851,10 @@ def authenticate_hosted_run():
     run_id, attempt = current_run_identity()
     value = workflow_api(f"/actions/runs/{run_id}/attempts/{attempt}")
     head = os.environ.get("GITHUB_SHA")
-    if (value.get("id") != run_id or value.get("run_attempt") != attempt or
+    if (not isinstance(value, dict) or type(value.get("id")) is not int or
+            type(value.get("run_attempt")) is not int or
+            type(value.get("workflow_id")) is not int or
+            value.get("id") != run_id or value.get("run_attempt") != attempt or
             value.get("head_sha") != head or
             value.get("head_branch") != "main" or
             value.get("workflow_id") != _LOCAL_WORKFLOW_ID or
@@ -4480,12 +4865,15 @@ def authenticate_hosted_run():
     result = workflow_api(
         f"/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
     jobs = result.get("jobs")
-    if result.get("total_count") != 1 or not isinstance(jobs,
-                                                        list) or len(jobs) != 1:
+    if (type(result.get("total_count")) is not int or
+            result["total_count"] != 1 or not isinstance(jobs, list) or
+            len(jobs) != 1 or not isinstance(jobs[0], dict)):
         raise AdapterError("Current producer job is missing or ambiguous",
                            "access")
     job = jobs[0]
-    if (job.get("run_id") != run_id or job.get("run_attempt") != attempt or
+    if (type(job.get("run_id")) is not int or
+            type(job.get("run_attempt")) is not int or
+            job.get("run_id") != run_id or job.get("run_attempt") != attempt or
             job.get("head_sha") != head or job.get("head_branch") != "main" or
             job.get("name") != "collect" or job.get("status") != "in_progress"):
         raise AdapterError("Untrusted current collect job", "access")
