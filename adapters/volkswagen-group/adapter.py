@@ -609,52 +609,81 @@ def publisher_attempt(publisher):
                 raise
 
 
-def record_retry_after(value, rate_limited=False):
+def retry_deadline(value, now):
+    """Parse complete HTTP dates; obsolete asctime is explicitly UTC."""
+    raw = str(value).strip()
+    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", raw):
+        deadline = now + float(raw)
+    else:
+        short = r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)"
+        month = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        clock = r"[0-9]{2}:[0-9]{2}:[0-9]{2}"
+        asctime = short + r" " + month + r" (?: [1-9]|[0-9]{2}) " + clock + r" [0-9]{4}"
+        imf = short + r", [0-9]{2} " + month + r" [0-9]{4} " + clock + r" GMT"
+        obsolete = (r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), "
+                    + r"[0-9]{2}-" + month + r"-[0-9]{2} " + clock + r" GMT")
+        if not any(re.fullmatch(pattern, raw) for pattern in (asctime, imf, obsolete)):
+            raise ValueError("Incomplete HTTP date")
+        date = parsedate_to_datetime(raw)
+        if re.fullmatch(asctime, raw):
+            date = date.replace(tzinfo=timezone.utc)
+        if date.utcoffset() is None:
+            raise ValueError("Missing HTTP timezone")
+        if re.fullmatch(obsolete, raw):
+            reference = datetime.fromtimestamp(now, timezone.utc)
+            year = reference.year // 100 * 100 + int(raw.split("-")[2][:2])
+            date = date.replace(year=year)
+            if date.year > reference.year + 50:
+                date = date.replace(year=date.year - 100)
+        deadline = date.timestamp()
+    if not protocol_number(deadline) or deadline <= now:
+        raise ValueError("Stale or unsupported retry deadline")
+    datetime.fromtimestamp(deadline, timezone.utc)
+    return deadline
+
+
+def record_retry_after(value, rate_limited=False, rate_limit_response=False):
+    """Persist current strike before fallible received-header interpretation."""
     with locked_budget():
         state = load_budget()
         protocol_current_owner(state)
         now = time.time()
-        deadline = None
-        if value is not None:
-            try:
-                raw = str(value).strip()
-                seconds = (
-                    float(raw)
-                    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", raw)
-                    else None
-                )
-                if seconds is not None:
-                    if not protocol_number(seconds) or seconds <= 0:
-                        raise ValueError("Invalid seconds")
-                    deadline = now + seconds
-                else:
-                    date = parsedate_to_datetime(raw)
-                    if date.utcoffset() is None:
-                        raise ValueError("Missing timezone")
-                    deadline = date.timestamp()
-                if not protocol_number(deadline) or deadline <= now:
-                    raise ValueError("Stale or unsupported retry deadline")
-                datetime.fromtimestamp(deadline, timezone.utc)
-            except (ValueError, TypeError, OverflowError, OSError):
-                deadline = None
         if rate_limited:
             count = state["rate_limit_count"] + 1
-            physical = state["interval"] * 2
-            page = state["page_interval"] * 2
-            fallback = now + 1800 * 2 ** (count - 1)
-            if count > 100 or not all(
-                protocol_number(v) for v in [physical, page, fallback]
-            ):
-                raise AdapterError("Unassessed rate-limit arithmetic", "access")
             state["rate_limit_count"] = count
-            state["interval"] = max(12.2, physical)
-            state["page_interval"] = max(30, page)
-            state["rate_limit_until"] = max(
-                state["rate_limit_until"], fallback, deadline or 0
-            )
-        state["not_before"] = max(
-            state["not_before"], state["rate_limit_until"], deadline or 0
-        )
+            # Keep every representable known increase even if a later value
+            # cannot fit the original schema or supported clock.
+            unsupported = False
+            for key, floor in [("interval", 12.2), ("page_interval", 30)]:
+                increased = state[key] * 2
+                if protocol_number(increased):
+                    state[key] = max(floor, increased)
+                else:
+                    unsupported = True
+            minimum = now + 1800
+            state["rate_limit_until"] = max(state["rate_limit_until"], minimum)
+            state["not_before"] = max(state["not_before"], state["rate_limit_until"])
+            state["observed_at"] = now
+            save_budget(state)
+            if unsupported:
+                raise AdapterError("Unassessed current rate-limit increase", "access")
+            fallback = now + 1800 * 2 ** (count - 1)
+            if not protocol_number(fallback):
+                raise AdapterError("Unassessed rate-limit arithmetic", "access")
+            datetime.fromtimestamp(fallback, timezone.utc)
+            state["rate_limit_until"] = max(state["rate_limit_until"], fallback)
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            if item is None:
+                continue
+            try:
+                deadline = retry_deadline(item, now)
+            except (ValueError, TypeError, OverflowError, OSError):
+                continue
+            state["not_before"] = max(state["not_before"], deadline)
+            if rate_limited or rate_limit_response:
+                state["rate_limit_until"] = max(state["rate_limit_until"], deadline)
+        state["not_before"] = max(state["not_before"], state["rate_limit_until"])
         state["observed_at"] = now
         save_budget(state)
 
@@ -710,6 +739,440 @@ def request_bytes(
         )
 
 
+
+_HOSTED_QA_APPROVAL = {'state': {'blocked': False,
+           'completed_at': 1794953107.0,
+           'family': 'youthopps-volkswagen-group-publisher-v1',
+           'flight_id': None,
+           'in_flight': False,
+           'interval': 12.2,
+           'inventory_completed_at': 1792144908.2215238,
+           'last_policy_receipt': None,
+           'last_settled_owner': None,
+           'legacy_completion_history_unknown': True,
+           'legacy_policy_history_unknown': True,
+           'legacy_rate_history_unknown': True,
+           'not_before': 1794953167.0,
+           'observed_at': 1794953107.0,
+           'page_interval': 30,
+           'policy_allowed': {'https://jobs.volkswagen-group.com': {'allowed': True,
+                                                                    'available': True,
+                                                                    'body_sha256': '91669efc2767d124199e1d848655af18d64ac71e61ae1227be7b6aa866f03caf',
+                                                                    'delay': 0,
+                                                                    'origin': 'https://jobs.volkswagen-group.com',
+                                                                    'owner': '00ae1ae7b393187b6d83d4c2ca697db7',
+                                                                    'rate': None,
+                                                                    'target_sha256': '87d7a3de4cfdf9c4f47e02dde0059e1a5aa2d8cb770ebc8050c841f52cf1cb38'},
+                              'https://www.hrd-portal.com': {'allowed': True,
+                                                             'available': True,
+                                                             'body_sha256': '58c109cc44da82a7ff610aaaa11a3801cb99eaa3cd98f3e05183607801af6608',
+                                                             'delay': 0,
+                                                             'origin': 'https://www.hrd-portal.com',
+                                                             'owner': '23b7c1633747c6c3c7f51ac18f383f39',
+                                                             'rate': None,
+                                                             'target_sha256': 'a76aa434a8d8d79dcaffd45d33914dc657514b964022c0c84aea077566c44431'},
+                              'https://www.volkswagen-karriere.de': {'allowed': True,
+                                                                     'available': True,
+                                                                     'body_sha256': 'dd84e3470dafcf77ca25f1d3d448c84dfd4255988f006a0318437961d06368fb',
+                                                                     'delay': 0,
+                                                                     'origin': 'https://www.volkswagen-karriere.de',
+                                                                     'owner': '063a958bc2230786a9f4490963737a65',
+                                                                     'rate': None,
+                                                                     'target_sha256': '7cfc6a64968a2e8f5070596ac86e392f41e361316efd716185b0087497bc7bd2'}},
+           'policy_denied': {},
+           'policy_pending': None,
+           'rate_limit_count': 0,
+           'rate_limit_until': 0,
+           'schema': 3,
+           'starts': [1794953006.3394604,
+                      1794953052.6283505,
+                      1794953065.4889944,
+                      1794953065.492417,
+                      1794953078.134661,
+                      1794953078.1381915,
+                      1794953090.5372863,
+                      1794953090.5409112,
+                      1794953104.2352846,
+                      1794953104.2387195],
+           'transition_id': '03ae72e7c5b9b17bd59b83358f96fc21dab0f157496b53122b3b783c94bb6b2b'},
+ 'state_sha256': 'ec723431bf9584abc5c8601cf914ee67f9f9b77b4319e759797e12c45cf50602',
+ 'evidence': 'https://github.com/YouthOpps/data-pipeline/issues/420#issuecomment-6962216777'}
+_HOSTED_QA_WITNESS = None
+_HOSTED_QA_PRIOR_ACK = None
+_HOSTED_QA_SCOPE = {'branch': 'qa/vw420-native-r2',
+ 'grant_created_after': '2026-11-17T22:15:07Z',
+ 'issue': 420,
+ 'maintainer_account': 12278069,
+ 'metadata_probe_evidence_sha256': 'a9a5a2c58e8faf2e31c7b33cfad4c091207e1b63b6ff15b77839b6acc5bd6d2a',
+ 'metadata_probe_run': 44183849163,
+ 'owned_production_archive_sha256': '902c148bb3d440a42158a75b3aac7ce2087806b514102470a45cdffb677a65a4',
+ 'previous_qa': {'artifact': {'id': 14375480569,
+                              'name': 'vw420-native-qa-evidence-1',
+                              'sha256': '46f952a5e05bb64156e088c73517edada8d51de6e7ee236f95f785af3c1d4b62',
+                              'size': 1853947},
+                 'attempt': 1,
+                 'branch': 'qa/vw420-native',
+                 'closure_manifest_sha256': '2c0f1887fcfda370d93870bdd8ff23e68d38bd58ee941e3e4cb02afb7c688206',
+                 'exact_last_ack_sha256': '739abcc7a2833216ed81ddb228011d6b27b4b97f2bdf06578de98565008f0524',
+                 'head': 'bbdeab135af7ea3c4a8bc8be3272a1310f883c86',
+                 'job_id': 134401546837,
+                 'job_terminal': '2026-11-17T22:05:07Z',
+                 'path': '.github/workflows/qa-vw420-native.yml',
+                 'qualification': 'unqualified',
+                 'released_generation': None,
+                 'report_sha256': '46aff1649c003dbd32c17382bf0f574e60daa854712f31ecb6b4b03fb5dc8c77',
+                 'run_id': 44185706575,
+                 'workflow_id': 421922777},
+ 'prior_issue_comment_id': 6962216777,
+ 'production_candidate_sha256': '93ab72b6217f5186dac3861d2e82235953f011481f83cddd18f086591391c51a',
+ 'production_history_sha256': '06edd7100c5e0e2bb75bef7e44dd9b3e3f58c02931238e4bc2bd4b50fd4c1887',
+ 'repository': 'YouthOpps/data-pipeline',
+ 'repository_id': 1163601208,
+ 'required_checkout_pins': {'.github/workflows/qa-vw420-native-r2.yml': '557e4e9991a02e94eb70027c2108ded79d375a94ad8459114c257f0b8128bdf8',
+                            'adapters/volkswagen-group/test_adapter.py': '18ffca3b510c0e6fcf94ceea627172392dfb7a4b598080fb6eeee376f459b1c5',
+                            'qa-website/assets/discovery.js': '39dccc7be14705e2c338ae065044b2f6736d5e0b7bec70436937ad543a8741bb',
+                            'qa-website/scripts/data.mjs': 'bc9d9f9f83c58061c6d29f3fd3d6b04b56ad1b7503b12a009c2f91e24b4deef3',
+                            'qa/vw420-r2/consumer.mjs': 'aa6649a1d0f911a2a357bf1f5feb2750a161be2f4700f37f3919e09d1381cfbe',
+                            'qa/vw420-r2/continuity.json': '93be3efecdf6d36f9625e6ee2bcc5497b0fefe4fc97ec641432bc92e9ce53997',
+                            'qa/vw420-r2/observer.py': '948617b0522af38564426370d225588eddf98b13c4be520b494f62343726c218',
+                            'qa/vw420-r2/prior-ack.json': '739abcc7a2833216ed81ddb228011d6b27b4b97f2bdf06578de98565008f0524',
+                            'qa/vw420-r2/reviewer.pem': 'c8bfa742ffcd2638a1926c8068b58c3f0cc9bcda7077b95ab3ac8a8ac5b01531',
+                            'qa/vw420-r2/runner.py': 'db69074e17ca578e25a67a66a3f382733b340b1d6184917f2b8983d135cd6dba',
+                            'qa/vw420-r2/seed.json': 'ec723431bf9584abc5c8601cf914ee67f9f9b77b4319e759797e12c45cf50602'},
+ 'schema': 1,
+ 'website_head': 'f4dd2f046855aa295a6e74be79603d79238fa0fa',
+ 'workflow': '.github/workflows/qa-vw420-native-r2.yml'}
+
+def hosted_qa_mode():
+    """Recognize only a deliberately approved nonpublishing QA derivative."""
+    return _HOSTED_QA_APPROVAL is not None
+
+
+def validate_hosted_qa_approval():
+    approval = _HOSTED_QA_APPROVAL
+    if (
+        not isinstance(approval, dict)
+        or set(approval) != {"state", "state_sha256", "evidence"}
+        or approval["state_sha256"] != "ec723431bf9584abc5c8601cf914ee67f9f9b77b4319e759797e12c45cf50602"
+        or approval["state_sha256"] != protocol_digest(approval["state"])
+        or approval["evidence"] != (
+            f"https://github.com/{_HOSTED_QA_SCOPE['repository']}/issues/{_HOSTED_QA_SCOPE['issue']}"
+            f"#issuecomment-{_HOSTED_QA_SCOPE['prior_issue_comment_id']}"
+        )
+    ):
+        raise AdapterError("Exact Volkswagen QA seed approval remains OFF", "access")
+    state = validate_budget(approval["state"])
+    if state["blocked"] or state["in_flight"] or state["policy_pending"] is not None:
+        raise AdapterError("Approved QA seed is unsettled", "access")
+    return state
+
+
+def exact_hosted_qa_grant(head):
+    """Authenticate the new exact-head grant without committing its own URL."""
+    scope = _HOSTED_QA_SCOPE
+    scope_sha256 = protocol_digest(scope)
+    labels = {
+        f"Approved Volkswagen QA head {head}",
+        f"Volkswagen QA approval scope {scope_sha256}",
+    }
+    comments = workflow_api("/issues/420/comments?per_page=100")
+    if not isinstance(comments, list) or len(comments) >= 100:
+        raise AdapterError("Volkswagen QA grant inventory is incomplete", "access")
+    candidates = [
+        item for item in comments
+        if isinstance(item, dict) and isinstance(item.get("body"), str)
+        and labels.issubset(item["body"].splitlines())
+    ]
+    if len(candidates) != 1:
+        raise AdapterError("Volkswagen QA head and scope grant is unavailable or ambiguous", "access")
+    grant = candidates[0]
+    comment_id, user, created = grant.get("id"), grant.get("user"), grant.get("created_at")
+    issue, repo = scope["issue"], scope["repository"]
+    if (
+        type(comment_id) is not int or comment_id <= scope["prior_issue_comment_id"]
+        or grant.get("issue_url") != _WORKFLOW_GITHUB + f"/issues/{issue}"
+        or grant.get("html_url") != f"https://github.com/{repo}/issues/{issue}#issuecomment-{comment_id}"
+        or not isinstance(user, dict) or type(user.get("id")) is not int
+        or user["id"] != scope["maintainer_account"] or user.get("type") != "User"
+        or not isinstance(created, str)
+        or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", created)
+        or protocol_timestamp(created) <= protocol_timestamp(scope["grant_created_after"])
+        or grant.get("updated_at") != created
+    ):
+        raise AdapterError("Volkswagen QA grant identity, author or creation differs", "access")
+    return {"comment_id": comment_id, "scope_sha256": scope_sha256, "created_at": created}
+
+
+def verify_hosted_qa_identity():
+    """Authenticate the one real QA job without giving it production authority."""
+    validate_hosted_qa_approval()
+    scope = _HOSTED_QA_SCOPE
+    repo, branch, path = scope["repository"], scope["branch"], scope["workflow"]
+    maintainer = scope["maintainer_account"]
+    expected = {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_REPOSITORY": repo,
+        "GITHUB_REF": "refs/heads/" + branch,
+        "GITHUB_WORKFLOW_REF": f"{repo}/{path}@refs/heads/{branch}",
+        "GITHUB_EVENT_NAME": "push",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_JOB": "native",
+        "GITHUB_ACTOR_ID": str(maintainer),
+    }
+    if (
+        any(os.environ.get(key) != value for key, value in expected.items())
+        or any(
+            name in os.environ
+            for name in (
+                "DATA_SOURCE_TOKEN", "WEBSITE_APP_ID", "WEBSITE_APP_PRIVATE_KEY",
+                "WEBSITE_APP_INSTALLATION_ID", "VOLKSWAGEN_GROUP_PACING_ARTIFACT_PATH",
+            )
+        )
+        or not callable(_HOSTED_QA_WITNESS)
+    ):
+        raise AdapterError("Exact isolated GitHub QA job required", "access")
+    run_text, head = os.environ.get("GITHUB_RUN_ID", ""), os.environ.get("GITHUB_SHA", "")
+    if not re.fullmatch(r"[1-9][0-9]*", run_text) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise AdapterError("Invalid GitHub QA identity", "access")
+    if os.environ.get("GITHUB_WORKFLOW_SHA") != head:
+        raise AdapterError("QA workflow revision differs from tested head", "access")
+    with open(os.environ["GITHUB_EVENT_PATH"], "rb") as stream:
+        event = json.loads(stream.read(1_000_001))
+    if (
+        event.get("ref") != expected["GITHUB_REF"] or event.get("before") != "0" * 40
+        or event.get("after") != head or event.get("created") is not True
+        or event.get("deleted") is not False or event.get("forced") is not False
+        or event.get("repository", {}).get("id") != scope["repository_id"]
+        or event.get("sender", {}).get("id") != maintainer
+        or event.get("sender", {}).get("type") != "User"
+    ):
+        raise AdapterError("Only the first QA branch creation is authorized", "access")
+    run = int(run_text)
+    pins = _HOSTED_QA_WITNESS()
+    if not isinstance(pins, dict) or any(
+        pins.get(name) != digest for name, digest in scope["required_checkout_pins"].items()
+    ):
+        raise AdapterError("Volkswagen QA scope checkout pins differ", "access")
+    grant = exact_hosted_qa_grant(head)
+    predecessor = verify_hosted_qa_predecessor_owner()
+    status = workflow_api(f"/actions/runs/{run}/attempts/1")
+    if (
+        status.get("id") != run
+        or status.get("run_attempt") != 1
+        or status.get("event") != "push"
+        or status.get("status") != "in_progress"
+        or status.get("actor", {}).get("id") != maintainer
+        or status.get("actor", {}).get("type") != "User"
+        or status.get("triggering_actor", {}).get("id") != maintainer
+        or status.get("triggering_actor", {}).get("type") != "User"
+        or protocol_timestamp(status.get("created_at")) < protocol_timestamp(grant["created_at"])
+        or status.get("path", "").split("@", 1)[0] != path
+        or status.get("head_sha") != head
+        or status.get("head_branch") != branch
+        or status.get("repository", {}).get("full_name") != repo
+        or status.get("head_repository", {}).get("full_name") != repo
+        or status.get("repository", {}).get("id") != _PROTOCOL_REPOSITORY_ID
+        or status.get("head_repository", {}).get("id") != _PROTOCOL_REPOSITORY_ID
+        or type(status.get("workflow_id")) is not int
+        or status["workflow_id"] <= 0
+        or status["workflow_id"] in {_PROTOCOL_WORKFLOW_ID, scope["previous_qa"]["workflow_id"]}
+    ):
+        raise AdapterError("GitHub QA attempt verification failed", "access")
+    workflow = status["workflow_id"]
+    definition = workflow_api(f"/actions/workflows/{workflow}")
+    inventory = workflow_api(f"/actions/workflows/{workflow}/runs?per_page=100")
+    runs = inventory.get("workflow_runs")
+    if (
+        definition.get("id") != workflow or definition.get("path") != path
+        or definition.get("state") != "active"
+        or inventory.get("total_count") != 1 or not isinstance(runs, list) or len(runs) != 1
+        or runs[0].get("id") != run or runs[0].get("run_attempt") != 1
+        or runs[0].get("head_sha") != head
+    ):
+        raise AdapterError("QA workflow already has another attempt or owner", "access")
+    jobs = workflow_api(f"/actions/runs/{run}/attempts/1/jobs?per_page=100")
+    values = jobs.get("jobs")
+    if (
+        jobs.get("total_count") != 1 or not isinstance(values, list) or len(values) != 1
+        or values[0].get("run_id") != run or values[0].get("run_attempt") != 1
+        or values[0].get("head_sha") != head or values[0].get("status") != "in_progress"
+        or values[0].get("name") != "native"
+        or type(values[0].get("id")) is not int or values[0]["id"] <= 0
+    ):
+        raise AdapterError("Exact active QA job was not proved", "access")
+    with open(__file__, "rb") as source:
+        source_hash = hashlib.sha256(source.read()).hexdigest()
+    if protocol_source_hash(head) != source_hash:
+        raise AdapterError("Original QA source bytes differ from the GitHub head", "access")
+    _HOSTED_QA_WITNESS()
+    return {"workflow_id": workflow, "run_id": run, "run_attempt": 1,
+            "head_sha": head, "ref": expected["GITHUB_REF"], "job_id": values[0]["id"],
+            "grant": grant, "previous_qa": predecessor}
+
+
+def verify_qa_history(context):
+    """Keep the QA claim tied to the exact original production chronology."""
+    owner, artifact = context["latest"], context["artifact"]
+    if (
+        context["history_sha256"] != "06edd7100c5e0e2bb75bef7e44dd9b3e3f58c02931238e4bc2bd4b50fd4c1887"
+        or len(context["run_projection"]) != 43
+        or (owner["id"], owner["attempt"], owner["head"])
+        != (44041318465, 1, "341ea050a605004b8b003ff83bc098ee1a28565c")
+        or (artifact["id"], artifact["size_in_bytes"], artifact["digest"])
+        != (14310180933, 1267, "sha256:902c148bb3d440a42158a75b3aac7ce2087806b514102470a45cdffb677a65a4")
+    ):
+        raise AdapterError("QA production history or owned artifact changed", "access")
+
+
+def verify_hosted_qa_predecessor_owner():
+    """Authenticate the closed, effectful R1 attempt and its exact retained archive."""
+    scope = _HOSTED_QA_SCOPE
+    prior = scope["previous_qa"]
+    workflow_id, run_id, attempt = prior["workflow_id"], prior["run_id"], prior["attempt"]
+    workflow = workflow_api(f"/actions/workflows/{workflow_id}")
+    if (
+        workflow.get("id") != workflow_id or workflow.get("path") != prior["path"]
+        or workflow.get("state") != "disabled_manually"
+    ):
+        raise AdapterError("Volkswagen QA predecessor workflow is not retired", "access")
+    runs = workflow_api(f"/actions/workflows/{workflow_id}/runs?per_page=100")
+    listed = runs.get("workflow_runs")
+    run = workflow_api(f"/actions/runs/{run_id}/attempts/{attempt}")
+    for inventory in (listed, [run]):
+        if not isinstance(inventory, list) or len(inventory) != 1:
+            raise AdapterError("Volkswagen QA predecessor run history changed", "access")
+        item = inventory[0]
+        if (
+            item.get("id") != run_id or item.get("workflow_id") != workflow_id
+            or item.get("run_attempt") != attempt or item.get("head_sha") != prior["head"]
+            or item.get("head_branch") != prior["branch"] or item.get("event") != "push"
+            or item.get("repository", {}).get("id") != scope["repository_id"]
+            or item.get("head_repository", {}).get("id") != scope["repository_id"]
+            or item.get("path", "").split("@", 1)[0] != prior["path"]
+            or item.get("status") != "completed" or item.get("conclusion") != "failure"
+        ):
+            raise AdapterError("Volkswagen QA predecessor terminal attempt differs", "access")
+    if runs.get("total_count") != 1:
+        raise AdapterError("Volkswagen QA predecessor was repeated", "access")
+
+    joints = workflow_api(f"/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
+    jobs = joints.get("jobs")
+    if joints.get("total_count") != 1 or not isinstance(jobs, list) or len(jobs) != 1:
+        raise AdapterError("Volkswagen QA predecessor job custody changed", "access")
+    job = jobs[0]
+    if (
+        job.get("id") != prior["job_id"] or job.get("name") != "native"
+        or job.get("run_id") != run_id or job.get("run_attempt") != attempt
+        or job.get("head_sha") != prior["head"] or job.get("status") != "completed"
+        or job.get("conclusion") != "failure" or job.get("completed_at") != prior["job_terminal"]
+    ):
+        raise AdapterError("Volkswagen QA predecessor job identity changed", "access")
+    inventory = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+    choices = inventory.get("artifacts")
+    if inventory.get("total_count") != 1 or not isinstance(choices, list) or len(choices) != 1:
+        raise AdapterError("Volkswagen QA predecessor archive inventory changed", "access")
+    artifact, expected = choices[0], prior["artifact"]
+    owner = artifact.get("workflow_run", {})
+    if (
+        artifact.get("id") != expected["id"] or artifact.get("name") != expected["name"]
+        or artifact.get("size_in_bytes") != expected["size"] or artifact.get("expired") is not False
+        or artifact.get("digest") != "sha256:" + expected["sha256"]
+        or owner.get("id") != run_id or owner.get("head_sha") != prior["head"]
+        or owner.get("head_branch") != prior["branch"]
+        or owner.get("repository_id") != scope["repository_id"]
+        or owner.get("head_repository_id") != scope["repository_id"]
+    ):
+        raise AdapterError("Volkswagen QA predecessor owned archive differs", "access")
+    return prior
+
+
+def verify_hosted_qa_predecessor_archive():
+    """Read the exact inseparable R1 receipt and encrypted capture before restoring."""
+    prior = _HOSTED_QA_SCOPE["previous_qa"]
+    expected = prior["artifact"]
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise AdapterError("Volkswagen QA predecessor archive credentials missing", "access")
+    endpoint = _WORKFLOW_GITHUB + f"/actions/artifacts/{expected['id']}/zip"
+    request = urllib.request.Request(
+        endpoint, headers={
+            "Authorization": "Bearer " + token, "User-Agent": _USER_AGENT,
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        try:
+            response = _OPENER.open(request, timeout=request_timeout())
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            if response.status != 302:
+                raise ValueError("Expected authenticated predecessor redirect")
+            target = response.headers.get("Location", "")
+            if len(response.read(1001)) > 1000:
+                raise ValueError("Oversized predecessor redirect")
+        parsed = urllib.parse.urlsplit(target)
+        if (
+            parsed.scheme != "https" or not parsed.hostname or parsed.username
+            or parsed.password or parsed.port or "." not in parsed.hostname
+            or parsed.hostname.endswith((".local", ".internal", ".localhost"))
+        ):
+            raise ValueError("Unexpected predecessor archive host")
+        try:
+            ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("Literal predecessor archive address")
+        status, _, body = request_bytes(target, byte_limit=expected["size"])
+        if (
+            status != 200 or len(body) != expected["size"]
+            or hashlib.sha256(body).hexdigest() != expected["sha256"]
+        ):
+            raise ValueError("Wrong predecessor archive bytes")
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            members = archive.infolist()
+            if (
+                len(members) != 2 or set(archive.namelist()) != {"capture.cms", "result.json"}
+                or archive.getinfo("result.json").file_size > 16384
+                or archive.getinfo("capture.cms").file_size > expected["size"]
+                or any(entry.flag_bits & 1 or entry.external_attr >> 16 & 0o170000 == 0o120000
+                       for entry in members)
+            ):
+                raise ValueError("Wrong predecessor archive members")
+            receipt = json.loads(archive.read("result.json"))
+            sealed_digest = hashlib.sha256(archive.read("capture.cms")).hexdigest()
+        owner = receipt["identity"]
+        if (
+            owner["workflow_id"] != prior["workflow_id"] or owner["run_id"] != prior["run_id"]
+            or owner["run_attempt"] != prior["attempt"] or owner["job_id"] != prior["job_id"]
+            or owner["head_sha"] != prior["head"] or owner["ref"] != "refs/heads/" + prior["branch"]
+            or receipt["encrypted_capture_sha256"] != sealed_digest
+            or receipt["qualification"] != prior["qualification"]
+            or receipt["released_generation"] != prior["released_generation"]
+            or receipt["last_original_ack"]["sha256"] != prior["exact_last_ack_sha256"]
+            or receipt["physical_count"] != 5 or receipt["ack_count"] != 36
+        ):
+            raise ValueError("Wrong predecessor result or final ACK")
+    except Exception:
+        raise AdapterError("Invalid or unavailable Volkswagen QA predecessor archive", "access") from None
+
+
+def validate_hosted_qa_predecessor_state():
+    """Join the exact last ACK only as historical effects from the failed run."""
+    prior = _HOSTED_QA_SCOPE["previous_qa"]
+    raw = _HOSTED_QA_PRIOR_ACK
+    if (
+        not isinstance(raw, bytes) or not 0 < len(raw) <= 16384
+        or hashlib.sha256(raw).hexdigest() != prior["exact_last_ack_sha256"]
+    ):
+        raise AdapterError("Volkswagen QA predecessor ACK bytes differ", "access")
+    state = validate_budget(json.loads(raw))
+    if state["blocked"] or state["in_flight"] or state["policy_pending"] is not None:
+        raise AdapterError("Volkswagen predecessor ACK retains a hold or pending owner", "access")
+    return state
+
+
 def workflow_api(path):
     """Read fresh authoritative metadata; local proxy auth is optional."""
     token = os.environ.get("GITHUB_TOKEN", "")
@@ -717,6 +1180,10 @@ def workflow_api(path):
         raise AdapterError("Hosted workflow credentials missing", "access")
     if not (
         path.startswith("/actions/")
+        or (
+            hosted_qa_mode()
+            and path == "/issues/420/comments?per_page=100"
+        )
         or re.fullmatch(
             r"/contents/adapters/volkswagen-group/adapter\.py"
             r"\?ref=[0-9a-f]{40}",
@@ -858,9 +1325,13 @@ def restore_family_artifact():
     global _RESTORED, _STATE_TRUSTED, _PROTOCOL_CONTEXT, _PROTOCOL_READY
     context = protocol_history()
     latest, artifact = context["latest"], context["artifact"]
+    if hosted_qa_mode():
+        verify_qa_history(context)
+        verify_hosted_qa_predecessor_archive()
     context["source_sha256"] = protocol_source_hash(latest["head"])
     if (
         context["hosted"]
+        and not hosted_qa_mode()
         and protocol_source_hash(context["current"][2])
         != hashlib.sha256(open(__file__, "rb").read()).hexdigest()
     ):
@@ -874,6 +1345,13 @@ def restore_family_artifact():
         context,
     )
     legacy = incoming["schema"] == 1
+    if hosted_qa_mode():
+        if legacy:
+            raise AdapterError("QA requires native owned state", "access")
+        incoming = protocol_join(incoming, validate_hosted_qa_predecessor_state())
+        incoming = protocol_join(incoming, validate_hosted_qa_approval())
+        if incoming["blocked"] or incoming["in_flight"] or incoming["policy_pending"] is not None:
+            raise AdapterError("QA restoration would retain an active hold", "access")
     marker = None
     if legacy:
         purpose = "HOSTED" if context["hosted"] else "LOCAL"
@@ -935,6 +1413,8 @@ def restore_family_artifact():
                             )
                         local = protocol_join(local, proposed)
             protocol_same_history(context)
+            if hosted_qa_mode() and (raw or not _GUARD_CREATED):
+                raise AdapterError("QA journal admission must be exclusive", "access")
             state = protocol_join(local, incoming)
             state["completed_at"] = max(
                 state["completed_at"], max(context["completion_bounds"])
@@ -1012,6 +1492,8 @@ def mark_pacing_artifact_ready(runner_parent, runner_root):
 
 def export_family_artifact():
     """Export healthy state; invalidate owned stale output on failure."""
+    if hosted_qa_mode():
+        raise AdapterError("QA cannot export production state", "access")
     path = os.environ.get("VOLKSWAGEN_GROUP_PACING_ARTIFACT_PATH")
     if not path or not (_STATE_TRUSTED or _PUBLISHER_GATE_FAILED):
         return
@@ -1028,6 +1510,7 @@ def export_family_artifact():
     parent_identity = None
     output_identity = None
     output_handles = ()
+    own_error_1 = None
     try:
         directory = os.fstat(parent)
         parent_identity = (directory.st_dev, directory.st_ino)
@@ -1050,6 +1533,7 @@ def export_family_artifact():
             pass
         if existing is not None:
             existing_identity = None
+            close_primary_1 = None
             try:
                 info = os.fstat(existing)
                 existing_identity = (info.st_dev, info.st_ino)
@@ -1078,8 +1562,15 @@ def export_family_artifact():
                 io_artifact_descriptor(existing, existing_identity)
                 os.unlink(name, dir_fd=parent)
                 os.fsync(parent)
+            except BaseException as error:
+                close_primary_1 = error
+                raise
             finally:
-                io_close_owned_descriptor(existing, existing_identity)
+                try:
+                    io_close_owned_descriptor(existing, existing_identity)
+                except BaseException:
+                    if close_primary_1 is None:
+                        raise
         if _PUBLISHER_GATE_FAILED or _GUARD_FATAL:
             raise AdapterError(
                 "Publisher completion gate cannot be exported", "access"
@@ -1101,6 +1592,7 @@ def export_family_artifact():
         output_identity = identity
         guard = None
         output_handles = (descriptor, guard)
+        own_error_2 = None
         try:
             io_artifact_descriptor(descriptor, identity)
             current = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -1113,6 +1605,7 @@ def export_family_artifact():
             io_artifact_descriptor(guard, identity)
             with locked_budget():
                 writer = os.dup(descriptor)
+                close_primary_2 = None
                 try:
                     io_artifact_descriptor(writer, identity)
                     payload = json.dumps(
@@ -1134,8 +1627,15 @@ def export_family_artifact():
                         io_artifact_descriptor(writer, identity)
                     os.fsync(writer)
                     io_artifact_descriptor(writer, identity)
+                except BaseException as error:
+                    close_primary_2 = error
+                    raise
                 finally:
-                    io_close_owned_descriptor(writer, identity)
+                    try:
+                        io_close_owned_descriptor(writer, identity)
+                    except BaseException:
+                        if close_primary_2 is None:
+                            raise
                 os.fsync(parent)
                 io_verify_current_parent(parent, root, parent_identity)
                 check = os.open(
@@ -1143,6 +1643,7 @@ def export_family_artifact():
                     os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                     dir_fd=parent,
                 )
+                close_primary_3 = None
                 try:
                     info = os.fstat(check)
                     current = os.stat(
@@ -1178,10 +1679,17 @@ def export_family_artifact():
                         raise AdapterError(
                             "Finalized pacing artifact mismatch", "access"
                         )
+                except BaseException as error:
+                    close_primary_3 = error
+                    raise
                 finally:
                     # The known artifact identity is available even if the
                     # reader validation/read failed before reader_identity.
-                    io_close_owned_descriptor(check, identity)
+                    try:
+                        io_close_owned_descriptor(check, identity)
+                    except BaseException:
+                        if close_primary_3 is None:
+                            raise
                 journal_verify()
                 io_signal_ready(parent, root, run_id, attempt)
                 journal_verify()
@@ -1192,6 +1700,7 @@ def export_family_artifact():
                 if identity != (named.st_dev, named.st_ino):
                     raise AdapterError("Owned artifact changed", "access")
         except BaseException:
+            own_error_2 = sys.exc_info()[1]
             journal_failed()
             # Cleanup must never replace the primary handoff/body failure.
             with contextlib.suppress(BaseException):
@@ -1200,7 +1709,7 @@ def export_family_artifact():
                 )
             raise
         finally:
-            primary = sys.exc_info()[1]
+            primary = own_error_2
             errors = []
             for handle in (descriptor, guard):
                 if handle is not None:
@@ -1222,8 +1731,11 @@ def export_family_artifact():
                     )
                 if primary is None:
                     raise errors[0]
+    except BaseException as error:
+        own_error_1 = error
+        raise
     finally:
-        primary = sys.exc_info()[1]
+        primary = own_error_1
         close_error = None
         try:
             io_verify_current_parent(parent, root, parent_identity)
@@ -1772,6 +2284,8 @@ def run_lifecycle(publishing):
 
 
 def main():
+    if hosted_qa_mode():
+        raise AdapterError("QA cannot run the publication lifecycle", "access")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--publish", action="store_true")
     args = parser.parse_args()
@@ -2129,6 +2643,183 @@ def html_fingerprint(body):
         if attrs:
             controls.append((node.tag, sorted(attrs.items())))
     facts = {"text": root.text(), "links": links, "controls": controls}
+    return hashlib.sha256(
+        json.dumps(facts, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def portal_terms_fingerprint(body, url):
+    """Bind the reviewed legal article and policy routes without site chrome."""
+    root = document_root(body.decode("utf-8", "strict"))
+    content = one(
+        [node for node in root.walk() if node.attrs.get("id") == "content"],
+        "Volkswagen job-portal terms article",
+    )
+    title = "Volkswagen Group | Nutzungsbedingungen"
+    if (
+        content.tag != "div"
+        or content.duplicate_attrs
+        or one(nodes(root, "title"), "job-portal title").text() != title
+        or one(nodes(root, "h1"), "job-portal heading").text() != title
+        or not content.text()
+    ):
+        raise AdapterError("Unexpected Volkswagen job-portal terms scope", "parse")
+
+    # Known footer policies may appear or disappear with consent widgets. A
+    # newly linked policy requires review; ordinary navigation may change.
+    known_routes = {
+        url,
+        "https://jobs.volkswagen-group.com/content/Datenschutzerklarung/?locale=de_DE",
+        "https://www.volkswagen-group.com/de/impressum-15695",
+        "https://policies.google.com/privacy",
+        "https://policies.google.com/terms",
+        "https://vimeo.com/legal/privacy/policy",
+        "https://vimeo.com/legal/privacy/cookies",
+        "https://vimeo.com/legal/",
+    }
+    policy_words = re.compile(
+        r"nutzungsbeding|datenschutz|impressum|urheberrecht|"
+        r"terms.of.use|terms.and.conditions|privacy|legal|copyright|"
+        r"acceptable.use|licen[cs]e",
+        re.I,
+    )
+    article_links = set(nodes(content, "a"))
+    links = set()
+    for anchor in nodes(root, "a"):
+        href = anchor.attrs.get("href", "")
+        route = urllib.parse.urljoin(url, href)
+        if anchor in article_links:
+            if not href or anchor.duplicate_attrs:
+                raise AdapterError("Ambiguous job-portal terms link", "parse")
+            links.add((anchor.text(), route))
+        labels = (
+            anchor.text(),
+            anchor.attrs.get("title", ""),
+            anchor.attrs.get("aria-label", ""),
+            href,
+        )
+        if (
+            href
+            and policy_words.search(" ".join(labels))
+            and (route not in known_routes or anchor.duplicate_attrs)
+        ):
+            raise AdapterError("Unreviewed Volkswagen job-portal policy link", "parse")
+    facts = {"text": content.text(), "links": sorted(links)}
+    return hashlib.sha256(
+        json.dumps(facts, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def career_homepage_fingerprint(body, headers, url, listing):
+    """Guard the reviewed German public route and legal surface of the career site."""
+    root = document_root(body.decode("utf-8", "strict"))
+    document = one(nodes(root, "html"), "Volkswagen career document")
+    head = one(nodes(document, "head"), "Volkswagen career head")
+    main = one(nodes(document, "main"), "Volkswagen career main")
+    footer = one(nodes(document, "footer"), "Volkswagen career footer")
+    heading = one(nodes(main, "h1"), "Volkswagen career heading").text()
+    title = one(nodes(head, "title"), "Volkswagen career title").text()
+    canonical = one(
+        [link for link in nodes(head, "link")
+         if link.attrs.get("rel", "").casefold() == "canonical"],
+        "Volkswagen career canonical route",
+    )
+    if (
+        document.duplicate_attrs or document.attrs.get("lang", "").lower() != "de"
+        or "volkswagen" not in heading.casefold() or "volkswagen" not in title.casefold()
+        or canonical.duplicate_attrs or canonical.attrs.get("href") != url
+        or any(nodes(document, tag) for tag in ("base", "form", "iframe"))
+    ):
+        raise AdapterError("Volkswagen public career document boundary changed", "parse")
+
+    robots = set()
+    for meta in nodes(head, "meta"):
+        name = meta.attrs.get("name", "").casefold()
+        if (
+            meta.attrs.get("http-equiv", "").casefold() == "refresh"
+            or name in {"refresh", "redirect"}
+        ):
+            raise AdapterError("Unexpected Volkswagen career client redirect", "parse")
+        if name == "robots" or name.endswith("bot") or "youthopp" in name:
+            if meta.duplicate_attrs:
+                raise AdapterError("Ambiguous Volkswagen career robots metadata", "parse")
+            directives = tuple(sorted(
+                part.strip().casefold()
+                for part in meta.attrs.get("content", "").split(",")
+            ))
+            robots.add((name, directives))
+    header_rules = (
+        headers.get_all("X-Robots-Tag", []) if hasattr(headers, "get_all")
+        else [headers.get("X-Robots-Tag", "")]
+    )
+    if any(
+        rule and rule.casefold().replace(" ", "") not in {"index,follow", "follow,index", "all"}
+        for rule in header_rules
+    ):
+        raise AdapterError("Volkswagen career response crawler policy changed", "parse")
+
+    policy_words = re.compile(
+        r"nutzungsbeding|nutzungsregel|datenschutz|impressum|urheber|lizenzhinweis|"
+        r"cookie[\s_-]*richtlin|rechtliche[\s_-]*hinweis|"
+        r"terms?[\s_./-]*(?:of[\s_./-]*use|and[\s_./-]*conditions)|"
+        r"privacy|legal|copyright|acceptable[\s_./-]*use|licen[cs]e",
+        re.I,
+    )
+    policy_routes = set()
+    search_routes = set()
+    required_footer_routes = {
+        urllib.parse.urljoin(url, path)
+        for path in (
+            "/de/nutzungsbedingungen.html", "/de/datenschutzerklaerung.html", "/de/impressum.html"
+        )
+    }
+    footer_links = set(nodes(footer, "a"))
+    footer_policy = set()
+    listing_parsed = urllib.parse.urlsplit(listing)
+    for link in nodes(document, "a") + nodes(head, "link"):
+        href = link.attrs.get("href", "")
+        if not href:
+            continue
+        target = urllib.parse.urljoin(url, href)
+        labels = (
+            link.text(), link.attrs.get("title", ""), link.attrs.get("aria-label", ""), href
+        )
+        if policy_words.search(" ".join(labels)):
+            if link.duplicate_attrs or urllib.parse.urlsplit(target).scheme != "https":
+                raise AdapterError("Ambiguous Volkswagen career policy route", "parse")
+            policy_routes.add(target)
+            if link in footer_links:
+                footer_policy.add(target)
+        route = urllib.parse.urlsplit(target)
+        if route.hostname == listing_parsed.hostname and route.path == listing_parsed.path:
+            if link.duplicate_attrs:
+                raise AdapterError("Ambiguous Volkswagen career listing target", "parse")
+            search_routes.add(target)
+    if listing not in search_routes or not required_footer_routes <= footer_policy:
+        raise AdapterError("Volkswagen career listing or required legal surfaces changed", "parse")
+
+    # Guard explicit direct-access and reuse notices wherever they appear.
+    # Job cards, campaigns, photographs and styles are outside the catalogue frontier.
+    notice_words = re.compile(
+        r"(?:automatisiert\w*|maschinell\w*|systematisch\w*|scrap\w*|crawler\w*|"
+        r"text[ -]and[ -]data[ -]mining|text[ -]und[ -]data[ -]mining|"
+        r"weiterverwend\w*|weitergab\w*|verwert\w*|vervielfältig\w*|"
+        r"wiederveröffentlich\w*|datenerheb\w*|datenausles\w*|"
+        r"unauthori[sz]ed|robots\.txt)"
+        r".{0,100}(?:unzulässig|verboten|zustimmung|erlaubnis|untersagt|"
+        r"prohibit\w*|not allowed|permission|without consent|zugriff|abruf|nutzung|access|extract\w*)"
+        r"|(?:nutzung|zugriff|abruf|access|extract\w*).{0,100}"
+        r"(?:automatisiert\w*|maschinell\w*|systematisch\w*|scrap\w*|crawler\w*)",
+        re.I,
+    )
+    notices = sorted({match.group().casefold() for match in notice_words.finditer(document.text())})
+    facts = {
+        "policy": sorted(policy_routes),
+        "footer_policy": sorted(footer_policy),
+        "search": sorted(search_routes),
+        "robots": sorted(robots),
+        "notices": notices,
+    }
     return hashlib.sha256(
         json.dumps(facts, ensure_ascii=False, separators=(",", ":")).encode()
     ).hexdigest()
@@ -3556,9 +4247,7 @@ INPUTS = {
             "url"
         ): "https://jobs.volkswagen-group.com/content/Nutzungsbedingungen/?locale=de_DE",
         "format": "html",
-        (
-            "sha256"
-        ): "257d17b39bbddfb809d03015552a054c22a979f585f593ef52b91a5c1e58eafa",
+        "terms_content_sha256": "253be4dfb844756222f17d08f13e48e7114e7f023596eaa27cf75d513a763d25",
         "role": "legal terms",
     },
     "input-194": {
@@ -3580,9 +4269,7 @@ INPUTS = {
     "input-196": {
         "url": "https://www.volkswagen-karriere.de/de.html",
         "format": "html",
-        (
-            "sha256"
-        ): "f3e7a788aa530d33a4427a0ac1a0254a056ef9e8209139b76b386547e0b94e25",
+        "career_homepage_sha256": '25c49d340f847aea3fc2f9f92ee7ead8cc1e30de39ca8e089cbe89245eb84660',
         "role": "official homepage",
     },
     "input-197": {
@@ -4126,7 +4813,8 @@ def journal_parent():
     except BaseException:
         journal_failed()
         if fresh and identity is not None:
-            io_close_owned_descriptor(descriptor, identity, True)
+            with contextlib.suppress(BaseException):
+                io_close_owned_descriptor(descriptor, identity, True)
         raise
     if fresh:
         _GUARD_PARENT, _GUARD_PARENT_ID = descriptor, identity
@@ -4455,6 +5143,8 @@ def _journal_preopener_base():
 def journal_preopener():
     _journal_preopener_base()
     protocol_first_wire()
+    if hosted_qa_mode():
+        _HOSTED_QA_WITNESS()
     _journal_preopener_base()
 
 
@@ -4507,8 +5197,7 @@ def io_verify_owned_descriptor(descriptor, expected, directory=False):
 
 
 def io_close_owned_descriptor(descriptor, expected, directory=False):
-    """Close our acquired object only, preserving an active primary error."""
-    primary = sys.exc_info()[1]
+    """Report this close's own failure to its caller's cleanup scope."""
     try:
         info = os.fstat(descriptor)
         if not directory and info.st_nlink == 0:
@@ -4526,8 +5215,7 @@ def io_close_owned_descriptor(descriptor, expected, directory=False):
         os.close(descriptor)
     except BaseException:
         journal_failed()
-        if primary is None:
-            raise
+        raise
 
 
 def io_artifact_descriptor(descriptor, expected):
@@ -4728,6 +5416,7 @@ def io_signal_ready(runner_parent, runner_root, run_id, attempt):
             if (named.st_dev, named.st_ino) != identity:
                 raise AdapterError("Step output path changed", "access")
 
+    own_error_3 = None
     try:
         for name in parts[:-1]:
             descriptor = os.open(
@@ -4756,10 +5445,11 @@ def io_signal_ready(runner_parent, runner_root, run_id, attempt):
         os.fsync(descriptor)
         verify_outputs()
     except BaseException:
+        own_error_3 = sys.exc_info()[1]
         journal_failed()
         raise
     finally:
-        primary = sys.exc_info()[1]
+        primary = own_error_3
         errors = []
         for fd, identity, is_directory, _, _ in reversed(descriptors):
             try:
@@ -4768,6 +5458,78 @@ def io_signal_ready(runner_parent, runner_root, run_id, attempt):
                 errors.append(error)
         if errors and primary is None:
             raise errors[0]
+
+
+@contextlib.contextmanager
+def bounded_response(response, publisher):
+    """Bound body and close by one absolute repeating alarm, including errors."""
+    original = signal.getitimer(signal.ITIMER_REAL)
+    began = time.monotonic()
+    primary = None
+    try:
+        if publisher:
+            duration = min(60, max(0.001, min(_PHASE_END, _RUN_END) - began))
+            if original[0] > 0:
+                duration = min(duration, original[0])
+            signal.setitimer(signal.ITIMER_REAL, duration, 0.1)
+            check_deadline()
+        yield
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        close_error = None
+        try:
+            response.close()
+        except BaseException as error:
+            close_error = error
+            if publisher:
+                journal_failed()
+        finally:
+            if publisher:
+                elapsed = time.monotonic() - began
+                remaining = max(0.001, original[0] - elapsed) if original[0] else 0
+                signal.setitimer(signal.ITIMER_REAL, remaining, original[1])
+        if close_error is not None and primary is None:
+            raise close_error
+
+
+def bounded_body(response, limit, publisher):
+    """Reject ambiguous framing and read every byte under the response timer."""
+    global _PUBLISHER_BYTES
+    headers = response.headers
+    lengths = headers.get_all("Content-Length", [])
+    transfers = headers.get_all("Transfer-Encoding", [])
+    if len(lengths) > 1 or len(transfers) > 1 or lengths and transfers:
+        raise AdapterError("Ambiguous response framing", "fetch")
+    declared = None
+    if lengths:
+        value = lengths[0].strip()
+        if not re.fullmatch(r"[0-9]+", value) or len(value) > 12:
+            raise AdapterError("Invalid response length", "fetch")
+        declared = int(value)
+        if declared > limit:
+            raise AdapterError("Oversized response length", "fetch")
+    if transfers and transfers[0].strip().lower() != "chunked":
+        raise AdapterError("Unsupported response transfer coding", "fetch")
+    if headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+        raise AdapterError("Unsupported response content encoding", "fetch")
+    chunks, total = [], 0
+    while True:
+        part = response.read(min(32768, limit + 1 - total))
+        if not isinstance(part, bytes):
+            raise AdapterError("Invalid response body segment", "fetch")
+        if not part:
+            break
+        chunks.append(part)
+        total += len(part)
+        if publisher:
+            _PUBLISHER_BYTES += len(part)
+        if total > limit:
+            raise AdapterError("Oversized response", "fetch")
+    if declared is not None and total != declared:
+        raise AdapterError("Incomplete response", "fetch")
+    return b"".join(chunks)
 
 
 def _transport_bytes(
@@ -4812,40 +5574,20 @@ def _transport_bytes(
                 if publisher:
                     raise publisher_transport_error(error, current) from None
                 raise
-            if publisher and response.status == 429:
-                # Save the adaptive MAX before any body or further request.
-                # A close failure is unassessed regardless of exception type.
-                try:
-                    record_retry_after(
-                        response.headers.get("Retry-After"), rate_limited=True
-                    )
-                except BaseException:
-                    try:
-                        response.close()
-                    except BaseException:
-                        journal_failed()
-                    raise
-                try:
-                    response.close()
-                except BaseException:
-                    journal_failed()
-                    raise
-                raise AssessedStop(
-                    "Publisher rate limit; timed embargo retained",
-                    "access",
-                    429,
-                )
-            with response:
+            with bounded_response(response, publisher):
+                stop = None
                 status = response.status
+                if publisher and status == 429:
+                    record_retry_after(None, rate_limited=True)
                 response_headers = response.headers
-                retry = response.headers.get("Retry-After")
+                retry = response_headers.get_all("Retry-After", [])
                 robots = (
                     publisher
                     and urllib.parse.urlsplit(url).path == "/robots.txt"
                 )
                 unavailable = robots and 400 <= status < 500 and status != 429
                 if publisher:
-                    record_retry_after(retry, rate_limited=status == 429)
+                    record_retry_after(retry, rate_limit_response=status == 429)
                 if publisher and not robots and status in (401, 403, 451):
                     with locked_budget():
                         state = load_budget()
@@ -4888,54 +5630,31 @@ def _transport_bytes(
                             raise AdapterError(
                                 "Whole publisher byte cap reached", "fetch"
                             )
-                    declared = response.headers.get("Content-Length")
-                    if declared and (
-                        not declared.isdigit() or int(declared) > byte_limit
-                    ):
-                        raise AdapterError(
-                            ("Oversized or invalid response length"), ("fetch")
-                        )
-                    try:
-                        body = response.read(byte_limit + 1)
-                    except (urllib.error.URLError, OSError) as error:
-                        if publisher:
-                            raise publisher_transport_error(
-                                error, current
-                            ) from None
-                        raise
-                    if (
-                        len(body) > byte_limit
-                        or declared
-                        and len(body) != int(declared)
-                    ):
-                        raise AdapterError(
-                            "Incomplete or oversized response", "fetch"
-                        )
-                    if publisher:
-                        _PUBLISHER_BYTES += len(body)
-                    encoding = response.headers.get(
-                        "Content-Encoding", "identity"
-                    )
-                    if encoding != "identity":
-                        raise AdapterError(
-                            ("Unsupported response content encoding"), ("fetch")
-                        )
-                if publisher and not unavailable:
-                    if protocol_primary_challenge(body, status):
-                        protocol_hold(
+                    body = bounded_body(response, byte_limit, publisher)
+                if publisher:
+                    if protocol_primary_challenge(body, status, unavailable):
+                        with locked_budget():
+                            state = load_budget()
+                            protocol_current_owner(state)
+                            state.update(blocked=True, observed_at=time.time())
+                            save_budget(state)
+                        stop = AssessedStop(
                             "Publisher displayed genuine access challenge",
+                            "access",
                             status,
                         )
                     if status == 429:
-                        raise AssessedStop(
+                        stop = stop or AssessedStop(
                             "Publisher rate limit; timed embargo retained",
                             "access",
                             status,
                         )
                     if not robots and status in (401, 403, 451):
-                        raise AssessedStop(
+                        stop = stop or AssessedStop(
                             "Publisher refused content access", "access", status
                         )
+        if stop is not None:
+            raise stop
         if status in (301, 302, 303, 307, 308):
             if not location or redirect == 5:
                 raise AdapterError("Invalid redirect chain", "access")
@@ -4979,6 +5698,7 @@ def _read_input_base(key):
     content_type = (
         headers.get("Content-Type", "").split(";", 1)[0].lower().strip()
     )
+    digest_key = "sha256"
     if info["format"] == "robots":
         if content_type not in {"text/plain", "text/html"}:
             raise AdapterError("Unexpected robots response format", "access")
@@ -4986,8 +5706,18 @@ def _read_input_base(key):
     else:
         if content_type not in {"text/html", "application/xhtml+xml"}:
             raise AdapterError("Unexpected programme response format", "parse")
-        digest = html_fingerprint(body)
-    if digest != info["sha256"]:
+        if "terms_content_sha256" in info:
+            digest_key = "terms_content_sha256"
+            digest = portal_terms_fingerprint(body, info["url"])
+        elif "career_homepage_sha256" in info:
+            digest_key = "career_homepage_sha256"
+            digest = career_homepage_fingerprint(
+                body, headers, info["url"], INPUTS["german-listing"]["url"]
+            )
+        else:
+            digest = html_fingerprint(body)
+    expected = info[digest_key]
+    if digest != expected:
         raise AdapterError(
             "Reviewed Volkswagen AG material or frontier changed: " + key,
             "parse",
@@ -5388,7 +6118,7 @@ def protocol_workflow_definition():
         raise AdapterError("Workflow definition identity changed", "access")
     expected = (
         "active"
-        if os.environ.get("GITHUB_ACTIONS") == "true"
+        if os.environ.get("GITHUB_ACTIONS") == "true" and not hosted_qa_mode()
         else "disabled_manually"
     )
     if obj.get("state") != expected:
@@ -5508,8 +6238,9 @@ def protocol_jobs(identity, attempt, head, current=False):
 def protocol_history():
     """Authenticate current run and every full terminal attempt chronology."""
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    qa_owner = verify_hosted_qa_identity() if hosted_qa_mode() else None
     current = None
-    if hosted:
+    if hosted and qa_owner is None:
         if (
             os.environ.get("GITHUB_REPOSITORY") != "YouthOpps/data-pipeline"
             or os.environ.get("GITHUB_REF") != "refs/heads/main"
@@ -5614,7 +6345,7 @@ def protocol_history():
             raise AdapterError(
                 "Publisher attempt changed during history", "access"
             )
-    if hosted and not found_current:
+    if hosted and qa_owner is None and not found_current:
         raise AdapterError(
             "Current hosted attempt absent from history", "access"
         )
@@ -5674,6 +6405,8 @@ def protocol_history():
     if fresh_projection != sorted(projection) or len(fresh_rows) != total:
         raise AdapterError("Fresh family run prefix changed", "access")
     protocol_workflow_definition()
+    if qa_owner is not None and verify_hosted_qa_identity() != qa_owner:
+        raise AdapterError("QA owner changed during production history", "access")
     stable = [
         {k: v for k, v in r.items() if k != "artifacts"}
         for r in sorted(completed, key=lambda x: (x["id"], x["attempt"]))
@@ -5681,6 +6414,7 @@ def protocol_history():
     return {
         "hosted": hosted,
         "current": current,
+        "qa_owner": qa_owner,
         "latest": latest,
         "artifact": artifact,
         "history_sha256": protocol_digest(stable),
@@ -6054,7 +6788,7 @@ class PrimaryText(HTMLParser):
         if not self.stack or not any(self.stack[-1][1:]):
             self.parts.append(value)
 
-def protocol_primary_challenge(body, status):
+def protocol_primary_challenge(body, status, rep_unavailable=False):
     """Inspect actual HTML only; ancillary mentions are not access refusals."""
     prefix = body[:1024].lstrip().lower()
     if not re.match(
@@ -6067,7 +6801,7 @@ def protocol_primary_challenge(body, status):
     title = " ".join(" ".join(text.head_title_parts).split()).lower()
     primary = " ".join(" ".join(text.parts).split()).lower()
     if re.search(
-        r"just a moment|attention required|access denied|captcha|"
+        r"just a moment|attention required|captcha|"
         r"verify you are human|checking your browser",
         title,
     ):
@@ -6081,7 +6815,9 @@ def protocol_primary_challenge(body, status):
     ]
     if any(p in primary for p in phrases):
         return True
-    if status == 429:
+    if not rep_unavailable and "access denied" in title:
+        return True
+    if status == 429 or rep_unavailable:
         return False
     # Preserve real standalone primary denials without matching help prose.
     return bool(
@@ -6300,6 +7036,7 @@ def protocol_same_history(expected):
         current["history_sha256"] != expected["history_sha256"]
         or current["run_projection"] != expected["run_projection"]
         or current["current"] != expected["current"]
+        or current["qa_owner"] != expected["qa_owner"]
         or current["artifact"] != expected["artifact"]
     ):
         raise AdapterError(
