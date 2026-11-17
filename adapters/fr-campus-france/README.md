@@ -99,40 +99,68 @@ the previous success timestamp.
 
 Daily schedule: **14:38 UTC**, plus filtered main-branch merge and manual
 triggers. GitHub can delay schedules. Production is serialized by publisher
-family `youthopps-campus-france-publisher-v1`, with an exclusive local family
-collection lock as well.
+family `youthopps-campus-france-publisher-v1`, with an exclusive local collection
+lock and stable journal lock. Both actual flock and Linux OFD ownership are
+verified before publisher access.
 
-All publisher hosts share the same persisted physical request budget: starts
-at least 12.2 seconds apart, no more than five starts per rolling 60 seconds,
-with a conservative prior-completion guard and stronger robots/retained limits.
-The inventory page guard waits at least 30 seconds after each preceding page
-completes; it covers the application home and both complete catalogue requests.
-Scripts and legal pages retain the physical budget. The page guard is local to
-the serialized collection, not a global cross-machine page-rate claim.
+The schema-3 journal records logical policy ownership and each physical request's
+reservation, actual close and assessed completion. A request is admitted only
+from a settled owned generation. Publisher starts remain at least 12.2 seconds
+apart, no more than five per rolling minute, with stronger retained constraints
+and a 30-second inventory completion guard. All publisher origins share that
+budget. Literal REP routes are assessed before content, using the current and
+retained legacy product tokens. An unavailable ordinary REP 4xx does not invent
+an allow rule or a content denial; human challenges and applicable restrictions
+remain barriers. Successful REP bodies require the reviewed plain-text grammar.
 
-HTTP 429 stops the current run. Both retained physical and page gaps double,
-with at least 30 minutes of exponential durable cooldown, or a longer valid
-Retry-After/known embargo. Unusable Retry-After values use the timed fallback;
-ordinary rate-warning bodies do not create a permanent refusal. A genuine
-primary human-verification challenge can retain both a hard hold and timed
-backoff. Stricter known state is merged with MAX, never reset. Counter bounds
-fail before more traffic rather than overflowing or shortening history.
+A received 429 durably doubles both gaps and retains at least 30 minutes of
+exponential cooldown before parsing additional constraints or reading the body.
+IMF-fixdate, RFC850 and asctime dates are accepted; ambiguous combined fields
+retain any independently known longer limit and leave the owner unresolved.
+Unsupported arithmetic, framing, incomplete bodies, unassessed policy and
+read/close failures prevent healthy settlement. Applicable content refusals and
+human challenges retain their hold. Legacy rate/policy uncertainty remains
+explicitly unknown and is never cleared by this migration.
 
-The phase cap is 15 minutes and the job cap 20 minutes; the publication token
-is obtained immediately before the sole application command. Persisted slower
-post-429 spacing can exhaust those unchanged caps: automatic completion is not
-guaranteed, and failure must retain state and last-good data.
+The collection cap remains 900 seconds; the job remains 20 minutes. The bounded
+process reserves publication and export time, proves the current hosted job
+before long restoration, and applies repeating deadlines through response close.
+Retained slow spacing may exhaust these caps. An exhausted budget is a failure,
+not permission to shorten a guard or retry the source.
 
-Before publisher access, production restores the newest completed family
-attempt's authenticated inert pacing artifact, ranked by exact-attempt jobs'
-actual completion, not mutable run IDs or `updated_at`. Queued older-ID reruns
-and the current run's preceding attempt remain covered. Repository, source,
-branch, head, run/attempt, job inventory and artifact binding are checked;
-missing or expired latest state fails closed. First-family bootstrap requires
-complete no-prior-family history, independent native QA and a maintainer-approved
-full known state, followed by at least 60 seconds of startup quiet. Its marker
-is intentionally absent until that approval. The workflow always uploads only
-trusted inert pacing state, including after first collection failure.
+Before publisher access, the full workflow-specific run/attempt/job history is
+validated and the newest qualified owned state is authenticated. Issue #417
+permits only the exact 24 immutable pre-request failures between the last owned
+artifact and this migration. Their exact job, head, source/workflow and retained
+log pins are checked; an unexpected attempt, artifact or changed owner blocks
+recovery. The first historical failure occurred at completed-identity metadata
+validation. Its hidden underlying API subcause is unknown.
+
+The original 427-byte owned archive from run `40005091304/1` is accepted only
+with its exact owner, archive/state digests and head. The conservative migration
+floor joins all 11 historical owned states, all seven historical workflow seed
+states, and 24 job-end plus 120-second administrative bounds: **47** distinct
+observations. These bounds do not pretend to be additional publisher requests.
+Stronger current state, pending owners, holds and both unknown-history flags are
+preserved. Missing, empty or malformed established local state cannot bootstrap
+itself. A separate source/machine/state-bound exclusive initializer and distinct
+outside zero-exit success witness require maintainer review before first local
+use; one-use initialization/native claims cannot be reset by the adapter.
+
+Future owned envelopes bind head, immutable adapter bytes and exact state bytes.
+A narrowly typed pre-request metadata-failure receipt carries **no state or
+allowance**. It is emitted only before any possible source open or journal
+mutation, with healthy infrastructure closure. A future consumer must prove the
+full chronology back to an authenticated older owned state. Missing evidence,
+unknown gaps or a possible publisher path cannot use that receipt.
+
+Only the two explicit complete financial-support taxonomy review guards may
+settle an otherwise clean semantic deferral. Their exact script-response receipt,
+logical/physical owners, durable generation, locks, constraints and close must
+all be verified. Generic parser errors, changed routes/legal scope/frontiers,
+retained holds, pending physical work and IO failures remain conservative.
+A failed factual review preserves last-good records while healthy owned pacing
+can still be exported; it cannot silently reset the publisher journal.
 
 ## Run and publication
 
@@ -154,7 +182,7 @@ python -B adapters/fr-campus-france/adapter.py --publish
 Publication changes only
 `YouthOpps/data-source/datas/fr-campus-france/{data,metadata}.json`, atomically
 and with source-scoped GitHub App credentials. Restore/trust happens before
-snapshot reads, and trusted pacing is exported in `finally`, preserving failure
+snapshot reads, and owned pacing or an eligible typed receipt is exported in `finally`, preserving failure
 exit status. First failure creates no placeholder pair; later failure preserves
 exact last-good data and success time, recording failure metadata when possible.
 The metadata attribution identifies CampusBourses / Campus France. Tests and
@@ -240,125 +268,31 @@ robots 429 keeps its timed backoff. Existing scoped refusal distinctions,
 including any reviewed API-only annotation, are retained.
 
 
-### Completion persistence and artifact failure
+## Current continuity maintenance — issue #417
 
-A failed publisher-completion state write makes this process unhealthy. It
-refuses further source requests and collection reentry, and cannot export an
-apparently valid pacing artifact containing older state. Export invalidates
-a safely owned prior artifact through its pinned descriptor before unlinking;
-unsafe files, symlinks and hardlinks are preserved and rejected. The new output
-descriptor remains open through serialization and any workflow readiness
-signal, so a later failure truncates it before attempting removal. No state
-history, actual access hold, collection scope or pacing limit is reset.
+Owned journal reads accumulate legal short reads and verify both metadata and
+acknowledged bytes. Writes acknowledge each truncate/partial-write generation;
+a changed current inode or observed stronger in-place update is preserved and
+refused. Original retained descriptors, parent identity and actual lock owners
+are checked before each request and export. Own close failures propagate even
+when a parent exception is active. Unsafe foreign paths are preserved; an
+unhealthy export is invalidated only through the original acquired authority.
+These checks are advisory and observational, not filesystem compare-and-swap.
 
-This conditional safety repair is checked with offline actual-function failure
-controls. It does not claim a new publisher collection, fresh complete current
-consumer replay, or certification of other legacy pacing/rate-limit behavior.
-Historical native proof is reused only for unchanged normal collection, facts,
-normalization, validation, expiry and publication functions; retained record
-and dependency limits are documented in the linked maintenance issue.
+The earlier #295/#328/#361 repairs and their original qualification remain
+historical context. This migration supersedes their legacy schema, six-key-only
+export and header-only 429 descriptions. It does not identify the hidden
+historical metadata subcause, certify renewed publisher access, or treat the
+historical 378-record collection as fresh production proof.
 
-### Current journal generation and owned IO maintenance
-
-The #295 Group C maintenance keeps the existing state schema, seed markers,
-source inventory, factual normalization, date precision, expiry, publication
-and workflow schedule. Journal reads and writes now use an owned retained
-read/write descriptor under the existing stable state.lock. Current parent,
-named inode and byte generation are checked before and after IO and again
-before opening a publisher request. Writers serialize in RAM and rewrite only
-that held inode; a changed current file is refused instead of overwritten.
-
-A genuinely new publisher namespace can be initialized only within the original
-validated incoming-state restore. Merely computing a path or finding a
-preexisting directory with missing journal/lock files does not grant
-initialization. Collection-lock identity is captured at acquisition; journal
-and collection releases are attempted independently. Cleanup preserves an
-active primary exception and refuses a healthy handoff after an IO failure.
-Export keeps the original six-key envelope and upload contract, with acquired
-writer/reader/parent identities retained through cleanup. It adds no workflow
-readiness-signal dependency.
-
-This intentionally replaces atomic journal replacement with in-place
-persistence: a crash or failed write can leave empty or partial bytes and
-sacrifice availability. Such bytes are refused rather than reconstructed from a
-weaker snapshot. Locks are advisory; these checks are not filesystem
-compare-and-swap and do not authenticate an arbitrary same-user writer ignoring
-the locks. If both persistence and invalidation fail, this unchanged schema has
-no durable pending barrier for a later process; that separate #273 limitation
-remains. Existing actual holds are never cleared.
-
-Validation for this maintenance is bounded ordinary private-namespace execution
-and whole-source static comparison. All original non-IO functions and
-state/seed/refusal literals are unchanged; the narrow main-finally wrapper only
-coordinates export and IO cleanup. Earlier complete successful native evidence
-remains historical qualification, not a native run of this maintenance. The
-original four raw-body services have expired, so no fresh full original-record
-or body replay is claimed. A separately pinned current published snapshot can
-be checked with the current consumer; it is not proof of current upstream
-accessibility or a replacement for the original full native evidence.
-
-The maintenance checks comprise 48 ordinary private contexts across the
-four-source group, plus whole-source AST protection. At immutable data snapshot
-5e7f5f11aa7698844b54ce30be12f55318425fe0, this source has 378 published
-records; the unchanged adapter expiry filter retains 378, and the pinned
-consumer accepts the complete published pair, its expiry-filtered pair, a
-derived valid-empty pair and failed-metadata last-good retention. These current
-published checks do not replay expired original native raw bodies or assess
-current publisher content.
-
-
-## Header-only HTTP 429 stop — issue #328
-
-A received publisher HTTP 429 now stops after the existing header constraints
-are retained, before reading any response body. The response must close
-successfully before this intentional stop is assessed. A close or persistence
-failure follows the existing failure handling; they cannot establish a healthy
-collection. Previously retained holds, numeric MAX constraints, Retry-After
-and unknown history remain. An unread 429 body provides no new challenge
-classification.
-
-This paragraph supersedes earlier 429 body-inspection descriptions. This
-conditional repair preserves non-429 responses, REP selection, the full
-collection/parser/IDs/dates/expiry, GitHub error-body handling, publication,
-caps, workflow, state schema and finite migration markers. It does not add
-missing pending ownership or upgrade a legacy source to a modern continuity
-protocol.
-
-Private ordinary transport/state controls and protected normal-AST comparisons
-qualify this change. Earlier genuine native evidence retains its original code
-and date attribution; no new publisher collection, current factual review,
-complete native replay or production run is claimed. The maintainer alone owns
-workflow/state coordination and the maintenance rollout for issue #328.
-
-
-### Interrupted journal writes
-
-Each in-place truncate and partial write is acknowledged only after its exact
-bounded bytes and full inode generation are checked. The next mutation and
-failure cleanup require that same acknowledgement. A stronger same-inode update
-observed during a write is preserved; the process latches publisher access
-closed instead of continuing or truncating that update. These checks retain the
-existing 16 KiB journal bound, state schema, MAX restrictions and publication
-behavior. They detect observed generation changes; they are not filesystem
-compare-and-swap operations.
-
-
-### Workflow metadata diagnostics — issue #361
-
-Infrastructure failures report bounded reason codes, positive numeric run and
-attempt identifiers when validated, API route classes and available HTTP status.
-Reasons distinguish credentials, transport, HTTP status, JSON decoding, job
-inventory/identity/completion/pagination/bounds, run identity/start/chronology
-and malformed metadata shape. Messages omit API queries, credentials, signed
-URLs, headers, response bodies and arbitrary exception text.
-
-All existing identity, chronology, inventory and trust checks still fail closed.
-Request counts, retry bounds, pacing history, held restrictions, owned-artifact
-requirements and publication behavior are unchanged. These diagnostics make a
-future infrastructure failure actionable; they do not recover missing artifacts
-or establish the cause of the earlier generic failure.
-
-Private metadata controls exercise successful and rejected responses without
-publisher access, native collection or artifact downloads. Existing source-data
-evidence remains historical; this change does not claim new collection or
-production recovery.
+OFF readiness uses actual functions with disposable private journals and inert
+HTTPResponse producers: all 24 immutable prewire boundaries, the real 427-byte
+archive through returned and HTTPError 302s, full family ownership/MAX history,
+both taxonomy guards and conservative peers, all three HTTP-date forms, framing,
+transport/body/close/persistence faults, original main proof/restore/export,
+source-bound one-use initialization and outside success/launch boundaries.
+Current website-consumer positive, empty, expired and wrong-source readiness
+uses explicitly synthetic records. Such controls authorize no live initializer,
+native test, workflow activation or publication. A fresh original native with
+complete retained output/body replay and independent review remains a separate
+gate before production recovery.
