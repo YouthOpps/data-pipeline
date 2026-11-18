@@ -1,6 +1,6 @@
 {
   "branch": "qa/croatia-news-research",
-  "enabled": false,
+  "enabled": true,
   "inventory_routes": [
     "https://www.studyincroatia.hr/news/?page=2",
     "https://www.studyincroatia.hr/news/?page=3",
