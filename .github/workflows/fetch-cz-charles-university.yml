@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   actions: read
+  issues: read
 concurrency:
   group: youthopps-cz-charles-university-publisher-v1
   queue: max

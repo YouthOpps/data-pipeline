@@ -35,6 +35,24 @@ LANGUAGE = "en"
 PUBLISHER_COUNTRY = "CZ"
 PUBLISHER_TYPE = "university"
 ATTRIBUTION = "Charles University"
+MFF_URL = "https://www.mff.cuni.cz/en/admissions/scholarships"
+FSV_URL = (
+    "https://fsv.cuni.cz/en/study/"
+    "scholarships-funding-and-fees/fsv-uk-scholars-program"
+)
+MFF_DETAILS = {
+    "cs": ("cstf-scholarships", "Computer Science Tuition Fee Scholarships"),
+    "math": ("prague-mathematics-tuition-fee-scholarships", "Prague Mathematics Tuition Fee Scholarships"),
+    "physics": ("prague-physics-tuition-fee-scholarships", "Prague Physics Tuition Fee Scholarships"),
+    "linguistics": ("computational-linguistics-scholarship", "Computational Linguistics Scholarship"),
+}
+MFF_AWARDS = (
+    ("cs-ba", "cs", "Computer Science Tuition Fee Scholarship – Bachelor’s", "Computer Science Bachelor’s", 3, 3),
+    ("cs-ma", "cs", "Computer Science Tuition Fee Scholarship – Master’s", "Computer Science Master’s", 2, 2),
+    ("math", "math", "Prague Mathematics Tuition Fee Scholarship", "Mathematics Master’s", 2, 2),
+    ("physics", "physics", "Prague Physics Tuition Fee Scholarship", "Physics Master’s", 2, 2),
+    ("linguistics", "linguistics", "Computational Linguistics Scholarship", "Language Technologies and Computational Linguistics Master’s", 2, 1),
+)
 
 
 class Node:
@@ -126,7 +144,7 @@ def page(url):
     delay = check_robots(url)
     document = (
         fetch_inventory_page(fetch_source, url, min_interval=delay)
-        if url in _INVENTORY_URLS
+        if is_inventory_url(url)
         else fetch_source(url, min_interval=delay)
     )
     if not re.search(
@@ -218,29 +236,22 @@ def read_pages():
         "global": "https://cuni.cz/UKEN-2361.html",
         "carolina": "https://centrumcarolina.cuni.cz/CAENG-70.html",
         "acute": "https://cuni.cz/UKEN-1398.html",
-        "mff": "https://www.mff.cuni.cz/en/admissions/scholarships",
-        "fsv": (
-            "https://fsv.cuni.cz/en/admissions/"
-            "scholarships-funding-and-fees/development-scholarships"
-        ),
+        "mff": MFF_URL,
+        "fsv": FSV_URL,
     }
-    base = "https://www.mff.cuni.cz/en/admissions/scholarships/"
-    for key, slug in (
-        ("cs", "cstf"),
-        ("math", "prague-mathematics-tuition-fee"),
-        ("physics", "prague-physics-tuition-fee"),
-        ("linguistics", "computational-linguistics"),
-    ):
-        urls[key] = (
-            base
-            + slug
-            + (
-                "-scholarship-2026"
-                if key == "linguistics"
-                else "-scholarships-2026"
-            )
-        )
-    pages = {key: (url, content(page(url), url)) for key, url in urls.items()}
+    pages = {}
+    mff_cycle = None
+    for key, url in urls.items():
+        section = content(page(url), url)
+        reviewed = review_page(key, url, section)
+        if key == "mff":
+            mff_cycle = reviewed
+        pages[key] = (url, section)
+    year, detailed_urls = mff_cycle
+    for key, url in detailed_urls.items():
+        section = content(page(url), url)
+        reviewed_mff_leaf(key, url, section, year)
+        pages[key] = (url, section)
     pages["german-call"] = german_document(pages["germany"])
     return pages
 
@@ -785,9 +796,6 @@ REVIEWED_CONDITIONS = {
     "havel": (
         "34125e878d31e1f1509118599d3f3e6941caf209b400f5849c27d0f4fe0dddee"
     ),
-    "international": (
-        "01a034298c6997f0a3479f84e6f4b7741817c66d540b87a78e04b5a40e5df034"
-    ),
     "foundations": (
         "692497332ce71bbe9476c2501a6d6f2bb7ca9e41a25c476162d027b6e4852835"
     ),
@@ -824,18 +832,6 @@ REVIEWED_CONDITIONS = {
     "acute": (
         "fb39f44d5f9df587f85dd09f1a05651c3492f22c388690293f6d0044d4cd3ab0"
     ),
-    "mff": ("13fdac2620fa5c0f29f283a46fa767c6f65d933505d080bdf7dc9d98c3e54624"),
-    "fsv": ("81582bed2f125c6dcaea478a2fdf6166c378eb4aa2f4fd8fa7eca4a002cbee3a"),
-    "cs": ("e3aba2b8cbe82ad391cde69a2af96d416f3d3d434fe7330b082d16a6032de305"),
-    "math": (
-        "9f67c4336d1d007b32b78e01e62c8ed2e93d981b2be63a1fe051e97543c39498"
-    ),
-    "physics": (
-        "9e571bf01d72b4de4e4ce78b03d2fb92b5698cac9071b0c71fcd604a112700a3"
-    ),
-    "linguistics": (
-        "75cefe115574bb8f20bb37e113a92819b261583eeb6b065ecdb4831b2025d06b"
-    ),
 }
 
 
@@ -844,7 +840,7 @@ MOBILITY_CONDITIONS = {
         "8f28594cbad1a2ea43ddb279bf902b83997e3e665efb42b7a568f1cb0485257c"
     ),
     "conditions": (
-        "f78a868ce186e0bfeba9d2ad11f8c07f70d7cd44d4cd65ae7462179543a20723"
+        "ac64afba00fc8687a079a72c1cca246adbb4eeb58dc9e61fa0aa738b904fe3da"
     ),
     "dates": (
         "1430c39546be6133a2b333334f15b173f901d65efe38e26234874d0790c3cc9b"
@@ -1029,6 +1025,19 @@ def mobility_sections(node, url):
                 if anchor.attrs.get("href")
             }
         )
+        if key == "conditions":
+            material, _ = international_material(section, url)
+            links = sorted(
+                (
+                    "" if caption.casefold() in GENERIC_LINK_CAPTIONS else caption,
+                    destination,
+                )
+                for caption, destination in links
+            )
+            result[key] = json.dumps(
+                (material, links), ensure_ascii=False, separators=(",", ":")
+            )
+            continue
         result[key] = json.dumps(
             {"text": section.text(), "links": links},
             ensure_ascii=False,
@@ -1037,25 +1046,405 @@ def mobility_sections(node, url):
     return result
 
 
-def parse_inventory(pages):
-    """Collect genuine programmes and calls from bounded own-publisher pages."""
-    for key, expected in REVIEWED_CONDITIONS.items():
-        text = pages[key][1].text().split("Last change:")[0]
+# Each card retains the reviewed factual projection and its existing record keys.
+INTERNATIONAL_CARDS = {
+    "Aktion": (
+        "c6244dfc61ad2b71dac181337bb99d2e5c3632eaedb7e19c0591701bce72f346",
+        ("aktion",),
+    ),
+    "DAAD": (
+        "ef29b9c4393b20ac9df63bb899176e2157e001759df9dda421aafdbe1441fbab",
+        ("daad-summer", "daad-masters", "daad-research", "daad-cotutelle"),
+    ),
+    "Czech-German Future Fund": (
+        "ff43e9c1f97f060097a9238010d1b6edb0ea7178f4e4ff6e02e078f67eb2787b",
+        ("future-fund",),
+    ),
+    "BTHA": (
+        "293d9788fe98260ac1d5144f9f8f740b3335f22275c80ee622a9228d3070ce93",
+        ("btha-postgraduate", "btha-summer"),
+    ),
+    "GFPS": (
+        "c7e996db2d10e11e0e3c80a3e164abdae6d302f944e23808e773ac247e2963d5",
+        ("gfps",),
+    ),
+    "KAAD": (
+        "63995b07184da01ee09d5b9a2a02e2c4910003cb927cb8ebcad4bc6148a5e763",
+        ("kaad",),
+    ),
+    "CERN - Doctoral Student Programme": (
+        "14c57ad722b53b95dbfd6c892d88413b031f3ee3915c89ab1c2cd1107870ece1",
+        ("cern",),
+    ),
+    "The Institute for Human Sciences": (
+        "435541a143c4d748ab8caa9847e1c1d2f263732c1900e0f6b9bea4eab3d5eff6",
+        (),
+    ),
+    "Baden-Württemberg-Stipendium": (
+        "846d7a5dfd5e329b5389b05a884aea878f6c4a45f824033fda9806a80d08feba",
+        (),
+    ),
+    "The Gerda Henkel Foundation": (
+        "d846fcb7e7ad90c6387cf2ee52d888cf2f6ce7174b86a9eafa8de58c8ec4399a",
+        (),
+    ),
+    "Barrande Fellowship": (
+        "1d940ce4f85e6e21338e5bb20e08f43660a9321dc32c96ec3d7ea9698567891b",
+        ("barrande",),
+    ),
+    "CEEPUS": (
+        "d2b4b17a73eda66f34c14ead605abd5c087c164bd3ef9498a77b828cc2abbbbf",
+        ("ceepus",),
+    ),
+    "Fulbright": (
+        "0120bdf6b57306bc605a9d7df385676f06f3422cab8323078748612c16d92e96",
+        ("fulbright",),
+    ),
+    "Scholarships at Japanese Universities": (
+        "4e3a9368d1523a295d0cf6702c48fedc56514b476ae7e91162c704421350b2d0",
+        (),
+    ),
+    "The Open Society Fund": (
+        "02a604593e6715edc6ccbddab3d3646bae3b7584d4575d8b1978d60fbea156d5",
+        (),
+    ),
+    "The International Visegrad Fund": (
+        "10b17c0133a5693f5b47e7e668726f17f3c0a70b7f23db299b87380ab5a053d0",
+        (),
+    ),
+}
+INTERNATIONAL_ARTICLE_FACTS = "d532a192442209042fed0b284921ac1c02ea213e8fba606a3b6c95edf6a609fa"
+GENERIC_LINK_CAPTIONS = {"here", "more information", "on the website", "learn more"}
+
+
+def international_material(node, url, excluded=()):
+    """Project visible facts and destinations while allowing generic link captions."""
+    words, destinations = [], set()
+
+    def visit(part):
+        if not isinstance(part, Node):
+            words.append(part)
+            return
+        if part in excluded or part.tag in {"script", "style", "noscript"}:
+            return
+        if part.tag == "a" and part.attrs.get("href"):
+            destinations.add(urllib.parse.urljoin(url, part.attrs["href"]))
+            if part.text().casefold() in GENERIC_LINK_CAPTIONS:
+                return
+        for child in part.children:
+            visit(child)
+
+    visit(node)
+    return " ".join(" ".join(words).split()), sorted(destinations)
+
+
+def international_fingerprint(material):
+    encoded = json.dumps(material, ensure_ascii=False, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def international_footer(footer, url):
+    omitted = {
+        item for item in nodes(footer, "div", "prints") if not item.text()
+    }
+    for paragraph in nodes(footer, "p"):
+        text = paragraph.text()
+        if re.fullmatch(
+            r"Last change: [A-Za-z]+ \d{1,2}, \d{4}, \d{1,2}:\d{2}", text
+        ) or text == "Responsible for site content: International Relations Office":
+            omitted.add(paragraph)
+    return international_material(footer, url, omitted)
+
+
+def reviewed_international_cards(node, url):
+    page_title = one(nodes(node, "h1"), "international programmes title")
+    article = one(nodes(node, "div", "node-content"), "international programmes article")
+    footers = nodes(node, "div", "content-footer")
+    if (
+        page_title.text() != "International Scholarship Programmes"
+        or len(footers) > 1
+        or any(international_footer(footer, url) != ("", []) for footer in footers)
+        or international_material(node, url, {page_title, article, *footers}) != ("", [])
+    ):
+        raise AdapterError("International programmes article structure changed", "parse")
+    cards = nodes(article, "div", "medailon-item")
+    material = international_material(article, url, set(cards))
+    if international_fingerprint(material) != INTERNATIONAL_ARTICLE_FACTS:
+        raise AdapterError("International programmes shared information changed", "parse")
+    contents = {}
+    for card in cards:
+        body = one(nodes(card, "div", "medailon-text"), "international scholarship card body")
+        heading = one(
+            nodes(body, "div", "medailon-title"), "international scholarship card title"
+        )
+        title = one(nodes(heading, "h4"), "international scholarship card heading").text()
+        if title in contents or title not in INTERNATIONAL_CARDS:
+            raise AdapterError("International scholarship card inventory changed", "parse")
+        if (
+            international_material(card, url, {body}) != ("", [])
+            or international_fingerprint(international_material(body, url))
+            != INTERNATIONAL_CARDS[title][0]
+        ):
+            raise AdapterError("International scholarship card facts changed: " + title, "parse")
+        contents[title] = body
+    if set(contents) != set(INTERNATIONAL_CARDS):
+        raise AdapterError("International scholarship card inventory changed", "parse")
+    return {
+        record: contents[title]
+        for title, (_, records) in INTERNATIONAL_CARDS.items()
+        for record in records
+    }
+
+
+MFF_INDEX_FACTS = "50f0df148d31df777aaa8c0a90584e6fe6344f8c4e926d01c5bbaf4b3b483410"
+MFF_LEAF_FACTS = {
+    "cs": "6fcadbe7bab83621e717f213bc10bb06cfd450a4ccda1b9f848e6f6aec81b8d7",
+    "math": "7bfd32b68d32d34b7a92376e41e137554636fb019b4a78faebb3af7f85a50277",
+    "physics": "c2c84c2c00997fd6cf3300ee28838975882f3b17291788ceaadb9db6478f2db6",
+    "linguistics": "b8529f970022d5b66c3c4f098c94c04bb9ce2b1873d86926c2875023565ebd33",
+}
+MFF_INDEX_CAPTIONS = (
+    ("Computer Science Tuition Fee Scholarships", "Bachelor’s Programme in Computer Science", "cs"),
+    ("Computer Science Tuition Fee Scholarship", "Master’s Programme in Computer Science", "cs"),
+    ("Prague Mathematics Tuition Fee Scholarship", "Master’s Programme in Mathematics", "math"),
+    ("Prague Physics Tuition Fee Scholarship", "Master’s Programme in Physics", "physics"),
+    ("Computational Linguistic Scholarships", "Language Technologies and Computational Linguistics", "linguistics"),
+)
+MFF_DEADLINE_SENTENCE = re.compile(
+    r"8\) The (?:application deadline|deadline for submitting applications) is "
+    r"(\d{1,2} [A-Z][a-z]+ 20\d{2}|[A-Z][a-z]+ \d{1,2}, 20\d{2})[.;]"
+)
+
+
+def mff_detail_url(role, year):
+    return f"{MFF_URL}/{MFF_DETAILS[role][0]}-{year}"
+
+
+def cycle_material(node, url, year, *, dates=()):
+    """Retain conditions and link associations while comparing relative cycle years."""
+    def relative(text):
+        for field, value in dates:
+            text = text.replace(value, f"{{{field}}}")
+        text = text.replace(f"{year}/{(year + 1) % 100:02}", "{cycle-short}")
+
+        def replace(match):
+            offset = int(match[0]) - year
+            return f"{{cycle+{offset}}}" if 0 <= offset <= 3 else match[0]
+
+        return re.sub(r"\b20\d{2}\b", replace, text)
+
+    text, _ = international_material(node, url)
+    linked = sorted({
+        (relative(link.text()), relative(urllib.parse.urljoin(url, link.attrs["href"])))
+        for link in nodes(node, "a") if link.attrs.get("href")
+    })
+    return international_fingerprint((relative(text), linked))
+
+
+def reviewed_mff_index(url, section):
+    """Require the five known awards and exactly four official destinations."""
+    start = re.search(r"\bStarting from Academic Year (20\d{2})/(\d{2}),", section.text())
+    if url != MFF_URL or start is None:
+        raise AdapterError("MFF academic cycle is unavailable", "parse")
+    year = int(start[1])
+    if int(start[2]) != (year + 1) % 100:
+        raise AdapterError("Inconsistent MFF academic cycle", "parse")
+    reviewed = {}
+    for caption, programme_name, role in MFF_INDEX_CAPTIONS:
+        row = one(
+            [link for link in nodes(section, "a") if link.text() == caption],
+            f"MFF {caption} destination",
+        )
+        expected = mff_detail_url(role, year)
+        target = urllib.parse.urljoin(url, row.attrs.get("href", ""))
+        if target != expected or not any(
+            row in item.children and programme_name in item.text()
+            for item in nodes(section, "li")
+        ):
+            raise AdapterError("MFF award title, study level or destination changed", "parse")
+        reviewed[role] = target
+    if cycle_material(section, url, year) != MFF_INDEX_FACTS:
+        raise AdapterError("MFF scholarship index guidance or inventory changed", "parse")
+    return year, reviewed
+
+
+def reviewed_mff_leaf(role, url, section, year):
+    """Bind the current deadline and fees to the reviewed annual award rules."""
+    heading = one(nodes(section, "h1"), f"MFF {role} document title")
+    if heading.text() != f"{MFF_DETAILS[role][1]} {year}" or url != mff_detail_url(role, year):
+        raise AdapterError("MFF detail does not match the advertised award cycle", "parse")
+    paragraphs = [node.text() for node in nodes(section, "p")]
+    match = one(
+        [match for text in paragraphs if (match := MFF_DEADLINE_SENTENCE.match(text))],
+        f"MFF {role} application deadline",
+    )
+    raw_date = match[1]
+    try:
+        date_format = "%B %d, %Y" if "," in raw_date else "%d %B %Y"
+        deadline = datetime.strptime(raw_date, date_format).date()
+    except ValueError as error:
+        raise AdapterError("Invalid MFF application deadline", "parse") from error
+    if (
+        deadline.year != year
+        or cycle_material(
+            section, url, year, dates=(("application-date", raw_date),)
+        ) != MFF_LEAF_FACTS[role]
+    ):
+        raise AdapterError(f"MFF {role} award conditions or application destinations changed", "parse")
+    return deadline.isoformat(), raw_date
+
+
+FSV_TITLE = "The 'FSV UK SCHOLARS' Program"
+FSV_SECTIONS = (
+    (),
+    ("DETAILED INFORMATION", "What is on offer", "Who is eligible", "Financial terms and conditions"),
+    ("HOW TO APPLY FOR THE SCHOLARSHIP", "Application submission", "Selection of applicants"),
+)
+FSV_SECTION_FACTS = (
+    "b2ab5c6b43e5f49bdf5a722f754292b3bf1c767b6355672657ec5a72476071b5",
+    "c7002031ca946ca116d1842614eb53f025bdbe86fead08cc9ec7aac7f8aa9f83",
+    "4a24da2be00509ed60985a14655e4d7ef89aab9a539a8c8b8f8cfd015780c1d6",
+)
+FSV_DEADLINE = re.compile(
+    r"The deadline for scholarship applications for (20\d{2})/(20\d{2}) is "
+    r"([A-Z][a-z]+ \d{1,2}, 20\d{2})\s*\."
+)
+FSV_STUDY_DEADLINE = re.compile(
+    r"the application fee paid by ([A-Z][a-z]+ \d{1,2}(?:st|nd|rd|th) 20\d{2})\."
+)
+FSV_PAYMENT = re.compile(
+    r"no later than ([A-Z][a-z]+ (20\d{2})) provided that all conditions are met\."
+)
+
+
+def reviewed_fsv(url, section):
+    """Validate each material programme section and extract its two current dates."""
+    frame = one(nodes(section, "div", "controls__print-wrap"), "FSV programme page")
+    title = one(nodes(frame, "h1"), "FSV programme title")
+    sections = nodes(frame, "section", "body")
+    headings = [tuple(node.text() for node in body.walk() if node.tag in {"h2", "h3", "h4"})
+                for body in sections]
+    if (
+        url != FSV_URL or title.text() != FSV_TITLE or tuple(headings) != FSV_SECTIONS
+        or international_material(section, url, {frame}) != (FSV_TITLE, [])
+        or international_material(frame, url, {title, *sections}) != ("", [])
+    ):
+        raise AdapterError("FSV scholarship sections or inventory changed", "parse")
+    application = sections[-1].text()
+    scholarship = one(FSV_DEADLINE.findall(application), "FSV scholarship deadline")
+    study_date = one(FSV_STUDY_DEADLINE.findall(application), "FSV study application deadline")
+    payment, payment_year = one(FSV_PAYMENT.findall(application), "FSV payment schedule")
+    year, next_year = int(scholarship[0]), int(scholarship[1])
+    try:
+        closes = datetime.strptime(scholarship[2], "%B %d, %Y").date()
+        study_closes = datetime.strptime(re.sub(r"(?<=\d)(?:st|nd|rd|th)\b", "", study_date),
+                                         "%B %d %Y").date()
+        payment_date = datetime.strptime(payment, "%B %Y").date()
+    except ValueError as error:
+        raise AdapterError("Invalid FSV application or payment date", "parse") from error
+    if (
+        next_year != year + 1 or closes.year != year or study_closes.year != year
+        or int(payment_year) != year or payment_date < max(closes, study_closes)
+    ):
+        raise AdapterError("Inconsistent FSV academic cycle or deadlines", "parse")
+    dates = (("scholarship-date", scholarship[2]), ("study-date", study_date), ("payment", payment))
+    for body, expected in zip(sections, FSV_SECTION_FACTS):
+        if cycle_material(body, url, year, dates=dates) != expected:
+            raise AdapterError("FSV scholarship facts or application destinations changed", "parse")
+    return year, closes, study_closes, payment, scholarship[2]
+
+
+def review_page(key, url, section):
+    """Reject a factual change before fetching the rest of the source inventory."""
+    if key == "international":
+        return reviewed_international_cards(section, url)
+    if key == "mff":
+        return reviewed_mff_index(url, section)
+    if key == "fsv":
+        return reviewed_fsv(url, section)
+    if key == "mobility":
+        for name, text in mobility_sections(section, url).items():
+            if hashlib.sha256(text.encode()).hexdigest() != MOBILITY_CONDITIONS[name]:
+                raise AdapterError(
+                    "Mobility Fund conditions changed; review section: " + name,
+                    "parse",
+                )
+    expected = REVIEWED_CONDITIONS.get(key)
+    if expected is not None:
+        text = section.text().split("Last change:")[0]
         if hashlib.sha256(text.encode()).hexdigest() != expected:
             raise AdapterError(
                 "Publisher conditions changed; review source page: " + key,
                 "parse",
             )
-    mobility_url, mobility_node = pages["mobility"]
-    for key, text in mobility_sections(mobility_node, mobility_url).items():
-        if (
-            hashlib.sha256(text.encode()).hexdigest()
-            != MOBILITY_CONDITIONS[key]
-        ):
-            raise AdapterError(
-                "Mobility Fund conditions changed; review section: " + key,
-                "parse",
-            )
+
+
+def mff_programmes(pages):
+    """Normalize the five independently attributable current MFF awards."""
+    mff_year, mff_urls = reviewed_mff_index(*pages["mff"])
+    mff_deadlines = {}
+    for role, target in mff_urls.items():
+        url, section = pages[role]
+        if url != target:
+            raise AdapterError("MFF detail route differs from official index", "parse")
+        mff_deadlines[role] = reviewed_mff_leaf(role, url, section, mff_year)
+    records = []
+    for key, role, title, field, years, awards in MFF_AWARDS:
+        deadline, date_evidence = mff_deadlines[role]
+        combined_support = (
+            "No other external living-allowance scholarship or grant. "
+            "CZK 120,000 living allowance/year, subject to first-semester progress. "
+            if role == "linguistics"
+            else "New entrants only, with no other scholarship or maintenance grant. "
+        )
+        url, section = pages[role]
+        result = programme(
+            f"mff-{key}-{mff_year}",
+            f"{title} {mff_year}",
+            url,
+            section.text(),
+            (str(mff_year), date_evidence, "4 200 EUR", "7 500 EUR"),
+            f"Up to {awards} academic-excellence awards for English-taught {field} "
+            f"entrants at CU Mathematics and Physics in {mff_year}/{mff_year + 1}. "
+            "Tuition coverage EUR 4,200/year for EU students "
+            f"or EUR 7,500/year otherwise, for {years} academic years. "
+            "English application documents include CV, motivation, transcripts and two recommendations. "
+            + combined_support
+            + "Continued support requires full-time study and academic progress.",
+            hosts=("CZ",),
+            deadline=deadline,
+        )
+        records.append(result)
+    return records
+
+
+def fsv_programme(url, section):
+    year, deadline, study_deadline, payment, evidence = reviewed_fsv(url, section)
+    return programme(
+        f"fsv-{year}-{(year + 1) % 100:02}",
+        f"FSV UK SCHOLARS scholarship {year}/{year + 1}",
+        url,
+        section.text(),
+        (evidence, "75 000", "no tuition fee waiver"),
+        "One-time payment of about CZK 75,000 for living costs of financially disadvantaged fee-paying "
+        "Social Sciences students. Incoming students and current BA year 1/2 or MA year 1 "
+        "may apply. No tuition waiver. Renewal requires a new application. Submit an English "
+        "or certified-translated application with a motivation essay and academic reference. "
+        f"New applicants must file and pay for programme admission by {study_deadline.isoformat()}. "
+        f"Payment by {payment} after winter registration and tuition settlement, if conditions are met.",
+        hosts=("CZ",),
+        deadline=deadline.isoformat(),
+    )
+
+
+def parse_inventory(pages):
+    """Collect genuine programmes and calls from bounded own-publisher pages."""
+    for key in (*REVIEWED_CONDITIONS, "mobility"):
+        review_page(key, *pages[key])
+    international_url, international_section = pages["international"]
+    international_cards = reviewed_international_cards(
+        international_section, international_url
+    )
     records = []
 
     def add(page_key, key, title, facts, summary, **options):
@@ -1165,28 +1554,14 @@ def parse_inventory(pages):
         ),
         hosts=("CZ",),
     )
-    add(
-        "fsv",
-        "fsv-2026-27",
-        "FSV UK SCHOLARS scholarship 2026/2027",
-        ("April 30, 2026", "75 000"),
-        (
-            "One-time approximately CZK75000 living-cost support for "
-            "financially disadvantaged fee-paying Faculty of Social "
-            "Sciences BA/MA students. Apply as incoming student, BA "
-            "year1/2 or MA year1 for the next year. No tuition waiver; "
-            "renewal needs a new application. English application, "
-            "motivation up to1000 words and academic recommendation "
-            "required; programme application/payment also due "
-            "April30,2026. Payment after winter registration and "
-            "tuition settlement, no later than December2026 subject to "
-            "conditions."
-        ),
-        deadline="2026-04-30",
-        hosts=("CZ",),
-    )
+    records.append(fsv_programme(*pages["fsv"]))
     for key, title, summary, facts, hosts in INTERNATIONAL:
-        add("international", key, title, facts, summary, hosts=hosts)
+        records.append(
+            programme(
+                key, title, international_url, international_cards[key].text(),
+                facts, summary, hosts=hosts,
+            )
+        )
     for key, title, summary, facts, hosts in FOUNDATIONS:
         item = add("foundations", key, title, facts, summary, hosts=hosts)
         if key == "visegrad":
@@ -1360,64 +1735,7 @@ def parse_inventory(pages):
         hosts=("LT", "LV", "CZ", "PL"),
         eligible=("BY",),
     )
-    for key, title, field in (
-        (
-            "cs-ba",
-            "Computer Science Tuition Fee Scholarship – Bachelor’s 2026",
-            "Bachelor",
-        ),
-        (
-            "cs-ma",
-            "Computer Science Tuition Fee Scholarship – Master’s 2026",
-            "Master",
-        ),
-        (
-            "math",
-            "Prague Mathematics Tuition Fee Scholarship 2026",
-            "Mathematics",
-        ),
-        ("physics", "Prague Physics Tuition Fee Scholarship 2026", "Physics"),
-        (
-            "linguistics",
-            "Computational Linguistics Scholarship 2026",
-            "Language Technologies",
-        ),
-    ):
-        source = "cs" if key.startswith("cs-") else key
-        add(
-            source,
-            "mff-" + key,
-            title,
-            ("2026", field),
-            "Academic-excellence award for applicants to the English-taught "
-            + field
-            + " programme at CU Mathematics and Physics starting2026/27. "
-            + "Tuition coverage EUR4200/year for EU students or7100 otherwise, "
-            + (
-                "for three Bachelor’s years. "
-                if key == "cs-ba"
-                else "for two Master’s years. "
-            )
-            + "English application documents include CV, motivation, "
-            + "transcripts and two recommendations, due April30,2026. "
-            + (
-                "No other external living-allowance scholarship/grant; "
-                if key == "linguistics"
-                else (
-                    "New entrants only; no other "
-                    "scholarship/maintenance grant; "
-                )
-            )
-            + "continued support requires full-time study and progress."
-            + (
-                " CZK120000 living allowance/year; first-semester progress "
-                "may reduce support."
-                if key == "linguistics"
-                else ""
-            ),
-            hosts=("CZ",),
-            deadline="2026-04-30",
-        )
+    records.extend(mff_programmes(pages))
     add(
         "mff",
         "mff-math-phd",
@@ -2746,8 +3064,19 @@ _INVENTORY_URLS = {
     "https://cuni.cz/UKEN-2396.html",
     "https://cuni.cz/UKEN-2366.html",
     "https://centrumcarolina.cuni.cz/CAENG-70.html",
-    "https://www.mff.cuni.cz/en/admissions/scholarships",
+    MFF_URL,
 }
+
+
+
+def is_inventory_url(url):
+    """Apply the inventory gap to official MFF occurrence detail routes."""
+    if url in _INVENTORY_URLS:
+        return True
+    return any(
+        re.fullmatch(re.escape(f"{MFF_URL}/{slug}-") + r"20\d{2}", url)
+        for slug, _ in MFF_DETAILS.values()
+    )
 
 
 class PrimaryText(HTMLParser):
@@ -4336,6 +4665,252 @@ def export_family_artifact():
     )
 
 
+
+
+_QUALIFIED_QA_RESUME_APPROVED = True
+_QUALIFIED_HANDOFF_SHA256 = '58c8eb9745228b277f65e32a4ee86949881d01ee577124f36794a3c8e47e2cea'
+_QUALIFIED_QA_HANDOFF = {'issue': 438,
+ 'maintainer_account': 12278069,
+ 'source_sha256': 'ad0dcd95236198f3ab725aa4767faca7115ec5185ab9584939475b8b14cf7300',
+ 'original_test_sha256': '3fcee35709a457a54adf509df4e3a1c8cb1028acba8daa613437fdd2ae1ff813',
+ 'reviewed_report_sha256': '2fea161722e538b2a1a1b7d4a31767d4cc2e166e5731745f29e4517fe60b47a7',
+ 'website_head': '11e66b0107956ed82b9918206e18d8e8fc6778b1',
+ 'verified_current_ids_sha256': '3f16c9cefad3f81bcf37054268bd793f99270753a4028aa071ae78ea76031e5d',
+ 'verified_current_count': 48,
+ 'retired_workflows': [[421945131, '.github/workflows/qa-charles-international-research.yml'],
+                       [421961106, '.github/workflows/qa-charles-international-native.yml'],
+                       [422221514, '.github/workflows/qa-charles-mobility-native.yml'],
+                       [422233850, '.github/workflows/qa-charles-mff-2027-research.yml'],
+                       [422237880, '.github/workflows/qa-charles-mff-2027-evidence.yml'],
+                       [422250879, '.github/workflows/qa-charles-current-native.yml'],
+                       [422264680, '.github/workflows/qa-charles-fsv-native.yml']],
+ 'production': {'owner': [44046868856, 1, 'cz-charles-university'],
+                'head': '341ea050a605004b8b003ff83bc098ee1a28565c',
+                'state_sha256': 'b5e7c3f1cc878f44f1c4ec1fe9a40d81cb2295010ae6298dfd5f45aa5ad0e180',
+                'history_count': 64,
+                'history_sha256': '9ffd22b3b24a07adbad24b49bb637eff0b14c7843c827791ab26e12681a12e79'},
+ 'qa': {'run': 44252329453,
+        'attempt': 1,
+        'workflow_id': 422264680,
+        'workflow_path': '.github/workflows/qa-charles-fsv-native.yml',
+        'branch': 'qa/charles-fsv-native',
+        'head': '2c02b65feca6f0eab08789b6def20d64136d765a',
+        'job': 134625735045,
+        'job_finished': '2026-11-18T06:47:11Z',
+        'grant': 6971093787,
+        'artifact': 14404549261,
+        'artifact_digest': 'sha256:3d58207bd1a2ec4c26b47855954ae34350f6cfa41675c96637404a34aeadbd0c',
+        'artifact_size': 2927787,
+        'artifact_name': 'charles-fsv-native-1',
+        'qualified_ack_sha256': '09aeafdcbf040f984d15db753e9b6fc51d87a5154c93f60a758e727fa5f6d7ef'},
+ 'seed': {'schema': 1,
+          'family': 'youthopps-cz-charles-university-publisher-v1',
+          'legacy_hold_history': 'unlogged_fields_unknown',
+          'research_provenance': {'completed': 1792082436.4999557,
+                                  'interval': 12.2,
+                                  'inventory_completed': 1792082436.4999557,
+                                  'known_blocked': False,
+                                  'legacy_429_history': 'unknown',
+                                  'legacy_hold_history': 'unlogged_fields_unknown',
+                                  'observed_429_since_research': 0,
+                                  'observed_at': 1792081867.0269678,
+                                  'page_gap': 30,
+                                  'public_approval': 'https://github.com/YouthOpps/data-pipeline/issues/215#issuecomment-6197155257',
+                                  'rate_limit_until': 0,
+                                  'research_approval_at': 1792082124.2556894,
+                                  'research_routes_limit': 2,
+                                  'scope': 'Exactly two fixed research GETs: literal robots then the named '
+                                           'content URL; not native or runtime/production clearance',
+                                  'starts': [1791499488.0, 1791499696.0, 1791500253.0, 1791500282.0, 1791501069.0,
+                                             1791501280.0, 1791528940.0, 1791554422.0, 1791586791.0, 1791613818.0,
+                                             1791637762.0, 1791656062.0, 1791670348.0, 1791700660.0, 1791725898.0,
+                                             1791758332.0, 1791787427.0, 1791821842.0, 1791853831.0, 1791902742.0,
+                                             1791933547.0, 1791956168.0, 1791968660.0, 1791981300.0, 1791999902.0,
+                                             1792016119.0, 1792041033.0, 1792050151.0, 1792061133.0, 1792062551.0,
+                                             1792079695.0, 1792082403.68792, 1792082435.048107],
+                                  'until': 1792082403.6876302},
+          'starts': [1794904489.8382602, 1794904502.8266723, 1794904515.6941419, 1794904528.574987,
+                     1794904541.6571567, 1794954593.199045, 1794954607.6024735, 1794955848.5381622,
+                     1794955850.9212065, 1794955863.742222, 1794955865.8313868, 1794979915.9215658,
+                     1794979918.6604228, 1794979931.3622675, 1794979934.0253732, 1794979946.9614542,
+                     1794979949.5359962, 1794979963.3030896, 1794979965.894626, 1794979978.8210056,
+                     1794979981.5076845, 1794979995.0048976, 1794979997.8192556, 1794980028.5371172,
+                     1794980031.3091927, 1794980044.2568417, 1794980047.4167752, 1794980060.3504024,
+                     1794980063.1799998, 1794980076.1373756, 1794980081.2638116, 1794980094.2033644,
+                     1794980096.8003626, 1794980127.5247793, 1794980130.884353, 1794980143.8289952,
+                     1794980146.6499808, 1794980159.5654144, 1794980162.5397263, 1794980175.4747367,
+                     1794980178.2492704, 1794980191.165997, 1794980193.7736752, 1794980206.75043,
+                     1794980209.4786575, 1794980222.4068933, 1794980224.8970797, 1794980237.6645122,
+                     1794980244.2063057, 1794980257.1443255, 1794980261.3396018, 1794980274.729564,
+                     1794980278.4885633, 1794981442.7801826, 1794981446.635848, 1794981460.074411,
+                     1794981463.9070842, 1794981495.3170571, 1794981499.334575, 1794981530.2357275,
+                     1794981533.919434, 1794981566.299907, 1794981570.2798076, 1794982603.7087352,
+                     1794982609.3765678, 1794982622.2413266, 1794982627.4483738, 1794982640.6920755,
+                     1794982646.045857, 1794982659.257041, 1794982664.5337827, 1794982677.7742627,
+                     1794982683.3224738, 1794982696.5419004, 1794982701.6702082, 1794982732.7129462,
+                     1794982737.9431295, 1794982751.1915414, 1794982756.6022174, 1794982769.8254278,
+                     1794982775.0271175, 1794982788.2614768, 1794982793.5778618, 1794982806.8284183,
+                     1794982812.2539446, 1794982843.2816968, 1794982848.5595224, 1794982861.8857217,
+                     1794982867.2340748, 1794982880.480609, 1794982885.9707172, 1794982899.8170836,
+                     1794982905.0015771, 1794982918.2582738, 1794982923.7098985, 1794982937.1297224,
+                     1794982942.2143447, 1794982955.682036, 1794982960.923359, 1794982974.0362995,
+                     1794982979.4031973, 1794982992.7074368, 1794982998.1022594, 1794983011.6217747,
+                     1794983017.1557326, 1794983030.26799, 1794983035.380488, 1794983048.4159591,
+                     1794983054.2109916, 1794983066.9460835, 1794983072.309094, 1794983787.9015534,
+                     1794983795.1992695, 1794983808.1517186, 1794983814.883126, 1794983828.4919195,
+                     1794983835.3584538, 1794983848.3859358, 1794983855.61252, 1794983869.1442215,
+                     1794983875.9631453, 1794983888.991699, 1794983895.6551762, 1794983926.5178487,
+                     1794983933.4596953, 1794983946.517017, 1794983953.4740744, 1794983966.5578883,
+                     1794983973.6398463, 1794983986.7040088, 1794983993.4460285, 1794984007.0128384,
+                     1794984013.8972318, 1794984044.7505372, 1794984051.7223713, 1794984064.7841368,
+                     1794984071.900031, 1794984085.519895, 1794984092.6746216, 1794984106.043138,
+                     1794984112.9453237, 1794984126.5084705, 1794984133.5312896, 1794984146.5737216,
+                     1794984153.3456576, 1794984166.2680879, 1794984172.9980156, 1794984185.9200196,
+                     1794984192.4990647, 1794984205.6437662, 1794984212.791074, 1794984225.8599226,
+                     1794984232.6617286, 1794984245.9396453, 1794984252.742556, 1794984265.779003,
+                     1794984272.78523, 1794984286.0397902, 1794984292.4675362, 1794984323.6091478,
+                     1794984330.5841594, 1794984361.7902014, 1794984368.9186795, 1794984399.7141416,
+                     1794984406.3991723, 1794984419.4285789, 1794984425.9918702],
+          'interval': 12.2,
+          'until': 1794983787.9013684,
+          'page_gap': 30,
+          'completed': 1794984426.9736302,
+          'inventory_completed': 1794984407.228491,
+          'blocked': False,
+          'legacy_429_history': 'unknown',
+          'observed_429_since_transition': 0,
+          'rate_limit_until': 0,
+          'observed_at': 1794984426.9736302}}
+
+def handoff_digest(value):
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def authorize_qualified_handoff(scope):
+    """Authenticate the first production continuation against its exact hosted review."""
+    repository = "YouthOpps/data-pipeline"
+    head = os.environ.get("GITHUB_SHA", "")
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or not re.fullmatch(r"[0-9a-f]{40}", head)
+        or handoff_digest(scope) != _QUALIFIED_HANDOFF_SHA256
+    ):
+        raise AdapterError("Reviewed Charles production handoff identity differs", "access")
+    current_run_identity()
+    qa = scope["qa"]
+    for workflow_id, path in scope["retired_workflows"]:
+        remote = workflow_api(f"/actions/workflows/{workflow_id}")
+        if (
+            remote.get("id") != workflow_id or remote.get("path") != path
+            or remote.get("state") != "disabled_manually"
+        ):
+            raise AdapterError("An earlier Charles QA workflow is not retired", "access")
+
+    fields = {
+        "id": qa["run"], "run_attempt": 1, "workflow_id": qa["workflow_id"],
+        "head_sha": qa["head"], "head_branch": qa["branch"],
+        "path": qa["workflow_path"], "event": "push", "status": "completed",
+        "conclusion": "success",
+    }
+    run = workflow_api(f"/actions/runs/{qa['run']}/attempts/1")
+    history = workflow_api(f"/actions/workflows/{qa['workflow_id']}/runs?per_page=100")
+    runs = history.get("workflow_runs", [])
+    if (
+        history.get("total_count") != 1 or len(runs) != 1
+        or any(run.get(key) != value or runs[0].get(key) != value for key, value in fields.items())
+        or run.get("repository", {}).get("full_name") != repository
+        or run.get("head_repository", {}).get("full_name") != repository
+    ):
+        raise AdapterError("Reviewed Charles native chronology differs", "access")
+
+    jobs = workflow_api(f"/actions/runs/{qa['run']}/attempts/1/jobs?per_page=100")
+    job = jobs.get("jobs", [])
+    fields = {
+        "id": qa["job"], "run_id": qa["run"], "run_attempt": 1,
+        "head_sha": qa["head"], "name": "native", "status": "completed",
+        "conclusion": "success", "completed_at": qa["job_finished"],
+    }
+    if jobs.get("total_count") != 1 or len(job) != 1 or any(
+        job[0].get(key) != value for key, value in fields.items()
+    ):
+        raise AdapterError("Reviewed Charles native job custody differs", "access")
+
+    items = workflow_api(f"/actions/runs/{qa['run']}/artifacts?per_page=100")
+    artifacts = items.get("artifacts", [])
+    fields = {
+        "id": qa["artifact"], "name": qa["artifact_name"], "expired": False,
+        "digest": qa["artifact_digest"], "size_in_bytes": qa["artifact_size"],
+    }
+    if (
+        items.get("total_count") != 1 or len(artifacts) != 1
+        or any(artifacts[0].get(key) != value for key, value in fields.items())
+        or artifacts[0].get("workflow_run", {}).get("id") != qa["run"]
+        or artifacts[0].get("workflow_run", {}).get("head_sha") != qa["head"]
+    ):
+        raise AdapterError("Reviewed Charles native archive custody differs", "access")
+
+    lines = {
+        f"Approved Charles production head {head}",
+        f"Charles production scope {_QUALIFIED_HANDOFF_SHA256}",
+    }
+    approvals = workflow_api(f"/issues/{scope['issue']}/comments?per_page=100")
+    if not isinstance(approvals, list) or len(approvals) >= 100:
+        raise AdapterError("Incomplete Charles production grant inventory", "access")
+    grants = [
+        item for item in approvals
+        if item.get("user", {}).get("id") == scope["maintainer_account"]
+        and item.get("user", {}).get("type") == "User"
+        and isinstance(item.get("body"), str)
+        and lines.issubset(item["body"].splitlines())
+    ]
+    if len(grants) != 1:
+        raise AdapterError("Exact Charles production grant unavailable", "access")
+    grant = grants[0]
+    created = grant.get("created_at", "")
+    if (
+        not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", created)
+        or created <= qa["job_finished"] or grant.get("updated_at") != created
+        or grant.get("issue_url") != f"https://api.github.com/repos/{repository}/issues/{scope['issue']}"
+    ):
+        raise AdapterError("Charles production grant ownership differs", "access")
+
+
+def apply_qualified_handoff(latest, incoming):
+    """Carry the complete retired native pacing into the first resumed production run."""
+    if _QUALIFIED_QA_RESUME_APPROVED is not True:
+        raise AdapterError("Reviewed Charles production continuation remains OFF", "access")
+    scope = _QUALIFIED_QA_HANDOFF
+    anchor = scope["production"]
+    identity = tuple(anchor["owner"])
+    if _SCANNED_HISTORY.get(identity[:2]) != (anchor["head"], _WORKFLOW_ID):
+        raise AdapterError("Charles production handoff anchor changed", "access")
+    if handoff_digest(scope) != _QUALIFIED_HANDOFF_SHA256:
+        raise AdapterError("Charles production handoff state changed", "access")
+    seed = validate_budget(scope["seed"])
+    if latest != identity:
+        floors = ("interval", "page_gap", "completed", "inventory_completed",
+                  "rate_limit_until", "until", "observed_429_since_transition")
+        if (
+            any(incoming[key] < seed[key] for key in floors)
+            or seed["blocked"] and not incoming["blocked"]
+            or incoming["research_provenance"] != seed["research_provenance"]
+        ):
+            raise AdapterError("Newer production state does not preserve the native handoff", "access")
+        return incoming
+
+    rows = sorted((run, attempt, head, workflow, "completed")
+                  for (run, attempt), (head, workflow) in _SCANNED_HISTORY.items())
+    if (
+        len(rows) != anchor["history_count"]
+        or handoff_digest(rows) != anchor["history_sha256"]
+        or handoff_digest(incoming) != anchor["state_sha256"]
+    ):
+        raise AdapterError("Reviewed prior Charles production ownership changed", "access")
+    authorize_qualified_handoff(scope)
+    return merge_budget(incoming, seed)
+
+
 def restore_family_artifact():
     """Require exact history for the reviewed legacy state handoff."""
     global _JOURNAL_BOOTSTRAP_ALLOWED
@@ -4442,6 +5017,7 @@ def restore_family_artifact():
         incoming = download_inert_artifact(
             latest, matches[0]["id"], matches[0]["digest"]
         )
+    incoming = apply_qualified_handoff(latest, incoming)
     _JOURNAL_BOOTSTRAP_ALLOWED = (
         _STATE_INITIALIZING
         and not _JOURNAL_SAVE_ATTEMPTED

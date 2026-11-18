@@ -87,7 +87,7 @@ The reviewed accessible inventory contains **54 records**:
 | Mobility Fund | Autumn2026 call, one record with four mobility categories |
 | University scholarship hub | Doctoral studying income; STARS; GI Bill |
 | Havel detail | Václav Havel Bursary |
-| FSV own detail | FSV UK SCHOLARS2026/27 |
+| FSV own detail | FSV UK SCHOLARS annual application |
 | International programmes | Aktion; four named DAAD schemes (summer course, all-fields Master's, research grants, cotutelle); Czech-German Future Fund; two BTHA schemes (postgraduate, summer/language); GFPS; KAAD; CERN Doctoral Student Programme; Barrande; CEEPUS; Fulbright |
 | Foundations | Sophia; Foundation for the Development of Education; Bakala; Bader; Experentia; SYLFF; Visegrad |
 | Japanese programmes | JASSO; MEXT, consolidated across both hubs and their own detail pages |
@@ -133,6 +133,20 @@ Excluded with source provenance:
 
 Unexpected changes to reviewed programme conditions or inventory fail parsing
 rather than publishing outdated amounts/eligibility or silently dropping awards.
+
+The international scholarship page uses a reviewed set of 16 programme and
+information cards. The adapter checks each card's facts and linked destinations,
+and validates the 14 existing programme records against their own cards. Card
+placement, generic link captions and known publication timestamps can change
+independently of the facts. Changes to shared guidance, eligibility, award
+amounts, application destinations or card membership require review. Review
+occurs during page reads so a changed page stops the remaining collection.
+
+The Japanese and Visegrad information cards refer to programmes already
+represented through the dedicated detail and foundation routes. The IWM,
+Gerda Henkel and Open Society Fund cards point to broader funding information.
+The Baden-Württemberg-Stipendium card identifies a scholarship overview with
+no dated call. The reviewed records from this page retain their existing scope.
 The factual summaries are protected by hashes of their actual scoped publisher
 content (tracking/navigation excluded; changing footer timestamps ignored).
 Changing a funding condition requires a fresh source review and adapter update.
@@ -147,8 +161,49 @@ exclusion, Category C event/contribution attachments and payment no earlier than
 31 December 2026, alongside the existing eligibility and indicative amounts.
 Historical HTML was unavailable, so this review does not identify the exact old
 textual change or classify the previous fingerprint failure as cosmetic.
+The subsequent [17 November 2026 hosted capture](https://github.com/YouthOpps/data-pipeline/actions/runs/44193685930)
+verified that the Autumn round had closed on 30 October and that the Spring
+round was planned for April 2027 without a published closing date. The observed
+application and financial section retained the existing funding amounts,
+combination exclusions and payment floor. The conditions check now projects
+the complete visible section text and exact linked destinations, including
+meaningful link labels. Generic link captions and non-visible presentation
+elements can vary. The layout, remaining material sections and published
+eligibility, expiry and record identities follow the existing checks.
 The collector still retrieves and verifies every required live page each run;
 it does not emit a cached snapshot when access or verification fails.
+
+The faculty scholarship index supplies the academic cycle and matching detail
+links for five awards. Computer Science Bachelor’s and Master’s share one
+document and retain separate records. The collector accepts only the reviewed
+same-host detail roles, verifies each linked cycle and reads the application
+deadline from each award’s regulation. Each annual occurrence has its own ID;
+the ongoing PhD programmes keep their existing IDs. The material review
+allows the dates and cycle to advance. It flags a change in award counts,
+financial rules, eligibility, renewal terms or application destinations.
+
+The [2027/28 hosted review](https://github.com/YouthOpps/data-pipeline/actions/runs/44247621941)
+confirmed four official detail pages with a 30 April 2027 deadline. The five
+awards cover EUR 4,200 per year for EU students or EUR 7,500 otherwise.
+Computational Linguistics also offers CZK 120,000 per year for living
+expenses, subject to the published study-progress conditions.
+
+The [2027/28 FSV review](https://github.com/YouthOpps/data-pipeline/actions/runs/44249892126)
+confirmed that the former Development Scholarships URL redirects to the
+official FSV UK SCHOLARS programme. The collector reads the canonical URL
+directly and checks the introduction, eligibility and financial conditions,
+and application material independently. It derives each occurrence’s year,
+scholarship and study application dates and payment month from the same
+publisher page. Both application routes close on 30 April 2027 for the
+2027/28 cycle. The one-time payment of about CZK 75,000 covers living costs
+and is due by December 2027 after the stated conditions are met.
+
+The [complete hosted verification](https://github.com/YouthOpps/data-pipeline/actions/runs/44252329453)
+validated 54 collected records and 48 current records through the website
+reader. It retained all 42 current records from the previous publication
+and added the six current MFF and FSV awards. The first production continuation
+requires a review of the exact revision and inherits the verified pacing
+journal before opening any publisher request.
 
 ## Dates, countries and conflicts
 
@@ -161,9 +216,9 @@ confirmation six weeks ahead and payment/report dates are distinct milestones.
 Yearless annual dates/months, rolling application lead times and call-publication
 milestones remain deadline-null. Genuine programme overviews may have unknown
 status. Acute emergency Rector applications explicitly run throughout the
-calendar year and are open. Explicit elapsed dated calls remain in the current
-publisher inventory with `expired` status, including FSV and the five MFF
-2026/27 awards (deadline April30,2026).
+calendar year and are open. Explicit elapsed dated calls still listed by the
+publisher retain `expired` status. The MFF and FSV faculties now list their
+2027/28 awards in place of the preceding cycle.
 
 The German monthly-call hub's “currently open” statement conflicts with its
 actually linked DOCX: applications for2026 stays were due **December8,2025**.
