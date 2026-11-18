@@ -739,7 +739,7 @@ def request_bytes(
         )
 
 
-_QUALIFIED_QA_RESUME_APPROVED = False
+_QUALIFIED_QA_RESUME_APPROVED = True
 _QUALIFIED_QA_ISSUE_COMMENTS = '/issues/420/comments?per_page=100'
 _QUALIFIED_QA_SCOPE = {'current_frontier_id_diff_sha256': '57e75dc1eeb04abdf883c6e557bef0057155c6127473bf306113e17069b9336e',
  'frozen_at': '2026-11-18T06:25:31Z',
