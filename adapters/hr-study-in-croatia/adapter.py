@@ -56,6 +56,58 @@ RUN_TIMEOUT = 1290
 EXPORT_TIMEOUT = 30
 _STATE_SCHEMA = 1
 _ARTIFACT_NAME = "studyincroatia-pacing-state"
+_PREVIOUS_PRODUCTION_OWNER = (44201367652, 1, 'hr-study-in-croatia')
+_NATIVE_HANDOFF = {'actual_starts': [1794982792.9547126,
+                   1794982806.9904978,
+                   1794982821.3754811,
+                   1794982835.5715797,
+                   1794982849.655146,
+                   1794982863.7084048,
+                   1794982877.8186255,
+                   1794982891.890781,
+                   1794982905.9637806,
+                   1794982920.0314083,
+                   1794982934.2764037,
+                   1794982948.4749296,
+                   1794982962.558577,
+                   1794982976.5367942,
+                   1794982990.5260777,
+                   1794983004.6348014,
+                   1794983036.709344,
+                   1794983068.6700513,
+                   1794983100.519423,
+                   1794983132.5039234,
+                   1794983146.5699244],
+ 'approval_id': None,
+ 'approval_scope': '94f1ed78bdc085028b3ac34c350e6a19f92be7c31c47f1e1d4294f368523a77d',
+ 'archive_bytes': 1394987,
+ 'archive_digest': 'sha256:d54b2dd38f9ff853c14a5826e56e719253554276aaef1110b2e60fa5abcf1872',
+ 'artifact_id': 14404151603,
+ 'capture_digest': '6c1dda6b940dd6acde5287e7f1804b5e96c4dd260c230773c83da6c423a69245',
+ 'completed_at': '2026-11-18T06:25:52Z',
+ 'consumer_replay_digest': 'c3859a149566acb2c8835217b027cbaf5490a1e4a0ad500a64abe78e6d6bcbb0',
+ 'host': 'productionresultssa32.blob.core.windows.net',
+ 'identity': {'grant': 6970817986,
+              'head': '305db5682ff25c2e99e8a845024d263c719ff074',
+              'job_id': 134619198879,
+              'ref': 'refs/heads/qa/croatia-archive-native',
+              'run_attempt': 1,
+              'run_id': 44250345680,
+              'workflow_id': 422253370},
+ 'maintainer_id': 12278069,
+ 'native_stdout_digest': 'acfe1706bdc20c60e27330078b13627517b0e048644f8bcd358a92a60395f85e',
+ 'state': {'blocked': False,
+           'family': 'youthopps-studyincroatia-publisher-v1',
+           'interval': 12.2,
+           'legacy_rate_history_unknown': True,
+           'not_before': 1794983159.3076653,
+           'observed_at': 1794983147.1076653,
+           'page_interval': 30,
+           'rate_failures': 0,
+           'schema': 1,
+           'starts': [1794983099.245646, 1794983131.1214647, 1794983145.2526531]},
+ 'state_digest': 'b40a3a35207c3697e6e5ddc1ecbed9920648af58653482d7249e7e92a6eaba90',
+ 'workflow': '.github/workflows/qa-croatia-archive-native.yml'}
 _STATE_PATH = _STATE_LOCK = None
 _COLLECTION_LOCK_FD = None
 _COLLECTION_STARTED = None
@@ -946,11 +998,7 @@ def scan_family_history():
     total, scanned = None, 0
     seen_ids = set()
     for page in range(1, 101):
-        route = (
-            "/actions/runs"
-            if hosted
-            else ("/actions/workflows/" + str(definition["id"]) + "/runs")
-        )
+        route = "/actions/workflows/" + str(definition["id"]) + "/runs"
         result = workflow_api(route + f"?per_page=100&page={page}")
         count, runs = result.get("total_count"), result.get("workflow_runs")
         if (
@@ -1087,11 +1135,8 @@ def scan_family_history():
     raise AdapterError("Workflow inventory exceeds reviewed bound", "access")
 
 
-def download_inert_artifact(identity, artifact_id, digest=None):
-    (
-        "Download a bounded authenticated artifact, stripping "
-        "cross-origin auth."
-    )
+def owned_archive_bytes(artifact_id, digest, *, byte_limit=32768, expected_host=None, exact_size=None):
+    """Get an owned authenticated ZIP without forwarding GitHub credentials."""
     token = os.environ.get("GITHUB_TOKEN", "")
     url = _WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip"
     request = urllib.request.Request(
@@ -1103,45 +1148,64 @@ def download_inert_artifact(identity, artifact_id, digest=None):
         },
     )
     try:
-        try:
-            response = _OPENER.open(request, timeout=request_timeout())
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            if response.status != 302:
-                raise ValueError("Expected artifact redirect")
-            destination = response.headers.get("Location", "")
-            response.read(1001)
-        parsed = urllib.parse.urlsplit(destination)
+        response = _OPENER.open(request, timeout=request_timeout())
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        if response.status != 302:
+            raise ValueError("Expected artifact redirect")
+        destination = response.headers.get("Location", "")
+        response.read(1001)
+    parsed = urllib.parse.urlsplit(destination)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.port
+    ):
+        raise ValueError("Unsafe artifact URL")
+    if "." not in parsed.hostname or parsed.hostname.endswith(
+        ((".local"), (".internal"), (".localhost"))
+    ):
+        raise ValueError("Private artifact hostname")
+    try:
+        ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("Literal artifact address")
+    # Signed URL is never stored or included in exceptions; no auth header.
+    if expected_host is None:
+        status, _, body = request_bytes(destination, byte_limit=byte_limit)
+    else:
+        if parsed.hostname != expected_host:
+            raise ValueError("Unexpected owned archive transfer origin")
+        transfer = urllib.request.Request(destination, headers={"User-Agent": _USER_AGENT})
+        with _OPENER.open(transfer, timeout=request_timeout()) as response:
+            status = response.status
+            if status != 200:
+                raise ValueError("Unexpected owned archive transfer status")
+            body = response.read(byte_limit + 1)
+    if (
+        status != 200 or len(body) > byte_limit
+        or exact_size is not None and len(body) != exact_size
+    ):
+        raise ValueError("Invalid artifact response")
+    if digest is not None:
         if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-            or parsed.port
+            not isinstance(digest, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+            or digest[7:] != hashlib.sha256(body).hexdigest()
         ):
-            raise ValueError("Unsafe artifact URL")
-        if "." not in parsed.hostname or parsed.hostname.endswith(
-            ((".local"), (".internal"), (".localhost"))
-        ):
-            raise ValueError("Private artifact hostname")
-        try:
-            ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            pass
-        else:
-            raise ValueError("Literal artifact address")
-        # Signed URL is never stored or included in exceptions; no auth header.
-        status, _, body = request_bytes(destination, byte_limit=32768)
-        if status != 200 or len(body) > 32768:
-            raise ValueError("Invalid artifact response")
-        if digest is not None:
-            if (
-                not isinstance(digest, str)
-                or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
-                or digest[7:] != hashlib.sha256(body).hexdigest()
-            ):
-                raise ValueError("Artifact digest mismatch")
+            raise ValueError("Artifact digest mismatch")
+    return body
+
+
+def download_inert_artifact(identity, artifact_id, digest=None):
+    """Verify the normal producer-owned pacing envelope."""
+    try:
+        body = owned_archive_bytes(artifact_id, digest)
         with zipfile.ZipFile(io.BytesIO(body)) as archive:
             entries = archive.infolist()
             if len(entries) != 1 or entries[0].filename != "pacing-state.json":
@@ -1179,6 +1243,133 @@ def download_inert_artifact(identity, artifact_id, digest=None):
         raise AdapterError(
             ("Invalid or unavailable family pacing artifact"), ("access")
         ) from None
+
+
+def validate_native_grant():
+    handoff = _NATIVE_HANDOFF
+    scope = {key: value for key, value in handoff.items() if key not in {"approval_id", "approval_scope"}}
+    canonical = json.dumps(scope, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    if hashlib.sha256(canonical).hexdigest() != handoff["approval_scope"]:
+        raise AdapterError("Reviewed native handoff scope differs", "access")
+    comment_id = handoff["approval_id"]
+    if type(comment_id) is not int or comment_id <= 0:
+        raise AdapterError("Study in Croatia native handoff is OFF", "access")
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("GITHUB_REPOSITORY") != "YouthOpps/data-pipeline"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+        or os.environ.get("GITHUB_RUN_ATTEMPT") != "1"
+        or os.environ.get("GITHUB_WORKFLOW_REF") != (
+            "YouthOpps/data-pipeline/.github/workflows/fetch-hr-study-in-croatia.yml@refs/heads/main"
+        )
+    ):
+        raise AdapterError("Native handoff requires the exact hosted production source", "access")
+    grant = workflow_api(f"/issues/comments/{comment_id}")
+    statement = "Approved Croatia production handoff " + handoff["approval_scope"]
+    if (
+        grant.get("id") != comment_id
+        or grant.get("user", {}).get("id") != handoff["maintainer_id"]
+        or grant.get("user", {}).get("type") != "User"
+        or grant.get("issue_url") != _WORKFLOW_GITHUB + "/issues/450"
+        or grant.get("html_url") != f"https://github.com/YouthOpps/data-pipeline/issues/450#issuecomment-{comment_id}"
+        or not isinstance(grant.get("created_at"), str)
+        or grant["created_at"] <= handoff["completed_at"]
+        or grant.get("updated_at") != grant["created_at"]
+        or statement not in grant.get("body", "").splitlines()
+    ):
+        raise AdapterError("Exact immutable production handoff grant is unavailable", "access")
+    return handoff
+
+
+def verified_native_state():
+    """Use the single retired native source-test owner for the first fresh producer."""
+    handoff = validate_native_grant()
+    identity = handoff["identity"]
+    run_id, workflow_id = identity["run_id"], identity["workflow_id"]
+    run = workflow_api(f"/actions/runs/{run_id}/attempts/1")
+    definition = workflow_api(f"/actions/workflows/{workflow_id}")
+    history = workflow_api(f"/actions/workflows/{workflow_id}/runs?per_page=100")
+    jobs = workflow_api(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=100")
+    expected = {
+        "id": run_id, "workflow_id": workflow_id, "run_attempt": 1,
+        "head_sha": identity["head"], "path": handoff["workflow"],
+        "head_branch": identity["ref"].removeprefix("refs/heads/"),
+        "status": "completed", "conclusion": "failure", "event": "push",
+    }
+    rows = history.get("workflow_runs", [])
+    if (
+        definition.get("id") != workflow_id or definition.get("path") != handoff["workflow"]
+        or definition.get("state") != "disabled_manually"
+        or history.get("total_count") != len(rows) or len(rows) != 1
+        or any(item.get(key) != value for item in (run, rows[0]) for key, value in expected.items())
+        or any(run.get(role, {}).get("id") != handoff["maintainer_id"] for role in ("actor", "triggering_actor"))
+        or any(run.get(repo, {}).get("full_name") != "YouthOpps/data-pipeline"
+               for repo in ("repository", "head_repository"))
+    ):
+        raise AdapterError("Exact retired native workflow lineage differs", "access")
+    expected_job = {
+        "id": identity["job_id"], "run_id": run_id, "run_attempt": 1, "head_sha": identity["head"],
+        "status": "completed", "conclusion": "failure", "name": "native",
+        "completed_at": handoff["completed_at"],
+    }
+    if (
+        jobs.get("total_count") != 1 or len(jobs.get("jobs", [])) != 1
+        or any(jobs["jobs"][0].get(key) != value for key, value in expected_job.items())
+    ):
+        raise AdapterError("Exact completed native job differs", "access")
+    artifact = workflow_api(f"/actions/artifacts/{handoff['artifact_id']}")
+    listing = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+    expected_artifact = {
+        "id": handoff["artifact_id"], "name": "croatia-archive-native-1", "expired": False,
+        "size_in_bytes": handoff["archive_bytes"], "digest": handoff["archive_digest"],
+    }
+    owned = listing.get("artifacts", [])
+    if (
+        listing.get("total_count") != len(owned) or len(owned) != 1
+        or any(item.get(key) != value for item in (artifact, owned[0])
+               for key, value in expected_artifact.items())
+        or artifact.get("workflow_run", {}).get("id") != run_id
+        or artifact["workflow_run"].get("head_sha") != identity["head"]
+    ):
+        raise AdapterError("Exact native pacing archive ownership differs", "access")
+    try:
+        raw = owned_archive_bytes(
+            artifact["id"], artifact["digest"], byte_limit=handoff["archive_bytes"],
+            expected_host=handoff["host"], exact_size=handoff["archive_bytes"],
+        )
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = archive.namelist()
+            expected_members = {"native-evidence.json", "capture.cms"} | {
+                f"{label}-{index:02}.json" for label in ("pending", "settled")
+                for index in range(1, len(INPUTS) + 2)
+            }
+            if len(names) != len(expected_members) or set(names) != expected_members:
+                raise ValueError("Unexpected native capture members")
+            info = archive.getinfo("native-evidence.json")
+            if info.file_size > 16384 or info.flag_bits & 1 or info.external_attr >> 16 & 0o170000 == 0o120000:
+                raise ValueError("Unexpected native capture evidence entry")
+            proof = json.loads(archive.read(info))
+        if (
+            proof["identity"] != identity or proof["native_complete"] is not False
+            or proof["unresolved_attempt"] is not False or proof["failure_type"] != "RuntimeError"
+            or proof["qualified_native_ack"] is not None
+            or proof["physical_opens"] != len(INPUTS) + 1
+            or proof["capture_sha256"] != handoff["capture_digest"]
+        ):
+            raise ValueError("Incomplete native capture")
+        receipt = proof["unqualified_latest_ack"]
+        raw_state = base64.b64decode(receipt["raw_base64"], validate=True)
+        if (len(raw_state) != receipt["bytes"]
+                or hashlib.sha256(raw_state).hexdigest() != receipt["sha256"]
+                or receipt["sha256"] != handoff["state_digest"]):
+            raise ValueError("Native journal receipt bytes differ")
+        state = validate_budget(json.loads(raw_state))
+        if state != receipt["state"] or state["blocked"] or state != handoff["state"]:
+            raise ValueError("Native journal receipt differs")
+        state["starts"] = sorted(set(state["starts"] + handoff["actual_starts"]))[-10:]
+        return validate_budget(state)
+    except (ValueError, TypeError, KeyError, OSError, zipfile.BadZipFile):
+        raise AdapterError("Invalid native pacing archive or state", "access") from None
 
 
 def restore_family_artifact():
@@ -1226,6 +1417,13 @@ def restore_family_artifact():
     incoming = download_inert_artifact(
         latest, artifact["id"], artifact.get("digest")
     )
+    if latest == _PREVIOUS_PRODUCTION_OWNER:
+        native = verified_native_state()
+        for key in ("not_before", "interval", "page_interval", "rate_failures"):
+            incoming[key] = max(incoming[key], native[key])
+        for key in ("blocked", "legacy_rate_history_unknown"):
+            incoming[key] = incoming[key] or native[key]
+        incoming["starts"] = sorted(set(incoming["starts"] + native["starts"]))[-10:]
     _JOURNAL_BOOTSTRAP_ALLOWED = (
         _STATE_INITIALIZING
         and not _JOURNAL_SAVE_ATTEMPTED
@@ -2694,6 +2892,7 @@ def run_body(publishing):
     failure = None
     try:
         with phase("prepublication", 900):
+            # Restore publisher custody before reading the data-source snapshot.
             prepare_collection()
             if publishing:
                 candidate = read_snapshot()

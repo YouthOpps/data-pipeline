@@ -110,6 +110,17 @@ run and attempt are checked before restrictive MAX/OR restoration into the
 original family journal under its existing locks. A missing local journal
 requires the newest owned state and does not establish a new allowance.
 
+The first resumed production attempt validates the retained native owner and
+the separately reviewed [production decision](https://github.com/YouthOpps/data-pipeline/issues/450)
+inside the standard `--publish` command, before contacting the publisher or
+accessing the data-source repository. The [native job](https://github.com/YouthOpps/data-pipeline/actions/runs/44250345680)
+completed the original nonpublishing source test and sealed every response
+and journal receipt. Its website wrapper failed to resolve the consumer's
+checkout path. Independent review replayed the sealed actual output with
+that path corrected and verified the full and expiry-filtered records against
+the pinned website reader. After the reviewed resume, later attempts restore
+the newest exact producer-owned pacing state.
+
 Local collection additionally requires the maintainer to pause this exact
 workflow. Its fixed ID, own workflow path and `disabled_manually` state are
 freshly checked before history and again immediately before the first publisher
