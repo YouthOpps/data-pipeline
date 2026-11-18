@@ -4,8 +4,8 @@
   "maintainer_account": 12278069,
   "reviewer_sha256": "6f6e68b82a80477b4cf8ca7bd4400eb54148d89a4b17d159d2c496222fa0b848",
   "origin": "YouthOpps/data-pipeline",
-  "branch": "qa/charles-mff-2027-research",
-  "workflow": ".github/workflows/qa-charles-mff-2027-research.yml",
+  "branch": "qa/charles-mff-2027-evidence",
+  "workflow": ".github/workflows/qa-charles-mff-2027-evidence.yml",
   "publisher_workflow": 378390057,
   "production_inventory_count": 64,
   "production_inventory_sha256": "9ffd22b3b24a07adbad24b49bb637eff0b14c7843c827791ab26e12681a12e79",
@@ -146,5 +146,25 @@
     ],
     "completion_floor": 1794980279.2145607,
     "journal_terminal": "settled"
+  },
+  "previous_zero_wire_research": {
+    "run": 44246932905,
+    "attempt": 1,
+    "workflow_id": 422233850,
+    "workflow_path": ".github/workflows/qa-charles-mff-2027-research.yml",
+    "job": 134608030530,
+    "job_finished": "2026-11-18T05:50:04Z",
+    "branch": "qa/charles-mff-2027-research",
+    "head": "3f05d8b00359b9809990bdd5c2c1064a247901d8",
+    "grant": 6970340760,
+    "artifact": 14401848454,
+    "artifact_digest": "sha256:0d3018df6c8105fc31779e0d91f427dde31fa3f566fbacd4451567eb6fe1e62a",
+    "artifact_size": 1547,
+    "artifact_host": "productionresultssa18.blob.core.windows.net",
+    "conclusion": "failure",
+    "job_name": "research",
+    "artifact_name": "charles-mff-2027-research-1",
+    "physical_receipt_sha256": "31242b660866b60f6b285bd0fa35413cebe28449d487e2459339e88157b72802",
+    "journal_terminal": "never-opened"
   }
 }

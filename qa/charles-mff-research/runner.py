@@ -23,9 +23,9 @@ SOURCE = CHECKOUT / "adapters/cz-charles-university/adapter.py"
 SCOPE = HERE / "scope.json"
 CERTIFICATE = HERE / "reviewer.pem"
 REPOSITORY = "YouthOpps/data-pipeline"
-BRANCH = "qa/charles-mff-2027-research"
-WORKFLOW = ".github/workflows/qa-charles-mff-2027-research.yml"
-PREVIOUS_ASSESSMENT = '2026-11-18T05:38:02Z'
+BRANCH = "qa/charles-mff-2027-evidence"
+WORKFLOW = ".github/workflows/qa-charles-mff-2027-evidence.yml"
+PREVIOUS_ASSESSMENT = '2026-11-18T05:50:04Z'
 
 ROUTES = (
     'https://www.mff.cuni.cz/robots.txt',
@@ -95,8 +95,8 @@ def authenticate(a, scope, head):
     issue = scope["issue"]
     approvals = a.workflow_api(f"/issues/{issue}/comments?per_page=100")
     demand(isinstance(approvals, list) and len(approvals) < 100, "Incomplete grant inventory")
-    lines = {f"Approved Charles MFF 2027 research head {head}",
-             f"Charles MFF 2027 research scope {sha256(canonical(scope)).hexdigest()}"}
+    lines = {f"Approved Charles MFF 2027 evidence head {head}",
+             f"Charles MFF 2027 evidence scope {sha256(canonical(scope)).hexdigest()}"}
     grants = [item for item in approvals if owner(item.get("user"), account)
               and isinstance(item.get("body"), str) and lines.issubset(item["body"].splitlines())]
     demand(len(grants) == 1, "Exact maintainer research grant unavailable or ambiguous")
@@ -123,7 +123,8 @@ def authenticate(a, scope, head):
             and type(workflow) is int and workflow > 0
             and workflow not in {scope["publisher_workflow"], scope["predecessor"]["workflow_id"],
                                  scope["latest_failed_native"]["workflow_id"],
-                                 scope["latest_mff_native"]["workflow_id"]},
+                                 scope["latest_mff_native"]["workflow_id"],
+                                 scope["previous_zero_wire_research"]["workflow_id"]},
             "Immutable hosted research run identity differs",
         )
         if status.get("status") == "in_progress":
@@ -168,7 +169,7 @@ def paused(a, scope):
     a.local_workflow_definition()
     snapshot = a.workflow_api(f"/actions/workflows/{scope['publisher_workflow']}/runs?per_page=100&page=1")
     verify_inventory(snapshot, scope)
-    for key in ("predecessor", "latest_failed_native", "latest_mff_native"):
+    for key in ("predecessor", "latest_failed_native", "latest_mff_native", "previous_zero_wire_research"):
         prior = scope[key]
         research_owner.check_retired(a, scope, prior, demand)
 
@@ -435,7 +436,7 @@ def main():
     spec.loader.exec_module(a)
     a.workflow_api = a.local_workflow_api
     original_continuity(a, scope)
-    output = Path(os.environ["RUNNER_TEMP"]) / "charles-mff-2027-research"
+    output = Path(os.environ["RUNNER_TEMP"]) / "charles-mff-2027-evidence"
     output.mkdir(mode=0o700)
     wire, acknowledgements, diagnostics = [], [], io.StringIO()
     identity = None
@@ -452,6 +453,9 @@ def main():
                     paused(a, scope)
                     priors = [research_owner.read_state(a, scope, demand, prior=scope[key])
                               for key in ("predecessor", "latest_failed_native", "latest_mff_native")]
+                    zero = research_owner.read_state(a, scope, demand,
+                                                     prior=scope["previous_zero_wire_research"])
+                    demand(zero is None, "Retired preflight unexpectedly owns publisher state")
                     a.prepare_collection()
                     with a.locked_budget():
                         merged = a.load_budget()

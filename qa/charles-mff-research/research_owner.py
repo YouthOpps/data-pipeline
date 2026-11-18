@@ -71,6 +71,9 @@ def read_state(adapter, scope, demand, *, prior=None):
 
 
 def download_artifact(adapter, prior, demand):
+    size_limit = prior["artifact_size"]
+    demand(type(size_limit) is int and 0 < size_limit <= 5_000_000,
+           "Authenticated predecessor size exceeds the original transport bound")
     request = Request(
         adapter._WORKFLOW_GITHUB + f"/actions/artifacts/{prior['artifact']}/zip",
         headers={"Accept": "application/vnd.github+json",
@@ -88,7 +91,6 @@ def download_artifact(adapter, prior, demand):
     demand(destination.scheme == "https" and destination.hostname == prior["artifact_host"]
            and destination.port is None and destination.username is None and destination.password is None,
            "Predecessor archive storage differs")
-    size_limit = artifact_limit(prior)
     adapter.verified_artifact_transfer = prior["artifact_host"]
     try:
         status, _, data = adapter.request_bytes(url, byte_limit=size_limit)
@@ -98,7 +100,7 @@ def download_artifact(adapter, prior, demand):
     return data
 
 
-def artifact_limit(prior):
+def member_limit(prior):
     return 8_388_608 if "observed_reservations" in prior else 262144
 
 
@@ -106,13 +108,14 @@ def decode_artifact(adapter, prior, raw, demand):
     demand(len(raw) == prior["artifact_size"]
            and "sha256:" + sha256(raw).hexdigest() == prior["artifact_digest"],
            "Exact predecessor archive bytes differ")
+    zero = prior.get("journal_terminal") == "never-opened"
     failed = prior["conclusion"] == "failure"
-    evidence_name = "native-evidence.json" if failed else "research-evidence.json"
+    evidence_name = "native-evidence.json" if failed and not zero else "research-evidence.json"
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         members = archive.infolist()
         demand(len(members) == 2 and {m.filename for m in members} == {"capture.cms", evidence_name}
                and all(not m.flag_bits & 1 and stat.S_IFMT(m.external_attr >> 16) != stat.S_IFLNK
-                       and 0 < m.file_size <= artifact_limit(prior) for m in members),
+                       and 0 < m.file_size <= member_limit(prior) for m in members),
                "Unexpected predecessor archive members")
         evidence = json.loads(archive.read(evidence_name))
         capture = archive.read("capture.cms")
@@ -121,10 +124,20 @@ def decode_artifact(adapter, prior, raw, demand):
         "job_id": prior["job"], "head": prior["head"], "grant": prior["grant"],
         "ref": "refs/heads/" + prior["branch"],
     }
-    expected_count = 21 if "observed_reservations" in prior else 2
+    expected_count = 0 if zero else (21 if "observed_reservations" in prior else 2)
     demand(evidence.get("identity") == identity and evidence.get("physical_opens") == expected_count
            and evidence.get("capture_sha256") == sha256(capture).hexdigest(),
            "Predecessor evidence identity differs")
+    if zero:
+        demand(failed and prior["job_name"] == "research"
+               and len(prior["physical_receipt_sha256"]) == 64
+               and evidence.get("research_complete") is False
+               and evidence.get("failure_type") == "AdapterError"
+               and all(key in evidence and evidence[key] is None for key in (
+                   "qualified_research_ack", "unqualified_latest_ack",
+                   "predecessor_merged_ack_sha256", "leaf_material_sha256",
+               )), "Prior zero-wire research scope contradicts archived evidence")
+        return None
     if failed:
         demand(evidence.get("native_started") is True
                and evidence.get("qualification_complete") is False
