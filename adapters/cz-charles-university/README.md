@@ -198,6 +198,13 @@ publisher page. Both application routes close on 30 April 2027 for the
 2027/28 cycle. The one-time payment of about CZK 75,000 covers living costs
 and is due by December 2027 after the stated conditions are met.
 
+The [complete hosted verification](https://github.com/YouthOpps/data-pipeline/actions/runs/44252329453)
+validated 54 collected records and 48 current records through the website
+reader. It retained all 42 current records from the previous publication
+and added the six current MFF and FSV awards. The first production continuation
+requires a review of the exact revision and inherits the verified pacing
+journal before opening any publisher request.
+
 ## Dates, countries and conflicts
 
 Known calendar application dates remain `YYYY-MM-DD` without invented midnight
