@@ -845,7 +845,7 @@ MOBILITY_CONDITIONS = {
         "8f28594cbad1a2ea43ddb279bf902b83997e3e665efb42b7a568f1cb0485257c"
     ),
     "conditions": (
-        "f78a868ce186e0bfeba9d2ad11f8c07f70d7cd44d4cd65ae7462179543a20723"
+        "ac64afba00fc8687a079a72c1cca246adbb4eeb58dc9e61fa0aa738b904fe3da"
     ),
     "dates": (
         "1430c39546be6133a2b333334f15b173f901d65efe38e26234874d0790c3cc9b"
@@ -1030,6 +1030,19 @@ def mobility_sections(node, url):
                 if anchor.attrs.get("href")
             }
         )
+        if key == "conditions":
+            material, _ = international_material(section, url)
+            links = sorted(
+                (
+                    "" if caption.casefold() in GENERIC_LINK_CAPTIONS else caption,
+                    destination,
+                )
+                for caption, destination in links
+            )
+            result[key] = json.dumps(
+                (material, links), ensure_ascii=False, separators=(",", ":")
+            )
+            continue
         result[key] = json.dumps(
             {"text": section.text(), "links": links},
             ensure_ascii=False,
@@ -1106,6 +1119,7 @@ INTERNATIONAL_CARDS = {
     ),
 }
 INTERNATIONAL_ARTICLE_FACTS = "d532a192442209042fed0b284921ac1c02ea213e8fba606a3b6c95edf6a609fa"
+GENERIC_LINK_CAPTIONS = {"here", "more information", "on the website", "learn more"}
 
 
 def international_material(node, url, excluded=()):
@@ -1120,12 +1134,7 @@ def international_material(node, url, excluded=()):
             return
         if part.tag == "a" and part.attrs.get("href"):
             destinations.add(urllib.parse.urljoin(url, part.attrs["href"]))
-            if part.text().casefold() in {
-                "here",
-                "more information",
-                "on the website",
-                "learn more",
-            }:
+            if part.text().casefold() in GENERIC_LINK_CAPTIONS:
                 return
         for child in part.children:
             visit(child)

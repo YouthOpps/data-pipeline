@@ -161,6 +161,15 @@ exclusion, Category C event/contribution attachments and payment no earlier than
 31 December 2026, alongside the existing eligibility and indicative amounts.
 Historical HTML was unavailable, so this review does not identify the exact old
 textual change or classify the previous fingerprint failure as cosmetic.
+The subsequent [17 November 2026 hosted capture](https://github.com/YouthOpps/data-pipeline/actions/runs/44193685930)
+verified that the Autumn round had closed on 30 October and that the Spring
+round was planned for April 2027 without a published closing date. The observed
+application and financial section retained the existing funding amounts,
+combination exclusions and payment floor. The conditions check now projects
+the complete visible section text and exact linked destinations, including
+meaningful link labels. Generic link captions and non-visible presentation
+elements can vary. The layout, remaining material sections and published
+eligibility, expiry and record identities follow the existing checks.
 The collector still retrieves and verifies every required live page each run;
 it does not emit a cached snapshot when access or verification fails.
 
