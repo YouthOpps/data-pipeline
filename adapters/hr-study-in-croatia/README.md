@@ -76,10 +76,14 @@ navigation and catalogue links, the policy links in the footer and standalone
 notice text. Responsive menu duplication, CSS build changes and ordinary copy
 rotation in the recognized introduction and video cards can vary. New access
 restrictions, eligibility or application language in those areas require review.
-The separate news inventories and authoritative programme, funding and policy
-pages still validate before records can change. The [November 18 hosted
-diagnostic](https://github.com/YouthOpps/data-pipeline/actions/runs/44244161633)
-reviewed the homepage and robots responses.
+The five news pages validate their active page, page links and ordered,
+non-overlapping card inventory. The archive accepts ordinary movement among
+reviewed editorial formats. A new possible application call or unreviewed
+format stops collection for a source review. Each existing programme,
+funding and policy page still validates its reviewed material directly. The
+November 18 [homepage](https://github.com/YouthOpps/data-pipeline/actions/runs/44244161633)
+and [archive diagnostics](https://github.com/YouthOpps/data-pipeline/actions/runs/44248415943)
+established these structures.
 
 A 375.2-second nominal pacing estimate includes startup quiet
 and inventory spacing before response/history overhead; the previous actual

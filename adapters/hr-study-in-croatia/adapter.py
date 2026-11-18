@@ -2352,12 +2352,102 @@ def home_frontier(body):
     return frontier
 
 
+def news_document(body):
+    root = document_root(body.decode("utf-8", "strict"))
+    footer = one(nodes(root, "footer"), "news policy footer")
+    routes = {link.attrs.get("href") for link in nodes(footer, "a")}
+    labels = [link.text() for link in nodes(footer, "a") if link.attrs.get("href") not in NEWS_POLICY_LINKS]
+    if (
+        not NEWS_POLICY_LINKS <= routes or NEWS_ACCESS_NOTICE.search(root.text())
+        or any(re.search(
+            r"\b(?:terms of (?:use|service)|terms and conditions|access policy|data reuse|copyright policy)\b",
+            name, re.I,
+        ) for name in labels)
+    ):
+        raise AdapterError("News access notice or policy route requires renewed review", "access")
+    return root
+
+
+def news_inventory(body, key):
+    """Return a verified archive page with each current card classified."""
+    root = news_document(body)
+    url = INPUTS[key]["url"]
+    main = one(nodes(root, "main"), "news main")
+    title = one(nodes(main, "h1"), "news heading")
+    listing = one(nodes(main, "div", "NewsSadrzajCnt"), "news listing")
+    pager = one(nodes(listing, "div", "paginacijaCnt"), "news pagination")
+    if title.text() != "News & Events" or listing.attrs.get("id") != "main":
+        raise AdapterError("Unrecognized news listing structure", "parse")
+    navigation = nodes(pager, "a")
+    numbered = [link for link in navigation if link.text().isdigit()]
+    pages = []
+    active = []
+    for link in numbered:
+        target = NEWS_PAGE_PATH.fullmatch(link.attrs.get("href", ""))
+        if target is None or int(link.text()) != int(target[1]) + 1:
+            raise AdapterError("Archive page number or target differs", "parse")
+        number = int(target[1])
+        pages.append(number)
+        if "active" in link.attrs.get("class", "").split():
+            active.append(number)
+    current = int(urllib.parse.urlsplit(url).query.removeprefix("page=") or "0")
+    if pages != list(range(len(NEWS_INVENTORY))) or active != [current]:
+        raise AdapterError("Archive pagination or default route requires review", "parse")
+    previous = f"/news/?page={current - 1}" if current else "#"
+    following = f"/news/?page={current + 1}" if current + 1 < len(pages) else "#"
+    if (
+        len(navigation) != len(numbered) + 2
+        or navigation[1:-1] != numbered
+        or navigation[0].attrs.get("href") != previous
+        or navigation[-1].attrs.get("href") != following
+    ):
+        raise AdapterError("Archive pagination boundaries require review", "parse")
+    known = {urllib.parse.urlsplit(INPUTS[key]["url"]).path for key in NEWS_LEAF_KEYS}
+    rows = []
+    for card in nodes(listing, "a"):
+        if card in navigation:
+            continue
+        route = card.attrs.get("href", "")
+        if NEWS_ARTICLE_PATH.fullmatch(route) is None:
+            raise AdapterError("Unreviewed news card link shape", "parse")
+        values = [
+            one(nodes(card, "div", cls), f"news card {cls}").text()
+            for cls in ("NewsLinkNaslov", "NewsLinkDatum", "NewsLinkTekst")
+        ]
+        headline, displayed_date, synopsis = values
+        if not headline or not synopsis:
+            raise AdapterError("Incomplete news card", "parse")
+        try:
+            date = datetime.strptime(displayed_date, "%d %B %Y").date().isoformat()
+        except ValueError:
+            raise AdapterError("Invalid news publication date", "parse") from None
+        if route not in known and (
+            not NEWS_EDITORIAL.search(headline) or NEWS_CALL_SIGNAL.search(f"{headline} {synopsis}")
+        ):
+            raise AdapterError("Unreviewed news article: " + route, "parse")
+        rows.append((route, date))
+    if not rows:
+        raise AdapterError("Empty news archive page", "parse")
+    return tuple(rows)
+
+
+def validate_news_inventory(pages):
+    """Require complete, non-overlapping and chronological archive pages."""
+    if any(not pages[key] for key in NEWS_INVENTORY):
+        raise AdapterError("Incomplete nonempty news archive", "parse")
+    rows = [row for key in NEWS_INVENTORY for row in pages[key]]
+    routes = {route for route, _ in rows}
+    dates = [date for _, date in rows]
+    if len(routes) != len(rows) or dates != sorted(dates, reverse=True):
+        raise AdapterError("News archive duplication or chronology differs", "parse")
+
+
 def read_input(key):
     info = INPUTS[key]
     try:
         status, headers, body = (
             fetch_inventory_page(fetch_public, info["url"])
-            if key == "news" or key.startswith("news-page")
+            if key in NEWS_INVENTORY
             else fetch_public(info["url"])
         )
     except AdapterError as error:
@@ -2368,6 +2458,8 @@ def read_input(key):
         ) from None
     if key == "home":
         return home_frontier(body)
+    if key in NEWS_INVENTORY:
+        return news_inventory(body, key)
     if info["format"] == "html":
         digest = html_fingerprint(body, key)
     else:
@@ -2389,9 +2481,10 @@ def read_pages():
 def parse_inventory(pages):
     if (
         set(pages) != set(INPUTS) or pages["home"] != HOME_ANCHORS
-        or any(pages[key] != info["sha256"] for key, info in INPUTS.items() if key != "home")
+        or any(pages[key] != info["sha256"] for key, info in INPUTS.items() if "sha256" in info)
     ):
         raise AdapterError("Incomplete reviewed programme frontier", "parse")
+    validate_news_inventory(pages)
     records = []
     now = datetime.now(timezone.utc)
     for profile in PROFILES:
@@ -2818,6 +2911,43 @@ HOME_MATERIAL_COPY = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+NEWS_ACCESS_NOTICE = re.compile(
+    r"\b(?:automated\s+(?:access|collection|extraction|requests?)|"
+    r"(?:no|prohibit(?:ed|s)?|forbid(?:den|s)?)\s+(?:web\s+)?(?:scraping|crawling|harvesting)|"
+    r"(?:scraping|crawling|harvesting)\s+(?:(?:is|are)\s+)?(?:prohibited|forbidden|restricted)|"
+    r"permission\s+(?:is\s+)?required\s+to\s+(?:access|collect|extract|reuse)|"
+    r"access\s+(?:requires\s+(?:prior\s+)?permission|is\s+(?:restricted|prohibited)))\b", re.I,
+)
+NEWS_CALL_SIGNAL = re.compile(
+    r"\b(?:applications? (?:(?:are|is) )?(?:now )?(?:open|close|due|accepted)|"
+    r"(?:call|invitation) for (?:applications|proposals)|"
+    r"accepting applications|application deadline|(?:apply|submit) (?:now|by|before)|"
+    r"scholarships? (?:available|offered)\b|(?:admission|funding) opportunities)\b", re.I,
+)
+NEWS_ARTICLE_PATH = re.compile(r"/news/[a-z0-9]+(?:-[a-z0-9]+)*/")
+NEWS_PAGE_PATH = re.compile(r"/news/\?page=([0-9]+)")
+NEWS_POLICY_LINKS = frozenset({
+    "/about-us/content-disclaimer/", "/about-us/privacy-policy-statement/",
+    "/about-us/cookie-statement/", "/about-us/accessibility-statement/",
+})
+
+NEWS_INVENTORY = ("news", "news-page1", "news-page2", "news-page3", "news-page4")
+# Recognize the archive's reviewed editorial formats without pinning its headlines.
+NEWS_EDITORIAL = re.compile(
+    r"^(?:Croatia promotes its higher education in\b|international students['’] stories:\s|"
+    r"meet Croatian higher ed institutions near you\b|Croatian higher education at .*\bEAIE\b|"
+    r"international researcher shares (?:his|her|their) experience\b|"
+    r"see the final list of Croatian institutions exhibiting at\b|"
+    r"Croatia to participate in EAIE\b|international students in Croatia: .*analysis reveals\b|"
+    r"study opportunities in Croatia presented at the Erasmus Generation Meeting\b|"
+    r"free LearnCro app for learning Croatian launched\b|"
+    r"this [A-Za-z]+ Study in Croatia is coming to the Erasmus Generation Meeting\b|"
+    r"Study in Croatia (?:(?:is exhibiting )?at|Initiative at) .*"
+    r"\b(?:APAIE|NAFSA|Informativa|EAIE)\b|"
+    r"prolongation of stay for international students$)",
+    re.I,
+)
+
 INPUTS = {'about': {'url': 'https://www.studyincroatia.hr/about-us/about-us-39/',
            'format': 'html',
            'sha256': 'fe41cc3fb79d8f15ad0e49be5730116a75d1a182d4211a1b20bd1f3218e0b0da'},
@@ -2859,20 +2989,15 @@ INPUTS = {'about': {'url': 'https://www.studyincroatia.hr/about-us/about-us-39/'
              'format': 'html',
              'sha256': 'cdd3143a50f9e30d9eef7c9b26518afacc38fd641e7a5ec3affd8843d6dd43a4'},
  'news-page1': {'url': 'https://www.studyincroatia.hr/news/?page=1',
-                'format': 'html',
-                'sha256': '6875c65ef74d983e7533bf18d8033d7d8ddd681edd8e75e66717ccf4e6bfc238'},
+                'format': 'html'},
  'news-page2': {'url': 'https://www.studyincroatia.hr/news/?page=2',
-                'format': 'html',
-                'sha256': 'a098670e40ddb483b4a992e62c942d17b77d73bea36b6b5cede374805632e6ab'},
+                'format': 'html'},
  'news-page3': {'url': 'https://www.studyincroatia.hr/news/?page=3',
-                'format': 'html',
-                'sha256': '18390286d89806c8fa45a483eca5927c80b8c2c9699e08921242520035b1dcd5'},
+                'format': 'html'},
  'news-page4': {'url': 'https://www.studyincroatia.hr/news/?page=4',
-                'format': 'html',
-                'sha256': 'd25c18d42622c8c1235ad3a44d39602f442be1169facf1882c4c91c2f77ade15'},
+                'format': 'html'},
  'news': {'url': 'https://www.studyincroatia.hr/news/',
-          'format': 'html',
-          'sha256': 'd74144f5edc2300d78d6dd3703406da1e30aaf8d2cf786db8b6ff0494bbdb62f'},
+          'format': 'html'},
  'privacy': {'url': 'https://www.studyincroatia.hr/about-us/privacy-policy-statement/',
              'format': 'html',
              'sha256': 'e98d25caa2dcbf64b58bbcde9dbde23eb1bab93806522b36903a66e8349a82e7'}}
