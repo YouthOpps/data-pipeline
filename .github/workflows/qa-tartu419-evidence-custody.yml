@@ -1,0 +1,31 @@
+name: Retain exact Tartu evidence archives
+
+on:
+  push:
+    branches: [qa/tartu419-evidence-custody]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  custody:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/tartu419-evidence-custody' && github.event.created == true && github.event.before == '0000000000000000000000000000000000000000' && github.event.sender.id == 12278069 && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify and copy the two exact GitHub-owned ZIPs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -B qa/tartu419-custody/retain.py
+      - name: Retain opaque issuer bytes and verification manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: tartu419-evidence-custody-${{ github.run_id }}-1
+          path: ${{ runner.temp }}/tartu419-evidence-custody/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
