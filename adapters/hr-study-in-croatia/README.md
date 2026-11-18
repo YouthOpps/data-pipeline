@@ -71,21 +71,7 @@ python -B adapters/hr-study-in-croatia/adapter.py --publish
 The sole live test performs one real nonpublishing collection, validates all twelve records and prints complete JSON to stdout. Hold stdout in memory; do not save normalized records or provide publication credentials to tests. The matching workflow's sole application command publishes this source's own pair atomically.
 
 Twenty HTML inputs plus one nominal robots request preserve the complete
-reviewed frontier. The homepage verifies the portal identity, the labelled
-navigation and catalogue links, the policy links in the footer and standalone
-notice text. Responsive menu duplication, CSS build changes and ordinary copy
-rotation in the recognized introduction and video cards can vary. New access
-restrictions, eligibility or application language in those areas require review.
-The five news pages validate their active page, page links and ordered,
-non-overlapping card inventory. The archive accepts ordinary movement among
-reviewed editorial formats. A new possible application call or unreviewed
-format stops collection for a source review. Each existing programme,
-funding and policy page still validates its reviewed material directly. The
-November 18 [homepage](https://github.com/YouthOpps/data-pipeline/actions/runs/44244161633)
-and [archive diagnostics](https://github.com/YouthOpps/data-pipeline/actions/runs/44248415943)
-established these structures.
-
-A 375.2-second nominal pacing estimate includes startup quiet
+reviewed frontier. A 375.2-second nominal pacing estimate includes startup quiet
 and inventory spacing before response/history overhead; the previous actual
 collection step was 255 seconds. These are planning evidence, not current
 source or runtime acceptance. Redirects, retries or stronger retained limits

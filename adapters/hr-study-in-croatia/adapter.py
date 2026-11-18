@@ -925,9 +925,9 @@ def latest_family_run():
                 ) from None
 
 
-def scan_family_history(*, hosted_research=False):
+def scan_family_history():
     """Select newest completed chronology, including older-ID rerun attempts."""
-    hosted = os.environ.get("GITHUB_ACTIONS") == "true" and not hosted_research
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
     current_id, current_attempt = (
         current_run_identity() if hosted else (None, None)
     )
@@ -2245,209 +2245,12 @@ def html_fingerprint(body, key=None):
     return hashlib.sha256(facts.encode()).hexdigest()
 
 
-def home_anchors(node):
-    """Return the labelled destinations without desktop/mobile duplication."""
-    return frozenset(
-        (
-            link.attrs["href"][len(SOURCE_URL) - 1:]
-            if link.attrs["href"].startswith(SOURCE_URL) else link.attrs["href"],
-            link.text().casefold(),
-        )
-        for link in nodes(node, "a") if link.attrs.get("href")
-    )
-
-
-def home_unlinked_text(node, promotional):
-    if node in promotional or node.tag in {"a", "script", "style"}:
-        return ""
-    parts = [
-        home_unlinked_text(child, promotional) if isinstance(child, Node) else child
-        for child in node.children
-    ]
-    return " ".join(" ".join(parts).split())
-
-
-def home_children(node):
-    """Separate visual elements from unexpected free text in a media widget."""
-    if any(isinstance(child, str) and child.strip() for child in node.children):
-        raise AdapterError("Changed Study in Croatia homepage promotional structure", "parse")
-    return [child for child in node.children if isinstance(child, Node)]
-
-
-def home_promotional_copy(main):
-    """Identify the reviewed introduction and paired YouTube captions."""
-    intro = one(nodes(main, "div", "NaslovnaUvodCnt"), "homepage introduction")
-    lead = one(nodes(intro, "div", "NaslovnaLead"), "homepage lead")
-    video = one(nodes(main, "div", "NaslovnaVideoSekcijaCnt"), "homepage video section")
-    if intro not in home_children(main) or video not in home_children(main):
-        raise AdapterError("Changed Study in Croatia homepage promotional placement", "parse")
-    paragraphs = home_children(lead)
-    cards = home_children(video)
-    if not paragraphs or not cards:
-        raise AdapterError("Missing Study in Croatia homepage promotional content", "parse")
-    allowed = set(paragraphs)
-    frames = set()
-    for card in cards:
-        children = home_children(card)
-        if (
-            card.tag != "div" or card.attrs.get("class") != "NaslovnaVideoCnt"
-            or len(children) != 2
-            or [child.attrs.get("class") for child in children] != ["NaslovnaVideo", "NaslovnaVideoTekst"]
-            or any(child.tag != "div" for child in children)
-        ):
-            raise AdapterError("Changed Study in Croatia homepage video card", "parse")
-        frame = one(home_children(children[0]), "homepage video frame")
-        caption = one(home_children(children[1]), "homepage video caption")
-        if (
-            frame.tag != "iframe" or frame.text()
-            or not re.fullmatch(r"https://www\.youtube\.com/embed/[A-Za-z0-9_-]{11}",
-                                frame.attrs.get("src", ""))
-            or " ".join(frame.attrs.get("title", "").split()) != caption.text()
-        ):
-            raise AdapterError("Changed Study in Croatia homepage video embed", "parse")
-        frames.add(frame)
-        allowed.add(caption)
-    if any(
-        node.tag != "p" or not node.text() or HOME_MATERIAL_COPY.search(node.text())
-        or any(child.tag not in {"p", "em", "strong", "span"} for child in node.walk())
-        for node in allowed
-    ):
-        raise AdapterError("Changed Study in Croatia homepage access or opportunity text", "parse")
-    return allowed, frames
-
-
-def home_frontier(body):
-    """Review the landing routes and policy links without pinning asset builds."""
-    root = document_root(body.decode("utf-8", "strict"))
-    head = one(nodes(root, "head"), "homepage head")
-    content = one(nodes(root, "body"), "homepage body")
-    main = one(nodes(content, "main"), "homepage main")
-    footer = one(nodes(content, "footer"), "homepage footer")
-    head_links = set(nodes(head, "link"))
-    canonical = [link.attrs.get("href") for link in head_links
-                 if link.attrs.get("rel") == "canonical"]
-    if (
-        canonical != [SOURCE_URL]
-        or one(nodes(head, "title"), "homepage title").text() != "Study in Croatia"
-        or main.attrs.get("id") != "main"
-        or one(nodes(main, "h1"), "homepage heading").text() != "Study in Croatia"
-        or any(nodes(root, tag) for tag in ("base", "form", "area", "object", "embed"))
-        or set(nodes(root, "link")) != head_links
-        or any(link.attrs.get("rel") not in HOME_HEAD_LINK_ROLES for link in head_links)
-        or set(nodes(root, "a")) != set(nodes(content, "a"))
-        or any(not link.attrs.get("href") for link in nodes(content, "a"))
-        or nodes(root, "div", "DidYouKnowCnt") or nodes(root, "div", "NewsOsobnaDatum")
-    ):
-        raise AdapterError("Changed Study in Croatia homepage identity or link structure", "parse")
-    if home_anchors(main) != HOME_MAIN_ANCHORS or not HOME_POLICY_ANCHORS <= home_anchors(footer):
-        raise AdapterError("Changed Study in Croatia homepage entry points or policy links", "parse")
-    promotional, frames = home_promotional_copy(main)
-    frontier = home_anchors(root)
-    if (
-        set(nodes(root, "iframe")) != frames
-        or home_unlinked_text(content, promotional) != "Study in Croatia"
-        or frontier != HOME_ANCHORS
-    ):
-        raise AdapterError("Changed Study in Croatia homepage notices or reviewed frontier", "parse")
-    return frontier
-
-
-def news_document(body):
-    root = document_root(body.decode("utf-8", "strict"))
-    footer = one(nodes(root, "footer"), "news policy footer")
-    routes = {link.attrs.get("href") for link in nodes(footer, "a")}
-    labels = [link.text() for link in nodes(footer, "a") if link.attrs.get("href") not in NEWS_POLICY_LINKS]
-    if (
-        not NEWS_POLICY_LINKS <= routes or NEWS_ACCESS_NOTICE.search(root.text())
-        or any(re.search(
-            r"\b(?:terms of (?:use|service)|terms and conditions|access policy|data reuse|copyright policy)\b",
-            name, re.I,
-        ) for name in labels)
-    ):
-        raise AdapterError("News access notice or policy route requires renewed review", "access")
-    return root
-
-
-def news_inventory(body, key):
-    """Return a verified archive page with each current card classified."""
-    root = news_document(body)
-    url = INPUTS[key]["url"]
-    main = one(nodes(root, "main"), "news main")
-    title = one(nodes(main, "h1"), "news heading")
-    listing = one(nodes(main, "div", "NewsSadrzajCnt"), "news listing")
-    pager = one(nodes(listing, "div", "paginacijaCnt"), "news pagination")
-    if title.text() != "News & Events" or listing.attrs.get("id") != "main":
-        raise AdapterError("Unrecognized news listing structure", "parse")
-    navigation = nodes(pager, "a")
-    numbered = [link for link in navigation if link.text().isdigit()]
-    pages = []
-    active = []
-    for link in numbered:
-        target = NEWS_PAGE_PATH.fullmatch(link.attrs.get("href", ""))
-        if target is None or int(link.text()) != int(target[1]) + 1:
-            raise AdapterError("Archive page number or target differs", "parse")
-        number = int(target[1])
-        pages.append(number)
-        if "active" in link.attrs.get("class", "").split():
-            active.append(number)
-    current = int(urllib.parse.urlsplit(url).query.removeprefix("page=") or "0")
-    if pages != list(range(len(NEWS_INVENTORY))) or active != [current]:
-        raise AdapterError("Archive pagination or default route requires review", "parse")
-    previous = f"/news/?page={current - 1}" if current else "#"
-    following = f"/news/?page={current + 1}" if current + 1 < len(pages) else "#"
-    if (
-        len(navigation) != len(numbered) + 2
-        or navigation[1:-1] != numbered
-        or navigation[0].attrs.get("href") != previous
-        or navigation[-1].attrs.get("href") != following
-    ):
-        raise AdapterError("Archive pagination boundaries require review", "parse")
-    known = {urllib.parse.urlsplit(INPUTS[key]["url"]).path for key in NEWS_LEAF_KEYS}
-    rows = []
-    for card in nodes(listing, "a"):
-        if card in navigation:
-            continue
-        route = card.attrs.get("href", "")
-        if NEWS_ARTICLE_PATH.fullmatch(route) is None:
-            raise AdapterError("Unreviewed news card link shape", "parse")
-        values = [
-            one(nodes(card, "div", cls), f"news card {cls}").text()
-            for cls in ("NewsLinkNaslov", "NewsLinkDatum", "NewsLinkTekst")
-        ]
-        headline, displayed_date, synopsis = values
-        if not headline or not synopsis:
-            raise AdapterError("Incomplete news card", "parse")
-        try:
-            date = datetime.strptime(displayed_date, "%d %B %Y").date().isoformat()
-        except ValueError:
-            raise AdapterError("Invalid news publication date", "parse") from None
-        if route not in known and (
-            not NEWS_EDITORIAL.search(headline) or NEWS_CALL_SIGNAL.search(f"{headline} {synopsis}")
-        ):
-            raise AdapterError("Unreviewed news article: " + route, "parse")
-        rows.append((route, date))
-    if not rows:
-        raise AdapterError("Empty news archive page", "parse")
-    return tuple(rows)
-
-
-def validate_news_inventory(pages):
-    """Require complete, non-overlapping and chronological archive pages."""
-    if any(not pages[key] for key in NEWS_INVENTORY):
-        raise AdapterError("Incomplete nonempty news archive", "parse")
-    rows = [row for key in NEWS_INVENTORY for row in pages[key]]
-    routes = {route for route, _ in rows}
-    dates = [date for _, date in rows]
-    if len(routes) != len(rows) or dates != sorted(dates, reverse=True):
-        raise AdapterError("News archive duplication or chronology differs", "parse")
-
-
 def read_input(key):
     info = INPUTS[key]
     try:
         status, headers, body = (
             fetch_inventory_page(fetch_public, info["url"])
-            if key in NEWS_INVENTORY
+            if key == "news" or key.startswith("news-page")
             else fetch_public(info["url"])
         )
     except AdapterError as error:
@@ -2456,10 +2259,6 @@ def read_input(key):
             error.stage,
             error.status,
         ) from None
-    if key == "home":
-        return home_frontier(body)
-    if key in NEWS_INVENTORY:
-        return news_inventory(body, key)
     if info["format"] == "html":
         digest = html_fingerprint(body, key)
     else:
@@ -2479,12 +2278,10 @@ def read_pages():
 
 
 def parse_inventory(pages):
-    if (
-        set(pages) != set(INPUTS) or pages["home"] != HOME_ANCHORS
-        or any(pages[key] != info["sha256"] for key, info in INPUTS.items() if "sha256" in info)
+    if set(pages) != set(INPUTS) or any(
+        pages[key] != info["sha256"] for key, info in INPUTS.items()
     ):
         raise AdapterError("Incomplete reviewed programme frontier", "parse")
-    validate_news_inventory(pages)
     records = []
     now = datetime.now(timezone.utc)
     for profile in PROFILES:
@@ -2822,6 +2619,7 @@ SIDEBAR_COUNTS = {'about': 1,
  'exchange': 1,
  'faq': 1,
  'funding': 1,
+ 'home': 0,
  'learning': 1,
  'medical': 0,
  'news': 0,
@@ -2830,124 +2628,6 @@ SIDEBAR_COUNTS = {'about': 1,
  'news-page3': 0,
  'news-page4': 0,
  'privacy': 1}
-HOME_HEAD_LINK_ROLES = frozenset({
-    "apple-touch-icon", "canonical", "dns-prefetch", "icon", "manifest",
-    "mask-icon", "stylesheet", "stylesheet preload prefetch",
-})
-HOME_MAIN_ANCHORS = frozenset({
-    ("/study-in-croatia/study-in-croatia-at-a-glance/", "find out more"),
-    ("/study-in-croatia/study-programmes-in-english/", "study programmes"),
-    ("/news/", "news & events"),
-    ("/faq/", "faq"),
-    ("/videos/", "view all videos"),
-})
-HOME_POLICY_ANCHORS = frozenset({
-    ("/about-us/content-disclaimer/", "content disclaimer"),
-    ("/about-us/privacy-policy-statement/", "privacy policy statement"),
-    ("/about-us/cookie-statement/", "cookie statement"),
-    ("/about-us/accessibility-statement/", "accessibility statement"),
-})
-HOME_ANCHORS = HOME_MAIN_ANCHORS | HOME_POLICY_ANCHORS | frozenset({
-    ("#", ""),
-    ("#", "a+ increase text"),
-    ("#", "a- decrease text"),
-    ("#", "a= default text size"),
-    ("#", "about us"),
-    ("#", "black text"),
-    ("#", "cookie settings"),
-    ("#", "default colors"),
-    ("#", "default font"),
-    ("#", "font for dyslexia"),
-    ("#", "live and work in croatia"),
-    ("#", "study in croatia"),
-    ("#", "white text"),
-    ("#", "why croatia"),
-    ("#main", "skip to main content"),
-    ("/", ""),
-    ("/about-us/about-us-39/", "about us"),
-    ("/about-us/brochures/", "brochures"),
-    ("/live-and-work-in-croatia/accommodation-and-meals/", "accommodation and meals"),
-    ("/live-and-work-in-croatia/finance-and-living-costs/", "finance and living costs"),
-    ("/live-and-work-in-croatia/health-insurance/", "health insurance"),
-    ("/live-and-work-in-croatia/learning-croatian/", "learning croatian"),
-    ("/live-and-work-in-croatia/student-work/", "student work"),
-    ("/live-and-work-in-croatia/things-to-do-in-croatia/", "things to do in croatia"),
-    ("/live-and-work-in-croatia/visa-and-residence-permit/", "live and work in croatia"),
-    ("/live-and-work-in-croatia/visa-and-residence-permit/", "visa and residence permit"),
-    ("/study-in-croatia/exchange-programmes/", "exchange programmes"),
-    ("/study-in-croatia/higher-education-system/", "higher education system"),
-    ("/study-in-croatia/how-to-apply/", "how to apply"),
-    ("/study-in-croatia/international-students-stories/", "international students' stories"),
-    ("/study-in-croatia/recognition-of-previous-education/", "recognition of previous education"),
-    ("/study-in-croatia/study-in-croatia-at-a-glance/", "study in croatia"),
-    ("/study-in-croatia/study-in-croatia-at-a-glance/", "study in croatia at a glance"),
-    ("/study-in-croatia/study-programmes-in-english/", "study programmes in english"),
-    ("/study-in-croatia/study-programmes-in-other-foreign-languages/", "study programmes in other foreign languages"),
-    ("/study-in-croatia/tuition-fees-and-scholarships/", "tuition fees and scholarships"),
-    ("/study-in-croatia/what-to-study/", "what to study"),
-    ("/why-croatia/croatia-welcomes-you/", "croatia welcomes you!"),
-    ("/why-croatia/croatia-welcomes-you/", "why croatia"),
-    ("/why-croatia/natural-beauty-and-climate/", "natural beauty and climate"),
-    ("/why-croatia/quality-of-higher-education/", "quality of higher education"),
-    ("/why-croatia/travel-opportunities/", "travel opportunities"),
-    ("https://en.ampeu.hr/", ""),
-    ("https://mzo.gov.hr/en", ""),
-    ("https://www.facebook.com/study.in.croatia/", ""),
-    ("https://www.instagram.com/studyincroatia/?hl=hr", ""),
-})
-HOME_MATERIAL_COPY = re.compile(
-    r"\b(?:automated|automatic|automatically|automation|crawl(?:er|ers|ing)?|"
-    r"scrap(?:e|er|ers|ing)|extract(?:ion|ing)?|data collection|reus(?:e|ed|ing)|"
-    r"robots?\.txt|permissions?|licen[cs](?:e|es|ed|ing)|copyright|copying|reproduction|consent|"
-    r"prohibit(?:ed|s|ion)?|restrict(?:ed|ion|ions)?|forbid(?:den|s)?|"
-    r"terms\s+(?:of\s+(?:use|service)|and\s+conditions)|access (?:denied|blocked)|"
-    r"all rights reserved|(?:shall|must) not|not (?:permitted|allowed)|"
-    r"eligible|eligibility|ineligible|qualif(?:y|ies|ied|ications?)|citizenship|residency|"
-    r"applicants?|deadlines?|admission (?:criteria|requirements)|(?:tuition|application) fees?|"
-    r"scholarships? (?:available|offered|for)|"
-    r"(?:call for|accepting) applications|apply (?:by|now|before|for)|"
-    r"applications? (?:are |will be )?(?:open|close|due|accepted)|"
-    r"(?:may|can) only (?:apply|access)|(?:must|required to) (?:apply|enrol|register|obtain|be|provide)"
-    r")\b",
-    re.IGNORECASE,
-)
-NEWS_ACCESS_NOTICE = re.compile(
-    r"\b(?:automated\s+(?:access|collection|extraction|requests?)|"
-    r"(?:no|prohibit(?:ed|s)?|forbid(?:den|s)?)\s+(?:web\s+)?(?:scraping|crawling|harvesting)|"
-    r"(?:scraping|crawling|harvesting)\s+(?:(?:is|are)\s+)?(?:prohibited|forbidden|restricted)|"
-    r"permission\s+(?:is\s+)?required\s+to\s+(?:access|collect|extract|reuse)|"
-    r"access\s+(?:requires\s+(?:prior\s+)?permission|is\s+(?:restricted|prohibited)))\b", re.I,
-)
-NEWS_CALL_SIGNAL = re.compile(
-    r"\b(?:applications? (?:(?:are|is) )?(?:now )?(?:open|close|due|accepted)|"
-    r"(?:call|invitation) for (?:applications|proposals)|"
-    r"accepting applications|application deadline|(?:apply|submit) (?:now|by|before)|"
-    r"scholarships? (?:available|offered)\b|(?:admission|funding) opportunities)\b", re.I,
-)
-NEWS_ARTICLE_PATH = re.compile(r"/news/[a-z0-9]+(?:-[a-z0-9]+)*/")
-NEWS_PAGE_PATH = re.compile(r"/news/\?page=([0-9]+)")
-NEWS_POLICY_LINKS = frozenset({
-    "/about-us/content-disclaimer/", "/about-us/privacy-policy-statement/",
-    "/about-us/cookie-statement/", "/about-us/accessibility-statement/",
-})
-
-NEWS_INVENTORY = ("news", "news-page1", "news-page2", "news-page3", "news-page4")
-# Recognize the archive's reviewed editorial formats without pinning its headlines.
-NEWS_EDITORIAL = re.compile(
-    r"^(?:Croatia promotes its higher education in\b|international students['’] stories:\s|"
-    r"meet Croatian higher ed institutions near you\b|Croatian higher education at .*\bEAIE\b|"
-    r"international researcher shares (?:his|her|their) experience\b|"
-    r"see the final list of Croatian institutions exhibiting at\b|"
-    r"Croatia to participate in EAIE\b|international students in Croatia: .*analysis reveals\b|"
-    r"study opportunities in Croatia presented at the Erasmus Generation Meeting\b|"
-    r"free LearnCro app for learning Croatian launched\b|"
-    r"this [A-Za-z]+ Study in Croatia is coming to the Erasmus Generation Meeting\b|"
-    r"Study in Croatia (?:(?:is exhibiting )?at|Initiative at) .*"
-    r"\b(?:APAIE|NAFSA|Informativa|EAIE)\b|"
-    r"prolongation of stay for international students$)",
-    re.I,
-)
-
 INPUTS = {'about': {'url': 'https://www.studyincroatia.hr/about-us/about-us-39/',
            'format': 'html',
            'sha256': 'fe41cc3fb79d8f15ad0e49be5730116a75d1a182d4211a1b20bd1f3218e0b0da'},
@@ -2981,7 +2661,9 @@ INPUTS = {'about': {'url': 'https://www.studyincroatia.hr/about-us/about-us-39/'
  'funding': {'url': 'https://www.studyincroatia.hr/study-in-croatia/tuition-fees-and-scholarships/',
              'format': 'html',
              'sha256': '5526628839e0e35ef7d1fd433361192d868e54fc235b47eae8e69f35e73e612f'},
- 'home': {'url': SOURCE_URL, 'format': 'html'},
+ 'home': {'url': 'https://www.studyincroatia.hr/',
+          'format': 'html',
+          'sha256': 'ca4f7b76129d96c4ee91d295cfd46246d65fb3ebfe62b683080a0d18f1ea1cbc'},
  'learning': {'url': 'https://www.studyincroatia.hr/live-and-work-in-croatia/learning-croatian/',
               'format': 'html',
               'sha256': '44e073a7e8ee3d0e8ec63af64f7050158096ed9e2d7846e8f832e775e47c6c9a'},
@@ -2989,15 +2671,20 @@ INPUTS = {'about': {'url': 'https://www.studyincroatia.hr/about-us/about-us-39/'
              'format': 'html',
              'sha256': 'cdd3143a50f9e30d9eef7c9b26518afacc38fd641e7a5ec3affd8843d6dd43a4'},
  'news-page1': {'url': 'https://www.studyincroatia.hr/news/?page=1',
-                'format': 'html'},
+                'format': 'html',
+                'sha256': '6875c65ef74d983e7533bf18d8033d7d8ddd681edd8e75e66717ccf4e6bfc238'},
  'news-page2': {'url': 'https://www.studyincroatia.hr/news/?page=2',
-                'format': 'html'},
+                'format': 'html',
+                'sha256': 'a098670e40ddb483b4a992e62c942d17b77d73bea36b6b5cede374805632e6ab'},
  'news-page3': {'url': 'https://www.studyincroatia.hr/news/?page=3',
-                'format': 'html'},
+                'format': 'html',
+                'sha256': '18390286d89806c8fa45a483eca5927c80b8c2c9699e08921242520035b1dcd5'},
  'news-page4': {'url': 'https://www.studyincroatia.hr/news/?page=4',
-                'format': 'html'},
+                'format': 'html',
+                'sha256': 'd25c18d42622c8c1235ad3a44d39602f442be1169facf1882c4c91c2f77ade15'},
  'news': {'url': 'https://www.studyincroatia.hr/news/',
-          'format': 'html'},
+          'format': 'html',
+          'sha256': 'd74144f5edc2300d78d6dd3703406da1e30aaf8d2cf786db8b6ff0494bbdb62f'},
  'privacy': {'url': 'https://www.studyincroatia.hr/about-us/privacy-policy-statement/',
              'format': 'html',
              'sha256': 'e98d25caa2dcbf64b58bbcde9dbde23eb1bab93806522b36903a66e8349a82e7'}}
