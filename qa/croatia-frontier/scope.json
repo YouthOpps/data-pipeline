@@ -1,5 +1,5 @@
 {
-  "enabled": false,
+  "enabled": true,
   "issue": 365,
   "maintainer_account": 12278069,
   "reviewer_sha256": "8c1f864a81fe042fd700c4354f57571ad8c61223eb21e025b3faab4651320e2b",
