@@ -1,7 +1,7 @@
 {
   "branch": "qa/croatia-archive-native",
   "candidate_adapter_sha256": "dbed22af814d550c23562719d82f7372eb12f5be55037954c5e50c587bd417f8",
-  "enabled": false,
+  "enabled": true,
   "inventory_routes": [
     "https://www.studyincroatia.hr/news/?page=1",
     "https://www.studyincroatia.hr/news/?page=2",
