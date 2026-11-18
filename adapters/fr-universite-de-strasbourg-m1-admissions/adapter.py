@@ -51,7 +51,45 @@ _ARTIFACT = 'fr-universite-de-strasbourg-m1-admissions-pacing-state'
 _HOSTED_DECISION = None
 _HOSTED_SEED = None
 _HOSTED_LINEAGE = None
-_QA_APPROVAL = None
+_QA_APPROVAL = {'decision': 'https://github.com/YouthOpps/data-pipeline/issues/443#issuecomment-6970319824',
+ 'seed': {'blocked': False,
+          'completed': 1794980398.344909,
+          'completed_logical_id': '66a8ea9096144d52893e0a40ffeb3a3c',
+          'completed_physical_id': '611e4150d7c448958b7c1629849464c7',
+          'family': 'youthopps-universite-de-strasbourg-publisher-v1',
+          'in_flight': False,
+          'interval': 12.2,
+          'inventory_completed': 1794979505.0277514,
+          'legacy_policy_history_unknown': True,
+          'legacy_rate_history_unknown': True,
+          'logical_id': '66a8ea9096144d52893e0a40ffeb3a3c',
+          'not_before': 1794980410.544909,
+          'observed_at': 1794980398.344909,
+          'outcome': 'response_assessed',
+          'page_interval': 30,
+          'physical_id': '611e4150d7c448958b7c1629849464c7',
+          'physical_pending': False,
+          'physical_started': 1794980394.6673105,
+          'policy': {'body_sha256': '3f6c3820e376d3a919c8d702497503f8256867808d27af3c8c731778810650dc',
+                     'legacy_allowed': True,
+                     'new_allowed': True,
+                     'status': 200,
+                     'unavailable': False,
+                     'url': 'https://mathinfo.unistra.fr/robots.txt'},
+          'rate_limit_strikes': 0,
+          'rate_limit_until': 0,
+          'rates': [],
+          'schema': 1,
+          'starts': [1794979488.0919547,
+                     1794979488.9222023,
+                     1794979503.4353256,
+                     1794979504.334586,
+                     1794980373.575606,
+                     1794980376.1780949,
+                     1794980394.6673105,
+                     1794980397.1594021],
+          'target': 'https://mathinfo.unistra.fr/en/legal-notice/'},
+ 'seed_sha256': '9548e6732cf738bb94312f932f05a5f70fa87818f9adb8a61b9b78d7b04220d3'}
 _QA_BRANCH = 'qa/443-strasbourg-m1-native'
 _QA_PATH = '.github/workflows/verify-strasbourg-m1-443.yml'
 _ACTIVE_AUTHORITY = None
