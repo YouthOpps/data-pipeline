@@ -1,0 +1,67 @@
+name: IBM issue 444 original nonpublishing native QA
+on:
+  push:
+    branches: [issue/444-ibm-native-qa]
+    paths:
+      - adapters/ibm/**
+      - .github/workflows/qa-ibm-444-native.yml
+      - .github/qa/ibm444/**
+permissions:
+  actions: read
+  contents: read
+  issues: read
+concurrency:
+  group: youthopps-ibm-careers-publisher-v1
+  cancel-in-progress: false
+  queue: max
+jobs:
+  collect:
+    if: >-
+      github.repository == 'YouthOpps/data-pipeline' &&
+      github.ref == 'refs/heads/issue/444-ibm-native-qa' &&
+      github.run_attempt == 1 &&
+      github.event.created == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read the exact reviewed website consumer
+        uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: b8228fdd28e18a5e0cccec007ccfe04052cdfe0a
+          path: .ibm-diagnostic-consumer
+          persist-credentials: false
+          submodules: false
+      - name: Run the original native test under the read-only observer
+        id: collect
+        run: python -B .github/qa/ibm444/ibm444_observe.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          IBM444_CONSUMER_FILE: ${{ github.workspace }}/.ibm-diagnostic-consumer/scripts/data.mjs
+          IBM_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+      - name: Preserve QA-owned publisher pacing
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ibm-pacing-state-v2-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Preserve encrypted native evidence
+        if: always() && steps.collect.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ibm-444-encrypted-native-evidence-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ibm444-encrypted-native-evidence.der
+          if-no-files-found: ignore
+          retention-days: 3

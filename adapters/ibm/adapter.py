@@ -174,6 +174,24 @@ _NO_PUBLISHER_LAST_ARTIFACT = (
     12926650363,
     "sha256:81f559b0af050d307e74f79b6408135848461b354852ff50aa337ce88663a28f",
 )
+# Issue #444. Verified data-source commit c7d0cf98116e94a23eefe2b9d41528048be90675
+# records the workflow API failure after snapshot validation. At this producer
+# revision the remaining hosted workflow API guard runs before the first wire.
+_PRE_WIRE_API_FAILURE = (
+    44184483208,
+    "c8edce30d9ba3067c89df8cfe9b7c6c66e1278b2",
+    134397208159,
+    "2026-11-17T21:53:27Z",
+    "2026-11-17T21:55:48Z",
+    "108fe0e0b1fbc22d8e5338aec7b4e2db5f046969",
+)
+_PRE_WIRE_API_PREDECESSOR = (
+    43926570474,
+    1,
+    "2d478d93da7a7e52b185d4406d2a08a2970431ea",
+    14255937767,
+    "sha256:0a8b41e0e905f616c1ff42c8f6deca2681f4031b6fb838f8f1041e051759382e",
+)
 _NO_PUBLISHER_BOUND = 0
 
 
@@ -291,6 +309,14 @@ class AdapterError(Exception):
     def __init__(self, message, stage="parse", status=None):
         super().__init__(message)
         self.stage, self.status = stage, status
+
+
+class WorkflowStateUnavailable(AdapterError):
+    """A GitHub coordination read failed."""
+
+
+class FirstWireWorkflowStateUnavailable(WorkflowStateUnavailable):
+    """Hosted coordination failed before the first physical publisher request."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -907,6 +933,7 @@ def durable_transaction(kind):
             _PROTOCOL_DEPTH += 1
             settled = False
             retryable_no_response = False
+            pre_wire_unavailable = False
             physical = (
                 {"started": False, "received": False}
                 if kind == "physical"
@@ -939,7 +966,10 @@ def durable_transaction(kind):
                 )
                 raise
             except AdapterError as error:
-                if not _PROTOCOL_FATAL:
+                pre_wire_unavailable = isinstance(
+                    error, FirstWireWorkflowStateUnavailable
+                ) and not _PROTOCOL_FIRST_WIRE_VERIFIED
+                if not _PROTOCOL_FATAL and not pre_wire_unavailable:
                     with protocol_budget() as state:
                         settled = (
                             getattr(error, "policy_retained", False)
@@ -968,6 +998,7 @@ def durable_transaction(kind):
                 if (
                     not settled
                     and not retryable_no_response
+                    and not pre_wire_unavailable
                     and (outer or physical is not None)
                 ):
                     _PROTOCOL_FATAL = _PUBLISHER_GATE_FAILED = True
@@ -979,15 +1010,43 @@ def durable_transaction(kind):
                     )
                 if outer:
                     try:
-                        if settled and not _PROTOCOL_FATAL:
+                        if (
+                            settled or pre_wire_unavailable
+                        ) and not _PROTOCOL_FATAL:
                             with protocol_budget() as state:
                                 protocol_healthy(state)
+                                if pre_wire_unavailable:
+                                    expected = (
+                                        {
+                                            key: value
+                                            for key, value in policy_frame.items()
+                                            if key != "complete"
+                                        }
+                                        if policy_frame is not None else None
+                                    )
+                                    if (
+                                        not state["in_flight"]
+                                        or state["pending"] != {
+                                            "id": _PROTOCOL_OWNER,
+                                            "kind": "policy" if kind == "assessment" else kind,
+                                            **protocol_target(url),
+                                        }
+                                        or state["policy_pending"] != expected
+                                        or state["current_policy_assessment"] is not None
+                                    ):
+                                        raise AdapterError(
+                                            "Pre-wire journal ownership changed", "access"
+                                        )
+                                    # Retain the conservative timing reservation
+                                    # and prior policy history, clearing only the
+                                    # assessment that could not reach the wire.
+                                    state["policy_pending"] = None
                                 if state["policy_pending"] is not None:
                                     raise AdapterError(
                                         "REP assessment remains pending",
                                         "access",
                                     )
-                                if policy_frame is not None:
+                                if policy_frame is not None and not pre_wire_unavailable:
                                     receipt = state["current_policy_assessment"]
                                     if receipt is None or any(
                                         receipt[k] != policy_frame[k]
@@ -1292,6 +1351,41 @@ def reviewed_no_publisher_attempt(run, jobs):
     return True
 
 
+def reviewed_pre_wire_api_failure(run, jobs):
+    """Authenticate the exact post-snapshot, pre-wire failure review."""
+    (
+        identity, head, job_id, started, completed, source_blob,
+    ) = _PRE_WIRE_API_FAILURE
+    if run["id"] != identity or run["run_attempt"] != 1:
+        return False
+    if (
+        run["head_sha"] != head
+        or run.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("conclusion") != "failure"
+        or (jobs[0]["id"], jobs[0]["started_at"], jobs[0]["completed_at"])
+        != (job_id, started, completed)
+    ):
+        raise AdapterError("Reviewed pre-wire API failure changed", "access")
+    for path, expected in (
+        ("adapters/ibm/adapter.py", source_blob),
+        (".github/workflows/fetch-ibm.yml", _REVIEWED_PRODUCER_WORKFLOW_BLOB),
+    ):
+        if workflow_api("/contents/" + path + "?ref=" + head).get("sha") != expected:
+            raise AdapterError("Reviewed pre-wire producer changed", "access")
+    artifact_inventory = workflow_api(
+        f"/actions/runs/{identity}/artifacts?per_page=100"
+    )
+    if (
+        type(artifact_inventory.get("total_count")) is not int
+        or artifact_inventory["total_count"] != 0
+        or artifact_inventory.get("artifacts") != []
+    ):
+        raise AdapterError("Reviewed pre-wire artifact inventory changed", "access")
+    return True
+
+
 def proven_guarded_no_publisher_attempt(run, jobs):
     """Recognize the current guarded producer or exact immutable old ghost."""
     if (
@@ -1523,7 +1617,9 @@ def protocol_fresh_history():
                 completed_attempts.append(
                     (finished, identity, number, detail, jobs)
                 )
-                if reviewed_no_publisher_attempt(detail, jobs):
+                if reviewed_no_publisher_attempt(
+                    detail, jobs
+                ) or reviewed_pre_wire_api_failure(detail, jobs):
                     no_publisher_bounds[identity] = finished
                     continue
                 if attempt == 1 and proven_guarded_no_publisher_attempt(
@@ -1579,6 +1675,16 @@ def protocol_fresh_history():
     if len(matches) != 1:
         raise AdapterError("Newest protocol artifact required", "access")
     artifact = matches[0]
+    recovery_finish = no_publisher_bounds.get(_PRE_WIRE_API_FAILURE[0])
+    if recovery_finish is not None and latest[0] <= recovery_finish:
+        if (
+            latest[1],
+            latest[2],
+            latest[3]["head_sha"],
+            artifact.get("id"),
+            artifact.get("digest"),
+        ) != _PRE_WIRE_API_PREDECESSOR:
+            raise AdapterError("Reviewed pre-wire predecessor changed", "access")
     if (latest[1], latest[2]) == _NO_PUBLISHER_LAST_OWNER:
         if (
             not set(_NO_PUBLISHER_ATTEMPTS) <= set(no_publisher_bounds)
@@ -2296,7 +2402,12 @@ def protocol_before_wire():
         raise AdapterError("Startup quiet must precede reservation", "access")
     if time.time() < _PROTOCOL_BOUNDARY_WALL:
         raise AdapterError("Protocol clock moved backwards", "access")
-    latest, artifact = protocol_fresh_history()
+    try:
+        latest, artifact = protocol_fresh_history()
+    except WorkflowStateUnavailable as error:
+        if protocol_purpose() != "hosted":
+            raise
+        raise FirstWireWorkflowStateUnavailable(str(error), "access") from None
     if protocol_context_key(latest, artifact) != _PROTOCOL_COMPAT_CONTEXT:
         raise AdapterError(
             "Newest publisher owner changed during quiet", "access"
@@ -3886,26 +3997,37 @@ def workflow_api(path):
     token = os.environ.get("GITHUB_TOKEN", "")
     if os.environ.get("GITHUB_ACTIONS") == "true" and not token:
         raise AdapterError("Workflow state credentials missing", "access")
-    try:
-        status, _, body = request_bytes(
-            _WORKFLOW_GITHUB
-            + path
-            + ("&" if "?" in path else "?")
-            + "_fresh="
-            + str(time.time_ns()),
-            headers={
-                **({"Authorization": "Bearer " + token} if token else {}),
-                "Accept": "application/vnd.github+json",
-                "Cache-Control": "no-cache",
-            },
-        )
-        if status != 200:
-            raise ValueError("Workflow API status")
-        return json.loads(body)
-    except Exception:
-        raise AdapterError(
-            ("Workflow pacing state unavailable"), ("access")
-        ) from None
+    headers = {
+        **({"Authorization": "Bearer " + token} if token else {}),
+        "Accept": "application/vnd.github+json",
+        "Cache-Control": "no-cache",
+    }
+    failure = "invalid response"
+    for attempt in range(3):
+        try:
+            status, response_headers, body = request_bytes(
+                _WORKFLOW_GITHUB + path + ("&" if "?" in path else "?")
+                + "_fresh=" + str(time.time_ns()),
+                headers=headers,
+            )
+            if status == 200:
+                return json.loads(body)
+            failure = f"HTTP {status}"
+            if status not in (500, 502, 503, 504) or response_headers.get("Retry-After"):
+                break
+        except (urllib.error.URLError, OSError) as error:
+            failure = type(getattr(error, "reason", error)).__name__
+            if isinstance(getattr(error, "reason", error), ssl.SSLError):
+                break
+        except Exception:
+            break
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+    print(
+        f"GitHub workflow coordination read failed at {path.partition('?')[0]} ({failure})",
+        file=sys.stderr,
+    )
+    raise WorkflowStateUnavailable("Workflow pacing state unavailable", "access")
 
 
 def verify_local_workflow_pause(definition=None):

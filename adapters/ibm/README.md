@@ -84,6 +84,35 @@ this timing proof only with its separately pinned original source/workflow.
 Changing the first-wire implementation requires renewed independent proof.
 Other missing artifacts remain errors; this is not an older-state fallback.
 
+### GitHub coordination outage recovery (#444)
+
+The [failed hosted attempt 44184483208/1](https://github.com/YouthOpps/data-pipeline/actions/runs/44184483208)
+left no pacing artifact. The publisher bot's [verified metadata commit](https://github.com/YouthOpps/data-source/commit/c7d0cf98116e94a23eefe2b9d41528048be90675)
+identifies the GitHub workflow coordination error after last-good snapshot
+validation and retains all five records. At the exact producer revision,
+workflow coordination on that path had to pass before the first IBM opener.
+The first-wire check therefore failed before any IBM request started. The
+provisional pacing reservation and robots assessment explain the failed export.
+
+The recovery binds that exact completed job and both immutable producer blobs
+to its empty artifact inventory. When it is the newest event, the reader restores
+only the independently verified v2 artifact from run `43926570474/1`. It retains
+the earlier artifact's restrictions and adds the failed job's completion bound.
+An unexpected owner or artifact still stops the run.
+
+GitHub coordination reads retry a narrow set of temporary infrastructure errors
+within the existing phase deadline. Rate-limited reads, responses with an explicit
+retry delay, certificate failures and invalid metadata stop at the observed error.
+After trusted state has been restored, a GitHub read failure at the hosted first-wire
+check can finalize only the current assessment whose ownership still matches the
+journal. The export retains inherited restrictions, policy history and any
+conservative reservation. Unknown pending state, journal faults and failures
+after a publisher opener still require the normal fail-closed handling.
+
+The immutable outcome and private offline journal/ZIP controls establish this
+recovery path without IBM requests. The original nonpublishing hosted test and
+the production refresh have separate acceptance evidence for this revision.
+
 The legacy queue is isolated by an artifact-generation fence rather than by
 assuming cancellation succeeded. The immutable old adapter requires
 `ibm-pacing-state-<attempt>` and has no newer-state fallback. New diagnostic

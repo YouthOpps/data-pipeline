@@ -1,0 +1,26 @@
+{
+  "adapter_sha256": "d10c6257baa914ec72579752a3d413bb1a65452834b347569832c2bcd8e8c37d",
+  "consumer_revision": "b8228fdd28e18a5e0cccec007ccfe04052cdfe0a",
+  "issue": 444,
+  "maintainer": 12278069,
+  "predecessor": [
+    43926570474,
+    1,
+    "2d478d93da7a7e52b185d4406d2a08a2970431ea",
+    14255937767,
+    "sha256:0a8b41e0e905f616c1ff42c8f6deca2681f4031b6fb838f8f1041e051759382e"
+  ],
+  "production_workflow_id": 380775192,
+  "qa_branch": "issue/444-ibm-native-qa",
+  "qa_workflow_path": ".github/workflows/qa-ibm-444-native.yml",
+  "review_public_pem_sha256": "c37b738b12df9f35e47d3f128a75919f6c20b403b9306c603c380adb75162a3b",
+  "test_sha256": "483799df34d9e8df03f29459740ce44f4e96d45d45093ef8e3ca64878231932f",
+  "wire_failure": [
+    44184483208,
+    "c8edce30d9ba3067c89df8cfe9b7c6c66e1278b2",
+    134397208159,
+    "2026-11-17T21:53:27Z",
+    "2026-11-17T21:55:48Z",
+    "108fe0e0b1fbc22d8e5338aec7b4e2db5f046969"
+  ]
+}
