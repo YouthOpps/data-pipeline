@@ -87,7 +87,7 @@ The reviewed accessible inventory contains **54 records**:
 | Mobility Fund | Autumn2026 call, one record with four mobility categories |
 | University scholarship hub | Doctoral studying income; STARS; GI Bill |
 | Havel detail | Václav Havel Bursary |
-| FSV own detail | FSV UK SCHOLARS2026/27 |
+| FSV own detail | FSV UK SCHOLARS annual application |
 | International programmes | Aktion; four named DAAD schemes (summer course, all-fields Master's, research grants, cotutelle); Czech-German Future Fund; two BTHA schemes (postgraduate, summer/language); GFPS; KAAD; CERN Doctoral Student Programme; Barrande; CEEPUS; Fulbright |
 | Foundations | Sophia; Foundation for the Development of Education; Bakala; Bader; Experentia; SYLFF; Visegrad |
 | Japanese programmes | JASSO; MEXT, consolidated across both hubs and their own detail pages |
@@ -188,6 +188,16 @@ awards cover EUR 4,200 per year for EU students or EUR 7,500 otherwise.
 Computational Linguistics also offers CZK 120,000 per year for living
 expenses, subject to the published study-progress conditions.
 
+The [2027/28 FSV review](https://github.com/YouthOpps/data-pipeline/actions/runs/44249892126)
+confirmed that the former Development Scholarships URL redirects to the
+official FSV UK SCHOLARS programme. The collector reads the canonical URL
+directly and checks the introduction, eligibility and financial conditions,
+and application material independently. It derives each occurrence’s year,
+scholarship and study application dates and payment month from the same
+publisher page. Both application routes close on 30 April 2027 for the
+2027/28 cycle. The one-time payment of about CZK 75,000 covers living costs
+and is due by December 2027 after the stated conditions are met.
+
 ## Dates, countries and conflicts
 
 Known calendar application dates remain `YYYY-MM-DD` without invented midnight
@@ -200,8 +210,8 @@ Yearless annual dates/months, rolling application lead times and call-publicatio
 milestones remain deadline-null. Genuine programme overviews may have unknown
 status. Acute emergency Rector applications explicitly run throughout the
 calendar year and are open. Explicit elapsed dated calls still listed by the
-publisher, including FSV, retain `expired` status. The faculty now lists the
-five 2027/28 MFF awards in place of the preceding cycle.
+publisher retain `expired` status. The MFF and FSV faculties now list their
+2027/28 awards in place of the preceding cycle.
 
 The German monthly-call hub's “currently open” statement conflicts with its
 actually linked DOCX: applications for2026 stays were due **December8,2025**.

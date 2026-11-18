@@ -36,6 +36,10 @@ PUBLISHER_COUNTRY = "CZ"
 PUBLISHER_TYPE = "university"
 ATTRIBUTION = "Charles University"
 MFF_URL = "https://www.mff.cuni.cz/en/admissions/scholarships"
+FSV_URL = (
+    "https://fsv.cuni.cz/en/study/"
+    "scholarships-funding-and-fees/fsv-uk-scholars-program"
+)
 MFF_DETAILS = {
     "cs": ("cstf-scholarships", "Computer Science Tuition Fee Scholarships"),
     "math": ("prague-mathematics-tuition-fee-scholarships", "Prague Mathematics Tuition Fee Scholarships"),
@@ -233,10 +237,7 @@ def read_pages():
         "carolina": "https://centrumcarolina.cuni.cz/CAENG-70.html",
         "acute": "https://cuni.cz/UKEN-1398.html",
         "mff": MFF_URL,
-        "fsv": (
-            "https://fsv.cuni.cz/en/admissions/"
-            "scholarships-funding-and-fees/development-scholarships"
-        ),
+        "fsv": FSV_URL,
     }
     pages = {}
     mff_cycle = None
@@ -831,7 +832,6 @@ REVIEWED_CONDITIONS = {
     "acute": (
         "fb39f44d5f9df587f85dd09f1a05651c3492f22c388690293f6d0044d4cd3ab0"
     ),
-    "fsv": ("81582bed2f125c6dcaea478a2fdf6166c378eb4aa2f4fd8fa7eca4a002cbee3a"),
 }
 
 
@@ -1220,11 +1220,11 @@ def mff_detail_url(role, year):
     return f"{MFF_URL}/{MFF_DETAILS[role][0]}-{year}"
 
 
-def mff_material(node, url, year, *, deadline=None):
+def cycle_material(node, url, year, *, dates=()):
     """Retain conditions and link associations while comparing relative cycle years."""
     def relative(text):
-        if deadline is not None:
-            text = text.replace(deadline, "{application-date}")
+        for field, value in dates:
+            text = text.replace(value, f"{{{field}}}")
         text = text.replace(f"{year}/{(year + 1) % 100:02}", "{cycle-short}")
 
         def replace(match):
@@ -1263,7 +1263,7 @@ def reviewed_mff_index(url, section):
         ):
             raise AdapterError("MFF award title, study level or destination changed", "parse")
         reviewed[role] = target
-    if mff_material(section, url, year) != MFF_INDEX_FACTS:
+    if cycle_material(section, url, year) != MFF_INDEX_FACTS:
         raise AdapterError("MFF scholarship index guidance or inventory changed", "parse")
     return year, reviewed
 
@@ -1286,10 +1286,72 @@ def reviewed_mff_leaf(role, url, section, year):
         raise AdapterError("Invalid MFF application deadline", "parse") from error
     if (
         deadline.year != year
-        or mff_material(section, url, year, deadline=raw_date) != MFF_LEAF_FACTS[role]
+        or cycle_material(
+            section, url, year, dates=(("application-date", raw_date),)
+        ) != MFF_LEAF_FACTS[role]
     ):
         raise AdapterError(f"MFF {role} award conditions or application destinations changed", "parse")
     return deadline.isoformat(), raw_date
+
+
+FSV_TITLE = "The 'FSV UK SCHOLARS' Program"
+FSV_SECTIONS = (
+    (),
+    ("DETAILED INFORMATION", "What is on offer", "Who is eligible", "Financial terms and conditions"),
+    ("HOW TO APPLY FOR THE SCHOLARSHIP", "Application submission", "Selection of applicants"),
+)
+FSV_SECTION_FACTS = (
+    "b2ab5c6b43e5f49bdf5a722f754292b3bf1c767b6355672657ec5a72476071b5",
+    "c7002031ca946ca116d1842614eb53f025bdbe86fead08cc9ec7aac7f8aa9f83",
+    "4a24da2be00509ed60985a14655e4d7ef89aab9a539a8c8b8f8cfd015780c1d6",
+)
+FSV_DEADLINE = re.compile(
+    r"The deadline for scholarship applications for (20\d{2})/(20\d{2}) is "
+    r"([A-Z][a-z]+ \d{1,2}, 20\d{2})\s*\."
+)
+FSV_STUDY_DEADLINE = re.compile(
+    r"the application fee paid by ([A-Z][a-z]+ \d{1,2}(?:st|nd|rd|th) 20\d{2})\."
+)
+FSV_PAYMENT = re.compile(
+    r"no later than ([A-Z][a-z]+ (20\d{2})) provided that all conditions are met\."
+)
+
+
+def reviewed_fsv(url, section):
+    """Validate each material programme section and extract its two current dates."""
+    frame = one(nodes(section, "div", "controls__print-wrap"), "FSV programme page")
+    title = one(nodes(frame, "h1"), "FSV programme title")
+    sections = nodes(frame, "section", "body")
+    headings = [tuple(node.text() for node in body.walk() if node.tag in {"h2", "h3", "h4"})
+                for body in sections]
+    if (
+        url != FSV_URL or title.text() != FSV_TITLE or tuple(headings) != FSV_SECTIONS
+        or international_material(section, url, {frame}) != (FSV_TITLE, [])
+        or international_material(frame, url, {title, *sections}) != ("", [])
+    ):
+        raise AdapterError("FSV scholarship sections or inventory changed", "parse")
+    application = sections[-1].text()
+    scholarship = one(FSV_DEADLINE.findall(application), "FSV scholarship deadline")
+    study_date = one(FSV_STUDY_DEADLINE.findall(application), "FSV study application deadline")
+    payment, payment_year = one(FSV_PAYMENT.findall(application), "FSV payment schedule")
+    year, next_year = int(scholarship[0]), int(scholarship[1])
+    try:
+        closes = datetime.strptime(scholarship[2], "%B %d, %Y").date()
+        study_closes = datetime.strptime(re.sub(r"(?<=\d)(?:st|nd|rd|th)\b", "", study_date),
+                                         "%B %d %Y").date()
+        payment_date = datetime.strptime(payment, "%B %Y").date()
+    except ValueError as error:
+        raise AdapterError("Invalid FSV application or payment date", "parse") from error
+    if (
+        next_year != year + 1 or closes.year != year or study_closes.year != year
+        or int(payment_year) != year or payment_date < max(closes, study_closes)
+    ):
+        raise AdapterError("Inconsistent FSV academic cycle or deadlines", "parse")
+    dates = (("scholarship-date", scholarship[2]), ("study-date", study_date), ("payment", payment))
+    for body, expected in zip(sections, FSV_SECTION_FACTS):
+        if cycle_material(body, url, year, dates=dates) != expected:
+            raise AdapterError("FSV scholarship facts or application destinations changed", "parse")
+    return year, closes, study_closes, payment, scholarship[2]
 
 
 def review_page(key, url, section):
@@ -1298,6 +1360,8 @@ def review_page(key, url, section):
         return reviewed_international_cards(section, url)
     if key == "mff":
         return reviewed_mff_index(url, section)
+    if key == "fsv":
+        return reviewed_fsv(url, section)
     if key == "mobility":
         for name, text in mobility_sections(section, url).items():
             if hashlib.sha256(text.encode()).hexdigest() != MOBILITY_CONDITIONS[name]:
@@ -1352,6 +1416,25 @@ def mff_programmes(pages):
         )
         records.append(result)
     return records
+
+
+def fsv_programme(url, section):
+    year, deadline, study_deadline, payment, evidence = reviewed_fsv(url, section)
+    return programme(
+        f"fsv-{year}-{(year + 1) % 100:02}",
+        f"FSV UK SCHOLARS scholarship {year}/{year + 1}",
+        url,
+        section.text(),
+        (evidence, "75 000", "no tuition fee waiver"),
+        "One-time payment of about CZK 75,000 for living costs of financially disadvantaged fee-paying "
+        "Social Sciences students. Incoming students and current BA year 1/2 or MA year 1 "
+        "may apply. No tuition waiver. Renewal requires a new application. Submit an English "
+        "or certified-translated application with a motivation essay and academic reference. "
+        f"New applicants must file and pay for programme admission by {study_deadline.isoformat()}. "
+        f"Payment by {payment} after winter registration and tuition settlement, if conditions are met.",
+        hosts=("CZ",),
+        deadline=deadline.isoformat(),
+    )
 
 
 def parse_inventory(pages):
@@ -1471,26 +1554,7 @@ def parse_inventory(pages):
         ),
         hosts=("CZ",),
     )
-    add(
-        "fsv",
-        "fsv-2026-27",
-        "FSV UK SCHOLARS scholarship 2026/2027",
-        ("April 30, 2026", "75 000"),
-        (
-            "One-time approximately CZK75000 living-cost support for "
-            "financially disadvantaged fee-paying Faculty of Social "
-            "Sciences BA/MA students. Apply as incoming student, BA "
-            "year1/2 or MA year1 for the next year. No tuition waiver; "
-            "renewal needs a new application. English application, "
-            "motivation up to1000 words and academic recommendation "
-            "required; programme application/payment also due "
-            "April30,2026. Payment after winter registration and "
-            "tuition settlement, no later than December2026 subject to "
-            "conditions."
-        ),
-        deadline="2026-04-30",
-        hosts=("CZ",),
-    )
+    records.append(fsv_programme(*pages["fsv"]))
     for key, title, summary, facts, hosts in INTERNATIONAL:
         records.append(
             programme(
