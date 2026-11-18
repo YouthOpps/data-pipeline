@@ -1,0 +1,35 @@
+name: qa-charles-mff-2027-research
+on:
+  push:
+    branches: [qa/charles-mff-2027-research]
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: youthopps-cz-charles-university-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  research:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/charles-mff-2027-research' && github.run_attempt == 1 && github.event.created == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 33
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Research four exact Charles MFF scholarship detail pages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/charles-mff-research/runner.py
+      - name: Retain isolated research state and encrypted capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: charles-mff-2027-research-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/charles-mff-2027-research/
+          if-no-files-found: ignore
+          retention-days: 14
