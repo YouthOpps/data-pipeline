@@ -7,6 +7,7 @@ on:
 permissions:
   actions: read
   contents: read
+  issues: read
 
 concurrency:
   group: youthopps-universite-de-strasbourg-publisher-v1
@@ -54,4 +55,4 @@ jobs:
           name: fr-universite-de-strasbourg-m1-admissions-qa-result-${{ github.run_attempt }}
           path: ${{ runner.temp }}/strasbourg443-native-evidence
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 3
