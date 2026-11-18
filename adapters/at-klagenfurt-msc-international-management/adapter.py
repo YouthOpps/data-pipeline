@@ -1319,7 +1319,7 @@ REPOSITORY = "YouthOpps/data-pipeline"
 API = "https://api.github.com"
 WORKFLOW_PATH = ".github/workflows/fetch-" + SOURCE_ID + ".yml"
 WORKFLOW_FILE = WORKFLOW_PATH.rsplit("/", 1)[1]
-WORKFLOW_SHA256 = "3af2056159eeee83af6cc24cf2829e92e582bbda9242a6e770e2d84cfe27f394"
+WORKFLOW_SHA256 = "9bb59b30401df986534f7610208574c9136e06681d50ebfe09613be8270775d6"
 REVIEWED_QA_RUN = 44245821168
 REVIEWED_QA_WORKFLOW = 422227671
 REVIEWED_QA_JOB = 134604404648
@@ -2014,31 +2014,24 @@ def export_state():
         os.close(fd)
 
 
-def production_preflight():
-    """Verify the current producer and pacing floor before obtaining write credentials."""
-    if "DATA_SOURCE_TOKEN" in os.environ:
-        raise Stop("Preflight refuses credentials with publication authority")
+def require_settled_production():
+    """Authenticate the producer and its pacing floor before opening the data-source repository."""
     binding = workflow_binding()
     state = hosted_floor(binding, workflow_history(binding))
     if any(state[key] for key in ("blocked", "in_flight", "physical_pending")):
         raise Stop("Newest publisher state has unresolved access restrictions")
-    print("Exact main producer and settled pacing floor verified")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_mutually_exclusive_group()
-    commands.add_argument("--publish", action="store_true", help="Publish this source on its owning Action")
-    commands.add_argument("--preflight", action="store_true", help="Authenticate source ownership without collection")
+    parser.add_argument("--publish", action="store_true", help="Publish this source on its owning Action")
     args = parser.parse_args()
-    if args.preflight:
-        production_preflight()
-        return
     if args.publish and not HOSTED:
         raise Stop("Only the owning GitHub Actions workflow may publish")
     if not args.publish:
         print(json.dumps(collect(), ensure_ascii=False))
         return
+    require_settled_production()
     try:
         publish()
     finally:
