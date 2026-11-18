@@ -1,0 +1,58 @@
+name: verify-unina-foundation-418
+
+on:
+  push:
+    branches: [qa/418-unina-foundation-native]
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: youthopps-unina-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/418-unina-foundation-native' && github.event.created == true && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 11e66b0107956ed82b9918206e18d8e8fc6778b1
+          path: website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run the one original nonpublishing Federico II Foundation admissions test
+        id: collect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          UNINA418_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+        run: python -B qa-unina418-foundation/observer.py
+      - name: Retain owned state from exact QA execution
+        if: always() && steps.collect.outputs.pacing_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: it-unina-apple-academy-foundation-qa-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Retain derived evidence and authenticated ciphertext
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: it-unina-apple-academy-foundation-qa-result-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/unina418-native-evidence
+          if-no-files-found: error
+          retention-days: 3
