@@ -174,6 +174,42 @@ _NO_PUBLISHER_LAST_ARTIFACT = (
     12926650363,
     "sha256:81f559b0af050d307e74f79b6408135848461b354852ff50aa337ce88663a28f",
 )
+# Issue #444. Verified data-source commit c7d0cf98116e94a23eefe2b9d41528048be90675
+# records the workflow API failure after snapshot validation. At this producer
+# revision the remaining hosted workflow API guard runs before the first wire.
+_PRE_WIRE_API_FAILURE = (
+    44184483208,
+    "c8edce30d9ba3067c89df8cfe9b7c6c66e1278b2",
+    134397208159,
+    "2026-11-17T21:53:27Z",
+    "2026-11-17T21:55:48Z",
+    "108fe0e0b1fbc22d8e5338aec7b4e2db5f046969",
+)
+_PRE_WIRE_API_PREDECESSOR = (
+    43926570474,
+    1,
+    "2d478d93da7a7e52b185d4406d2a08a2970431ea",
+    14255937767,
+    "sha256:0a8b41e0e905f616c1ff42c8f6deca2681f4031b6fb838f8f1041e051759382e",
+)
+_ISOLATED_QA_HANDOFF = {
+    "workflow_id": 422232194,
+    "workflow_path": ".github/workflows/qa-ibm-444-native.yml",
+    "branch": "issue/444-ibm-native-qa",
+    "run_id": 44246650336,
+    "head": "5ea4f06bd3e8e0743688d01f1730bf7dd837d0fe",
+    "actor_id": 12278069,
+    "job_id": 134607100176,
+    "started": "2026-11-18T05:47:12Z",
+    "finished": "2026-11-18T05:51:25Z",
+    "source_blob": "9a711d9c6db679e22df9a33a0898aae451d4665e",
+    "workflow_blob": "912f2685578a665837ef257309dc18b83cfe13fd",
+    "artifact_id": 14402157005,
+    "artifact_digest": "sha256:f6fa9e0386e940b26a5675137e3586392e1692e9cd8bae3f9e3fa58485ad3797",
+}
+# Pin the first canonical continuation's exact reviewed program. Its own digest
+# line is normalized to zeroes before hashing to keep the input reproducible.
+_HANDOFF_PRODUCER_SHA256 = "c2cf365bd7dd6cee57992192e0efe8786eb3a3c3c24da07d58cc11208fd110bb"
 _NO_PUBLISHER_BOUND = 0
 
 
@@ -291,6 +327,14 @@ class AdapterError(Exception):
     def __init__(self, message, stage="parse", status=None):
         super().__init__(message)
         self.stage, self.status = stage, status
+
+
+class WorkflowStateUnavailable(AdapterError):
+    """A GitHub coordination read failed."""
+
+
+class FirstWireWorkflowStateUnavailable(WorkflowStateUnavailable):
+    """Hosted coordination failed before the first physical publisher request."""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -907,6 +951,7 @@ def durable_transaction(kind):
             _PROTOCOL_DEPTH += 1
             settled = False
             retryable_no_response = False
+            pre_wire_unavailable = False
             physical = (
                 {"started": False, "received": False}
                 if kind == "physical"
@@ -939,7 +984,10 @@ def durable_transaction(kind):
                 )
                 raise
             except AdapterError as error:
-                if not _PROTOCOL_FATAL:
+                pre_wire_unavailable = isinstance(
+                    error, FirstWireWorkflowStateUnavailable
+                ) and not _PROTOCOL_FIRST_WIRE_VERIFIED
+                if not _PROTOCOL_FATAL and not pre_wire_unavailable:
                     with protocol_budget() as state:
                         settled = (
                             getattr(error, "policy_retained", False)
@@ -968,6 +1016,7 @@ def durable_transaction(kind):
                 if (
                     not settled
                     and not retryable_no_response
+                    and not pre_wire_unavailable
                     and (outer or physical is not None)
                 ):
                     _PROTOCOL_FATAL = _PUBLISHER_GATE_FAILED = True
@@ -979,15 +1028,43 @@ def durable_transaction(kind):
                     )
                 if outer:
                     try:
-                        if settled and not _PROTOCOL_FATAL:
+                        if (
+                            settled or pre_wire_unavailable
+                        ) and not _PROTOCOL_FATAL:
                             with protocol_budget() as state:
                                 protocol_healthy(state)
+                                if pre_wire_unavailable:
+                                    expected = (
+                                        {
+                                            key: value
+                                            for key, value in policy_frame.items()
+                                            if key != "complete"
+                                        }
+                                        if policy_frame is not None else None
+                                    )
+                                    if (
+                                        not state["in_flight"]
+                                        or state["pending"] != {
+                                            "id": _PROTOCOL_OWNER,
+                                            "kind": "policy" if kind == "assessment" else kind,
+                                            **protocol_target(url),
+                                        }
+                                        or state["policy_pending"] != expected
+                                        or state["current_policy_assessment"] is not None
+                                    ):
+                                        raise AdapterError(
+                                            "Pre-wire journal ownership changed", "access"
+                                        )
+                                    # Retain the conservative timing reservation
+                                    # and prior policy history, clearing only the
+                                    # assessment that could not reach the wire.
+                                    state["policy_pending"] = None
                                 if state["policy_pending"] is not None:
                                     raise AdapterError(
                                         "REP assessment remains pending",
                                         "access",
                                     )
-                                if policy_frame is not None:
+                                if policy_frame is not None and not pre_wire_unavailable:
                                     receipt = state["current_policy_assessment"]
                                     if receipt is None or any(
                                         receipt[k] != policy_frame[k]
@@ -1213,7 +1290,7 @@ def protocol_run_binding(run, identity, head=None):
     return run
 
 
-def protocol_exact_jobs(run, completed=True):
+def protocol_exact_jobs(run, completed=True, head_branch="main"):
     """Require a complete inventory with explicit identity on every job."""
     identity, attempt = run["id"], run["run_attempt"]
     result = workflow_api(
@@ -1240,7 +1317,7 @@ def protocol_exact_jobs(run, completed=True):
             or job.get("run_id") != identity
             or job.get("run_attempt") != attempt
             or job.get("head_sha") != run["head_sha"]
-            or job.get("head_branch") != "main"
+            or job.get("head_branch") != head_branch
             or job.get("status")
             not in (
                 {"completed"}
@@ -1289,6 +1366,41 @@ def reviewed_no_publisher_attempt(run, jobs):
     elapsed = protocol_timestamp(pin[2]) - protocol_timestamp(pin[1])
     if not 0 <= elapsed < 60:
         raise AdapterError("No-publisher timing proof changed", "access")
+    return True
+
+
+def reviewed_pre_wire_api_failure(run, jobs):
+    """Authenticate the exact post-snapshot, pre-wire failure review."""
+    (
+        identity, head, job_id, started, completed, source_blob,
+    ) = _PRE_WIRE_API_FAILURE
+    if run["id"] != identity or run["run_attempt"] != 1:
+        return False
+    if (
+        run["head_sha"] != head
+        or run.get("conclusion") != "failure"
+        or len(jobs) != 1
+        or jobs[0].get("name") != "collect"
+        or jobs[0].get("conclusion") != "failure"
+        or (jobs[0]["id"], jobs[0]["started_at"], jobs[0]["completed_at"])
+        != (job_id, started, completed)
+    ):
+        raise AdapterError("Reviewed pre-wire API failure changed", "access")
+    for path, expected in (
+        ("adapters/ibm/adapter.py", source_blob),
+        (".github/workflows/fetch-ibm.yml", _REVIEWED_PRODUCER_WORKFLOW_BLOB),
+    ):
+        if workflow_api("/contents/" + path + "?ref=" + head).get("sha") != expected:
+            raise AdapterError("Reviewed pre-wire producer changed", "access")
+    artifact_inventory = workflow_api(
+        f"/actions/runs/{identity}/artifacts?per_page=100"
+    )
+    if (
+        type(artifact_inventory.get("total_count")) is not int
+        or artifact_inventory["total_count"] != 0
+        or artifact_inventory.get("artifacts") != []
+    ):
+        raise AdapterError("Reviewed pre-wire artifact inventory changed", "access")
     return True
 
 
@@ -1436,6 +1548,157 @@ def preserve_no_publisher_bounds(incoming):
     return validate_budget(state)
 
 
+def handoff_program_digest(program):
+    pinned_line = rb'(?m)^_HANDOFF_PRODUCER_SHA256 = "[0-9a-f]{64}"$'
+    template = b'_HANDOFF_PRODUCER_SHA256 = "' + b"0" * 64 + b'"'
+    normalized, count = re.subn(pinned_line, template, program)
+    if count != 1:
+        raise AdapterError("Reviewed handoff producer marker is missing", "access")
+    return hashlib.sha256(normalized).hexdigest()
+
+
+def verified_handoff_successor(first, qa_finished):
+    """Require proof the first later canonical owner could restore QA state."""
+    completed, _, _, run, jobs = first
+    if (
+        completed <= qa_finished
+        or protocol_timestamp(run.get("created_at")) <= qa_finished
+        or any(protocol_timestamp(job.get("started_at")) <= qa_finished for job in jobs)
+    ):
+        raise AdapterError("Canonical IBM attempt overlaps isolated QA", "access")
+    head = run["head_sha"]
+    source = workflow_api("/contents/adapters/ibm/adapter.py?ref=" + head)
+    try:
+        if source.get("encoding") != "base64" or not 0 < source["size"] <= 1_000_000:
+            raise ValueError()
+        program = base64.b64decode("".join(source["content"].split()), validate=True)
+        exact_marker = (
+            b'_HANDOFF_PRODUCER_SHA256 = "'
+            + _HANDOFF_PRODUCER_SHA256.encode("ascii")
+            + b'"'
+        )
+        if (
+            len(program) != source["size"]
+            or exact_marker not in program.splitlines()
+            or handoff_program_digest(program) != _HANDOFF_PRODUCER_SHA256
+        ):
+            raise ValueError()
+    except (ValueError, TypeError, KeyError, AdapterError):
+        raise AdapterError(
+            "Unreviewed canonical IBM successor program", "access"
+        ) from None
+    workflow = workflow_api("/contents/.github/workflows/fetch-ibm.yml?ref=" + head)
+    if workflow.get("sha") != _REVIEWED_PRODUCER_WORKFLOW_BLOB:
+        raise AdapterError("Unreviewed canonical IBM successor workflow", "access")
+
+
+def reviewed_isolated_qa_owner(candidates, latest, artifact):
+    """Carry exact newer retired QA state into the ordinary canonical family."""
+    qa = _ISOLATED_QA_HANDOFF
+    finished = protocol_timestamp(qa["finished"])
+    workflow_path = f"/actions/workflows/{qa['workflow_id']}"
+    definition = workflow_api(workflow_path)
+    if (
+        definition.get("id") != qa["workflow_id"]
+        or definition.get("path") != qa["workflow_path"]
+        or definition.get("state") != "disabled_manually"
+    ):
+        raise AdapterError("Exact isolated IBM QA workflow must stay retired", "access")
+    history = workflow_api(workflow_path + "/runs?per_page=100")
+    rows = history.get("workflow_runs")
+    if (
+        type(history.get("total_count")) is not int
+        or history["total_count"] != 1
+        or not isinstance(rows, list)
+        or len(rows) != 1
+    ):
+        raise AdapterError("Unexpected isolated IBM QA history", "access")
+    run_route = f"/actions/runs/{qa['run_id']}"
+    expected_run = {
+        "id": qa["run_id"],
+        "run_attempt": 1,
+        "workflow_id": qa["workflow_id"],
+        "path": qa["workflow_path"],
+        "head_branch": qa["branch"],
+        "head_sha": qa["head"],
+        "event": "push",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    run = workflow_api(run_route + "/attempts/1")
+    if any(
+        any(entry.get(field) != value for field, value in expected_run.items())
+        or entry.get("repository", {}).get("full_name") != "YouthOpps/data-pipeline"
+        or entry.get("head_repository", {}).get("full_name") != "YouthOpps/data-pipeline"
+        or any(
+            entry.get(role, {}).get("id") != qa["actor_id"]
+            or entry.get(role, {}).get("type") != "User"
+            for role in ("actor", "triggering_actor")
+        )
+        for entry in (rows[0], run)
+    ):
+        raise AdapterError("Unexpected isolated IBM QA attempt binding", "access")
+    jobs, exact_finished = protocol_exact_jobs(run, head_branch=qa["branch"])
+    job = jobs[0]
+    if (
+        len(jobs) != 1
+        or exact_finished != finished
+        or job["id"] != qa["job_id"]
+        or job.get("name") != "collect"
+        or job.get("conclusion") != "success"
+        or job.get("started_at") != qa["started"]
+        or job.get("completed_at") != qa["finished"]
+    ):
+        raise AdapterError("Unexpected isolated IBM QA job binding", "access")
+
+    later = next(
+        (candidate for candidate in candidates if candidate[0] >= finished), None
+    )
+    if later is not None:
+        verified_handoff_successor(later, finished)
+        return latest, artifact
+    if protocol_context_key(latest, artifact) != _PRE_WIRE_API_PREDECESSOR:
+        raise AdapterError("The exact pre-QA canonical predecessor changed", "access")
+    for path, expected in (
+        ("adapters/ibm/adapter.py", qa["source_blob"]),
+        (qa["workflow_path"], qa["workflow_blob"]),
+    ):
+        if workflow_api("/contents/" + path + "?ref=" + qa["head"]).get("sha") != expected:
+            raise AdapterError("The isolated IBM QA producer changed", "access")
+    inventory = workflow_api(run_route + "/artifacts?per_page=100")
+    artifacts = inventory.get("artifacts")
+    if (
+        not isinstance(artifacts, list)
+        or type(inventory.get("total_count")) is not int
+        or inventory["total_count"] != len(artifacts)
+        or not 1 <= len(artifacts) <= 2
+        or any(not isinstance(a, dict) for a in artifacts)
+        or any(a.get("name") not in {
+            "ibm-pacing-state-v2-1", "ibm-444-encrypted-native-evidence-1",
+        } for a in artifacts)
+    ):
+        raise AdapterError("Unexpected isolated IBM QA artifact inventory", "access")
+    matches = [a for a in artifacts if a.get("name") == "ibm-pacing-state-v2-1"]
+    if len(matches) != 1:
+        raise AdapterError("Exact isolated IBM QA pacing artifact required", "access")
+    selected = matches[0]
+    owner = selected.get("workflow_run", {})
+    if (
+        selected.get("id") != qa["artifact_id"]
+        or selected.get("digest") != qa["artifact_digest"]
+        or selected.get("expired") is not False
+        or not numeric(selected.get("size_in_bytes"))
+        or not 0 < selected["size_in_bytes"] <= 32768
+        or owner.get("id") != qa["run_id"]
+        or owner.get("head_branch") != qa["branch"]
+        or owner.get("head_sha") != qa["head"]
+        or owner.get("repository_id") != 1163601208
+        or owner.get("head_repository_id") != 1163601208
+    ):
+        raise AdapterError("Unexpected isolated IBM QA artifact provenance", "access")
+    return (finished, qa["run_id"], 1, run, jobs), selected
+
+
 def protocol_fresh_history():
     """Check current coordination and exact completion chronology."""
     global _NO_PUBLISHER_BOUND
@@ -1523,7 +1786,9 @@ def protocol_fresh_history():
                 completed_attempts.append(
                     (finished, identity, number, detail, jobs)
                 )
-                if reviewed_no_publisher_attempt(detail, jobs):
+                if reviewed_no_publisher_attempt(
+                    detail, jobs
+                ) or reviewed_pre_wire_api_failure(detail, jobs):
                     no_publisher_bounds[identity] = finished
                     continue
                 if attempt == 1 and proven_guarded_no_publisher_attempt(
@@ -1579,6 +1844,16 @@ def protocol_fresh_history():
     if len(matches) != 1:
         raise AdapterError("Newest protocol artifact required", "access")
     artifact = matches[0]
+    recovery_finish = no_publisher_bounds.get(_PRE_WIRE_API_FAILURE[0])
+    if recovery_finish is not None and latest[0] <= recovery_finish:
+        if (
+            latest[1],
+            latest[2],
+            latest[3]["head_sha"],
+            artifact.get("id"),
+            artifact.get("digest"),
+        ) != _PRE_WIRE_API_PREDECESSOR:
+            raise AdapterError("Reviewed pre-wire predecessor changed", "access")
     if (latest[1], latest[2]) == _NO_PUBLISHER_LAST_OWNER:
         if (
             not set(_NO_PUBLISHER_ATTEMPTS) <= set(no_publisher_bounds)
@@ -1606,7 +1881,7 @@ def protocol_fresh_history():
     ):
         raise AdapterError("Untrusted newest protocol artifact", "access")
     _NO_PUBLISHER_BOUND = max(no_publisher_bounds.values(), default=0)
-    return latest, artifact
+    return reviewed_isolated_qa_owner(candidates, latest, artifact)
 
 
 def protocol_legacy_selection(latest, artifact):
@@ -2296,7 +2571,12 @@ def protocol_before_wire():
         raise AdapterError("Startup quiet must precede reservation", "access")
     if time.time() < _PROTOCOL_BOUNDARY_WALL:
         raise AdapterError("Protocol clock moved backwards", "access")
-    latest, artifact = protocol_fresh_history()
+    try:
+        latest, artifact = protocol_fresh_history()
+    except WorkflowStateUnavailable as error:
+        if protocol_purpose() != "hosted":
+            raise
+        raise FirstWireWorkflowStateUnavailable(str(error), "access") from None
     if protocol_context_key(latest, artifact) != _PROTOCOL_COMPAT_CONTEXT:
         raise AdapterError(
             "Newest publisher owner changed during quiet", "access"
@@ -3886,26 +4166,37 @@ def workflow_api(path):
     token = os.environ.get("GITHUB_TOKEN", "")
     if os.environ.get("GITHUB_ACTIONS") == "true" and not token:
         raise AdapterError("Workflow state credentials missing", "access")
-    try:
-        status, _, body = request_bytes(
-            _WORKFLOW_GITHUB
-            + path
-            + ("&" if "?" in path else "?")
-            + "_fresh="
-            + str(time.time_ns()),
-            headers={
-                **({"Authorization": "Bearer " + token} if token else {}),
-                "Accept": "application/vnd.github+json",
-                "Cache-Control": "no-cache",
-            },
-        )
-        if status != 200:
-            raise ValueError("Workflow API status")
-        return json.loads(body)
-    except Exception:
-        raise AdapterError(
-            ("Workflow pacing state unavailable"), ("access")
-        ) from None
+    headers = {
+        **({"Authorization": "Bearer " + token} if token else {}),
+        "Accept": "application/vnd.github+json",
+        "Cache-Control": "no-cache",
+    }
+    failure = "invalid response"
+    for attempt in range(3):
+        try:
+            status, response_headers, body = request_bytes(
+                _WORKFLOW_GITHUB + path + ("&" if "?" in path else "?")
+                + "_fresh=" + str(time.time_ns()),
+                headers=headers,
+            )
+            if status == 200:
+                return json.loads(body)
+            failure = f"HTTP {status}"
+            if status not in (500, 502, 503, 504) or response_headers.get("Retry-After"):
+                break
+        except (urllib.error.URLError, OSError) as error:
+            failure = type(getattr(error, "reason", error)).__name__
+            if isinstance(getattr(error, "reason", error), ssl.SSLError):
+                break
+        except Exception:
+            break
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+    print(
+        f"GitHub workflow coordination read failed at {path.partition('?')[0]} ({failure})",
+        file=sys.stderr,
+    )
+    raise WorkflowStateUnavailable("Workflow pacing state unavailable", "access")
 
 
 def verify_local_workflow_pause(definition=None):

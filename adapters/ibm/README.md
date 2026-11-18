@@ -84,6 +84,47 @@ this timing proof only with its separately pinned original source/workflow.
 Changing the first-wire implementation requires renewed independent proof.
 Other missing artifacts remain errors; this is not an older-state fallback.
 
+### GitHub coordination outage recovery (#444)
+
+The [failed hosted attempt 44184483208/1](https://github.com/YouthOpps/data-pipeline/actions/runs/44184483208)
+left no pacing artifact. The publisher bot's [verified metadata commit](https://github.com/YouthOpps/data-source/commit/c7d0cf98116e94a23eefe2b9d41528048be90675)
+identifies the GitHub workflow coordination error after last-good snapshot
+validation and retains all five records. At the exact producer revision,
+workflow coordination on that path had to pass before the first IBM opener.
+The first-wire check therefore failed before any IBM request started. The
+provisional pacing reservation and robots assessment explain the failed export.
+
+The recovery binds that exact completed job and both immutable producer blobs
+to its empty artifact inventory. When it is the newest event, the reader restores
+only the independently verified v2 artifact from run `43926570474/1`. It retains
+the earlier artifact's restrictions and adds the failed job's completion bound.
+An unexpected owner or artifact still stops the run.
+
+GitHub coordination reads retry a narrow set of temporary infrastructure errors
+within the existing phase deadline. Rate-limited reads, responses with an explicit
+retry delay, certificate failures and invalid metadata stop at the observed error.
+After trusted state has been restored, a GitHub read failure at the hosted first-wire
+check can finalize only the current assessment whose ownership still matches the
+journal. The export retains inherited restrictions, policy history and any
+conservative reservation. Unknown pending state, journal faults and failures
+after a publisher opener still require the normal fail-closed handling.
+
+The original nonpublishing hosted test recovered from the verified predecessor
+and returned five IBM programmes across the full nine-document graph. Ten
+actual requests returned HTTP 200. The measured completion gaps were at least
+12.203654 seconds between requests and 30.003777 seconds between inventory
+requests, with at most five starts in any rolling minute. Independent review
+verified all 85 journal readbacks and the current consumer's raw, filtered and
+valid-empty results. [Hosted QA 44246650336](https://github.com/YouthOpps/data-pipeline/actions/runs/44246650336)
+
+The retired QA workflow owns the authoritative v2 timing artifact
+`14402157005`. Until a canonical successor publishes fresh owned state, the
+normal reader requires the reviewed canonical predecessor and the exact QA
+workflow, job, producer and archive binding. It retains the journal's prior
+restrictions and new physical timing. A later canonical owner must follow
+the QA completion and trace to the first reviewed production continuation.
+The original canonical workflow remains the sole production publisher.
+
 The legacy queue is isolated by an artifact-generation fence rather than by
 assuming cancellation succeeded. The immutable old adapter requires
 `ibm-pacing-state-<attempt>` and has no newer-state fallback. New diagnostic
