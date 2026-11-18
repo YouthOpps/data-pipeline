@@ -1,7 +1,7 @@
 {
   "branch": "qa/croatia-frontier-native",
   "candidate_adapter_sha256": "f0dec1a52a6fb6c9d7c2fea78b5f70327420ba3f42c5c3eaa51e7c518b3fd614",
-  "enabled": false,
+  "enabled": true,
   "inventory_routes": [
     "https://www.studyincroatia.hr/news/?page=1",
     "https://www.studyincroatia.hr/news/?page=2",
