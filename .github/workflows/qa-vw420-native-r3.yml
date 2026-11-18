@@ -1,0 +1,45 @@
+name: qa-vw420-native-r3
+on:
+  push:
+    branches: [qa/vw420-native-r3]
+permissions:
+  actions: read
+  contents: read
+  issues: read
+concurrency:
+  group: youthopps-volkswagen-group-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  native:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/vw420-native-r3' && github.run_attempt == 1 && github.event.created
+    runs-on: ubuntu-latest
+    timeout-minutes: 155
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 4987b37f306cee6f9ba76acd26be7ffb61f0a1f7
+          path: qa-website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run the original Volkswagen test and website consumer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/vw420-r3/runner.py
+      - name: Retain qualified or failure evidence under a distinct QA identity
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vw420-native-r3-qa-evidence-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vw420-native-r3-qa/
+          if-no-files-found: error
+          retention-days: 30
