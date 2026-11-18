@@ -1,0 +1,44 @@
+name: qa-charles-fsv-native
+on:
+  push:
+    branches: [qa/charles-fsv-native]
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: youthopps-cz-charles-university-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  native:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/charles-fsv-native' && github.run_attempt == 1 && github.event.created == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 33
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 11e66b0107956ed82b9918206e18d8e8fc6778b1
+          path: qa-website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run the original complete nonpublishing Charles native test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/charles-native/runner.py
+      - name: Retain isolated native state and encrypted capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: charles-fsv-native-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/charles-fsv-native/
+          if-no-files-found: ignore
+          retention-days: 14
