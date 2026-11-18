@@ -609,52 +609,81 @@ def publisher_attempt(publisher):
                 raise
 
 
-def record_retry_after(value, rate_limited=False):
+def retry_deadline(value, now):
+    """Parse complete HTTP dates; obsolete asctime is explicitly UTC."""
+    raw = str(value).strip()
+    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", raw):
+        deadline = now + float(raw)
+    else:
+        short = r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)"
+        month = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+        clock = r"[0-9]{2}:[0-9]{2}:[0-9]{2}"
+        asctime = short + r" " + month + r" (?: [1-9]|[0-9]{2}) " + clock + r" [0-9]{4}"
+        imf = short + r", [0-9]{2} " + month + r" [0-9]{4} " + clock + r" GMT"
+        obsolete = (r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), "
+                    + r"[0-9]{2}-" + month + r"-[0-9]{2} " + clock + r" GMT")
+        if not any(re.fullmatch(pattern, raw) for pattern in (asctime, imf, obsolete)):
+            raise ValueError("Incomplete HTTP date")
+        date = parsedate_to_datetime(raw)
+        if re.fullmatch(asctime, raw):
+            date = date.replace(tzinfo=timezone.utc)
+        if date.utcoffset() is None:
+            raise ValueError("Missing HTTP timezone")
+        if re.fullmatch(obsolete, raw):
+            reference = datetime.fromtimestamp(now, timezone.utc)
+            year = reference.year // 100 * 100 + int(raw.split("-")[2][:2])
+            date = date.replace(year=year)
+            if date.year > reference.year + 50:
+                date = date.replace(year=date.year - 100)
+        deadline = date.timestamp()
+    if not protocol_number(deadline) or deadline <= now:
+        raise ValueError("Stale or unsupported retry deadline")
+    datetime.fromtimestamp(deadline, timezone.utc)
+    return deadline
+
+
+def record_retry_after(value, rate_limited=False, rate_limit_response=False):
+    """Persist current strike before fallible received-header interpretation."""
     with locked_budget():
         state = load_budget()
         protocol_current_owner(state)
         now = time.time()
-        deadline = None
-        if value is not None:
-            try:
-                raw = str(value).strip()
-                seconds = (
-                    float(raw)
-                    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", raw)
-                    else None
-                )
-                if seconds is not None:
-                    if not protocol_number(seconds) or seconds <= 0:
-                        raise ValueError("Invalid seconds")
-                    deadline = now + seconds
-                else:
-                    date = parsedate_to_datetime(raw)
-                    if date.utcoffset() is None:
-                        raise ValueError("Missing timezone")
-                    deadline = date.timestamp()
-                if not protocol_number(deadline) or deadline <= now:
-                    raise ValueError("Stale or unsupported retry deadline")
-                datetime.fromtimestamp(deadline, timezone.utc)
-            except (ValueError, TypeError, OverflowError, OSError):
-                deadline = None
         if rate_limited:
             count = state["rate_limit_count"] + 1
-            physical = state["interval"] * 2
-            page = state["page_interval"] * 2
-            fallback = now + 1800 * 2 ** (count - 1)
-            if count > 100 or not all(
-                protocol_number(v) for v in [physical, page, fallback]
-            ):
-                raise AdapterError("Unassessed rate-limit arithmetic", "access")
             state["rate_limit_count"] = count
-            state["interval"] = max(12.2, physical)
-            state["page_interval"] = max(30, page)
-            state["rate_limit_until"] = max(
-                state["rate_limit_until"], fallback, deadline or 0
-            )
-        state["not_before"] = max(
-            state["not_before"], state["rate_limit_until"], deadline or 0
-        )
+            # Keep every representable known increase even if a later value
+            # cannot fit the original schema or supported clock.
+            unsupported = False
+            for key, floor in [("interval", 12.2), ("page_interval", 30)]:
+                increased = state[key] * 2
+                if protocol_number(increased):
+                    state[key] = max(floor, increased)
+                else:
+                    unsupported = True
+            minimum = now + 1800
+            state["rate_limit_until"] = max(state["rate_limit_until"], minimum)
+            state["not_before"] = max(state["not_before"], state["rate_limit_until"])
+            state["observed_at"] = now
+            save_budget(state)
+            if unsupported:
+                raise AdapterError("Unassessed current rate-limit increase", "access")
+            fallback = now + 1800 * 2 ** (count - 1)
+            if not protocol_number(fallback):
+                raise AdapterError("Unassessed rate-limit arithmetic", "access")
+            datetime.fromtimestamp(fallback, timezone.utc)
+            state["rate_limit_until"] = max(state["rate_limit_until"], fallback)
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            if item is None:
+                continue
+            try:
+                deadline = retry_deadline(item, now)
+            except (ValueError, TypeError, OverflowError, OSError):
+                continue
+            state["not_before"] = max(state["not_before"], deadline)
+            if rate_limited or rate_limit_response:
+                state["rate_limit_until"] = max(state["rate_limit_until"], deadline)
+        state["not_before"] = max(state["not_before"], state["rate_limit_until"])
         state["observed_at"] = now
         save_budget(state)
 
@@ -710,6 +739,191 @@ def request_bytes(
         )
 
 
+_QUALIFIED_QA_RESUME_APPROVED = True
+_QUALIFIED_QA_ISSUE_COMMENTS = '/issues/420/comments?per_page=100'
+_QUALIFIED_QA_SCOPE = {'current_frontier_id_diff_sha256': '57e75dc1eeb04abdf883c6e557bef0057155c6127473bf306113e17069b9336e',
+ 'frozen_at': '2026-11-18T06:25:31Z',
+ 'maintainer_account': 12278069,
+ 'observations': 529,
+ 'production': {'artifact_digest': 'sha256:902c148bb3d440a42158a75b3aac7ce2087806b514102470a45cdffb677a65a4',
+                'artifact_id': 14310180933,
+                'attempt': 1,
+                'head': '341ea050a605004b8b003ff83bc098ee1a28565c',
+                'job_id': 133896320706,
+                'run_id': 44041318465,
+                'source_sha256': 'ed44df8f7cb75c9bb9fb19c6166d9b78cd0eb9ef89fb95e9bd27da3f30176235'},
+ 'production_history_sha256': '06edd7100c5e0e2bb75bef7e44dd9b3e3f58c02931238e4bc2bd4b50fd4c1887',
+ 'qa': {'archive_digest': 'sha256:35835941644d1717290bbc61b1ba645f386836cbd1aefdb94b22ac6224f3a8a5',
+        'archive_id': 14402663346,
+        'archive_name': 'vw420-native-r3-qa-evidence-1',
+        'archive_size': 31994885,
+        'branch': 'qa/vw420-native-r3',
+        'completed_at': '2026-11-18T06:06:57Z',
+        'head': 'e46106c1dfa421a70cf82a24e134f0f6508da205',
+        'job_id': 134598674935,
+        'run_id': 44244084235,
+        'workflow_id': 422218176},
+ 'qa_last_ack_sha256': '010a9880c499c82ce31cd816cb221238e5821dc50edb5f0e91d9960ab164332a',
+ 'qualified_candidate_sha256': '64f8459f79af11b638510f1de4f873d95a5de24419e6dcf8c062ed6e426b5a4f',
+ 'qualified_report_sha256': '041e258b6f98fe825ee70cac4226683a09d5b4953a15c9c8483a329ca74b6f10',
+ 'retired_workflows': [[421922777, '.github/workflows/qa-vw420-native.yml'],
+                       [421941308, '.github/workflows/qa-vw420-native-r2.yml'],
+                       [422218176, '.github/workflows/qa-vw420-native-r3.yml']],
+ 'schema': 1,
+ 'seed': {'blocked': False,
+          'completed_at': 1794982017.0,
+          'family': 'youthopps-volkswagen-group-publisher-v1',
+          'flight_id': None,
+          'in_flight': False,
+          'interval': 12.2,
+          'inventory_completed_at': 1794980094.4653616,
+          'last_policy_receipt': None,
+          'last_settled_owner': None,
+          'legacy_completion_history_unknown': True,
+          'legacy_policy_history_unknown': True,
+          'legacy_rate_history_unknown': True,
+          'not_before': 1794982077.0,
+          'observed_at': 1794982017.0,
+          'page_interval': 30,
+          'policy_allowed': {'https://jobs.volkswagen-group.com': {'allowed': True,
+                                                                   'available': True,
+                                                                   'body_sha256': '91669efc2767d124199e1d848655af18d64ac71e61ae1227be7b6aa866f03caf',
+                                                                   'delay': 0,
+                                                                   'origin': 'https://jobs.volkswagen-group.com',
+                                                                   'owner': '0002d7c2b47eb9703c1c839403c23a15',
+                                                                   'rate': None,
+                                                                   'target_sha256': '0b006a3dbabf1c6629b6d1d28ec3d081941764df0e08b0992545846662163fcf'},
+                             'https://www.hrd-portal.com': {'allowed': True,
+                                                            'available': True,
+                                                            'body_sha256': '58c109cc44da82a7ff610aaaa11a3801cb99eaa3cd98f3e05183607801af6608',
+                                                            'delay': 0,
+                                                            'origin': 'https://www.hrd-portal.com',
+                                                            'owner': '23b7c1633747c6c3c7f51ac18f383f39',
+                                                            'rate': None,
+                                                            'target_sha256': 'a76aa434a8d8d79dcaffd45d33914dc657514b964022c0c84aea077566c44431'},
+                             'https://www.volkswagen-karriere.de': {'allowed': True,
+                                                                    'available': True,
+                                                                    'body_sha256': 'dd84e3470dafcf77ca25f1d3d448c84dfd4255988f006a0318437961d06368fb',
+                                                                    'delay': 0,
+                                                                    'origin': 'https://www.volkswagen-karriere.de',
+                                                                    'owner': '063a958bc2230786a9f4490963737a65',
+                                                                    'rate': None,
+                                                                    'target_sha256': '7cfc6a64968a2e8f5070596ac86e392f41e361316efd716185b0087497bc7bd2'}},
+          'policy_denied': {},
+          'policy_pending': None,
+          'rate_limit_count': 0,
+          'rate_limit_until': 0,
+          'schema': 3,
+          'starts': [1794981956.7458403,
+                     1794981956.748732,
+                     1794981969.8445797,
+                     1794981969.8476334,
+                     1794981982.9104762,
+                     1794981982.91343,
+                     1794981995.9728928,
+                     1794981995.975803,
+                     1794982009.1065238,
+                     1794982009.1097927],
+          'transition_id': '03ae72e7c5b9b17bd59b83358f96fc21dab0f157496b53122b3b783c94bb6b2b'},
+ 'seed_sha256': '96febc39e024fb305f6dfccb6a01587e13eddb9ae29efefeed042edbef23698a',
+ 'source': 'volkswagen-group'}
+
+
+def qualified_qa_resume_id():
+    return protocol_digest(_QUALIFIED_QA_SCOPE)
+
+
+def verify_qualified_qa_predecessor():
+    scope = _QUALIFIED_QA_SCOPE
+    qa = scope['qa']
+    for workflow_id, path in scope['retired_workflows']:
+        workflow = workflow_api(f'/actions/workflows/{workflow_id}')
+        if (workflow['id'], workflow['path'], workflow['state']) != (workflow_id, path, 'disabled_manually'):
+            raise AdapterError('Volkswagen QA workflow still owns publisher access', 'access')
+
+    runs = workflow_api(f"/actions/workflows/{qa['workflow_id']}/runs?per_page=100")
+    jobs = workflow_api(f"/actions/runs/{qa['run_id']}/attempts/1/jobs?per_page=100")
+    artifacts = workflow_api(f"/actions/runs/{qa['run_id']}/artifacts?per_page=100")
+    inventories = ((runs, 'workflow_runs'), (jobs, 'jobs'), (artifacts, 'artifacts'))
+    if any(value.get('total_count') != 1 or len(value.get(key, [])) != 1 for value, key in inventories):
+        raise AdapterError('Volkswagen QA evidence owner is ambiguous', 'access')
+    run, job, archive = (value[key][0] for value, key in inventories)
+    exact_run = (qa['run_id'], qa['workflow_id'], 1, qa['head'], qa['branch'], 'push', 'completed', 'success')
+    actual_run = tuple(run.get(key) for key in ('id', 'workflow_id', 'run_attempt', 'head_sha',
+                                                'head_branch', 'event', 'status', 'conclusion'))
+    exact_job = (qa['job_id'], qa['run_id'], 1, qa['head'], 'native', 'completed', 'success', qa['completed_at'])
+    actual_job = tuple(job.get(key) for key in ('id', 'run_id', 'run_attempt', 'head_sha',
+                                                'name', 'status', 'conclusion', 'completed_at'))
+    exact_archive = (qa['archive_id'], qa['archive_name'], qa['archive_digest'], qa['archive_size'], False)
+    actual_archive = tuple(archive.get(key) for key in ('id', 'name', 'digest', 'size_in_bytes', 'expired'))
+    owner = archive.get('workflow_run', {})
+    if (actual_run != exact_run or actual_job != exact_job or actual_archive != exact_archive
+        or run.get('repository', {}).get('id') != _PROTOCOL_REPOSITORY_ID
+        or run.get('head_repository', {}).get('id') != _PROTOCOL_REPOSITORY_ID
+        or run.get('actor', {}).get('id') != scope['maintainer_account']
+        or run.get('triggering_actor', {}).get('id') != scope['maintainer_account']
+        or owner.get('id') != qa['run_id'] or owner.get('head_sha') != qa['head']
+        or owner.get('head_branch') != qa['branch']
+        or owner.get('repository_id') != _PROTOCOL_REPOSITORY_ID
+        or owner.get('head_repository_id') != _PROTOCOL_REPOSITORY_ID
+        or workflow_api(f"/actions/artifacts/{qa['archive_id']}") != archive):
+        raise AdapterError('Volkswagen exact qualified QA ownership changed', 'access')
+
+
+def verify_qualified_qa_resume_grant(context):
+    scope = _QUALIFIED_QA_SCOPE
+    current = context['current']
+    if _QUALIFIED_QA_RESUME_APPROVED is not True or not context['hosted'] or current is None or current[1] != 1:
+        raise AdapterError('Volkswagen qualified production resume remains OFF', 'access')
+    labels = {f'Approved Volkswagen production head {current[2]}',
+              f'Volkswagen production approval scope {qualified_qa_resume_id()}'}
+    comments = workflow_api(_QUALIFIED_QA_ISSUE_COMMENTS)
+    if not isinstance(comments, list) or len(comments) >= 100:
+        raise AdapterError('Volkswagen production grant inventory is incomplete', 'access')
+    matches = [comment for comment in comments if isinstance(comment.get('body'), str)
+               and labels <= set(comment['body'].splitlines())]
+    if len(matches) != 1:
+        raise AdapterError('Volkswagen exact production grant is unavailable or ambiguous', 'access')
+    grant = matches[0]
+    current_run = workflow_api(f'/actions/runs/{current[0]}/attempts/1')
+    protocol_run(current_run, current)
+    created_at = protocol_timestamp(grant.get('created_at'))
+    if (grant.get('user', {}).get('id') != scope['maintainer_account']
+        or grant.get('user', {}).get('type') != 'User'
+        or grant.get('issue_url') != _WORKFLOW_GITHUB + '/issues/420'
+        or grant.get('created_at') != grant.get('updated_at')
+        or not protocol_timestamp(scope['frozen_at']) < created_at < protocol_timestamp(current_run.get('created_at'))):
+        raise AdapterError('Volkswagen production grant identity or chronology changed', 'access')
+    verify_qualified_qa_predecessor()
+
+
+def apply_qualified_qa_resume_floor(context, incoming):
+    scope = _QUALIFIED_QA_SCOPE
+    if _QUALIFIED_QA_RESUME_APPROVED is not True or incoming['schema'] != 3:
+        raise AdapterError('Volkswagen qualified production resume remains OFF', 'access')
+    latest, artifact = context['latest'], context['artifact']
+    if latest['id'] != scope['production']['run_id']:
+        if (incoming['transition_id'] != qualified_qa_resume_id()
+            or latest['completed_at'] <= protocol_timestamp(scope['qa']['completed_at'])):
+            raise AdapterError('Newest Volkswagen producer state lacks qualified QA continuity', 'access')
+        return incoming, False
+    actual = {
+        'run_id': latest['id'], 'attempt': latest['attempt'], 'head': latest['head'],
+        'job_id': latest['job_id'], 'artifact_id': artifact['id'], 'artifact_digest': artifact['digest'],
+        'source_sha256': context['source_sha256'],
+    }
+    if actual != scope['production'] or context['history_sha256'] != scope['production_history_sha256']:
+        raise AdapterError('Volkswagen production predecessor changed before the qualified resume', 'access')
+    floor = validate_budget(scope['seed'])
+    if (protocol_digest(floor) != scope['seed_sha256'] or floor['blocked'] or floor['in_flight']
+        or floor['policy_pending'] is not None or floor['completed_at'] < protocol_timestamp(scope['qa']['completed_at'])):
+        raise AdapterError('Volkswagen qualified QA floor integrity changed', 'access')
+    verify_qualified_qa_resume_grant(context)
+    resumed = protocol_join(incoming, floor)
+    resumed['transition_id'] = qualified_qa_resume_id()
+    return validate_budget(resumed), True
+
+
 def workflow_api(path):
     """Read fresh authoritative metadata; local proxy auth is optional."""
     token = os.environ.get("GITHUB_TOKEN", "")
@@ -717,6 +931,7 @@ def workflow_api(path):
         raise AdapterError("Hosted workflow credentials missing", "access")
     if not (
         path.startswith("/actions/")
+        or path == _QUALIFIED_QA_ISSUE_COMMENTS
         or re.fullmatch(
             r"/contents/adapters/volkswagen-group/adapter\.py"
             r"\?ref=[0-9a-f]{40}",
@@ -728,7 +943,7 @@ def workflow_api(path):
         "Accept": "application/vnd.github+json",
         "Cache-Control": "no-cache",
     }
-    if token:
+    if token and path != _QUALIFIED_QA_ISSUE_COMMENTS:
         headers["Authorization"] = "Bearer " + token
     separator = "&" if "?" in path else "?"
     status, _, raw = request_bytes(
@@ -884,6 +1099,7 @@ def restore_family_artifact():
         )
         proposed = protocol_marker(context, marker, purpose)
         incoming = protocol_legacy_into(proposed, incoming)
+    incoming, context["qualified_qa_resume"] = apply_qualified_qa_resume_floor(context, incoming)
     # Only authenticated HOSTED input may create an ephemeral new namespace.
     scope = (
         journal_restore_scope(incoming)
@@ -936,6 +1152,8 @@ def restore_family_artifact():
                         local = protocol_join(local, proposed)
             protocol_same_history(context)
             state = protocol_join(local, incoming)
+            if state["transition_id"] != qualified_qa_resume_id():
+                raise AdapterError("Volkswagen journal lacks qualified QA continuity", "access")
             state["completed_at"] = max(
                 state["completed_at"], max(context["completion_bounds"])
             )
@@ -1028,6 +1246,7 @@ def export_family_artifact():
     parent_identity = None
     output_identity = None
     output_handles = ()
+    own_error_1 = None
     try:
         directory = os.fstat(parent)
         parent_identity = (directory.st_dev, directory.st_ino)
@@ -1050,6 +1269,7 @@ def export_family_artifact():
             pass
         if existing is not None:
             existing_identity = None
+            close_primary_1 = None
             try:
                 info = os.fstat(existing)
                 existing_identity = (info.st_dev, info.st_ino)
@@ -1078,8 +1298,15 @@ def export_family_artifact():
                 io_artifact_descriptor(existing, existing_identity)
                 os.unlink(name, dir_fd=parent)
                 os.fsync(parent)
+            except BaseException as error:
+                close_primary_1 = error
+                raise
             finally:
-                io_close_owned_descriptor(existing, existing_identity)
+                try:
+                    io_close_owned_descriptor(existing, existing_identity)
+                except BaseException:
+                    if close_primary_1 is None:
+                        raise
         if _PUBLISHER_GATE_FAILED or _GUARD_FATAL:
             raise AdapterError(
                 "Publisher completion gate cannot be exported", "access"
@@ -1101,6 +1328,7 @@ def export_family_artifact():
         output_identity = identity
         guard = None
         output_handles = (descriptor, guard)
+        own_error_2 = None
         try:
             io_artifact_descriptor(descriptor, identity)
             current = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -1113,6 +1341,7 @@ def export_family_artifact():
             io_artifact_descriptor(guard, identity)
             with locked_budget():
                 writer = os.dup(descriptor)
+                close_primary_2 = None
                 try:
                     io_artifact_descriptor(writer, identity)
                     payload = json.dumps(
@@ -1134,8 +1363,15 @@ def export_family_artifact():
                         io_artifact_descriptor(writer, identity)
                     os.fsync(writer)
                     io_artifact_descriptor(writer, identity)
+                except BaseException as error:
+                    close_primary_2 = error
+                    raise
                 finally:
-                    io_close_owned_descriptor(writer, identity)
+                    try:
+                        io_close_owned_descriptor(writer, identity)
+                    except BaseException:
+                        if close_primary_2 is None:
+                            raise
                 os.fsync(parent)
                 io_verify_current_parent(parent, root, parent_identity)
                 check = os.open(
@@ -1143,6 +1379,7 @@ def export_family_artifact():
                     os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                     dir_fd=parent,
                 )
+                close_primary_3 = None
                 try:
                     info = os.fstat(check)
                     current = os.stat(
@@ -1178,10 +1415,17 @@ def export_family_artifact():
                         raise AdapterError(
                             "Finalized pacing artifact mismatch", "access"
                         )
+                except BaseException as error:
+                    close_primary_3 = error
+                    raise
                 finally:
                     # The known artifact identity is available even if the
                     # reader validation/read failed before reader_identity.
-                    io_close_owned_descriptor(check, identity)
+                    try:
+                        io_close_owned_descriptor(check, identity)
+                    except BaseException:
+                        if close_primary_3 is None:
+                            raise
                 journal_verify()
                 io_signal_ready(parent, root, run_id, attempt)
                 journal_verify()
@@ -1192,6 +1436,7 @@ def export_family_artifact():
                 if identity != (named.st_dev, named.st_ino):
                     raise AdapterError("Owned artifact changed", "access")
         except BaseException:
+            own_error_2 = sys.exc_info()[1]
             journal_failed()
             # Cleanup must never replace the primary handoff/body failure.
             with contextlib.suppress(BaseException):
@@ -1200,7 +1445,7 @@ def export_family_artifact():
                 )
             raise
         finally:
-            primary = sys.exc_info()[1]
+            primary = own_error_2
             errors = []
             for handle in (descriptor, guard):
                 if handle is not None:
@@ -1222,8 +1467,11 @@ def export_family_artifact():
                     )
                 if primary is None:
                     raise errors[0]
+    except BaseException as error:
+        own_error_1 = error
+        raise
     finally:
-        primary = sys.exc_info()[1]
+        primary = own_error_1
         close_error = None
         try:
             io_verify_current_parent(parent, root, parent_identity)
@@ -2129,6 +2377,303 @@ def html_fingerprint(body):
         if attrs:
             controls.append((node.tag, sorted(attrs.items())))
     facts = {"text": root.text(), "links": links, "controls": controls}
+    return hashlib.sha256(
+        json.dumps(facts, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def portal_terms_fingerprint(body, url):
+    """Bind the reviewed legal article and policy routes without site chrome."""
+    root = document_root(body.decode("utf-8", "strict"))
+    content = one(
+        [node for node in root.walk() if node.attrs.get("id") == "content"],
+        "Volkswagen job-portal terms article",
+    )
+    title = "Volkswagen Group | Nutzungsbedingungen"
+    if (
+        content.tag != "div"
+        or content.duplicate_attrs
+        or one(nodes(root, "title"), "job-portal title").text() != title
+        or one(nodes(root, "h1"), "job-portal heading").text() != title
+        or not content.text()
+    ):
+        raise AdapterError("Unexpected Volkswagen job-portal terms scope", "parse")
+
+    # Known footer policies may appear or disappear with consent widgets. A
+    # newly linked policy requires review; ordinary navigation may change.
+    known_routes = {
+        url,
+        "https://jobs.volkswagen-group.com/content/Datenschutzerklarung/?locale=de_DE",
+        "https://www.volkswagen-group.com/de/impressum-15695",
+        "https://policies.google.com/privacy",
+        "https://policies.google.com/terms",
+        "https://vimeo.com/legal/privacy/policy",
+        "https://vimeo.com/legal/privacy/cookies",
+        "https://vimeo.com/legal/",
+    }
+    policy_words = re.compile(
+        r"nutzungsbeding|datenschutz|impressum|urheberrecht|"
+        r"terms.of.use|terms.and.conditions|privacy|legal|copyright|"
+        r"acceptable.use|licen[cs]e",
+        re.I,
+    )
+    article_links = set(nodes(content, "a"))
+    links = set()
+    for anchor in nodes(root, "a"):
+        href = anchor.attrs.get("href", "")
+        route = urllib.parse.urljoin(url, href)
+        if anchor in article_links:
+            if not href or anchor.duplicate_attrs:
+                raise AdapterError("Ambiguous job-portal terms link", "parse")
+            links.add((anchor.text(), route))
+        labels = (
+            anchor.text(),
+            anchor.attrs.get("title", ""),
+            anchor.attrs.get("aria-label", ""),
+            href,
+        )
+        if (
+            href
+            and policy_words.search(" ".join(labels))
+            and (route not in known_routes or anchor.duplicate_attrs)
+        ):
+            raise AdapterError("Unreviewed Volkswagen job-portal policy link", "parse")
+    facts = {"text": content.text(), "links": sorted(links)}
+    return hashlib.sha256(
+        json.dumps(facts, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def career_homepage_fingerprint(body, headers, url, listing):
+    """Guard the reviewed German public route and legal surface of the career site."""
+    root = document_root(body.decode("utf-8", "strict"))
+    document = one(nodes(root, "html"), "Volkswagen career document")
+    head = one(nodes(document, "head"), "Volkswagen career head")
+    main = one(nodes(document, "main"), "Volkswagen career main")
+    footer = one(nodes(document, "footer"), "Volkswagen career footer")
+    heading = one(nodes(main, "h1"), "Volkswagen career heading").text()
+    title = one(nodes(head, "title"), "Volkswagen career title").text()
+    canonical = one(
+        [link for link in nodes(head, "link")
+         if link.attrs.get("rel", "").casefold() == "canonical"],
+        "Volkswagen career canonical route",
+    )
+    if (
+        document.duplicate_attrs or document.attrs.get("lang", "").lower() != "de"
+        or "volkswagen" not in heading.casefold() or "volkswagen" not in title.casefold()
+        or canonical.duplicate_attrs or canonical.attrs.get("href") != url
+        or any(nodes(document, tag) for tag in ("base", "form", "iframe"))
+    ):
+        raise AdapterError("Volkswagen public career document boundary changed", "parse")
+
+    robots = set()
+    for meta in nodes(head, "meta"):
+        name = meta.attrs.get("name", "").casefold()
+        if (
+            meta.attrs.get("http-equiv", "").casefold() == "refresh"
+            or name in {"refresh", "redirect"}
+        ):
+            raise AdapterError("Unexpected Volkswagen career client redirect", "parse")
+        if name == "robots" or name.endswith("bot") or "youthopp" in name:
+            if meta.duplicate_attrs:
+                raise AdapterError("Ambiguous Volkswagen career robots metadata", "parse")
+            directives = tuple(sorted(
+                part.strip().casefold()
+                for part in meta.attrs.get("content", "").split(",")
+            ))
+            robots.add((name, directives))
+    header_rules = (
+        headers.get_all("X-Robots-Tag", []) if hasattr(headers, "get_all")
+        else [headers.get("X-Robots-Tag", "")]
+    )
+    if any(
+        rule and rule.casefold().replace(" ", "") not in {"index,follow", "follow,index", "all"}
+        for rule in header_rules
+    ):
+        raise AdapterError("Volkswagen career response crawler policy changed", "parse")
+
+    policy_words = re.compile(
+        r"nutzungsbeding|nutzungsregel|datenschutz|impressum|urheber|lizenzhinweis|"
+        r"cookie[\s_-]*richtlin|rechtliche[\s_-]*hinweis|"
+        r"terms?[\s_./-]*(?:of[\s_./-]*use|and[\s_./-]*conditions)|"
+        r"privacy|legal|copyright|acceptable[\s_./-]*use|licen[cs]e",
+        re.I,
+    )
+    policy_routes = set()
+    search_routes = set()
+    required_footer_routes = {
+        urllib.parse.urljoin(url, path)
+        for path in (
+            "/de/nutzungsbedingungen.html", "/de/datenschutzerklaerung.html", "/de/impressum.html"
+        )
+    }
+    footer_links = set(nodes(footer, "a"))
+    footer_policy = set()
+    listing_parsed = urllib.parse.urlsplit(listing)
+    for link in nodes(document, "a") + nodes(head, "link"):
+        href = link.attrs.get("href", "")
+        if not href:
+            continue
+        target = urllib.parse.urljoin(url, href)
+        labels = (
+            link.text(), link.attrs.get("title", ""), link.attrs.get("aria-label", ""), href
+        )
+        if policy_words.search(" ".join(labels)):
+            if link.duplicate_attrs or urllib.parse.urlsplit(target).scheme != "https":
+                raise AdapterError("Ambiguous Volkswagen career policy route", "parse")
+            policy_routes.add(target)
+            if link in footer_links:
+                footer_policy.add(target)
+        route = urllib.parse.urlsplit(target)
+        if route.hostname == listing_parsed.hostname and route.path == listing_parsed.path:
+            if link.duplicate_attrs:
+                raise AdapterError("Ambiguous Volkswagen career listing target", "parse")
+            search_routes.add(target)
+    if listing not in search_routes or not required_footer_routes <= footer_policy:
+        raise AdapterError("Volkswagen career listing or required legal surfaces changed", "parse")
+
+    # Guard explicit direct-access and reuse notices wherever they appear.
+    # Job cards, campaigns, photographs and styles are outside the catalogue frontier.
+    notice_words = re.compile(
+        r"(?:automatisiert\w*|maschinell\w*|systematisch\w*|scrap\w*|crawler\w*|"
+        r"text[ -]and[ -]data[ -]mining|text[ -]und[ -]data[ -]mining|"
+        r"weiterverwend\w*|weitergab\w*|verwert\w*|vervielfältig\w*|"
+        r"wiederveröffentlich\w*|datenerheb\w*|datenausles\w*|"
+        r"unauthori[sz]ed|robots\.txt)"
+        r".{0,100}(?:unzulässig|verboten|zustimmung|erlaubnis|untersagt|"
+        r"prohibit\w*|not allowed|permission|without consent|zugriff|abruf|nutzung|access|extract\w*)"
+        r"|(?:nutzung|zugriff|abruf|access|extract\w*).{0,100}"
+        r"(?:automatisiert\w*|maschinell\w*|systematisch\w*|scrap\w*|crawler\w*)",
+        re.I,
+    )
+    notices = sorted({match.group().casefold() for match in notice_words.finditer(document.text())})
+    facts = {
+        "policy": sorted(policy_routes),
+        "footer_policy": sorted(footer_policy),
+        "search": sorted(search_routes),
+        "robots": sorted(robots),
+        "notices": notices,
+    }
+    return hashlib.sha256(
+        json.dumps(facts, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def career_terms_fingerprint(body, headers, url):
+    """Bind the reviewed German career terms and respect their crawl scope."""
+    root = document_root(body.decode("utf-8", "strict"))
+    document = one(nodes(root, "html"), "Volkswagen career terms document")
+    head = one(nodes(document, "head"), "Volkswagen career terms head")
+    main = one(nodes(document, "main"), "Volkswagen career terms main")
+    footer = one(nodes(document, "footer"), "Volkswagen career terms footer")
+    title = "Nutzungsbedingungen"
+    canonical = one(
+        [link for link in nodes(head, "link")
+         if link.attrs.get("rel", "").casefold() == "canonical"],
+        "Volkswagen career terms canonical",
+    )
+    if (
+        document.duplicate_attrs or document.attrs.get("lang", "").casefold() != "de"
+        or canonical.duplicate_attrs or canonical.attrs.get("href") != url
+        or one(nodes(head, "title"), "Volkswagen career terms title").text() != title
+        or one(nodes(main, "h1"), "Volkswagen career terms heading").text() != title
+        or any(nodes(document, tag) for tag in ("base", "form", "iframe"))
+    ):
+        raise AdapterError("Volkswagen career terms document boundary changed", "parse")
+
+    robots = []
+    for meta in nodes(head, "meta"):
+        name = meta.attrs.get("name", "").casefold()
+        if meta.attrs.get("http-equiv", "").casefold() == "refresh":
+            raise AdapterError("Unexpected Volkswagen career terms redirect", "parse")
+        if name == "robots" or name.endswith("bot") or "youthopp" in name:
+            if meta.duplicate_attrs:
+                raise AdapterError("Ambiguous Volkswagen career terms crawler instructions", "parse")
+            directives = tuple(sorted(
+                part.strip().casefold()
+                for part in meta.attrs.get("content", "").split(",")
+            ))
+            robots.append((name, directives))
+    if robots != [("robots", ("nofollow", "noindex"))]:
+        raise AdapterError("Volkswagen career terms crawler instructions changed", "parse")
+    header_rules = (
+        headers.get_all("X-Robots-Tag", []) if hasattr(headers, "get_all")
+        else [headers.get("X-Robots-Tag", "")]
+    )
+    if any(rule.strip() for rule in header_rules):
+        raise AdapterError("Volkswagen career terms response crawler instructions changed", "parse")
+
+    breadcrumbs = {
+        node for node in nodes(main, "nav")
+        if node.attrs.get("aria-label", "").casefold() == "breadcrumb-navigation"
+    }
+
+    def visible_text(node, omitted):
+        if node in omitted or node.tag in {"script", "style"}:
+            return ""
+        return " ".join(" ".join(
+            visible_text(child, omitted) if isinstance(child, Node) else child
+            for child in node.children
+        ).split())
+
+    # No links are followed from this nofollow document. Bind only the actual
+    # legal material and counterpart URL; the job portal terms are checked
+    # earlier by their independent fixed input.
+    policy_words = re.compile(
+        r"nutzungsbeding|nutzungsregel|datenschutz|impressum|urheber|lizenzhinweis|"
+        r"cookie[\s_-]*richtlin|rechtliche[\s_-]*hinweis|\bagb\b|"
+        r"terms?[\s_./-]*(?:of[\s_./-]*use|and[\s_./-]*conditions)|"
+        r"privacy|legal|copyright|acceptable[\s_./-]*use|licen[cs]e",
+        re.I,
+    )
+    navigation = {link for breadcrumb in breadcrumbs for link in nodes(breadcrumb, "a")}
+    article = set(nodes(main, "a")) - navigation
+    footer_links = set(nodes(footer, "a"))
+    article_links, policy_links, footer_policy = set(), set(), set()
+    for link in nodes(document, "a") + nodes(head, "link"):
+        href = link.attrs.get("href", "")
+        labels = (link.text(), link.attrs.get("title", ""), link.attrs.get("aria-label", ""), href)
+        is_policy = bool(href and policy_words.search(" ".join(labels)))
+        if link not in article and not is_policy:
+            continue
+        route = urllib.parse.urljoin(url, href)
+        parsed = urllib.parse.urlsplit(route)
+        if (
+            not href or link.duplicate_attrs or parsed.scheme != "https"
+            or not parsed.hostname or parsed.username or parsed.password
+        ):
+            raise AdapterError("Ambiguous Volkswagen career terms legal route", "parse")
+        if link in article:
+            article_links.add((link.text(), route))
+        if is_policy:
+            policy_links.add(route)
+            if link in footer_links:
+                footer_policy.add(route)
+    if not article_links or url not in footer_policy:
+        raise AdapterError("Volkswagen career terms legal provenance changed", "parse")
+
+    title_parts = tuple(node.text() for node in nodes(main, "h2"))
+    legal_text = visible_text(main, breadcrumbs)
+    if len(title_parts) != 8 or not legal_text:
+        raise AdapterError("Incomplete Volkswagen career terms legal article", "parse")
+
+    direct_notice = re.compile(
+        r"(?:automatisiert\w*|systematisch\w*|crawler\w*|scrap\w*|"
+        r"weiterverwend\w*|datenausles\w*|text[ -]and[ -]data[ -]mining)"
+        r".{0,100}(?:unzulässig|verboten|untersagt|zustimmung|erlaubnis|"
+        r"prohibit\w*|not allowed|permission|without consent|zugriff|abruf|nutzung|access)",
+        re.I,
+    )
+    outside = visible_text(document, {head, main})
+    outside += " " + " ".join(visible_text(item, set()) for item in breadcrumbs)
+    facts = {
+        "text": legal_text,
+        "outside_notices": sorted({match.group().casefold() for match in direct_notice.finditer(outside)}),
+        "section_headings": title_parts,
+        "article_links": sorted(article_links),
+        "policy_links": sorted(policy_links),
+        "footer_policy": sorted(footer_policy),
+    }
     return hashlib.sha256(
         json.dumps(facts, ensure_ascii=False, separators=(",", ":")).encode()
     ).hexdigest()
@@ -3556,9 +4101,7 @@ INPUTS = {
             "url"
         ): "https://jobs.volkswagen-group.com/content/Nutzungsbedingungen/?locale=de_DE",
         "format": "html",
-        (
-            "sha256"
-        ): "257d17b39bbddfb809d03015552a054c22a979f585f593ef52b91a5c1e58eafa",
+        "terms_content_sha256": "253be4dfb844756222f17d08f13e48e7114e7f023596eaa27cf75d513a763d25",
         "role": "legal terms",
     },
     "input-194": {
@@ -3580,17 +4123,13 @@ INPUTS = {
     "input-196": {
         "url": "https://www.volkswagen-karriere.de/de.html",
         "format": "html",
-        (
-            "sha256"
-        ): "f3e7a788aa530d33a4427a0ac1a0254a056ef9e8209139b76b386547e0b94e25",
+        "career_homepage_sha256": '25c49d340f847aea3fc2f9f92ee7ead8cc1e30de39ca8e089cbe89245eb84660',
         "role": "official homepage",
     },
     "input-197": {
         "url": "https://www.volkswagen-karriere.de/de/nutzungsbedingungen.html",
         "format": "html",
-        (
-            "sha256"
-        ): "2c333250fb0f843e9ee1b1c414a8fff4e5a7bc69f804ce30007cf90e6b950185",
+        "career_terms_sha256": '6a32279888261edcaa5905bcb776b9e2a0db3d79b07057cf868f7dcbde183ddc',
         "role": "legal terms",
     },
     "input-198": {
@@ -4126,7 +4665,8 @@ def journal_parent():
     except BaseException:
         journal_failed()
         if fresh and identity is not None:
-            io_close_owned_descriptor(descriptor, identity, True)
+            with contextlib.suppress(BaseException):
+                io_close_owned_descriptor(descriptor, identity, True)
         raise
     if fresh:
         _GUARD_PARENT, _GUARD_PARENT_ID = descriptor, identity
@@ -4507,8 +5047,7 @@ def io_verify_owned_descriptor(descriptor, expected, directory=False):
 
 
 def io_close_owned_descriptor(descriptor, expected, directory=False):
-    """Close our acquired object only, preserving an active primary error."""
-    primary = sys.exc_info()[1]
+    """Report this close's own failure to its caller's cleanup scope."""
     try:
         info = os.fstat(descriptor)
         if not directory and info.st_nlink == 0:
@@ -4526,8 +5065,7 @@ def io_close_owned_descriptor(descriptor, expected, directory=False):
         os.close(descriptor)
     except BaseException:
         journal_failed()
-        if primary is None:
-            raise
+        raise
 
 
 def io_artifact_descriptor(descriptor, expected):
@@ -4728,6 +5266,7 @@ def io_signal_ready(runner_parent, runner_root, run_id, attempt):
             if (named.st_dev, named.st_ino) != identity:
                 raise AdapterError("Step output path changed", "access")
 
+    own_error_3 = None
     try:
         for name in parts[:-1]:
             descriptor = os.open(
@@ -4756,10 +5295,11 @@ def io_signal_ready(runner_parent, runner_root, run_id, attempt):
         os.fsync(descriptor)
         verify_outputs()
     except BaseException:
+        own_error_3 = sys.exc_info()[1]
         journal_failed()
         raise
     finally:
-        primary = sys.exc_info()[1]
+        primary = own_error_3
         errors = []
         for fd, identity, is_directory, _, _ in reversed(descriptors):
             try:
@@ -4768,6 +5308,78 @@ def io_signal_ready(runner_parent, runner_root, run_id, attempt):
                 errors.append(error)
         if errors and primary is None:
             raise errors[0]
+
+
+@contextlib.contextmanager
+def bounded_response(response, publisher):
+    """Bound body and close by one absolute repeating alarm, including errors."""
+    original = signal.getitimer(signal.ITIMER_REAL)
+    began = time.monotonic()
+    primary = None
+    try:
+        if publisher:
+            duration = min(60, max(0.001, min(_PHASE_END, _RUN_END) - began))
+            if original[0] > 0:
+                duration = min(duration, original[0])
+            signal.setitimer(signal.ITIMER_REAL, duration, 0.1)
+            check_deadline()
+        yield
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        close_error = None
+        try:
+            response.close()
+        except BaseException as error:
+            close_error = error
+            if publisher:
+                journal_failed()
+        finally:
+            if publisher:
+                elapsed = time.monotonic() - began
+                remaining = max(0.001, original[0] - elapsed) if original[0] else 0
+                signal.setitimer(signal.ITIMER_REAL, remaining, original[1])
+        if close_error is not None and primary is None:
+            raise close_error
+
+
+def bounded_body(response, limit, publisher):
+    """Reject ambiguous framing and read every byte under the response timer."""
+    global _PUBLISHER_BYTES
+    headers = response.headers
+    lengths = headers.get_all("Content-Length", [])
+    transfers = headers.get_all("Transfer-Encoding", [])
+    if len(lengths) > 1 or len(transfers) > 1 or lengths and transfers:
+        raise AdapterError("Ambiguous response framing", "fetch")
+    declared = None
+    if lengths:
+        value = lengths[0].strip()
+        if not re.fullmatch(r"[0-9]+", value) or len(value) > 12:
+            raise AdapterError("Invalid response length", "fetch")
+        declared = int(value)
+        if declared > limit:
+            raise AdapterError("Oversized response length", "fetch")
+    if transfers and transfers[0].strip().lower() != "chunked":
+        raise AdapterError("Unsupported response transfer coding", "fetch")
+    if headers.get("Content-Encoding", "identity").strip().lower() != "identity":
+        raise AdapterError("Unsupported response content encoding", "fetch")
+    chunks, total = [], 0
+    while True:
+        part = response.read(min(32768, limit + 1 - total))
+        if not isinstance(part, bytes):
+            raise AdapterError("Invalid response body segment", "fetch")
+        if not part:
+            break
+        chunks.append(part)
+        total += len(part)
+        if publisher:
+            _PUBLISHER_BYTES += len(part)
+        if total > limit:
+            raise AdapterError("Oversized response", "fetch")
+    if declared is not None and total != declared:
+        raise AdapterError("Incomplete response", "fetch")
+    return b"".join(chunks)
 
 
 def _transport_bytes(
@@ -4812,40 +5424,20 @@ def _transport_bytes(
                 if publisher:
                     raise publisher_transport_error(error, current) from None
                 raise
-            if publisher and response.status == 429:
-                # Save the adaptive MAX before any body or further request.
-                # A close failure is unassessed regardless of exception type.
-                try:
-                    record_retry_after(
-                        response.headers.get("Retry-After"), rate_limited=True
-                    )
-                except BaseException:
-                    try:
-                        response.close()
-                    except BaseException:
-                        journal_failed()
-                    raise
-                try:
-                    response.close()
-                except BaseException:
-                    journal_failed()
-                    raise
-                raise AssessedStop(
-                    "Publisher rate limit; timed embargo retained",
-                    "access",
-                    429,
-                )
-            with response:
+            with bounded_response(response, publisher):
+                stop = None
                 status = response.status
+                if publisher and status == 429:
+                    record_retry_after(None, rate_limited=True)
                 response_headers = response.headers
-                retry = response.headers.get("Retry-After")
+                retry = response_headers.get_all("Retry-After", [])
                 robots = (
                     publisher
                     and urllib.parse.urlsplit(url).path == "/robots.txt"
                 )
                 unavailable = robots and 400 <= status < 500 and status != 429
                 if publisher:
-                    record_retry_after(retry, rate_limited=status == 429)
+                    record_retry_after(retry, rate_limit_response=status == 429)
                 if publisher and not robots and status in (401, 403, 451):
                     with locked_budget():
                         state = load_budget()
@@ -4888,54 +5480,31 @@ def _transport_bytes(
                             raise AdapterError(
                                 "Whole publisher byte cap reached", "fetch"
                             )
-                    declared = response.headers.get("Content-Length")
-                    if declared and (
-                        not declared.isdigit() or int(declared) > byte_limit
-                    ):
-                        raise AdapterError(
-                            ("Oversized or invalid response length"), ("fetch")
-                        )
-                    try:
-                        body = response.read(byte_limit + 1)
-                    except (urllib.error.URLError, OSError) as error:
-                        if publisher:
-                            raise publisher_transport_error(
-                                error, current
-                            ) from None
-                        raise
-                    if (
-                        len(body) > byte_limit
-                        or declared
-                        and len(body) != int(declared)
-                    ):
-                        raise AdapterError(
-                            "Incomplete or oversized response", "fetch"
-                        )
-                    if publisher:
-                        _PUBLISHER_BYTES += len(body)
-                    encoding = response.headers.get(
-                        "Content-Encoding", "identity"
-                    )
-                    if encoding != "identity":
-                        raise AdapterError(
-                            ("Unsupported response content encoding"), ("fetch")
-                        )
-                if publisher and not unavailable:
-                    if protocol_primary_challenge(body, status):
-                        protocol_hold(
+                    body = bounded_body(response, byte_limit, publisher)
+                if publisher:
+                    if protocol_primary_challenge(body, status, unavailable):
+                        with locked_budget():
+                            state = load_budget()
+                            protocol_current_owner(state)
+                            state.update(blocked=True, observed_at=time.time())
+                            save_budget(state)
+                        stop = AssessedStop(
                             "Publisher displayed genuine access challenge",
+                            "access",
                             status,
                         )
                     if status == 429:
-                        raise AssessedStop(
+                        stop = stop or AssessedStop(
                             "Publisher rate limit; timed embargo retained",
                             "access",
                             status,
                         )
                     if not robots and status in (401, 403, 451):
-                        raise AssessedStop(
+                        stop = stop or AssessedStop(
                             "Publisher refused content access", "access", status
                         )
+        if stop is not None:
+            raise stop
         if status in (301, 302, 303, 307, 308):
             if not location or redirect == 5:
                 raise AdapterError("Invalid redirect chain", "access")
@@ -4979,6 +5548,7 @@ def _read_input_base(key):
     content_type = (
         headers.get("Content-Type", "").split(";", 1)[0].lower().strip()
     )
+    digest_key = "sha256"
     if info["format"] == "robots":
         if content_type not in {"text/plain", "text/html"}:
             raise AdapterError("Unexpected robots response format", "access")
@@ -4986,8 +5556,21 @@ def _read_input_base(key):
     else:
         if content_type not in {"text/html", "application/xhtml+xml"}:
             raise AdapterError("Unexpected programme response format", "parse")
-        digest = html_fingerprint(body)
-    if digest != info["sha256"]:
+        if "terms_content_sha256" in info:
+            digest_key = "terms_content_sha256"
+            digest = portal_terms_fingerprint(body, info["url"])
+        elif "career_terms_sha256" in info:
+            digest_key = "career_terms_sha256"
+            digest = career_terms_fingerprint(body, headers, info["url"])
+        elif "career_homepage_sha256" in info:
+            digest_key = "career_homepage_sha256"
+            digest = career_homepage_fingerprint(
+                body, headers, info["url"], INPUTS["german-listing"]["url"]
+            )
+        else:
+            digest = html_fingerprint(body)
+    expected = info[digest_key]
+    if digest != expected:
         raise AdapterError(
             "Reviewed Volkswagen AG material or frontier changed: " + key,
             "parse",
@@ -6054,7 +6637,7 @@ class PrimaryText(HTMLParser):
         if not self.stack or not any(self.stack[-1][1:]):
             self.parts.append(value)
 
-def protocol_primary_challenge(body, status):
+def protocol_primary_challenge(body, status, rep_unavailable=False):
     """Inspect actual HTML only; ancillary mentions are not access refusals."""
     prefix = body[:1024].lstrip().lower()
     if not re.match(
@@ -6067,7 +6650,7 @@ def protocol_primary_challenge(body, status):
     title = " ".join(" ".join(text.head_title_parts).split()).lower()
     primary = " ".join(" ".join(text.parts).split()).lower()
     if re.search(
-        r"just a moment|attention required|access denied|captcha|"
+        r"just a moment|attention required|captcha|"
         r"verify you are human|checking your browser",
         title,
     ):
@@ -6081,7 +6664,9 @@ def protocol_primary_challenge(body, status):
     ]
     if any(p in primary for p in phrases):
         return True
-    if status == 429:
+    if not rep_unavailable and "access denied" in title:
+        return True
+    if status == 429 or rep_unavailable:
         return False
     # Preserve real standalone primary denials without matching help prose.
     return bool(
@@ -6358,7 +6943,11 @@ def protocol_first_wire():
         return
     with locked_budget():
         protocol_same_history(_PROTOCOL_CONTEXT)
+        if _PROTOCOL_CONTEXT["qualified_qa_resume"]:
+            verify_qualified_qa_resume_grant(_PROTOCOL_CONTEXT)
         state = load_budget()
+        if state["transition_id"] != qualified_qa_resume_id():
+            raise AdapterError("Volkswagen journal lacks qualified QA continuity", "access")
         protocol_current_owner(state)
         if state["blocked"] or time.time() < max(
             _COLLECTION_STARTED + 60, state["rate_limit_until"]

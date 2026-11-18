@@ -26,7 +26,7 @@ Empty retrieval, incomplete parsing, validation failure and publication
 failure preserve last-good data and its success timestamp. Cleanup never
 writes separately before the successful atomic refresh.
 
-Official access and reuse remain guarded. Fresh robots for [jobs.volkswagen-group.com](https://jobs.volkswagen-group.com/robots.txt), [volkswagen-karriere.de](https://www.volkswagen-karriere.de/robots.txt) and [HRD](https://www.hrd-portal.com/robots.txt) precede documents. Both official career homepages and their linked [career terms](https://www.volkswagen-karriere.de/de/nutzungsbedingungen.html) and [job-portal terms](https://jobs.volkswagen-group.com/content/Nutzungsbedingungen/?locale=de_DE) retain their previously reviewed complete material/frontier fingerprints. October 14 research confirmed all seven policy/home inputs unchanged. The May 2026 career and January 2026 portal terms prohibit commercial systematic use without consent; that commercial qualifier remains material. This adapter collects minimal original noncommercial factual recaps and direct official opportunity links, without creative description mirrors, images, applications, profiles or guessed APIs.
+Official access and reuse remain guarded. Fresh robots for [jobs.volkswagen-group.com](https://jobs.volkswagen-group.com/robots.txt), [volkswagen-karriere.de](https://www.volkswagen-karriere.de/robots.txt) and [HRD](https://www.hrd-portal.com/robots.txt) precede documents. The [German career homepage](https://www.volkswagen-karriere.de/de.html) retains its reviewed official listing destinations, legal links, crawler metadata and direct access or reuse notices. The English homepage retains its complete material and frontier fingerprint. The [career terms](https://www.volkswagen-karriere.de/de/nutzungsbedingungen.html) retain all reviewed legal prose, linked policies and explicit noindex and nofollow instructions. The catalogue reads this document for access-policy review and does not index it or use it to discover opportunity routes. The [job-portal terms](https://jobs.volkswagen-group.com/content/Nutzungsbedingungen/?locale=de_DE) use the legal article guard described in the #420 section. The May 2026 career and January 2026 portal terms prohibit commercial systematic use without consent; that commercial qualifier remains material. This adapter collects minimal original noncommercial factual recaps and direct official opportunity links, without creative description mirrors, images, applications, profiles or guessed APIs.
 
 The #316 candidate's durable family budget applies at least 12.2 seconds from
 physical completion to the next start and at most five starts in a rolling
@@ -51,7 +51,7 @@ output signal; pending or failed persistence cannot upload a healthy envelope.
 
 Every GitHub publication request obtains or renews a repository-scoped installation token through the configured App. The matching workflow discovers the `YouthOpps/data-source` installation using `actions/create-github-app-token@v2`, supplies its authoritative installation ID and preserves native JIT renewal; it does not pass the action's temporary token as a static fallback. Atomic source-scoped CAS writes affect only `datas/volkswagen-group/{data,metadata}.json`. Initial failure creates no folder; later failure preserves validated last-good data and success/check timestamps when safe failure metadata can be written. Creation/first-seen/last-seen use attempt start, last-checked uses successful end, and updated-at advances only on a material change. The daily schedule is staggered with other sources. Push routing, manual dispatch, repository/main guard and serialized family publication remain unchanged. Maintainer merge starts production; implementation does not dispatch Actions or publish.
 
-Run the sole real nonpublishing test from the repository root:
+On GitHub Actions, run the sole real nonpublishing test from the repository root in an isolated, reviewed QA workflow:
 
 ```sh
 python -B adapters/volkswagen-group/test_adapter.py
@@ -393,3 +393,74 @@ closed instead of continuing or truncating that update. These checks retain the
 existing 16 KiB journal bound, state schema, MAX restrictions and publication
 behavior. They detect observed generation changes; they are not filesystem
 compare-and-swap operations.
+
+## Changed recruiting-platform terms review (#420)
+
+The last failing production run stopped on the recruiting platform's terms
+(`input-193`). During the November 17, 2026 bounded policy review, both the
+actual robots response and the actual terms response completed with HTTP 200.
+The terms page still identified the January 2026 policy. Section 1 distinguishes
+public informational access from registered online applications. Section 7
+prohibits interference or circumventing protections and says “Eine
+gewerbliche, systematische Nutzung der Webseiten der Volkswagen AG ist ohne
+Zustimmung der Volkswagen AG unzulässig.” The restriction on systematic
+commercial use does not apply to the project's noncommercial catalogue of
+brief original facts and official vacancy links. Section 8 limits the portal
+licence, so the adapter does not assert a right to reproduce the publisher's
+content. No change authorizes signing in, submitting applications, collecting
+profiles, or accessing restricted routes.
+
+The adapter checks the full normalized legal article, document identity and
+article links instead of treating changes to outer layout, navigation, styles
+or consent widgets as changes to the policy. A material change to either
+responsive copy of the legal article, an unexpected linked policy, or an
+ambiguous terms document stops collection. The other guarded inputs and the
+current inventory, eligibility, normalization, expiry and publication rules
+retain their checks.
+
+The OFF transport revision assesses complete bounded response bodies before
+settlement, including received 429 and literal robots responses. A current 429
+persists its strike, doubled current physical/page gaps and minimum embargo
+before interpreting received headers. Complete IMF-fixdate, RFC 850 and asctime
+HTTP dates retain the longest supported deadline. Ordinary unavailable robots
+4xx remains distinct from a genuine visible challenge. Sole chunked framing is
+supported; duplicate lengths, conflicting framing, unsupported transfer coding,
+truncation and failed closes retain unresolved ownership. A repeating absolute
+response alarm covers both body reading and close, including pre-body errors.
+Owned export and step-output cleanup track their own exceptions independently
+of an error already being handled by their caller.
+
+Separate private readiness uses all 43 observed owned archives, 43 exact job
+completion bounds, 14 immutable workflow/source versions and the embedded
+historical native seeds. Legacy unknown fields and existing policy witnesses
+remain; missing local history supplies no fresh allowance. Synthetic controls
+and genuine archive decoding are offline evidence, not publisher access or a
+passing collection test.
+
+The bounded policy review retained 15 acknowledged journal updates and two
+closed policy responses. The November 18 isolated qualification then ran the
+unchanged original collector and the pinned website loader on GitHub Actions.
+All 160 publisher responses returned HTTP 200 and closed. The run acknowledged
+1,128 journal updates and released the exact final generation. Independent
+replay of the authenticated encrypted artifact reproduced all 137 fresh records
+and the 137 expiry-filtered website IDs.
+[Qualified test](https://github.com/YouthOpps/data-pipeline/actions/runs/44244084235/job/134598674935)
+
+The German publisher census advertised 141 rows across six pages. All details
+were read, yielding 137 qualifying German JobIDs and four non-youth JobIDs.
+The English page advertised five aliases, including four qualifying matches
+and one of the non-youth JobIDs. The prior 157-record site snapshot shares
+109 JobIDs with the refreshed census. Twenty-eight JobIDs are newly represented.
+The 48 previous-only JobIDs were absent from the current advertised census.
+Publisher expiry or withdrawal causes for those individual older posts remain
+unconfirmed.
+
+Production retains its original read of the latest genuine production artifact
+and the original atomic publication path. The first qualified resume takes the
+maximum of that owned state and the reviewed floor derived from 529 historical
+reservation or opener observations. The runtime checks the exact qualified QA
+run, its archived receipt identity and the manual retirement of all three QA
+workflows before making its first publisher request. A fresh exact production
+head grant is checked before restoration and again before that request. The
+normal producer carries the transition identity in its own subsequent pacing
+artifacts. The local candidate keeps the production authorization OFF.
