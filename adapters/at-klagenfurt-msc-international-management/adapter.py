@@ -1319,16 +1319,16 @@ REPOSITORY = "YouthOpps/data-pipeline"
 API = "https://api.github.com"
 WORKFLOW_PATH = ".github/workflows/fetch-" + SOURCE_ID + ".yml"
 WORKFLOW_FILE = WORKFLOW_PATH.rsplit("/", 1)[1]
-WORKFLOW_SHA256 = "9bb59b30401df986534f7610208574c9136e06681d50ebfe09613be8270775d6"
-REVIEWED_QA_RUN = None
-REVIEWED_QA_WORKFLOW = None
-REVIEWED_QA_JOB = None
-REVIEWED_QA_ARTIFACT = None
-REVIEWED_QA_HEAD = None
-REVIEWED_QA_BRANCH = None
-REVIEWED_QA_PATH = None
-REVIEWED_QA_ZIP_DIGEST = None
-REVIEWED_QA_FLOOR_SHA256 = None
+WORKFLOW_SHA256 = "3af2056159eeee83af6cc24cf2829e92e582bbda9242a6e770e2d84cfe27f394"
+REVIEWED_QA_RUN = 44245821168
+REVIEWED_QA_WORKFLOW = 422227671
+REVIEWED_QA_JOB = 134604404648
+REVIEWED_QA_ARTIFACT = 14401981609
+REVIEWED_QA_HEAD = '1aa4872adfb2a702e86e48c1236ea3318bcaabbe'
+REVIEWED_QA_BRANCH = 'qa/442-klagenfurt-native-5b50d7988e79a41e'
+REVIEWED_QA_PATH = '.github/workflows/verify-at-klagenfurt-msc-international-management.yml'
+REVIEWED_QA_ZIP_DIGEST = 'sha256:b87c7d7bed6a9bdbe79d88c88124cd3687149ded72b4f86d30c185ae78f321bb'
+REVIEWED_QA_FLOOR_SHA256 = 'ae576d6d53f6859e7645af83bc0a8399a30788fdb06b8c7c7892e00e27aab094'
 ARTIFACT_NAME = SOURCE_ID + "-pacing-state"
 ADAPTER_PATH = f"adapters/{SOURCE_ID}/adapter.py"
 FIRST_HOSTED = None
@@ -1625,6 +1625,8 @@ def verify_reviewed_qa_owner():
     if artifacts.get("total_count") != 1 or len(artifacts["artifacts"]) != 1:
         raise Stop("The reviewed native artifact owner is not unique")
     artifact = artifacts["artifacts"][0]
+    if workflow_api(f"/actions/artifacts/{REVIEWED_QA_ARTIFACT}") != artifact:
+        raise Stop("The retired QA artifact reports inconsistent metadata")
     owner = artifact["workflow_run"]
     if (artifact.get("id") != REVIEWED_QA_ARTIFACT or artifact.get("name") != "klagenfurt442-native-attempt-1"
             or artifact.get("expired") is not False or artifact.get("digest") != REVIEWED_QA_ZIP_DIGEST
@@ -1632,6 +1634,27 @@ def verify_reviewed_qa_owner():
             or owner["head_branch"] != REVIEWED_QA_BRANCH
             or owner["repository_id"] != 1163601208 or owner["head_repository_id"] != 1163601208):
         raise Stop("The exact reviewed original native artifact no longer matches")
+
+
+def verify_first_production_grant(binding, evidence, packet_sha, floor_sha):
+    comment_id = evidence.rsplit("-", 1)[-1]
+    comment = workflow_api("/issues/comments/" + comment_id)
+    exact = workflow_api(f"/actions/runs/{binding[1]}/attempts/1")
+    required = (
+        "Approved Klagenfurt production packet " + packet_sha,
+        "Klagenfurt production floor " + floor_sha,
+        f"Klagenfurt production native run {REVIEWED_QA_RUN}/1",
+    )
+    author = comment.get("user") or {}
+    created = comment.get("created_at")
+    lines = (comment.get("body") or "").splitlines()
+    if (type(comment.get("id")) is not int or comment["id"] != int(comment_id)
+            or author.get("id") != 12278069 or author.get("type") != "User"
+            or comment.get("html_url") != evidence or comment.get("issue_url")
+            != API + "/repos/YouthOpps/data-pipeline/issues/442"
+            or not isinstance(created, str) or created != comment.get("updated_at")
+            or created > exact["created_at"] or any(lines.count(value) != 1 for value in required)):
+        raise Stop("First production publisher use lacks the exact original maintainer grant")
 
 
 def hosted_floor(binding, owner):
@@ -1643,12 +1666,16 @@ def hosted_floor(binding, owner):
     evidence = FIRST_HOSTED.get("review_evidence", "")
     if (
         not re.fullmatch(r"https://github\.com/YouthOpps/data-pipeline/issues/442#issuecomment-[1-9][0-9]*", evidence)
-        or evidence.endswith("-6969970616")
+        or evidence.endswith(("-6969970616", "-6970185955"))
     ):
         raise Stop("First hosted use needs its own reviewed production handoff")
     state = validate(FIRST_HOSTED["state"])
     if digest(canonical(state)) != FIRST_HOSTED["state_sha256"] or FIRST_HOSTED["state_sha256"] != REVIEWED_QA_FLOOR_SHA256:
         raise Stop("Reviewed native publisher state differs")
+    packet_sha = FIRST_HOSTED.get("review_packet_sha256")
+    if not isinstance(packet_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", packet_sha):
+        raise Stop("Missing reviewed production packet identity")
+    verify_first_production_grant(binding, evidence, packet_sha, REVIEWED_QA_FLOOR_SHA256)
     verify_reviewed_qa_owner()
     return state
 
@@ -1987,10 +2014,26 @@ def export_state():
         os.close(fd)
 
 
+def production_preflight():
+    """Verify the current producer and pacing floor before obtaining write credentials."""
+    if "DATA_SOURCE_TOKEN" in os.environ:
+        raise Stop("Preflight refuses credentials with publication authority")
+    binding = workflow_binding()
+    state = hosted_floor(binding, workflow_history(binding))
+    if any(state[key] for key in ("blocked", "in_flight", "physical_pending")):
+        raise Stop("Newest publisher state has unresolved access restrictions")
+    print("Exact main producer and settled pacing floor verified")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--publish", action="store_true", help="Publish this source on its owning Action")
+    commands = parser.add_mutually_exclusive_group()
+    commands.add_argument("--publish", action="store_true", help="Publish this source on its owning Action")
+    commands.add_argument("--preflight", action="store_true", help="Authenticate source ownership without collection")
     args = parser.parse_args()
+    if args.preflight:
+        production_preflight()
+        return
     if args.publish and not HOSTED:
         raise Stop("Only the owning GitHub Actions workflow may publish")
     if not args.publish:
@@ -2006,5 +2049,13 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as problem:
+        for request in AUDIT["requests"]:
+            # Preserve observed protocol boundaries and exact request identity for recovery.
+            # This diagnostic excludes response bodies and headers.
+            observation = {key: request.get(key) for key in (
+                "request_id", "url", "status", "transport", "wall_start", "wall_completion",
+                "start", "completion", "error", "read_error", "close_error", "completion_clock_error",
+            )}
+            print("Publisher transport " + canonical(observation).decode(), file=sys.stderr)
         print(type(problem).__name__ + ": source collection or publication failed", file=sys.stderr)
         sys.exit(1)
