@@ -56,6 +56,58 @@ RUN_TIMEOUT = 1290
 EXPORT_TIMEOUT = 30
 _STATE_SCHEMA = 1
 _ARTIFACT_NAME = "studyincroatia-pacing-state"
+_PREVIOUS_PRODUCTION_OWNER = (44201367652, 1, 'hr-study-in-croatia')
+_NATIVE_HANDOFF = {'actual_starts': [1794982792.9547126,
+                   1794982806.9904978,
+                   1794982821.3754811,
+                   1794982835.5715797,
+                   1794982849.655146,
+                   1794982863.7084048,
+                   1794982877.8186255,
+                   1794982891.890781,
+                   1794982905.9637806,
+                   1794982920.0314083,
+                   1794982934.2764037,
+                   1794982948.4749296,
+                   1794982962.558577,
+                   1794982976.5367942,
+                   1794982990.5260777,
+                   1794983004.6348014,
+                   1794983036.709344,
+                   1794983068.6700513,
+                   1794983100.519423,
+                   1794983132.5039234,
+                   1794983146.5699244],
+ 'approval_id': 6971142890,
+ 'approval_scope': '94f1ed78bdc085028b3ac34c350e6a19f92be7c31c47f1e1d4294f368523a77d',
+ 'archive_bytes': 1394987,
+ 'archive_digest': 'sha256:d54b2dd38f9ff853c14a5826e56e719253554276aaef1110b2e60fa5abcf1872',
+ 'artifact_id': 14404151603,
+ 'capture_digest': '6c1dda6b940dd6acde5287e7f1804b5e96c4dd260c230773c83da6c423a69245',
+ 'completed_at': '2026-11-18T06:25:52Z',
+ 'consumer_replay_digest': 'c3859a149566acb2c8835217b027cbaf5490a1e4a0ad500a64abe78e6d6bcbb0',
+ 'host': 'productionresultssa32.blob.core.windows.net',
+ 'identity': {'grant': 6970817986,
+              'head': '305db5682ff25c2e99e8a845024d263c719ff074',
+              'job_id': 134619198879,
+              'ref': 'refs/heads/qa/croatia-archive-native',
+              'run_attempt': 1,
+              'run_id': 44250345680,
+              'workflow_id': 422253370},
+ 'maintainer_id': 12278069,
+ 'native_stdout_digest': 'acfe1706bdc20c60e27330078b13627517b0e048644f8bcd358a92a60395f85e',
+ 'state': {'blocked': False,
+           'family': 'youthopps-studyincroatia-publisher-v1',
+           'interval': 12.2,
+           'legacy_rate_history_unknown': True,
+           'not_before': 1794983159.3076653,
+           'observed_at': 1794983147.1076653,
+           'page_interval': 30,
+           'rate_failures': 0,
+           'schema': 1,
+           'starts': [1794983099.245646, 1794983131.1214647, 1794983145.2526531]},
+ 'state_digest': 'b40a3a35207c3697e6e5ddc1ecbed9920648af58653482d7249e7e92a6eaba90',
+ 'workflow': '.github/workflows/qa-croatia-archive-native.yml'}
 _STATE_PATH = _STATE_LOCK = None
 _COLLECTION_LOCK_FD = None
 _COLLECTION_STARTED = None
@@ -946,11 +998,7 @@ def scan_family_history():
     total, scanned = None, 0
     seen_ids = set()
     for page in range(1, 101):
-        route = (
-            "/actions/runs"
-            if hosted
-            else ("/actions/workflows/" + str(definition["id"]) + "/runs")
-        )
+        route = "/actions/workflows/" + str(definition["id"]) + "/runs"
         result = workflow_api(route + f"?per_page=100&page={page}")
         count, runs = result.get("total_count"), result.get("workflow_runs")
         if (
@@ -1087,11 +1135,8 @@ def scan_family_history():
     raise AdapterError("Workflow inventory exceeds reviewed bound", "access")
 
 
-def download_inert_artifact(identity, artifact_id, digest=None):
-    (
-        "Download a bounded authenticated artifact, stripping "
-        "cross-origin auth."
-    )
+def owned_archive_bytes(artifact_id, digest, *, byte_limit=32768, expected_host=None, exact_size=None):
+    """Get an owned authenticated ZIP without forwarding GitHub credentials."""
     token = os.environ.get("GITHUB_TOKEN", "")
     url = _WORKFLOW_GITHUB + f"/actions/artifacts/{artifact_id}/zip"
     request = urllib.request.Request(
@@ -1103,45 +1148,64 @@ def download_inert_artifact(identity, artifact_id, digest=None):
         },
     )
     try:
-        try:
-            response = _OPENER.open(request, timeout=request_timeout())
-        except urllib.error.HTTPError as error:
-            response = error
-        with response:
-            if response.status != 302:
-                raise ValueError("Expected artifact redirect")
-            destination = response.headers.get("Location", "")
-            response.read(1001)
-        parsed = urllib.parse.urlsplit(destination)
+        response = _OPENER.open(request, timeout=request_timeout())
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        if response.status != 302:
+            raise ValueError("Expected artifact redirect")
+        destination = response.headers.get("Location", "")
+        response.read(1001)
+    parsed = urllib.parse.urlsplit(destination)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.port
+    ):
+        raise ValueError("Unsafe artifact URL")
+    if "." not in parsed.hostname or parsed.hostname.endswith(
+        ((".local"), (".internal"), (".localhost"))
+    ):
+        raise ValueError("Private artifact hostname")
+    try:
+        ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("Literal artifact address")
+    # Signed URL is never stored or included in exceptions; no auth header.
+    if expected_host is None:
+        status, _, body = request_bytes(destination, byte_limit=byte_limit)
+    else:
+        if parsed.hostname != expected_host:
+            raise ValueError("Unexpected owned archive transfer origin")
+        transfer = urllib.request.Request(destination, headers={"User-Agent": _USER_AGENT})
+        with _OPENER.open(transfer, timeout=request_timeout()) as response:
+            status = response.status
+            if status != 200:
+                raise ValueError("Unexpected owned archive transfer status")
+            body = response.read(byte_limit + 1)
+    if (
+        status != 200 or len(body) > byte_limit
+        or exact_size is not None and len(body) != exact_size
+    ):
+        raise ValueError("Invalid artifact response")
+    if digest is not None:
         if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-            or parsed.port
+            not isinstance(digest, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+            or digest[7:] != hashlib.sha256(body).hexdigest()
         ):
-            raise ValueError("Unsafe artifact URL")
-        if "." not in parsed.hostname or parsed.hostname.endswith(
-            ((".local"), (".internal"), (".localhost"))
-        ):
-            raise ValueError("Private artifact hostname")
-        try:
-            ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            pass
-        else:
-            raise ValueError("Literal artifact address")
-        # Signed URL is never stored or included in exceptions; no auth header.
-        status, _, body = request_bytes(destination, byte_limit=32768)
-        if status != 200 or len(body) > 32768:
-            raise ValueError("Invalid artifact response")
-        if digest is not None:
-            if (
-                not isinstance(digest, str)
-                or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
-                or digest[7:] != hashlib.sha256(body).hexdigest()
-            ):
-                raise ValueError("Artifact digest mismatch")
+            raise ValueError("Artifact digest mismatch")
+    return body
+
+
+def download_inert_artifact(identity, artifact_id, digest=None):
+    """Verify the normal producer-owned pacing envelope."""
+    try:
+        body = owned_archive_bytes(artifact_id, digest)
         with zipfile.ZipFile(io.BytesIO(body)) as archive:
             entries = archive.infolist()
             if len(entries) != 1 or entries[0].filename != "pacing-state.json":
@@ -1179,6 +1243,133 @@ def download_inert_artifact(identity, artifact_id, digest=None):
         raise AdapterError(
             ("Invalid or unavailable family pacing artifact"), ("access")
         ) from None
+
+
+def validate_native_grant():
+    handoff = _NATIVE_HANDOFF
+    scope = {key: value for key, value in handoff.items() if key not in {"approval_id", "approval_scope"}}
+    canonical = json.dumps(scope, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    if hashlib.sha256(canonical).hexdigest() != handoff["approval_scope"]:
+        raise AdapterError("Reviewed native handoff scope differs", "access")
+    comment_id = handoff["approval_id"]
+    if type(comment_id) is not int or comment_id <= 0:
+        raise AdapterError("Study in Croatia native handoff is OFF", "access")
+    if (
+        os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("GITHUB_REPOSITORY") != "YouthOpps/data-pipeline"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+        or os.environ.get("GITHUB_RUN_ATTEMPT") != "1"
+        or os.environ.get("GITHUB_WORKFLOW_REF") != (
+            "YouthOpps/data-pipeline/.github/workflows/fetch-hr-study-in-croatia.yml@refs/heads/main"
+        )
+    ):
+        raise AdapterError("Native handoff requires the exact hosted production source", "access")
+    grant = workflow_api(f"/issues/comments/{comment_id}")
+    statement = "Approved Croatia production handoff " + handoff["approval_scope"]
+    if (
+        grant.get("id") != comment_id
+        or grant.get("user", {}).get("id") != handoff["maintainer_id"]
+        or grant.get("user", {}).get("type") != "User"
+        or grant.get("issue_url") != _WORKFLOW_GITHUB + "/issues/450"
+        or grant.get("html_url") != f"https://github.com/YouthOpps/data-pipeline/issues/450#issuecomment-{comment_id}"
+        or not isinstance(grant.get("created_at"), str)
+        or grant["created_at"] <= handoff["completed_at"]
+        or grant.get("updated_at") != grant["created_at"]
+        or statement not in grant.get("body", "").splitlines()
+    ):
+        raise AdapterError("Exact immutable production handoff grant is unavailable", "access")
+    return handoff
+
+
+def verified_native_state():
+    """Use the single retired native source-test owner for the first fresh producer."""
+    handoff = validate_native_grant()
+    identity = handoff["identity"]
+    run_id, workflow_id = identity["run_id"], identity["workflow_id"]
+    run = workflow_api(f"/actions/runs/{run_id}/attempts/1")
+    definition = workflow_api(f"/actions/workflows/{workflow_id}")
+    history = workflow_api(f"/actions/workflows/{workflow_id}/runs?per_page=100")
+    jobs = workflow_api(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=100")
+    expected = {
+        "id": run_id, "workflow_id": workflow_id, "run_attempt": 1,
+        "head_sha": identity["head"], "path": handoff["workflow"],
+        "head_branch": identity["ref"].removeprefix("refs/heads/"),
+        "status": "completed", "conclusion": "failure", "event": "push",
+    }
+    rows = history.get("workflow_runs", [])
+    if (
+        definition.get("id") != workflow_id or definition.get("path") != handoff["workflow"]
+        or definition.get("state") != "disabled_manually"
+        or history.get("total_count") != len(rows) or len(rows) != 1
+        or any(item.get(key) != value for item in (run, rows[0]) for key, value in expected.items())
+        or any(run.get(role, {}).get("id") != handoff["maintainer_id"] for role in ("actor", "triggering_actor"))
+        or any(run.get(repo, {}).get("full_name") != "YouthOpps/data-pipeline"
+               for repo in ("repository", "head_repository"))
+    ):
+        raise AdapterError("Exact retired native workflow lineage differs", "access")
+    expected_job = {
+        "id": identity["job_id"], "run_id": run_id, "run_attempt": 1, "head_sha": identity["head"],
+        "status": "completed", "conclusion": "failure", "name": "native",
+        "completed_at": handoff["completed_at"],
+    }
+    if (
+        jobs.get("total_count") != 1 or len(jobs.get("jobs", [])) != 1
+        or any(jobs["jobs"][0].get(key) != value for key, value in expected_job.items())
+    ):
+        raise AdapterError("Exact completed native job differs", "access")
+    artifact = workflow_api(f"/actions/artifacts/{handoff['artifact_id']}")
+    listing = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+    expected_artifact = {
+        "id": handoff["artifact_id"], "name": "croatia-archive-native-1", "expired": False,
+        "size_in_bytes": handoff["archive_bytes"], "digest": handoff["archive_digest"],
+    }
+    owned = listing.get("artifacts", [])
+    if (
+        listing.get("total_count") != len(owned) or len(owned) != 1
+        or any(item.get(key) != value for item in (artifact, owned[0])
+               for key, value in expected_artifact.items())
+        or artifact.get("workflow_run", {}).get("id") != run_id
+        or artifact["workflow_run"].get("head_sha") != identity["head"]
+    ):
+        raise AdapterError("Exact native pacing archive ownership differs", "access")
+    try:
+        raw = owned_archive_bytes(
+            artifact["id"], artifact["digest"], byte_limit=handoff["archive_bytes"],
+            expected_host=handoff["host"], exact_size=handoff["archive_bytes"],
+        )
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = archive.namelist()
+            expected_members = {"native-evidence.json", "capture.cms"} | {
+                f"{label}-{index:02}.json" for label in ("pending", "settled")
+                for index in range(1, len(INPUTS) + 2)
+            }
+            if len(names) != len(expected_members) or set(names) != expected_members:
+                raise ValueError("Unexpected native capture members")
+            info = archive.getinfo("native-evidence.json")
+            if info.file_size > 16384 or info.flag_bits & 1 or info.external_attr >> 16 & 0o170000 == 0o120000:
+                raise ValueError("Unexpected native capture evidence entry")
+            proof = json.loads(archive.read(info))
+        if (
+            proof["identity"] != identity or proof["native_complete"] is not False
+            or proof["unresolved_attempt"] is not False or proof["failure_type"] != "RuntimeError"
+            or proof["qualified_native_ack"] is not None
+            or proof["physical_opens"] != len(INPUTS) + 1
+            or proof["capture_sha256"] != handoff["capture_digest"]
+        ):
+            raise ValueError("Incomplete native capture")
+        receipt = proof["unqualified_latest_ack"]
+        raw_state = base64.b64decode(receipt["raw_base64"], validate=True)
+        if (len(raw_state) != receipt["bytes"]
+                or hashlib.sha256(raw_state).hexdigest() != receipt["sha256"]
+                or receipt["sha256"] != handoff["state_digest"]):
+            raise ValueError("Native journal receipt bytes differ")
+        state = validate_budget(json.loads(raw_state))
+        if state != receipt["state"] or state["blocked"] or state != handoff["state"]:
+            raise ValueError("Native journal receipt differs")
+        state["starts"] = sorted(set(state["starts"] + handoff["actual_starts"]))[-10:]
+        return validate_budget(state)
+    except (ValueError, TypeError, KeyError, OSError, zipfile.BadZipFile):
+        raise AdapterError("Invalid native pacing archive or state", "access") from None
 
 
 def restore_family_artifact():
@@ -1226,6 +1417,13 @@ def restore_family_artifact():
     incoming = download_inert_artifact(
         latest, artifact["id"], artifact.get("digest")
     )
+    if latest == _PREVIOUS_PRODUCTION_OWNER:
+        native = verified_native_state()
+        for key in ("not_before", "interval", "page_interval", "rate_failures"):
+            incoming[key] = max(incoming[key], native[key])
+        for key in ("blocked", "legacy_rate_history_unknown"):
+            incoming[key] = incoming[key] or native[key]
+        incoming["starts"] = sorted(set(incoming["starts"] + native["starts"]))[-10:]
     _JOURNAL_BOOTSTRAP_ALLOWED = (
         _STATE_INITIALIZING
         and not _JOURNAL_SAVE_ATTEMPTED
@@ -2245,12 +2443,209 @@ def html_fingerprint(body, key=None):
     return hashlib.sha256(facts.encode()).hexdigest()
 
 
+def home_anchors(node):
+    """Return the labelled destinations without desktop/mobile duplication."""
+    return frozenset(
+        (
+            link.attrs["href"][len(SOURCE_URL) - 1:]
+            if link.attrs["href"].startswith(SOURCE_URL) else link.attrs["href"],
+            link.text().casefold(),
+        )
+        for link in nodes(node, "a") if link.attrs.get("href")
+    )
+
+
+def home_unlinked_text(node, promotional):
+    if node in promotional or node.tag in {"a", "script", "style"}:
+        return ""
+    parts = [
+        home_unlinked_text(child, promotional) if isinstance(child, Node) else child
+        for child in node.children
+    ]
+    return " ".join(" ".join(parts).split())
+
+
+def home_children(node):
+    """Separate visual elements from unexpected free text in a media widget."""
+    if any(isinstance(child, str) and child.strip() for child in node.children):
+        raise AdapterError("Changed Study in Croatia homepage promotional structure", "parse")
+    return [child for child in node.children if isinstance(child, Node)]
+
+
+def home_promotional_copy(main):
+    """Identify the reviewed introduction and paired YouTube captions."""
+    intro = one(nodes(main, "div", "NaslovnaUvodCnt"), "homepage introduction")
+    lead = one(nodes(intro, "div", "NaslovnaLead"), "homepage lead")
+    video = one(nodes(main, "div", "NaslovnaVideoSekcijaCnt"), "homepage video section")
+    if intro not in home_children(main) or video not in home_children(main):
+        raise AdapterError("Changed Study in Croatia homepage promotional placement", "parse")
+    paragraphs = home_children(lead)
+    cards = home_children(video)
+    if not paragraphs or not cards:
+        raise AdapterError("Missing Study in Croatia homepage promotional content", "parse")
+    allowed = set(paragraphs)
+    frames = set()
+    for card in cards:
+        children = home_children(card)
+        if (
+            card.tag != "div" or card.attrs.get("class") != "NaslovnaVideoCnt"
+            or len(children) != 2
+            or [child.attrs.get("class") for child in children] != ["NaslovnaVideo", "NaslovnaVideoTekst"]
+            or any(child.tag != "div" for child in children)
+        ):
+            raise AdapterError("Changed Study in Croatia homepage video card", "parse")
+        frame = one(home_children(children[0]), "homepage video frame")
+        caption = one(home_children(children[1]), "homepage video caption")
+        if (
+            frame.tag != "iframe" or frame.text()
+            or not re.fullmatch(r"https://www\.youtube\.com/embed/[A-Za-z0-9_-]{11}",
+                                frame.attrs.get("src", ""))
+            or " ".join(frame.attrs.get("title", "").split()) != caption.text()
+        ):
+            raise AdapterError("Changed Study in Croatia homepage video embed", "parse")
+        frames.add(frame)
+        allowed.add(caption)
+    if any(
+        node.tag != "p" or not node.text() or HOME_MATERIAL_COPY.search(node.text())
+        or any(child.tag not in {"p", "em", "strong", "span"} for child in node.walk())
+        for node in allowed
+    ):
+        raise AdapterError("Changed Study in Croatia homepage access or opportunity text", "parse")
+    return allowed, frames
+
+
+def home_frontier(body):
+    """Review the landing routes and policy links without pinning asset builds."""
+    root = document_root(body.decode("utf-8", "strict"))
+    head = one(nodes(root, "head"), "homepage head")
+    content = one(nodes(root, "body"), "homepage body")
+    main = one(nodes(content, "main"), "homepage main")
+    footer = one(nodes(content, "footer"), "homepage footer")
+    head_links = set(nodes(head, "link"))
+    canonical = [link.attrs.get("href") for link in head_links
+                 if link.attrs.get("rel") == "canonical"]
+    if (
+        canonical != [SOURCE_URL]
+        or one(nodes(head, "title"), "homepage title").text() != "Study in Croatia"
+        or main.attrs.get("id") != "main"
+        or one(nodes(main, "h1"), "homepage heading").text() != "Study in Croatia"
+        or any(nodes(root, tag) for tag in ("base", "form", "area", "object", "embed"))
+        or set(nodes(root, "link")) != head_links
+        or any(link.attrs.get("rel") not in HOME_HEAD_LINK_ROLES for link in head_links)
+        or set(nodes(root, "a")) != set(nodes(content, "a"))
+        or any(not link.attrs.get("href") for link in nodes(content, "a"))
+        or nodes(root, "div", "DidYouKnowCnt") or nodes(root, "div", "NewsOsobnaDatum")
+    ):
+        raise AdapterError("Changed Study in Croatia homepage identity or link structure", "parse")
+    if home_anchors(main) != HOME_MAIN_ANCHORS or not HOME_POLICY_ANCHORS <= home_anchors(footer):
+        raise AdapterError("Changed Study in Croatia homepage entry points or policy links", "parse")
+    promotional, frames = home_promotional_copy(main)
+    frontier = home_anchors(root)
+    if (
+        set(nodes(root, "iframe")) != frames
+        or home_unlinked_text(content, promotional) != "Study in Croatia"
+        or frontier != HOME_ANCHORS
+    ):
+        raise AdapterError("Changed Study in Croatia homepage notices or reviewed frontier", "parse")
+    return frontier
+
+
+def news_document(body):
+    root = document_root(body.decode("utf-8", "strict"))
+    footer = one(nodes(root, "footer"), "news policy footer")
+    routes = {link.attrs.get("href") for link in nodes(footer, "a")}
+    labels = [link.text() for link in nodes(footer, "a") if link.attrs.get("href") not in NEWS_POLICY_LINKS]
+    if (
+        not NEWS_POLICY_LINKS <= routes or NEWS_ACCESS_NOTICE.search(root.text())
+        or any(re.search(
+            r"\b(?:terms of (?:use|service)|terms and conditions|access policy|data reuse|copyright policy)\b",
+            name, re.I,
+        ) for name in labels)
+    ):
+        raise AdapterError("News access notice or policy route requires renewed review", "access")
+    return root
+
+
+def news_inventory(body, key):
+    """Return a verified archive page with each current card classified."""
+    root = news_document(body)
+    url = INPUTS[key]["url"]
+    main = one(nodes(root, "main"), "news main")
+    title = one(nodes(main, "h1"), "news heading")
+    listing = one(nodes(main, "div", "NewsSadrzajCnt"), "news listing")
+    pager = one(nodes(listing, "div", "paginacijaCnt"), "news pagination")
+    if title.text() != "News & Events" or listing.attrs.get("id") != "main":
+        raise AdapterError("Unrecognized news listing structure", "parse")
+    navigation = nodes(pager, "a")
+    numbered = [link for link in navigation if link.text().isdigit()]
+    pages = []
+    active = []
+    for link in numbered:
+        target = NEWS_PAGE_PATH.fullmatch(link.attrs.get("href", ""))
+        if target is None or int(link.text()) != int(target[1]) + 1:
+            raise AdapterError("Archive page number or target differs", "parse")
+        number = int(target[1])
+        pages.append(number)
+        if "active" in link.attrs.get("class", "").split():
+            active.append(number)
+    current = int(urllib.parse.urlsplit(url).query.removeprefix("page=") or "0")
+    if pages != list(range(len(NEWS_INVENTORY))) or active != [current]:
+        raise AdapterError("Archive pagination or default route requires review", "parse")
+    previous = f"/news/?page={current - 1}" if current else "#"
+    following = f"/news/?page={current + 1}" if current + 1 < len(pages) else "#"
+    if (
+        len(navigation) != len(numbered) + 2
+        or navigation[1:-1] != numbered
+        or navigation[0].attrs.get("href") != previous
+        or navigation[-1].attrs.get("href") != following
+    ):
+        raise AdapterError("Archive pagination boundaries require review", "parse")
+    known = {urllib.parse.urlsplit(INPUTS[key]["url"]).path for key in NEWS_LEAF_KEYS}
+    rows = []
+    for card in nodes(listing, "a"):
+        if card in navigation:
+            continue
+        route = card.attrs.get("href", "")
+        if NEWS_ARTICLE_PATH.fullmatch(route) is None:
+            raise AdapterError("Unreviewed news card link shape", "parse")
+        values = [
+            one(nodes(card, "div", cls), f"news card {cls}").text()
+            for cls in ("NewsLinkNaslov", "NewsLinkDatum", "NewsLinkTekst")
+        ]
+        headline, displayed_date, synopsis = values
+        if not headline or not synopsis:
+            raise AdapterError("Incomplete news card", "parse")
+        try:
+            date = datetime.strptime(displayed_date, "%d %B %Y").date().isoformat()
+        except ValueError:
+            raise AdapterError("Invalid news publication date", "parse") from None
+        if route not in known and (
+            not NEWS_EDITORIAL.search(headline) or NEWS_CALL_SIGNAL.search(f"{headline} {synopsis}")
+        ):
+            raise AdapterError("Unreviewed news article: " + route, "parse")
+        rows.append((route, date))
+    if not rows:
+        raise AdapterError("Empty news archive page", "parse")
+    return tuple(rows)
+
+
+def validate_news_inventory(pages):
+    """Require complete, non-overlapping and chronological archive pages."""
+    if any(not pages[key] for key in NEWS_INVENTORY):
+        raise AdapterError("Incomplete nonempty news archive", "parse")
+    rows = [row for key in NEWS_INVENTORY for row in pages[key]]
+    routes = {route for route, _ in rows}
+    dates = [date for _, date in rows]
+    if len(routes) != len(rows) or dates != sorted(dates, reverse=True):
+        raise AdapterError("News archive duplication or chronology differs", "parse")
+
+
 def read_input(key):
     info = INPUTS[key]
     try:
         status, headers, body = (
             fetch_inventory_page(fetch_public, info["url"])
-            if key == "news" or key.startswith("news-page")
+            if key in NEWS_INVENTORY
             else fetch_public(info["url"])
         )
     except AdapterError as error:
@@ -2259,6 +2654,10 @@ def read_input(key):
             error.stage,
             error.status,
         ) from None
+    if key == "home":
+        return home_frontier(body)
+    if key in NEWS_INVENTORY:
+        return news_inventory(body, key)
     if info["format"] == "html":
         digest = html_fingerprint(body, key)
     else:
@@ -2278,10 +2677,12 @@ def read_pages():
 
 
 def parse_inventory(pages):
-    if set(pages) != set(INPUTS) or any(
-        pages[key] != info["sha256"] for key, info in INPUTS.items()
+    if (
+        set(pages) != set(INPUTS) or pages["home"] != HOME_ANCHORS
+        or any(pages[key] != info["sha256"] for key, info in INPUTS.items() if "sha256" in info)
     ):
         raise AdapterError("Incomplete reviewed programme frontier", "parse")
+    validate_news_inventory(pages)
     records = []
     now = datetime.now(timezone.utc)
     for profile in PROFILES:
@@ -2491,6 +2892,7 @@ def run_body(publishing):
     failure = None
     try:
         with phase("prepublication", 900):
+            # Restore publisher custody before reading the data-source snapshot.
             prepare_collection()
             if publishing:
                 candidate = read_snapshot()
@@ -2619,7 +3021,6 @@ SIDEBAR_COUNTS = {'about': 1,
  'exchange': 1,
  'faq': 1,
  'funding': 1,
- 'home': 0,
  'learning': 1,
  'medical': 0,
  'news': 0,
@@ -2628,6 +3029,124 @@ SIDEBAR_COUNTS = {'about': 1,
  'news-page3': 0,
  'news-page4': 0,
  'privacy': 1}
+HOME_HEAD_LINK_ROLES = frozenset({
+    "apple-touch-icon", "canonical", "dns-prefetch", "icon", "manifest",
+    "mask-icon", "stylesheet", "stylesheet preload prefetch",
+})
+HOME_MAIN_ANCHORS = frozenset({
+    ("/study-in-croatia/study-in-croatia-at-a-glance/", "find out more"),
+    ("/study-in-croatia/study-programmes-in-english/", "study programmes"),
+    ("/news/", "news & events"),
+    ("/faq/", "faq"),
+    ("/videos/", "view all videos"),
+})
+HOME_POLICY_ANCHORS = frozenset({
+    ("/about-us/content-disclaimer/", "content disclaimer"),
+    ("/about-us/privacy-policy-statement/", "privacy policy statement"),
+    ("/about-us/cookie-statement/", "cookie statement"),
+    ("/about-us/accessibility-statement/", "accessibility statement"),
+})
+HOME_ANCHORS = HOME_MAIN_ANCHORS | HOME_POLICY_ANCHORS | frozenset({
+    ("#", ""),
+    ("#", "a+ increase text"),
+    ("#", "a- decrease text"),
+    ("#", "a= default text size"),
+    ("#", "about us"),
+    ("#", "black text"),
+    ("#", "cookie settings"),
+    ("#", "default colors"),
+    ("#", "default font"),
+    ("#", "font for dyslexia"),
+    ("#", "live and work in croatia"),
+    ("#", "study in croatia"),
+    ("#", "white text"),
+    ("#", "why croatia"),
+    ("#main", "skip to main content"),
+    ("/", ""),
+    ("/about-us/about-us-39/", "about us"),
+    ("/about-us/brochures/", "brochures"),
+    ("/live-and-work-in-croatia/accommodation-and-meals/", "accommodation and meals"),
+    ("/live-and-work-in-croatia/finance-and-living-costs/", "finance and living costs"),
+    ("/live-and-work-in-croatia/health-insurance/", "health insurance"),
+    ("/live-and-work-in-croatia/learning-croatian/", "learning croatian"),
+    ("/live-and-work-in-croatia/student-work/", "student work"),
+    ("/live-and-work-in-croatia/things-to-do-in-croatia/", "things to do in croatia"),
+    ("/live-and-work-in-croatia/visa-and-residence-permit/", "live and work in croatia"),
+    ("/live-and-work-in-croatia/visa-and-residence-permit/", "visa and residence permit"),
+    ("/study-in-croatia/exchange-programmes/", "exchange programmes"),
+    ("/study-in-croatia/higher-education-system/", "higher education system"),
+    ("/study-in-croatia/how-to-apply/", "how to apply"),
+    ("/study-in-croatia/international-students-stories/", "international students' stories"),
+    ("/study-in-croatia/recognition-of-previous-education/", "recognition of previous education"),
+    ("/study-in-croatia/study-in-croatia-at-a-glance/", "study in croatia"),
+    ("/study-in-croatia/study-in-croatia-at-a-glance/", "study in croatia at a glance"),
+    ("/study-in-croatia/study-programmes-in-english/", "study programmes in english"),
+    ("/study-in-croatia/study-programmes-in-other-foreign-languages/", "study programmes in other foreign languages"),
+    ("/study-in-croatia/tuition-fees-and-scholarships/", "tuition fees and scholarships"),
+    ("/study-in-croatia/what-to-study/", "what to study"),
+    ("/why-croatia/croatia-welcomes-you/", "croatia welcomes you!"),
+    ("/why-croatia/croatia-welcomes-you/", "why croatia"),
+    ("/why-croatia/natural-beauty-and-climate/", "natural beauty and climate"),
+    ("/why-croatia/quality-of-higher-education/", "quality of higher education"),
+    ("/why-croatia/travel-opportunities/", "travel opportunities"),
+    ("https://en.ampeu.hr/", ""),
+    ("https://mzo.gov.hr/en", ""),
+    ("https://www.facebook.com/study.in.croatia/", ""),
+    ("https://www.instagram.com/studyincroatia/?hl=hr", ""),
+})
+HOME_MATERIAL_COPY = re.compile(
+    r"\b(?:automated|automatic|automatically|automation|crawl(?:er|ers|ing)?|"
+    r"scrap(?:e|er|ers|ing)|extract(?:ion|ing)?|data collection|reus(?:e|ed|ing)|"
+    r"robots?\.txt|permissions?|licen[cs](?:e|es|ed|ing)|copyright|copying|reproduction|consent|"
+    r"prohibit(?:ed|s|ion)?|restrict(?:ed|ion|ions)?|forbid(?:den|s)?|"
+    r"terms\s+(?:of\s+(?:use|service)|and\s+conditions)|access (?:denied|blocked)|"
+    r"all rights reserved|(?:shall|must) not|not (?:permitted|allowed)|"
+    r"eligible|eligibility|ineligible|qualif(?:y|ies|ied|ications?)|citizenship|residency|"
+    r"applicants?|deadlines?|admission (?:criteria|requirements)|(?:tuition|application) fees?|"
+    r"scholarships? (?:available|offered|for)|"
+    r"(?:call for|accepting) applications|apply (?:by|now|before|for)|"
+    r"applications? (?:are |will be )?(?:open|close|due|accepted)|"
+    r"(?:may|can) only (?:apply|access)|(?:must|required to) (?:apply|enrol|register|obtain|be|provide)"
+    r")\b",
+    re.IGNORECASE,
+)
+NEWS_ACCESS_NOTICE = re.compile(
+    r"\b(?:automated\s+(?:access|collection|extraction|requests?)|"
+    r"(?:no|prohibit(?:ed|s)?|forbid(?:den|s)?)\s+(?:web\s+)?(?:scraping|crawling|harvesting)|"
+    r"(?:scraping|crawling|harvesting)\s+(?:(?:is|are)\s+)?(?:prohibited|forbidden|restricted)|"
+    r"permission\s+(?:is\s+)?required\s+to\s+(?:access|collect|extract|reuse)|"
+    r"access\s+(?:requires\s+(?:prior\s+)?permission|is\s+(?:restricted|prohibited)))\b", re.I,
+)
+NEWS_CALL_SIGNAL = re.compile(
+    r"\b(?:applications? (?:(?:are|is) )?(?:now )?(?:open|close|due|accepted)|"
+    r"(?:call|invitation) for (?:applications|proposals)|"
+    r"accepting applications|application deadline|(?:apply|submit) (?:now|by|before)|"
+    r"scholarships? (?:available|offered)\b|(?:admission|funding) opportunities)\b", re.I,
+)
+NEWS_ARTICLE_PATH = re.compile(r"/news/[a-z0-9]+(?:-[a-z0-9]+)*/")
+NEWS_PAGE_PATH = re.compile(r"/news/\?page=([0-9]+)")
+NEWS_POLICY_LINKS = frozenset({
+    "/about-us/content-disclaimer/", "/about-us/privacy-policy-statement/",
+    "/about-us/cookie-statement/", "/about-us/accessibility-statement/",
+})
+
+NEWS_INVENTORY = ("news", "news-page1", "news-page2", "news-page3", "news-page4")
+# Recognize the archive's reviewed editorial formats without pinning its headlines.
+NEWS_EDITORIAL = re.compile(
+    r"^(?:Croatia promotes its higher education in\b|international students['’] stories:\s|"
+    r"meet Croatian higher ed institutions near you\b|Croatian higher education at .*\bEAIE\b|"
+    r"international researcher shares (?:his|her|their) experience\b|"
+    r"see the final list of Croatian institutions exhibiting at\b|"
+    r"Croatia to participate in EAIE\b|international students in Croatia: .*analysis reveals\b|"
+    r"study opportunities in Croatia presented at the Erasmus Generation Meeting\b|"
+    r"free LearnCro app for learning Croatian launched\b|"
+    r"this [A-Za-z]+ Study in Croatia is coming to the Erasmus Generation Meeting\b|"
+    r"Study in Croatia (?:(?:is exhibiting )?at|Initiative at) .*"
+    r"\b(?:APAIE|NAFSA|Informativa|EAIE)\b|"
+    r"prolongation of stay for international students$)",
+    re.I,
+)
+
 INPUTS = {'about': {'url': 'https://www.studyincroatia.hr/about-us/about-us-39/',
            'format': 'html',
            'sha256': 'fe41cc3fb79d8f15ad0e49be5730116a75d1a182d4211a1b20bd1f3218e0b0da'},
@@ -2661,9 +3180,7 @@ INPUTS = {'about': {'url': 'https://www.studyincroatia.hr/about-us/about-us-39/'
  'funding': {'url': 'https://www.studyincroatia.hr/study-in-croatia/tuition-fees-and-scholarships/',
              'format': 'html',
              'sha256': '5526628839e0e35ef7d1fd433361192d868e54fc235b47eae8e69f35e73e612f'},
- 'home': {'url': 'https://www.studyincroatia.hr/',
-          'format': 'html',
-          'sha256': 'ca4f7b76129d96c4ee91d295cfd46246d65fb3ebfe62b683080a0d18f1ea1cbc'},
+ 'home': {'url': SOURCE_URL, 'format': 'html'},
  'learning': {'url': 'https://www.studyincroatia.hr/live-and-work-in-croatia/learning-croatian/',
               'format': 'html',
               'sha256': '44e073a7e8ee3d0e8ec63af64f7050158096ed9e2d7846e8f832e775e47c6c9a'},
@@ -2671,20 +3188,15 @@ INPUTS = {'about': {'url': 'https://www.studyincroatia.hr/about-us/about-us-39/'
              'format': 'html',
              'sha256': 'cdd3143a50f9e30d9eef7c9b26518afacc38fd641e7a5ec3affd8843d6dd43a4'},
  'news-page1': {'url': 'https://www.studyincroatia.hr/news/?page=1',
-                'format': 'html',
-                'sha256': '6875c65ef74d983e7533bf18d8033d7d8ddd681edd8e75e66717ccf4e6bfc238'},
+                'format': 'html'},
  'news-page2': {'url': 'https://www.studyincroatia.hr/news/?page=2',
-                'format': 'html',
-                'sha256': 'a098670e40ddb483b4a992e62c942d17b77d73bea36b6b5cede374805632e6ab'},
+                'format': 'html'},
  'news-page3': {'url': 'https://www.studyincroatia.hr/news/?page=3',
-                'format': 'html',
-                'sha256': '18390286d89806c8fa45a483eca5927c80b8c2c9699e08921242520035b1dcd5'},
+                'format': 'html'},
  'news-page4': {'url': 'https://www.studyincroatia.hr/news/?page=4',
-                'format': 'html',
-                'sha256': 'd25c18d42622c8c1235ad3a44d39602f442be1169facf1882c4c91c2f77ade15'},
+                'format': 'html'},
  'news': {'url': 'https://www.studyincroatia.hr/news/',
-          'format': 'html',
-          'sha256': 'd74144f5edc2300d78d6dd3703406da1e30aaf8d2cf786db8b6ff0494bbdb62f'},
+          'format': 'html'},
  'privacy': {'url': 'https://www.studyincroatia.hr/about-us/privacy-policy-statement/',
              'format': 'html',
              'sha256': 'e98d25caa2dcbf64b58bbcde9dbde23eb1bab93806522b36903a66e8349a82e7'}}

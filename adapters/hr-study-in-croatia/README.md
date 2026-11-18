@@ -71,7 +71,21 @@ python -B adapters/hr-study-in-croatia/adapter.py --publish
 The sole live test performs one real nonpublishing collection, validates all twelve records and prints complete JSON to stdout. Hold stdout in memory; do not save normalized records or provide publication credentials to tests. The matching workflow's sole application command publishes this source's own pair atomically.
 
 Twenty HTML inputs plus one nominal robots request preserve the complete
-reviewed frontier. A 375.2-second nominal pacing estimate includes startup quiet
+reviewed frontier. The homepage verifies the portal identity, the labelled
+navigation and catalogue links, the policy links in the footer and standalone
+notice text. Responsive menu duplication, CSS build changes and ordinary copy
+rotation in the recognized introduction and video cards can vary. New access
+restrictions, eligibility or application language in those areas require review.
+The five news pages validate their active page, page links and ordered,
+non-overlapping card inventory. The archive accepts ordinary movement among
+reviewed editorial formats. A new possible application call or unreviewed
+format stops collection for a source review. Each existing programme,
+funding and policy page still validates its reviewed material directly. The
+November 18 [homepage](https://github.com/YouthOpps/data-pipeline/actions/runs/44244161633)
+and [archive diagnostics](https://github.com/YouthOpps/data-pipeline/actions/runs/44248415943)
+established these structures.
+
+A 375.2-second nominal pacing estimate includes startup quiet
 and inventory spacing before response/history overhead; the previous actual
 collection step was 255 seconds. These are planning evidence, not current
 source or runtime acceptance. Redirects, retries or stronger retained limits
@@ -95,6 +109,17 @@ closed, with no older fallback or mature bootstrap. Artifact digest, source,
 run and attempt are checked before restrictive MAX/OR restoration into the
 original family journal under its existing locks. A missing local journal
 requires the newest owned state and does not establish a new allowance.
+
+The first resumed production attempt validates the retained native owner and
+the separately reviewed [production decision](https://github.com/YouthOpps/data-pipeline/issues/450)
+inside the standard `--publish` command, before contacting the publisher or
+accessing the data-source repository. The [native job](https://github.com/YouthOpps/data-pipeline/actions/runs/44250345680)
+completed the original nonpublishing source test and sealed every response
+and journal receipt. Its website wrapper failed to resolve the consumer's
+checkout path. Independent review replayed the sealed actual output with
+that path corrected and verified the full and expiry-filtered records against
+the pinned website reader. After the reviewed resume, later attempts restore
+the newest exact producer-owned pacing state.
 
 Local collection additionally requires the maintainer to pause this exact
 workflow. Its fixed ID, own workflow path and `disabled_manually` state are
