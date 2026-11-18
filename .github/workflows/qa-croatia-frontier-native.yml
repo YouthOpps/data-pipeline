@@ -1,0 +1,42 @@
+name: qa-croatia-frontier-native
+on:
+  push:
+    branches: [qa/croatia-frontier-native]
+permissions:
+  actions: read
+  issues: read
+  contents: read
+concurrency:
+  group: youthopps-studyincroatia-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  native:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/croatia-frontier-native' && github.run_attempt == 1 && github.event.created == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: b8228fdd28e18a5e0cccec007ccfe04052cdfe0a
+          path: website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify the original Study in Croatia collection and consumer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/croatia-native/runner.py
+      - name: Retain timing evidence and encrypted capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: croatia-frontier-native-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/croatia-frontier-native/
+          if-no-files-found: ignore
+          retention-days: 7

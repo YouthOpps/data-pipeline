@@ -1,0 +1,91 @@
+{
+  "branch": "qa/croatia-frontier-native",
+  "candidate_adapter_sha256": "f0dec1a52a6fb6c9d7c2fea78b5f70327420ba3f42c5c3eaa51e7c518b3fd614",
+  "enabled": false,
+  "inventory_routes": [
+    "https://www.studyincroatia.hr/news/?page=1",
+    "https://www.studyincroatia.hr/news/?page=2",
+    "https://www.studyincroatia.hr/news/?page=3",
+    "https://www.studyincroatia.hr/news/?page=4",
+    "https://www.studyincroatia.hr/news/"
+  ],
+  "issue": 365,
+  "latest_artifact": 14382290619,
+  "latest_artifact_bytes": 443,
+  "latest_artifact_digest": "sha256:215c84b0974376da3edbc61012842fd48d18836eacc77a479b8aad0911265860",
+  "latest_head": "14d919910e81aa3e9ad06fcd69051e8d9fbf8c9c",
+  "latest_job": 134456014102,
+  "latest_owner": [
+    44201367652,
+    1,
+    "hr-study-in-croatia"
+  ],
+  "latest_state_sha256": "c1c912ed58ad54e3c91c750db1c50a9a89680f2e7dd24bc3508d5ec3b6ed3f01",
+  "maintainer_account": 12278069,
+  "origin": "YouthOpps/data-pipeline",
+  "owned_transfer_host": "productionresultssa3.blob.core.windows.net",
+  "production_inventory_count": 42,
+  "production_inventory_sha256": "876e22eae9329b79f960f651951c4605c0e48f5b957d028c8ba7b98ee18ad93b",
+  "production_job_chronology_sha256": "ac2d7c71a95f381b55c9de4ba757191a3f8975072bfdc6115615f21d9f245b65",
+  "publisher_workflow": 378390772,
+  "research": {
+    "archive_bytes": 61741,
+    "archive_digest": "sha256:ea1f98b9d05748377125ed0e0c330740f86892172dfc53e78d59a28ae7eee17c",
+    "artifact_id": 14399569962,
+    "completed_at": "2026-11-18T05:27:16Z",
+    "host": "productionresultssa30.blob.core.windows.net",
+    "identity": {
+      "grant": 6969951549,
+      "head": "95c82064ddab73979b86224b1c996f586e8d15c6",
+      "job_id": 134598922648,
+      "ref": "refs/heads/qa/croatia-frontier-research",
+      "run_attempt": 1,
+      "run_id": 44244161633,
+      "workflow_id": 422218542
+    },
+    "state": {
+      "blocked": false,
+      "family": "youthopps-studyincroatia-publisher-v1",
+      "interval": 12.2,
+      "legacy_rate_history_unknown": true,
+      "not_before": 1794979643.7760007,
+      "observed_at": 1794979631.5760007,
+      "page_interval": 30,
+      "rate_failures": 0,
+      "schema": 1,
+      "starts": [
+        1794979615.5020525,
+        1794979629.7282796
+      ]
+    },
+    "state_digest": "9ed99f26a52c60326551424a856de8d5403ad544728e9cba83ed9d306b8b5cae"
+  },
+  "reviewer_sha256": "8c1f864a81fe042fd700c4354f57571ad8c61223eb21e025b3faab4651320e2b",
+  "routes": [
+    "https://www.studyincroatia.hr/robots.txt",
+    "https://www.studyincroatia.hr/about-us/about-us-39/",
+    "https://www.studyincroatia.hr/news/scholarships-of-the-republic-of-croatia-call-for-applications-for-the-academic-year-2023-2024/",
+    "https://www.studyincroatia.hr/news/scholarships-of-the-republic-of-croatia-call-for-applications-for-the-academic-year-2024-2025/",
+    "https://www.studyincroatia.hr/news/applications-for-the-international-graduate-biomedical-mathematics-study-programme-in-english-now-open/",
+    "https://www.studyincroatia.hr/about-us/cookie-statement/",
+    "https://www.studyincroatia.hr/news/cooperation-programme-between-croatia-and-north-macedonia/",
+    "https://www.studyincroatia.hr/news/entrance-exam-applications-for-the-dental-study-programme-in-english-now-open/",
+    "https://www.studyincroatia.hr/about-us/content-disclaimer/",
+    "https://www.studyincroatia.hr/study-in-croatia/exchange-programmes/",
+    "https://www.studyincroatia.hr/faq/",
+    "https://www.studyincroatia.hr/study-in-croatia/tuition-fees-and-scholarships/",
+    "https://www.studyincroatia.hr/",
+    "https://www.studyincroatia.hr/live-and-work-in-croatia/learning-croatian/",
+    "https://www.studyincroatia.hr/news/university-of-zagreb-school-of-medicine-opens-applications-for-medical-studies-in-english/",
+    "https://www.studyincroatia.hr/news/?page=1",
+    "https://www.studyincroatia.hr/news/?page=2",
+    "https://www.studyincroatia.hr/news/?page=3",
+    "https://www.studyincroatia.hr/news/?page=4",
+    "https://www.studyincroatia.hr/news/",
+    "https://www.studyincroatia.hr/about-us/privacy-policy-statement/"
+  ],
+  "test_sha256": "3e2560360f89da9e1d659ce9d0938e945418a8dd120c0917f78c24ead0a28bce",
+  "website_consumer_sha256": "bc9d9f9f83c58061c6d29f3fd3d6b04b56ad1b7503b12a009c2f91e24b4deef3",
+  "website_head": "b8228fdd28e18a5e0cccec007ccfe04052cdfe0a",
+  "workflow": ".github/workflows/qa-croatia-frontier-native.yml"
+}
