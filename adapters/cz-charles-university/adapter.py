@@ -35,6 +35,20 @@ LANGUAGE = "en"
 PUBLISHER_COUNTRY = "CZ"
 PUBLISHER_TYPE = "university"
 ATTRIBUTION = "Charles University"
+MFF_URL = "https://www.mff.cuni.cz/en/admissions/scholarships"
+MFF_DETAILS = {
+    "cs": ("cstf-scholarships", "Computer Science Tuition Fee Scholarships"),
+    "math": ("prague-mathematics-tuition-fee-scholarships", "Prague Mathematics Tuition Fee Scholarships"),
+    "physics": ("prague-physics-tuition-fee-scholarships", "Prague Physics Tuition Fee Scholarships"),
+    "linguistics": ("computational-linguistics-scholarship", "Computational Linguistics Scholarship"),
+}
+MFF_AWARDS = (
+    ("cs-ba", "cs", "Computer Science Tuition Fee Scholarship – Bachelor’s", "Computer Science Bachelor’s", 3, 3),
+    ("cs-ma", "cs", "Computer Science Tuition Fee Scholarship – Master’s", "Computer Science Master’s", 2, 2),
+    ("math", "math", "Prague Mathematics Tuition Fee Scholarship", "Mathematics Master’s", 2, 2),
+    ("physics", "physics", "Prague Physics Tuition Fee Scholarship", "Physics Master’s", 2, 2),
+    ("linguistics", "linguistics", "Computational Linguistics Scholarship", "Language Technologies and Computational Linguistics Master’s", 2, 1),
+)
 
 
 class Node:
@@ -126,7 +140,7 @@ def page(url):
     delay = check_robots(url)
     document = (
         fetch_inventory_page(fetch_source, url, min_interval=delay)
-        if url in _INVENTORY_URLS
+        if is_inventory_url(url)
         else fetch_source(url, min_interval=delay)
     )
     if not re.search(
@@ -218,32 +232,24 @@ def read_pages():
         "global": "https://cuni.cz/UKEN-2361.html",
         "carolina": "https://centrumcarolina.cuni.cz/CAENG-70.html",
         "acute": "https://cuni.cz/UKEN-1398.html",
-        "mff": "https://www.mff.cuni.cz/en/admissions/scholarships",
+        "mff": MFF_URL,
         "fsv": (
             "https://fsv.cuni.cz/en/admissions/"
             "scholarships-funding-and-fees/development-scholarships"
         ),
     }
-    base = "https://www.mff.cuni.cz/en/admissions/scholarships/"
-    for key, slug in (
-        ("cs", "cstf"),
-        ("math", "prague-mathematics-tuition-fee"),
-        ("physics", "prague-physics-tuition-fee"),
-        ("linguistics", "computational-linguistics"),
-    ):
-        urls[key] = (
-            base
-            + slug
-            + (
-                "-scholarship-2026"
-                if key == "linguistics"
-                else "-scholarships-2026"
-            )
-        )
     pages = {}
+    mff_cycle = None
     for key, url in urls.items():
         section = content(page(url), url)
-        review_page(key, url, section)
+        reviewed = review_page(key, url, section)
+        if key == "mff":
+            mff_cycle = reviewed
+        pages[key] = (url, section)
+    year, detailed_urls = mff_cycle
+    for key, url in detailed_urls.items():
+        section = content(page(url), url)
+        reviewed_mff_leaf(key, url, section, year)
         pages[key] = (url, section)
     pages["german-call"] = german_document(pages["germany"])
     return pages
@@ -825,18 +831,7 @@ REVIEWED_CONDITIONS = {
     "acute": (
         "fb39f44d5f9df587f85dd09f1a05651c3492f22c388690293f6d0044d4cd3ab0"
     ),
-    "mff": ("13fdac2620fa5c0f29f283a46fa767c6f65d933505d080bdf7dc9d98c3e54624"),
     "fsv": ("81582bed2f125c6dcaea478a2fdf6166c378eb4aa2f4fd8fa7eca4a002cbee3a"),
-    "cs": ("e3aba2b8cbe82ad391cde69a2af96d416f3d3d434fe7330b082d16a6032de305"),
-    "math": (
-        "9f67c4336d1d007b32b78e01e62c8ed2e93d981b2be63a1fe051e97543c39498"
-    ),
-    "physics": (
-        "9e571bf01d72b4de4e4ce78b03d2fb92b5698cac9071b0c71fcd604a112700a3"
-    ),
-    "linguistics": (
-        "75cefe115574bb8f20bb37e113a92819b261583eeb6b065ecdb4831b2025d06b"
-    ),
 }
 
 
@@ -1201,10 +1196,108 @@ def reviewed_international_cards(node, url):
     }
 
 
+MFF_INDEX_FACTS = "50f0df148d31df777aaa8c0a90584e6fe6344f8c4e926d01c5bbaf4b3b483410"
+MFF_LEAF_FACTS = {
+    "cs": "6fcadbe7bab83621e717f213bc10bb06cfd450a4ccda1b9f848e6f6aec81b8d7",
+    "math": "7bfd32b68d32d34b7a92376e41e137554636fb019b4a78faebb3af7f85a50277",
+    "physics": "c2c84c2c00997fd6cf3300ee28838975882f3b17291788ceaadb9db6478f2db6",
+    "linguistics": "b8529f970022d5b66c3c4f098c94c04bb9ce2b1873d86926c2875023565ebd33",
+}
+MFF_INDEX_CAPTIONS = (
+    ("Computer Science Tuition Fee Scholarships", "Bachelor’s Programme in Computer Science", "cs"),
+    ("Computer Science Tuition Fee Scholarship", "Master’s Programme in Computer Science", "cs"),
+    ("Prague Mathematics Tuition Fee Scholarship", "Master’s Programme in Mathematics", "math"),
+    ("Prague Physics Tuition Fee Scholarship", "Master’s Programme in Physics", "physics"),
+    ("Computational Linguistic Scholarships", "Language Technologies and Computational Linguistics", "linguistics"),
+)
+MFF_DEADLINE_SENTENCE = re.compile(
+    r"8\) The (?:application deadline|deadline for submitting applications) is "
+    r"(\d{1,2} [A-Z][a-z]+ 20\d{2}|[A-Z][a-z]+ \d{1,2}, 20\d{2})[.;]"
+)
+
+
+def mff_detail_url(role, year):
+    return f"{MFF_URL}/{MFF_DETAILS[role][0]}-{year}"
+
+
+def mff_material(node, url, year, *, deadline=None):
+    """Retain conditions and link associations while comparing relative cycle years."""
+    def relative(text):
+        if deadline is not None:
+            text = text.replace(deadline, "{application-date}")
+        text = text.replace(f"{year}/{(year + 1) % 100:02}", "{cycle-short}")
+
+        def replace(match):
+            offset = int(match[0]) - year
+            return f"{{cycle+{offset}}}" if 0 <= offset <= 3 else match[0]
+
+        return re.sub(r"\b20\d{2}\b", replace, text)
+
+    text, _ = international_material(node, url)
+    linked = sorted({
+        (relative(link.text()), relative(urllib.parse.urljoin(url, link.attrs["href"])))
+        for link in nodes(node, "a") if link.attrs.get("href")
+    })
+    return international_fingerprint((relative(text), linked))
+
+
+def reviewed_mff_index(url, section):
+    """Require the five known awards and exactly four official destinations."""
+    start = re.search(r"\bStarting from Academic Year (20\d{2})/(\d{2}),", section.text())
+    if url != MFF_URL or start is None:
+        raise AdapterError("MFF academic cycle is unavailable", "parse")
+    year = int(start[1])
+    if int(start[2]) != (year + 1) % 100:
+        raise AdapterError("Inconsistent MFF academic cycle", "parse")
+    reviewed = {}
+    for caption, programme_name, role in MFF_INDEX_CAPTIONS:
+        row = one(
+            [link for link in nodes(section, "a") if link.text() == caption],
+            f"MFF {caption} destination",
+        )
+        expected = mff_detail_url(role, year)
+        target = urllib.parse.urljoin(url, row.attrs.get("href", ""))
+        if target != expected or not any(
+            row in item.children and programme_name in item.text()
+            for item in nodes(section, "li")
+        ):
+            raise AdapterError("MFF award title, study level or destination changed", "parse")
+        reviewed[role] = target
+    if mff_material(section, url, year) != MFF_INDEX_FACTS:
+        raise AdapterError("MFF scholarship index guidance or inventory changed", "parse")
+    return year, reviewed
+
+
+def reviewed_mff_leaf(role, url, section, year):
+    """Bind the current deadline and fees to the reviewed annual award rules."""
+    heading = one(nodes(section, "h1"), f"MFF {role} document title")
+    if heading.text() != f"{MFF_DETAILS[role][1]} {year}" or url != mff_detail_url(role, year):
+        raise AdapterError("MFF detail does not match the advertised award cycle", "parse")
+    paragraphs = [node.text() for node in nodes(section, "p")]
+    match = one(
+        [match for text in paragraphs if (match := MFF_DEADLINE_SENTENCE.match(text))],
+        f"MFF {role} application deadline",
+    )
+    raw_date = match[1]
+    try:
+        date_format = "%B %d, %Y" if "," in raw_date else "%d %B %Y"
+        deadline = datetime.strptime(raw_date, date_format).date()
+    except ValueError as error:
+        raise AdapterError("Invalid MFF application deadline", "parse") from error
+    if (
+        deadline.year != year
+        or mff_material(section, url, year, deadline=raw_date) != MFF_LEAF_FACTS[role]
+    ):
+        raise AdapterError(f"MFF {role} award conditions or application destinations changed", "parse")
+    return deadline.isoformat(), raw_date
+
+
 def review_page(key, url, section):
     """Reject a factual change before fetching the rest of the source inventory."""
     if key == "international":
         return reviewed_international_cards(section, url)
+    if key == "mff":
+        return reviewed_mff_index(url, section)
     if key == "mobility":
         for name, text in mobility_sections(section, url).items():
             if hashlib.sha256(text.encode()).hexdigest() != MOBILITY_CONDITIONS[name]:
@@ -1220,6 +1313,45 @@ def review_page(key, url, section):
                 "Publisher conditions changed; review source page: " + key,
                 "parse",
             )
+
+
+def mff_programmes(pages):
+    """Normalize the five independently attributable current MFF awards."""
+    mff_year, mff_urls = reviewed_mff_index(*pages["mff"])
+    mff_deadlines = {}
+    for role, target in mff_urls.items():
+        url, section = pages[role]
+        if url != target:
+            raise AdapterError("MFF detail route differs from official index", "parse")
+        mff_deadlines[role] = reviewed_mff_leaf(role, url, section, mff_year)
+    records = []
+    for key, role, title, field, years, awards in MFF_AWARDS:
+        deadline, date_evidence = mff_deadlines[role]
+        combined_support = (
+            "No other external living-allowance scholarship or grant. "
+            "CZK 120,000 living allowance/year, subject to first-semester progress. "
+            if role == "linguistics"
+            else "New entrants only, with no other scholarship or maintenance grant. "
+        )
+        url, section = pages[role]
+        result = programme(
+            f"mff-{key}-{mff_year}",
+            f"{title} {mff_year}",
+            url,
+            section.text(),
+            (str(mff_year), date_evidence, "4 200 EUR", "7 500 EUR"),
+            f"Up to {awards} academic-excellence awards for English-taught {field} "
+            f"entrants at CU Mathematics and Physics in {mff_year}/{mff_year + 1}. "
+            "Tuition coverage EUR 4,200/year for EU students "
+            f"or EUR 7,500/year otherwise, for {years} academic years. "
+            "English application documents include CV, motivation, transcripts and two recommendations. "
+            + combined_support
+            + "Continued support requires full-time study and academic progress.",
+            hosts=("CZ",),
+            deadline=deadline,
+        )
+        records.append(result)
+    return records
 
 
 def parse_inventory(pages):
@@ -1539,64 +1671,7 @@ def parse_inventory(pages):
         hosts=("LT", "LV", "CZ", "PL"),
         eligible=("BY",),
     )
-    for key, title, field in (
-        (
-            "cs-ba",
-            "Computer Science Tuition Fee Scholarship – Bachelor’s 2026",
-            "Bachelor",
-        ),
-        (
-            "cs-ma",
-            "Computer Science Tuition Fee Scholarship – Master’s 2026",
-            "Master",
-        ),
-        (
-            "math",
-            "Prague Mathematics Tuition Fee Scholarship 2026",
-            "Mathematics",
-        ),
-        ("physics", "Prague Physics Tuition Fee Scholarship 2026", "Physics"),
-        (
-            "linguistics",
-            "Computational Linguistics Scholarship 2026",
-            "Language Technologies",
-        ),
-    ):
-        source = "cs" if key.startswith("cs-") else key
-        add(
-            source,
-            "mff-" + key,
-            title,
-            ("2026", field),
-            "Academic-excellence award for applicants to the English-taught "
-            + field
-            + " programme at CU Mathematics and Physics starting2026/27. "
-            + "Tuition coverage EUR4200/year for EU students or7100 otherwise, "
-            + (
-                "for three Bachelor’s years. "
-                if key == "cs-ba"
-                else "for two Master’s years. "
-            )
-            + "English application documents include CV, motivation, "
-            + "transcripts and two recommendations, due April30,2026. "
-            + (
-                "No other external living-allowance scholarship/grant; "
-                if key == "linguistics"
-                else (
-                    "New entrants only; no other "
-                    "scholarship/maintenance grant; "
-                )
-            )
-            + "continued support requires full-time study and progress."
-            + (
-                " CZK120000 living allowance/year; first-semester progress "
-                "may reduce support."
-                if key == "linguistics"
-                else ""
-            ),
-            hosts=("CZ",),
-            deadline="2026-04-30",
-        )
+    records.extend(mff_programmes(pages))
     add(
         "mff",
         "mff-math-phd",
@@ -2925,8 +3000,19 @@ _INVENTORY_URLS = {
     "https://cuni.cz/UKEN-2396.html",
     "https://cuni.cz/UKEN-2366.html",
     "https://centrumcarolina.cuni.cz/CAENG-70.html",
-    "https://www.mff.cuni.cz/en/admissions/scholarships",
+    MFF_URL,
 }
+
+
+
+def is_inventory_url(url):
+    """Apply the inventory gap to official MFF occurrence detail routes."""
+    if url in _INVENTORY_URLS:
+        return True
+    return any(
+        re.fullmatch(re.escape(f"{MFF_URL}/{slug}-") + r"20\d{2}", url)
+        for slug, _ in MFF_DETAILS.values()
+    )
 
 
 class PrimaryText(HTMLParser):

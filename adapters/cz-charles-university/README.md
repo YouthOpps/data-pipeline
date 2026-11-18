@@ -173,6 +173,21 @@ eligibility, expiry and record identities follow the existing checks.
 The collector still retrieves and verifies every required live page each run;
 it does not emit a cached snapshot when access or verification fails.
 
+The faculty scholarship index supplies the academic cycle and matching detail
+links for five awards. Computer Science Bachelor’s and Master’s share one
+document and retain separate records. The collector accepts only the reviewed
+same-host detail roles, verifies each linked cycle and reads the application
+deadline from each award’s regulation. Each annual occurrence has its own ID;
+the ongoing PhD programmes keep their existing IDs. The material review
+allows the dates and cycle to advance. It flags a change in award counts,
+financial rules, eligibility, renewal terms or application destinations.
+
+The [2027/28 hosted review](https://github.com/YouthOpps/data-pipeline/actions/runs/44247621941)
+confirmed four official detail pages with a 30 April 2027 deadline. The five
+awards cover EUR 4,200 per year for EU students or EUR 7,500 otherwise.
+Computational Linguistics also offers CZK 120,000 per year for living
+expenses, subject to the published study-progress conditions.
+
 ## Dates, countries and conflicts
 
 Known calendar application dates remain `YYYY-MM-DD` without invented midnight
@@ -184,9 +199,9 @@ confirmation six weeks ahead and payment/report dates are distinct milestones.
 Yearless annual dates/months, rolling application lead times and call-publication
 milestones remain deadline-null. Genuine programme overviews may have unknown
 status. Acute emergency Rector applications explicitly run throughout the
-calendar year and are open. Explicit elapsed dated calls remain in the current
-publisher inventory with `expired` status, including FSV and the five MFF
-2026/27 awards (deadline April30,2026).
+calendar year and are open. Explicit elapsed dated calls still listed by the
+publisher, including FSV, retain `expired` status. The faculty now lists the
+five 2027/28 MFF awards in place of the preceding cycle.
 
 The German monthly-call hub's “currently open” statement conflicts with its
 actually linked DOCX: applications for2026 stays were due **December8,2025**.
