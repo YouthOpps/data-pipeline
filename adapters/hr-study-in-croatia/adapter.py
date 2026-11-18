@@ -925,9 +925,9 @@ def latest_family_run():
                 ) from None
 
 
-def scan_family_history():
+def scan_family_history(*, hosted_research=False):
     """Select newest completed chronology, including older-ID rerun attempts."""
-    hosted = os.environ.get("GITHUB_ACTIONS") == "true"
+    hosted = os.environ.get("GITHUB_ACTIONS") == "true" and not hosted_research
     current_id, current_attempt = (
         current_run_identity() if hosted else (None, None)
     )
