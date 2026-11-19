@@ -1,0 +1,34 @@
+name: Adjudicate the unsent Ernst Mach FH R2 reservation
+
+on:
+  push:
+    branches: [qa/grants-at-fh469-adjudicate-r2]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: youthopps-grants-at-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  adjudicate:
+    if: false && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/grants-at-fh469-adjudicate-r2' && github.event.created == true && github.run_attempt == 1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify the reviewed detached proof and exact held journal
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa-grants469-adjudication/settle.py
+      - name: Retain non-publishing adjudication
+        uses: actions/upload-artifact@v4
+        with:
+          name: grants-at-fh469-r2-adjudication-1
+          path: ${{ runner.temp }}/grants-at-fh469-r2-adjudication
+          if-no-files-found: error
+          retention-days: 90
