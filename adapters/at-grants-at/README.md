@@ -32,7 +32,21 @@ A nonzero publishing-organisation ID does not make a funding programme a directo
 entry. Titles, native IDs, funding categories and available institution names come
 from the public result rows. Summaries are short original statements of those
 facts. Source-language titles are marked `und`; generated summaries are English.
-No destination, eligibility, deadline or application status is inferred.
+Destination, eligibility and deadline are omitted for records without
+programme-specific publisher evidence. Application status stays unknown.
+
+The existing Ernst Mach FH record `at-grants-at-44772-0` includes the deadline
+published in its [official OeAD FAQ](https://oead.at/en/study-research-teaching/overview-grants-and-scholarships/ernst-mach-grant/faq-ernst-mach-grant-fachhochschule).
+The FAQ explicitly associates the date and CET time with the academic year.
+For 2027/28, 1 February 2027 at 23:59 CET becomes
+`2027-02-01T22:59:00Z`. An ambiguous or changed date format fails validation
+before publication. The record keeps its grants.at identity and link. Its
+host country is Austria. The FAQ ties eligibility to bachelor's or master's
+enrolment at a university in an eligible country outside Europe and prior
+acceptance by an Austrian university of applied sciences. The summary also
+records the four completed semesters required for bachelor's students and
+the maximum age of 35. Applicant citizenship stays unknown. The separately
+scoped Ernst Mach worldwide programme is unaffected.
 
 Programme URLs use the official client's Copy Link format:
 `https://grants.at/en/?=<base64(StipFoeID_HZGID_0)>`. The empty query key is the
@@ -100,8 +114,9 @@ The last successful run on 5 November 2026 reconciled 1,396 category rows into
 1,131 programmes across eight funding partitions in approximately 415 seconds.
 Those counts describe that run, not limits. The complete frontier comprises
 three evidence pages, robots for the three origins, current metadata, one
-all-category query and every current funding partition. It does not require a
-separate request for each programme. A larger taxonomy or retained slowdown can
+all-category query, every current funding partition and the OeAD FAQ when the
+Ernst Mach FH native row is present. The FAQ uses the existing OeAD policy and
+physical request budget. A larger taxonomy or retained slowdown can
 exceed the phase budget; the adapter then preserves last-good data rather than
 truncating the inventory.
 

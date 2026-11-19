@@ -37,6 +37,15 @@ ATTRIBUTION = "Source: grants.at / OeAD (© OeAD)"
 SERVICE_URL = "https://ajs.scholarships.at/"
 SCRIPT_URL = SERVICE_URL + "JS_1.0/STIMAQuery.min.js"
 IMPRINT_URL = "https://oead.at/en/imprint-en"
+ERNST_MACH_FH_KEY = (44772, 0)
+ERNST_MACH_FH_TITLE = (
+    "Ernst Mach Grant for studying at an Austrian university of applied "
+    "sciences (Fachhochschule)"
+)
+ERNST_MACH_FH_FAQ = (
+    "https://oead.at/en/study-research-teaching/overview-grants-and-scholarships/"
+    "ernst-mach-grant/faq-ernst-mach-grant-fachhochschule"
+)
 _ALLOWED_HOSTS = {"grants.at", "ajs.scholarships.at", "oead.at"}
 _ROBOTS = {}
 _PAGE_COMPLETED = None
@@ -1266,6 +1275,62 @@ def programme_url(identifier, group):
     return SOURCE_URL + "?=" + base64.b64encode(native).decode("ascii")
 
 
+def add_ernst_mach_fh_call(record):
+    """Read the application deadline from the official award FAQ."""
+    if record["title"].casefold() != ERNST_MACH_FH_TITLE.casefold():
+        raise AdapterError("Ernst Mach FH programme identity changed", "parse")
+    visible = VisibleText()
+    visible.feed(fetch_source(ERNST_MACH_FH_FAQ))
+    visible.close()
+    text = " ".join(" ".join(visible.text).split())
+    eligibility = (
+        r"studying a Master['’]s or a Bachelor['’]s programme at a university "
+        r"in one of the defined countries of origin",
+        r"Bachelor students must also have successfully completed at least "
+        r"4 semesters",
+        r"The maximum age is 35 years",
+        r"Applicants need to be accepted as exchange scholars from an Austrian "
+        r"university of applied sciences",
+    )
+    if any(not re.search(rule, text, re.IGNORECASE) for rule in eligibility):
+        raise AdapterError("Changed Ernst Mach FH eligibility wording", "parse")
+    matches = set(re.findall(
+        r"\bThe deadline for all applications for stays during the academic year "
+        r"(\d{4})\s*/\s*(\d{2}|\d{4}) is February (\d{1,2})"
+        r"(?:st|nd|rd|th)?,\s*(\d{4}),\s*(\d{2}):(\d{2})\s*"
+        r"\(CET(?:\s*[-–]\s*Central European Time)?\)",
+        text, flags=re.IGNORECASE,
+    ))
+    if len(matches) != 1:
+        raise AdapterError("Missing or conflicting Ernst Mach FH call", "parse")
+    start, end, day, year, hour, minute = matches.pop()
+    next_year = str(int(start) + 1)
+    if year != start or end not in {next_year, next_year[-2:]}:
+        raise AdapterError("Inconsistent Ernst Mach FH call year", "parse")
+    try:
+        deadline = datetime(
+            int(year), 2, int(day), int(hour), int(minute),
+            tzinfo=timezone(timedelta(hours=1)),
+        )
+    except ValueError:
+        raise AdapterError("Invalid Ernst Mach FH deadline", "parse") from None
+    record["deadline"] = deadline.astimezone(timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    record["host_countries"] = ["AT"]
+    record["summary"] = (
+        f"Funding for a {start}/{next_year} exchange or visiting stay at an "
+        "Austrian university of applied sciences. Applicants must study for "
+        "a bachelor's or master's degree at a university in an eligible "
+        "non-European country and secure acceptance from an Austrian host. "
+        "Bachelor's students need four completed semesters. The maximum age "
+        "is 35."
+    )
+    record["classification"]["evidence"].append(
+        "Call deadline and prior acceptance: " + ERNST_MACH_FH_FAQ
+    )
+
+
 def collect_body():
     """Read the complete public funding index and reconcile every partition."""
     home = fetch_source(SOURCE_URL)
@@ -1359,6 +1424,8 @@ def collect_body():
         record["summary_language"] = "en"
         if item["institution"]:
             record["institution"] = item["institution"]
+        if (identifier, group) == ERNST_MACH_FH_KEY:
+            add_ernst_mach_fh_call(record)
         records.append(record)
     validate_records(records)
     print(
