@@ -8,4 +8,11 @@ The reviewed publisher responses permit the scoped careers paths under the captu
 
 A refresh requests robots, one complete inventory page and both reviewed details. The publisher has no verified incremental signal for this scope. The adapter requires original state continuity across research, native QA and publication. It retains the physical and inventory pacing floors, holds and embargoes and checks current access before each request. A failed response leaves the last good published dataset intact.
 
-The candidate production workflow uses the source's 08:41 UTC slot. Upon separately reviewed activation, it runs `python -B adapters/cern-summer-studentships/adapter.py --publish` and atomically updates the source's dataset and metadata, removing records after their verified Geneva cutoff. The sole native nonpublishing test runs through the reviewed GitHub Actions scope using `python -B adapters/cern-summer-studentships/test_adapter.py`. Production requires the exact accepted native state. [Integration issue](https://github.com/YouthOpps/data-pipeline/issues/459)
+The production workflow uses the source's 08:41 UTC slot. On its approved merge, it runs `python -B adapters/cern-summer-studentships/adapter.py --publish` and atomically updates the source's dataset and metadata, removing records after their verified Geneva cutoff. The sole native nonpublishing test runs through the reviewed GitHub Actions scope using `python -B adapters/cern-summer-studentships/test_adapter.py`. Production requires the exact accepted native state. [Integration issue](https://github.com/YouthOpps/data-pipeline/issues/459)
+
+The original hosted test emitted both CERN records. The current website consumer accepted
+the complete output and the expiry-filtered output. The first production run verifies and
+downloads the exact retired native owner's pacing artifact and carries its journal forward.
+Subsequent runs restore the newest authenticated producer attempt. An unresolved state or
+missing artifact stops the next attempt before collection.
+[Native test](https://github.com/YouthOpps/data-pipeline/actions/runs/44506400577/job/135499040343) · [Approved transition](https://github.com/YouthOpps/data-pipeline/issues/459#issuecomment-7006688911)
