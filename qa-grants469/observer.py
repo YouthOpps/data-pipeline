@@ -20,13 +20,14 @@ import zipfile
 ROOT = Path.cwd()
 QA = ROOT / "qa-grants469"
 SOURCE = ROOT / "adapters/at-grants-at"
-WORKFLOW = ".github/workflows/verify-at-grants-at-fh469-r2.yml"
-BRANCH = "qa/grants-at-fh469-native-r2"
+WORKFLOW = ".github/workflows/verify-at-grants-at-fh469-r3.yml"
+BRANCH = "qa/grants-at-fh469-native-r3"
 CERT = QA / "review-cert.pem"
 SCOPE_BYTES = (QA / "scope.json").read_bytes()
 SCOPE = json.loads(SCOPE_BYTES)
 MAINTAINER_ID = 12278069
 RUN_LIMIT_SECONDS = 1740
+R2_ADJUDICATION = None
 
 
 class EvidenceError(RuntimeError):
@@ -299,6 +300,7 @@ def install_native_binding(adapter, run, grant, capture):
     archive = adapter.download_inert_artifact
     opener = adapter._OPENER.open
     write_budget = adapter.write_budget
+    begin_pending = adapter.begin_pending
 
     def read_production_history():
         verify_exclusive(adapter.workflow_api)
@@ -346,15 +348,22 @@ def install_native_binding(adapter, run, grant, capture):
         finally:
             row["after"] = time.monotonic()
 
+    def begin_reviewed_pending(state, kind):
+        # The original pace() invokes begin_pending after waiting, before any
+        # physical reservation or signal-owned wire block. Keep GitHub outside
+        # the publisher opener so the two transports never share a live timer.
+        if kind == "physical":
+            verify_exclusive(adapter.workflow_api)
+            require(verify_grant(adapter.workflow_api, run) == grant,
+                    "The exact native authorization changed before the physical reservation")
+        return begin_pending(state, kind)
+
     def observed_open(request, *args, **kwargs):
         url = request.full_url
         if urllib.parse.urlsplit(url).hostname not in adapter._ALLOWED_HOSTS:
             return opener(request, *args, **kwargs)
         require(SCOPE["paths"].get(url) == request.get_method(),
                 "An unreviewed publisher route reached the opener")
-        verify_exclusive(adapter.workflow_api)
-        require(verify_grant(adapter.workflow_api, run) == grant,
-                "The exact native authorization changed before a publisher request")
         receipts = capture["requests"]
         row = {"url": url, "method": request.get_method(), "payload": request.data,
                "request_headers": list(request.header_items()),
@@ -378,6 +387,7 @@ def install_native_binding(adapter, run, grant, capture):
     adapter.download_inert_artifact = read_production_archive
     adapter.transfer_fh_native_state = verify_native_initial_state
     adapter.write_budget = retain_write
+    adapter.begin_pending = begin_reviewed_pending
     adapter._OPENER.open = observed_open
 
 
@@ -548,6 +558,8 @@ def main():
         spec = importlib.util.spec_from_file_location("adapter", SOURCE / "adapter.py")
         adapter = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(adapter)
+        require(R2_ADJUDICATION is not None,
+                "R3 requires the actual signed and retired R2 adjudication result")
         arm_infrastructure(adapter)
         report["stage"] = "hosted_preflight"
         run, grant = verify_hosted(adapter.workflow_api)
