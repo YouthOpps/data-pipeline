@@ -173,6 +173,9 @@ _COLLECTION_ATTEMPTED = _COLLECTION_CLOSED = False
 _WORKFLOW_ID = 385560984
 _WORKFLOW_PATH = ".github/workflows/fetch-at-grants-at.yml"
 _ADAPTER_PATH = "adapters/at-grants-at/adapter.py"
+_FH_QA_BRANCH = "qa/grants-at-fh469-native"
+_FH_QA_PATH = ".github/workflows/verify-at-grants-at-fh469.yml"
+_FH_NATIVE_HANDOFF = None
 _LEGACY_SOURCE_SHA256 = "53061cf5e6a42f8395252218fb4ee45af4af5f6710f3fa6c2b0ef3107a737977"
 _LEGACY_WORKFLOW_SHA256 = "1d6fd8b2a43ec3b5160532e50985823efc26bc7510a8aecd51807a89b8612b3e"
 _WORKFLOW_SHA256 = '54d611bdd987b6c71881d34092efe664e82827658bba81c8ead348a2edb08f0e'
@@ -3069,6 +3072,89 @@ def retained_hosted_max(incoming):
     return merge_budget(incoming, validate_budget(candidate))
 
 
+def transfer_fh_native_state(incoming, predecessor):
+    """Adopt the exact retired native owner, or its validated production descendant."""
+    approval = _FH_NATIVE_HANDOFF
+    if (not isinstance(approval, dict) or set(approval) != {
+            "approval", "workflow", "run", "job", "head", "artifact",
+            "artifact_sha256", "state_sha256", "state", "production_predecessor"}
+            or any(type(approval[field]) is not int or approval[field] <= 0
+                   for field in ("approval", "workflow", "run", "job",
+                                 "artifact", "production_predecessor"))
+            or not re.fullmatch(r"[0-9a-f]{40}", approval["head"])
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", approval["artifact_sha256"])):
+        raise AdapterError("Reviewed Ernst Mach FH native handoff is OFF", "access")
+    native = validate_budget(approval["state"])
+    if (hashlib.sha256(json.dumps(native, sort_keys=True, separators=(",", ":"))
+                      .encode()).hexdigest() != approval["state_sha256"]
+            or native["blocked"] or native["pending"]):
+        raise AdapterError("Native handoff digest or access state differs", "access")
+    if predecessor["id"] != approval["production_predecessor"]:
+        # Established journals prune request starts outside the rolling window.
+        recent = dict(native, starts=[started for started in native["starts"]
+                                     if incoming["observed_at"] - started < 60])
+        combined = merge_budget(incoming, recent)
+        if combined != incoming or incoming["observed_at"] <= native["observed_at"]:
+            raise AdapterError("Latest production owner did not retain the native handoff",
+                               "access")
+        return incoming
+
+    run_id = approval["run"]
+    workflow = workflow_api(f'/actions/workflows/{approval["workflow"]}')
+    if (workflow.get("id") != approval["workflow"]
+            or workflow.get("path") != _FH_QA_PATH
+            or workflow.get("state") != "disabled_manually"):
+        raise AdapterError("Exact native owner is not retired", "access")
+    expected = {
+        "id": run_id, "workflow_id": approval["workflow"], "run_attempt": 1,
+        "head_sha": approval["head"], "head_branch": _FH_QA_BRANCH,
+        "path": _FH_QA_PATH, "event": "push", "status": "completed",
+        "conclusion": "success",
+    }
+    inventory = workflow_api(f'/actions/workflows/{approval["workflow"]}/runs?per_page=2')
+    rows = inventory.get("workflow_runs")
+    run = workflow_api(f"/actions/runs/{run_id}/attempts/1")
+    if (inventory.get("total_count") != 1 or not isinstance(rows, list) or len(rows) != 1
+            or any(run.get(field) != value or rows[0].get(field) != value
+                   for field, value in expected.items())
+            or any(run.get(field, {}).get("full_name") != "YouthOpps/data-pipeline"
+                   for field in ("head_repository", "repository"))):
+        raise AdapterError("Exact native run or chronology differs", "access")
+    jobs = workflow_api(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=2")
+    matching = jobs.get("jobs")
+    if (jobs.get("total_count") != 1 or not isinstance(matching, list)
+            or len(matching) != 1 or any(
+                matching[0].get(field) != value for field, value in {
+                    "id": approval["job"], "run_id": run_id, "name": "verify",
+                    "head_sha": approval["head"], "status": "completed",
+                    "conclusion": "success",
+                }.items())):
+        raise AdapterError("Exact native verification job differs", "access")
+    comment = workflow_api(f'/issues/comments/{approval["approval"]}')
+    decision = (f'Approved Ernst Mach FH production state {approval["state_sha256"]}')
+    if (comment.get("issue_url") != _WORKFLOW_GITHUB + "/issues/469"
+            or comment.get("user", {}).get("id") != 12278069
+            or comment.get("user", {}).get("type") != "User"
+            or comment.get("created_at") != comment.get("updated_at")
+            or epoch(comment.get("created_at")) < epoch(matching[0].get("completed_at"))
+            or comment.get("body", "").splitlines().count(decision) != 1):
+        raise AdapterError("Exact production handoff decision is absent", "access")
+    artifacts = [row for row in run_artifacts(run)
+                 if row.get("name") == "grants-at-fh469-qa-state-1"]
+    if (len(artifacts) != 1 or artifacts[0].get("id") != approval["artifact"]
+            or artifacts[0].get("digest") != approval["artifact_sha256"]
+            or artifacts[0].get("expired") is not False
+            or artifacts[0].get("workflow_run", {}).get("id") != run_id
+            or artifacts[0].get("workflow_run", {}).get("head_sha") != approval["head"]):
+        raise AdapterError("Exact retired native state artifact differs", "access")
+    witnessed = download_inert_artifact(
+        (run_id, 1, SOURCE_ID, approval["head"]), approval["artifact"],
+        approval["artifact_sha256"])
+    if witnessed != native:
+        raise AdapterError("Reviewed native state differs from original bytes", "access")
+    return merge_budget(incoming, native)
+
+
 def restore_family_artifact():
     global _RESTORED, _STATE_TRUSTED, _STARTUP_QUIET_UNTIL
     if _RESTORED:
@@ -3100,6 +3186,8 @@ def restore_family_artifact():
     if incoming is None:
         raise AdapterError("No exact owned source state", "access")
     incoming = retained_hosted_max(incoming)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        incoming = transfer_fh_native_state(incoming, run)
     with journal_restore_scope(incoming), locked_budget():
         local = load_budget()
         combined = merge_budget(local, incoming)
