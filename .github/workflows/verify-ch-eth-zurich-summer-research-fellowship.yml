@@ -1,0 +1,48 @@
+name: Verify ETH Zurich summer research fellowship
+
+on:
+  push:
+    branches: [qa/456-eth-zurich-fellowship-native]
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: youthopps-eth-zurich-fellowship-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: false && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/456-eth-zurich-fellowship-native' && github.event.created == true && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: c74cde5404d0362603047f42d40b73b475cf2d6e
+          path: website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Exercise the original nonpublishing fellowship collector in RAM
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa-eth456/observer.py
+      - name: Retain derived run evidence and acknowledged publisher state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eth-zurich-fellowship-native-result-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/eth456-native-result
+          if-no-files-found: error
+          retention-days: 7
