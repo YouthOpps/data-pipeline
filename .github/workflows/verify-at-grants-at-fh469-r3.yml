@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   verify:
-    if: false && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/grants-at-fh469-native-r3' && github.event.created == true && github.run_attempt == 1
+    if: true && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/grants-at-fh469-native-r3' && github.event.created == true && github.run_attempt == 1
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
