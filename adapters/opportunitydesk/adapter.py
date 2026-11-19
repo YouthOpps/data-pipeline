@@ -169,6 +169,14 @@ class AdapterError(Exception):
         self.stage, self.status = stage, status
 
 
+class UnreviewedTaxonomy(AdapterError):
+    """A fully fetched article has no supported publisher classification."""
+
+    def __init__(self, body_sha256):
+        super().__init__("Unreviewed publisher opportunity taxonomy")
+        self.body_sha256 = body_sha256
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, file, code, message, headers, url):
         return None
@@ -885,7 +893,11 @@ def collect_inventory():
                 if _feed_text(node.text)
             )
         )
-        article = Article(fetch_source(url, min_interval=check_robots(url)))
+        evidence = {}
+        document = fetch_source(
+            url, min_interval=check_robots(url), evidence=evidence
+        )
+        article = Article(document)
         if not article.text:
             raise AdapterError("Publisher article structure changed")
         numbered = [
@@ -931,7 +943,7 @@ def collect_inventory():
         if not categories:
             categories = material_programme_categories(article)
         if not categories:
-            raise AdapterError("Unreviewed publisher opportunity taxonomy")
+            raise UnreviewedTaxonomy(evidence["sha256"])
         record = make_record(
             title,
             url,
@@ -3136,7 +3148,10 @@ def collect():
     try:
         with phase("collection", COLLECTION_TIMEOUT):
             _COLLECTION_STARTED = time.time()
-            return collect_source_inventory(SOURCE_URL)
+            records, taxonomy_failure = collect_source_inventory(SOURCE_URL)
+            if taxonomy_failure is not None:
+                raise taxonomy_failure
+            return records
     except PhaseExpired:
         raise AdapterError(
             "Opportunity Desk collection phase exhausted", "fetch"
@@ -5436,14 +5451,43 @@ def close_legacy_descriptor(descriptor, identity, directory=False):
             raise
 
 
+@durable_transaction("policy")
 def collect_source_inventory(url):
-    """Keep the original full read and source-policy validation pending."""
-    return collect_inventory()
-
-
-collect_source_inventory = durable_transaction("policy")(
-    collect_source_inventory
-)
+    """Keep the source transaction open through transport and policy checks."""
+    try:
+        return collect_inventory(), None
+    except UnreviewedTaxonomy as failure:
+        # Propagate the parse error after the original policy owner settles.
+        verify_collection()
+        with locked_budget():
+            state = load_budget()
+            publisher_healthy(state)
+            response = state["response_receipt"]
+            policy = state["policy_receipt"]
+            if (
+                not state["in_flight"]
+                or state["flight_id"] != _ACTIVE_FLIGHT_ID
+                or state["policy_pending"] is not None
+                or state["request_outcome"] != "response_assessed"
+                or state["request_id"] != state["completed_request_id"]
+                or response is None
+                or response["owner"] != _ACTIVE_FLIGHT_ID
+                or response["request"] != state["request_id"]
+                or response["target"] != _CURRENT_ASSESSMENT_URL
+                or response["status"] != 200
+                or response["assessment"] != "body"
+                or not response["body_read"]
+                or response["body_sha256"] != failure.body_sha256
+                or policy is None
+                or policy["owner"] != _ACTIVE_FLIGHT_ID
+                or policy["target"] != response["target"]
+                or policy["decision"] != "allow"
+            ):
+                raise AdapterError(
+                    "Unreviewed taxonomy lacks exact assessed publisher evidence",
+                    "access",
+                ) from failure
+        return None, failure
 
 
 @contextlib.contextmanager
