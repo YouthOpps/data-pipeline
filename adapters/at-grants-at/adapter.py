@@ -1453,6 +1453,8 @@ def run():
               "using DATA_SOURCE_TOKEN"),
     )
     args = parser.parse_args()
+    if args.publish and _FH_NATIVE_HANDOFF is None:
+        raise AdapterError("Reviewed Ernst Mach FH native handoff is OFF", "access")
     global _RUN_END
     if _RUN_END is None:
         _RUN_END = time.monotonic() + 1740

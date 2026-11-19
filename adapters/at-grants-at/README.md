@@ -48,6 +48,15 @@ records the four completed semesters required for bachelor's students and
 the maximum age of 35. Applicant citizenship stays unknown. The separately
 scoped Ernst Mach worldwide programme is unaffected.
 
+The first production refresh after this change uses a separately reviewed
+native-test journal. The production owner must be paused for that test, and
+the temporary test workflow must be retired before the first production
+handoff. The handoff verifies the exact attempt, job, immutable source
+artifact, and post-test maintainer decision. It merges the original journal
+with the newest production state using the existing restriction and history
+rules. Later source-owned production states must retain that handoff's
+restrictions. A missing or conflicting handoff stops publication.
+
 Programme URLs use the official client's Copy Link format:
 `https://grants.at/en/?=<base64(StipFoeID_HZGID_0)>`. The empty query key is the
 publisher's own `URLPARAMETER=""` setting. Its detail loader consumes the two
