@@ -12,6 +12,7 @@ import re
 import runpy
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -27,7 +28,7 @@ SCOPE_BYTES = (QA / "scope.json").read_bytes()
 SCOPE = json.loads(SCOPE_BYTES)
 MAINTAINER_ID = 12278069
 RUN_LIMIT_SECONDS = 1740
-R2_ADJUDICATION = None
+CERT_SHA256 = "c8bfa742ffcd2638a1926c8068b58c3f0cc9bcda7077b95ab3ac8a8ac5b01531"
 
 
 class EvidenceError(RuntimeError):
@@ -171,6 +172,12 @@ def verify_exclusive(api):
     require_fields(retired, {"id": old["workflow"], "path": old["path"],
                              "state": "disabled_manually"},
                    "The exact prior native workflow must remain retired")
+    settled = SCOPE["adjudication"]
+    for identifier, path in ((settled["held_workflow"], settled["held_path"]),
+                             (settled["workflow"], settled["path"])):
+        require_fields(api(f"/actions/workflows/{identifier}"), {
+            "id": identifier, "path": path, "state": "disabled_manually"
+        }, "The latest held or adjudication owner is not retired")
     return latest
 
 
@@ -295,7 +302,113 @@ def verify_failed_preflight(adapter):
     return old["run"]
 
 
-def install_native_binding(adapter, run, grant, capture):
+def verified_adjudication(adapter):
+    """Load only the exact retired, signed, publisher-free disposition."""
+    proof = SCOPE["adjudication"]
+    api = adapter.workflow_api
+    identifier, run_id = proof["workflow"], proof["run"]
+    expected = {
+        "id": run_id, "workflow_id": identifier, "run_attempt": 1,
+        "path": proof["path"], "head_branch": proof["branch"],
+        "head_sha": proof["head"], "event": "push",
+        "status": "completed", "conclusion": "success",
+    }
+    run = api(f"/actions/runs/{run_id}/attempts/1")
+    history = api(f"/actions/workflows/{identifier}/runs?per_page=2")
+    require(history.get("total_count") == 1 and len(history.get("workflow_runs", [])) == 1,
+            "Adjudication has a competing run")
+    for row in (run, history["workflow_runs"][0]):
+        require_fields(row, expected, "Exact completed adjudication changed")
+        require(all(row.get(key, {}).get("full_name") == SCOPE["repo"]
+                    for key in ("repository", "head_repository")), "Foreign adjudication run")
+    jobs = api(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=2")
+    require(jobs.get("total_count") == 1 and len(jobs.get("jobs", [])) == 1,
+            "Exact adjudication job cannot be identified")
+    require_fields(jobs["jobs"][0], {
+        "id": proof["job"], "name": "adjudicate", "run_id": run_id,
+        "head_sha": proof["head"], "status": "completed", "conclusion": "success",
+    }, "Exact adjudication job changed")
+    listing = api(f"/actions/runs/{run_id}/artifacts?per_page=2")
+    require(listing.get("total_count") == 1 and len(listing.get("artifacts", [])) == 1,
+            "Adjudication has a competing or missing artifact")
+    artifact = listing["artifacts"][0]
+    require_fields(artifact, {
+        "id": proof["artifact"], "digest": proof["artifact_digest"],
+        "name": "grants-at-fh469-r2-adjudication-1",
+        "size_in_bytes": proof["bytes"], "expired": False,
+    }, "Exact adjudication artifact changed")
+    require_fields(artifact.get("workflow_run", {}), {"id": run_id, "head_sha": proof["head"]},
+                   "Adjudication artifact belongs to a different run")
+    status, headers, _ = adapter.request_bytes(
+        adapter._WORKFLOW_GITHUB + f'/actions/artifacts/{proof["artifact"]}/zip',
+        byte_limit=1000,
+        headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                 "Accept": "application/vnd.github+json"},
+    )
+    destination = headers.get("Location", "")
+    target = urllib.parse.urlsplit(destination)
+    require(status == 302 and target.scheme == "https" and target.hostname
+            and not target.username and not target.password and target.port is None
+            and target.hostname.endswith((".blob.core.windows.net",
+                                          ".actions.githubusercontent.com")),
+            "Adjudication redirect is outside GitHub artifact custody")
+    status, _, body = adapter.request_bytes(destination, byte_limit=8192)
+    require(status == 200 and len(body) == proof["bytes"]
+            and "sha256:" + sha(body) == proof["artifact_digest"],
+            "Adjudication archive bytes differ")
+    with zipfile.ZipFile(io.BytesIO(body)) as artifact_data:
+        members = artifact_data.infolist()
+        require(len(members) == 3 and {row.filename for row in members} ==
+                {"adjudication.json", "proof.json", "proof.cms"} and all(
+                    row.file_size <= 8192 and not row.flag_bits & 1 for row in members),
+                "Adjudication archive contains unexpected files")
+        record = artifact_data.read("adjudication.json")
+        review = artifact_data.read("proof.json")
+        signature = artifact_data.read("proof.cms")
+    require(sha(record) == proof["original_file_sha256"]
+            and sha(review) == proof["proof_sha256"]
+            and sha(signature) == proof["signature_sha256"]
+            and sha(CERT.read_bytes()) == CERT_SHA256,
+            "Signed original adjudication files differ")
+    with tempfile.TemporaryDirectory(prefix="grants-at-fh469-proof-") as location:
+        path = Path(location)
+        (path / "proof.json").write_bytes(review)
+        (path / "proof.cms").write_bytes(signature)
+        checked = subprocess.run(
+            ["openssl", "cms", "-verify", "-binary", "-inform", "DER", "-nointern",
+             "-in", str(path / "proof.cms"), "-content", str(path / "proof.json"),
+             "-certfile", str(CERT), "-CAfile", str(CERT),
+             "-purpose", "any", "-out", os.devnull],
+            capture_output=True, timeout=12, check=False)
+        require(checked.returncode == 0, "Detached adjudication review is invalid")
+    row, signed = json.loads(record), json.loads(review)
+    require_fields(row, {
+        "run": run_id, "job": proof["job"], "head": proof["head"],
+        "source": adapter.SOURCE_ID, "kind": "reviewed-unsent-reservation-adjudication",
+        "network_publisher_opens": 0, "native_held_run": proof["held_run"],
+        "native_held_job": proof["held_job"], "state_sha256": proof["state_sha256"],
+        "original_state_sha256": proof["held_state_sha256"],
+    }, "Exact adjudication receipt differs")
+    require_fields(signed, {
+        "native_run": proof["held_run"], "native_job": proof["held_job"],
+        "publisher_opens": 0, "preserved_start_union_count": 23,
+        "original_state_sha256": proof["held_state_sha256"],
+        "adjudicated_state_sha256": proof["state_sha256"],
+    }, "Detached review does not certify this disposition")
+    original = adapter.validate_budget(row["original_state"])
+    state = adapter.validate_budget(row["adjudicated_state"])
+    require(sha(canonical(state)) == proof["state_sha256"] and
+            sha(canonical(original)) == proof["held_state_sha256"]
+            and original["pending"] and original["pending_id"] == signed["original_pending_id"]
+            and not state["pending"] and not state["blocked"] and len(state["starts"]) == 23
+            and set(original["starts"]).issubset(state["starts"])
+            and all(state[key] == original[key] for key in set(state) -
+                    {"pending", "pending_id", "pending_kind", "starts"}),
+            "The authenticated disposition did not preserve the held state")
+    return state
+
+
+def install_native_binding(adapter, run, grant, capture, adjudicated):
     history = adapter.family_history
     archive = adapter.download_inert_artifact
     opener = adapter._OPENER.open
@@ -332,9 +445,10 @@ def install_native_binding(adapter, run, grant, capture):
         original = capture.get("predecessor")
         require(predecessor["id"] == SCOPE["production_run_id"] and original is not None
                 and adapter.merge_budget(original, incoming) == incoming
-                and not incoming["pending"] and not incoming["blocked"],
+                and not incoming["pending"] and not incoming["blocked"]
+                and adapter.merge_budget(incoming, adjudicated) == adjudicated,
                 "A production restriction or state transfer was lost")
-        return incoming
+        return adjudicated
 
     def retain_write(state):
         row = {"intended": json.loads(json.dumps(state)), "before": time.monotonic()}
@@ -558,17 +672,19 @@ def main():
         spec = importlib.util.spec_from_file_location("adapter", SOURCE / "adapter.py")
         adapter = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(adapter)
-        require(R2_ADJUDICATION is not None,
-                "R3 requires the actual signed and retired R2 adjudication result")
         arm_infrastructure(adapter)
         report["stage"] = "hosted_preflight"
         run, grant = verify_hosted(adapter.workflow_api)
         report["stage"] = "retained_preflight"
         report["verified_zero_traffic_run"] = verify_failed_preflight(adapter)
+        report["stage"] = "signed_adjudication"
+        adjudicated = verified_adjudication(adapter)
+        capture["adjudicated_seed"] = adjudicated
+        report["adjudicated_seed_sha256"] = sha(canonical(adjudicated))
         seal(b"grants.at reviewer preflight")
         report.update(run_id=run["id"], head_sha=run["head_sha"],
                       grant_id=grant, scope_sha256=sha(SCOPE_BYTES))
-        install_native_binding(adapter, run, grant, capture)
+        install_native_binding(adapter, run, grant, capture, adjudicated)
         report["stage"] = "original_test"
         original = run_original(adapter)
         capture["original"] = original
