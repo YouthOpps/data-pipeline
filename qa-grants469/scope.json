@@ -8,6 +8,18 @@
   "production_artifact_id": 14514135468,
   "production_artifact_digest": "sha256:9ae3e11febdff2f2e294b10012446a71fcf74bef5c7ed2282447447d87f8e4f4",
   "production_state_digest": "57c04fa6c3752554c9f538dfdb12ca7e310bac4230fd7645d12a48e210a7c3ca",
+  "failed_preflight": {
+    "workflow": 423719685,
+    "path": ".github/workflows/verify-at-grants-at-fh469.yml",
+    "branch": "qa/grants-at-fh469-native",
+    "run": 44510393376,
+    "job": 135512808239,
+    "head": "d67c73e3e42f2b27210d05d4653c416f367a4f70",
+    "artifact": 14523670066,
+    "artifact_digest": "sha256:f1976dd90cbe736eb2f44a6e967a99b68b6bdfccce5bba5d6a441e1d07eb82f7",
+    "bytes": 1041,
+    "encrypted_evidence_digest": "04ca40128b78e0c2f4ddb55664f6eae903efa27cff43e0591752d73ff9d09507"
+  },
   "website": "c74cde5404d0362603047f42d40b73b475cf2d6e",
   "paths": {
     "https://grants.at/en/": "GET",

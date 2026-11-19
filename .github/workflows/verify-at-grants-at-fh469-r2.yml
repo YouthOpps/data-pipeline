@@ -2,7 +2,7 @@ name: Verify grants.at Ernst Mach FH #469
 
 on:
   push:
-    branches: [qa/grants-at-fh469-native]
+    branches: [qa/grants-at-fh469-native-r2]
 
 permissions:
   actions: read
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   verify:
-    if: false && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/grants-at-fh469-native' && github.event.created == true && github.run_attempt == 1
+    if: false && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/grants-at-fh469-native-r2' && github.event.created == true && github.run_attempt == 1
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:

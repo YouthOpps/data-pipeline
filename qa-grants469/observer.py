@@ -15,12 +15,13 @@ import sys
 import time
 import urllib.error
 import urllib.parse
+import zipfile
 
 ROOT = Path.cwd()
 QA = ROOT / "qa-grants469"
 SOURCE = ROOT / "adapters/at-grants-at"
-WORKFLOW = ".github/workflows/verify-at-grants-at-fh469.yml"
-BRANCH = "qa/grants-at-fh469-native"
+WORKFLOW = ".github/workflows/verify-at-grants-at-fh469-r2.yml"
+BRANCH = "qa/grants-at-fh469-native-r2"
 CERT = QA / "review-cert.pem"
 SCOPE_BYTES = (QA / "scope.json").read_bytes()
 SCOPE = json.loads(SCOPE_BYTES)
@@ -164,6 +165,11 @@ def verify_exclusive(api):
     }, "Latest production owner changed")
     require(all(latest.get(k, {}).get("full_name") == SCOPE["repo"]
                 for k in ("head_repository", "repository")), "Foreign latest owner")
+    old = SCOPE["failed_preflight"]
+    retired = api(f'/actions/workflows/{old["workflow"]}')
+    require_fields(retired, {"id": old["workflow"], "path": old["path"],
+                             "state": "disabled_manually"},
+                   "The exact prior native workflow must remain retired")
     return latest
 
 
@@ -217,6 +223,75 @@ def verify_hosted(api):
     verify_checkout(head)
     verify_exclusive(api)
     return run, verify_grant(api, run)
+
+
+def verify_failed_preflight(adapter):
+    """Authenticate the previously reviewed encrypted zero-traffic preflight."""
+    old = SCOPE["failed_preflight"]
+    api = adapter.workflow_api
+    expected_run = {
+        "id": old["run"], "workflow_id": old["workflow"], "run_attempt": 1,
+        "path": old["path"], "head_branch": old["branch"], "head_sha": old["head"],
+        "event": "push", "status": "completed", "conclusion": "failure",
+    }
+    previous = api(f'/actions/runs/{old["run"]}/attempts/1')
+    inventory = api(f'/actions/workflows/{old["workflow"]}/runs?per_page=2')
+    require(inventory.get("total_count") == 1
+            and len(inventory.get("workflow_runs", [])) == 1,
+            "Prior workflow history contains another execution")
+    for row in (previous, inventory["workflow_runs"][0]):
+        require_fields(row, expected_run, "Exact failed preflight attempt differs")
+        require(all(row.get(k, {}).get("full_name") == SCOPE["repo"]
+                    for k in ("repository", "head_repository")), "Foreign preflight owner")
+    jobs = api(f'/actions/runs/{old["run"]}/attempts/1/jobs?per_page=2')
+    require(jobs.get("total_count") == 1 and len(jobs.get("jobs", [])) == 1,
+            "Prior preflight job inventory differs")
+    require_fields(jobs["jobs"][0], {
+        "id": old["job"], "name": "verify", "run_id": old["run"],
+        "head_sha": old["head"], "status": "completed", "conclusion": "failure",
+    }, "Exact failed preflight job differs")
+    listed = api(f'/actions/runs/{old["run"]}/artifacts?per_page=2')
+    require(listed.get("total_count") == 1 and len(listed.get("artifacts", [])) == 1,
+            "Prior attempt has a competing or missing state artifact")
+    artifact = listed["artifacts"][0]
+    require_fields(artifact, {
+        "id": old["artifact"], "digest": old["artifact_digest"], "size_in_bytes": old["bytes"],
+        "name": "grants-at-fh469-qa-result-1", "expired": False,
+    }, "Exact failed preflight archive differs")
+    require_fields(artifact.get("workflow_run", {}), {"id": old["run"], "head_sha": old["head"]},
+                   "Prior artifact belongs to another execution")
+
+    status, headers, _ = adapter.request_bytes(
+        adapter._WORKFLOW_GITHUB + f'/actions/artifacts/{old["artifact"]}/zip',
+        byte_limit=1000,
+        headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                 "Accept": "application/vnd.github+json"},
+    )
+    destination = headers.get("Location", "")
+    target = urllib.parse.urlsplit(destination)
+    require(status == 302 and target.scheme == "https" and target.hostname
+            and not target.username and not target.password and target.port is None
+            and target.hostname.endswith((".blob.core.windows.net",
+                                          ".actions.githubusercontent.com")),
+            "Failed preflight archive redirect is outside GitHub artifact custody")
+    status, _, body = adapter.request_bytes(destination, byte_limit=8192)
+    require(status == 200 and len(body) == old["bytes"]
+            and "sha256:" + sha(body) == old["artifact_digest"],
+            "Failed preflight download bytes differ")
+    with zipfile.ZipFile(io.BytesIO(body)) as source:
+        members = source.infolist()
+        require(len(members) == 2 and {item.filename for item in members} ==
+                {"manifest.json", "evidence.cms"} and all(
+                    item.file_size <= 8192 and not item.flag_bits & 1 for item in members),
+                "Prior preflight archive contains unexpected or missing evidence")
+        manifest = json.loads(source.read("manifest.json"))
+        encrypted = source.read("evidence.cms")
+    require(manifest == {
+        "encrypted_evidence_sha256": old["encrypted_evidence_digest"],
+        "error_type": "AdapterError", "observer": "failed", "publisher_requests": 0,
+    } and sha(encrypted) == old["encrypted_evidence_digest"],
+            "Prior attempt lacks the exact reviewed zero-traffic evidence")
+    return old["run"]
 
 
 def install_native_binding(adapter, run, grant, capture):
@@ -476,6 +551,8 @@ def main():
         arm_infrastructure(adapter)
         report["stage"] = "hosted_preflight"
         run, grant = verify_hosted(adapter.workflow_api)
+        report["stage"] = "retained_preflight"
+        report["verified_zero_traffic_run"] = verify_failed_preflight(adapter)
         seal(b"grants.at reviewer preflight")
         report.update(run_id=run["id"], head_sha=run["head_sha"],
                       grant_id=grant, scope_sha256=sha(SCOPE_BYTES))
