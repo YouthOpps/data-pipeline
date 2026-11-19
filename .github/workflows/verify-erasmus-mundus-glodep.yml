@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   verify:
-    if: false && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/461-glodep-consortium-native' && github.event.created == true && github.run_attempt == 1
+    if: true && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/461-glodep-consortium-native' && github.event.created == true && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
