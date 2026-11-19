@@ -15,9 +15,10 @@ The scope excludes the later self-paid round, EACEA catalogue records, programme
 funding for institutions, and any earlier intake. The EACEA and GLODEP authorship
 and access histories are separate.
 
-This offline draft parses the actual acknowledged GLODEP first-contact result of
-GitHub Actions run 44511912823. Neither importing nor executing this module
-starts collection or writes publication files. The native and production
-binding to the latest same-origin journal, the sole native test, and the
-production workflow remain open. The GLODEP research precedent contains the
-source-specific bounded transport for those future changes.
+The OFF native branch uses the current same-origin robots policy and the one scoped
+criteria page. Its publisher journal starts from the authenticated and retired
+first-contact run 44511912823, retaining original timing observations and adding
+the recorded wire starts. Exact GitHub Actions run, source and reviewer identity
+are checked before original test acquisition. The native observer processes the
+response and website verification in RAM, retaining derived evidence and the
+latest acknowledged publisher state only. Production integration is pending.
