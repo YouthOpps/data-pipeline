@@ -27,3 +27,5 @@ The production workflow requires the exact approved transfer from native run
 authenticated production attempt and preserve its retained holds. Successful
 production writes the source's data and metadata atomically, including a valid
 empty collection after expiry. Acquisition failures preserve the last good data.
+
+The [original hosted collection](https://github.com/YouthOpps/data-pipeline/actions/runs/44515044026) verified the complete 2027–2029 scholarship intake. The current website consumer accepted the complete result and the valid empty result at the conservative date-only expiry boundary. The first production workflow checks the settled state and sole retired native workflow owner against the [reviewed transition](https://github.com/YouthOpps/data-pipeline/issues/461#issuecomment-7007951280). Later runs restore the newest authenticated producer attempt. A missing owned artifact or unresolved publisher state stops collection.
