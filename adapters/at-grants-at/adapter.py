@@ -175,6 +175,9 @@ _WORKFLOW_PATH = ".github/workflows/fetch-at-grants-at.yml"
 _ADAPTER_PATH = "adapters/at-grants-at/adapter.py"
 _FH_QA_BRANCH = "qa/grants-at-fh469-native-r3"
 _FH_QA_PATH = ".github/workflows/verify-at-grants-at-fh469-r3.yml"
+_FH_ADJUDICATED_SHA256 = (
+    "35ff56501c90037ca9c75b62fc575dd9b0f53fb4b80674ca76aff595fa33a122"
+)
 _FH_NATIVE_HANDOFF = None
 _LEGACY_SOURCE_SHA256 = "53061cf5e6a42f8395252218fb4ee45af4af5f6710f3fa6c2b0ef3107a737977"
 _LEGACY_WORKFLOW_SHA256 = "1d6fd8b2a43ec3b5160532e50985823efc26bc7510a8aecd51807a89b8612b3e"
@@ -3079,7 +3082,8 @@ def transfer_fh_native_state(incoming, predecessor):
     approval = _FH_NATIVE_HANDOFF
     if (not isinstance(approval, dict) or set(approval) != {
             "approval", "workflow", "run", "job", "head", "artifact",
-            "artifact_sha256", "state_sha256", "state", "production_predecessor"}
+            "artifact_sha256", "state_sha256", "state", "adjudicated_state",
+            "production_predecessor"}
             or any(type(approval[field]) is not int or approval[field] <= 0
                    for field in ("approval", "workflow", "run", "job",
                                  "artifact", "production_predecessor"))
@@ -3091,10 +3095,18 @@ def transfer_fh_native_state(incoming, predecessor):
                       .encode()).hexdigest() != approval["state_sha256"]
             or native["blocked"] or native["pending"]):
         raise AdapterError("Native handoff digest or access state differs", "access")
+    adjudicated = validate_budget(approval["adjudicated_state"])
+    if (hashlib.sha256(json.dumps(adjudicated, sort_keys=True, separators=(",", ":"))
+                      .encode()).hexdigest() != _FH_ADJUDICATED_SHA256
+            or adjudicated["pending"] or adjudicated["blocked"]
+            or len(adjudicated["starts"]) != 23
+            or native["observed_at"] <= adjudicated["observed_at"]):
+        raise AdapterError("The signed pre-native adjudication differs", "access")
+    retained = merge_budget(native, adjudicated)
     if predecessor["id"] != approval["production_predecessor"]:
         # Established journals prune request starts outside the rolling window.
-        recent = dict(native, starts=[started for started in native["starts"]
-                                     if incoming["observed_at"] - started < 60])
+        recent = dict(retained, starts=[started for started in retained["starts"]
+                                       if incoming["observed_at"] - started < 60])
         combined = merge_budget(incoming, recent)
         if combined != incoming or incoming["observed_at"] <= native["observed_at"]:
             raise AdapterError("Latest production owner did not retain the native handoff",
@@ -3154,7 +3166,7 @@ def transfer_fh_native_state(incoming, predecessor):
         approval["artifact_sha256"])
     if witnessed != native:
         raise AdapterError("Reviewed native state differs from original bytes", "access")
-    return merge_budget(incoming, native)
+    return merge_budget(incoming, retained)
 
 
 def restore_family_artifact():

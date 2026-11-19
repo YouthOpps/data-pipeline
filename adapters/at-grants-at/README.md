@@ -54,7 +54,9 @@ the temporary test workflow must be retired before the first production
 handoff. The handoff verifies the exact attempt, job, immutable source
 artifact, and post-test maintainer decision. It merges the original journal
 with the newest production state using the existing restriction and history
-rules. Later source-owned production states must retain that handoff's
+rules. The signed R2 adjudication remains a separate input so its 23
+acknowledged starts, including the unsent reservation, survive the first
+production adoption. Later source-owned production states must retain that handoff's
 restrictions. A missing or conflicting handoff stops publication.
 
 Programme URLs use the official client's Copy Link format:
