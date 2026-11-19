@@ -1,0 +1,23 @@
+{
+  "repo": "YouthOpps/data-pipeline",
+  "base": "483b219c403414050f4c5868e8a93e990f9376d5",
+  "production_workflow_id": 385560984,
+  "production_run_id": 44491548727,
+  "production_head": "1dcca6beb3023cf918f50cb87f68f3522b9978b2",
+  "production_job_id": 135448150447,
+  "production_artifact_id": 14514135468,
+  "production_artifact_digest": "sha256:9ae3e11febdff2f2e294b10012446a71fcf74bef5c7ed2282447447d87f8e4f4",
+  "production_state_digest": "57c04fa6c3752554c9f538dfdb12ca7e310bac4230fd7645d12a48e210a7c3ca",
+  "website": "c74cde5404d0362603047f42d40b73b475cf2d6e",
+  "paths": {
+    "https://grants.at/en/": "GET",
+    "https://grants.at/robots.txt": "GET",
+    "https://ajs.scholarships.at/JS_1.0/STIMAQuery.min.js": "GET",
+    "https://ajs.scholarships.at/robots.txt": "GET",
+    "https://ajs.scholarships.at/GetMetadata": "POST",
+    "https://ajs.scholarships.at/STIMAEntrySearchForTextParameters": "POST",
+    "https://oead.at/en/imprint-en": "GET",
+    "https://oead.at/robots.txt": "GET",
+    "https://oead.at/en/study-research-teaching/overview-grants-and-scholarships/ernst-mach-grant/faq-ernst-mach-grant-fachhochschule": "GET"
+  }
+}

@@ -1,0 +1,57 @@
+name: Verify grants.at Ernst Mach FH #469
+
+on:
+  push:
+    branches: [qa/grants-at-fh469-native]
+
+permissions:
+  actions: read
+  contents: read
+  issues: read
+
+concurrency:
+  group: youthopps-grants-at-publisher-v1
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: false && github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/grants-at-fh469-native' && github.event.created == true && github.run_attempt == 1
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: c74cde5404d0362603047f42d40b73b475cf2d6e
+          path: website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run the original nonpublishing grants.at test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GRANTS_AT_PACING_ARTIFACT_PATH: ${{ runner.temp }}/pacing-state.json
+        run: python -B qa-grants469/observer.py
+      - name: Retain source-owned pacing result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grants-at-fh469-qa-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pacing-state.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Retain provenance and encrypted complete results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grants-at-fh469-qa-result-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/grants-at-fh469-qa
+          if-no-files-found: error
+          retention-days: 3
