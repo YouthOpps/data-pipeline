@@ -173,8 +173,8 @@ _COLLECTION_ATTEMPTED = _COLLECTION_CLOSED = False
 _WORKFLOW_ID = 385560984
 _WORKFLOW_PATH = ".github/workflows/fetch-at-grants-at.yml"
 _ADAPTER_PATH = "adapters/at-grants-at/adapter.py"
-_FH_QA_BRANCH = "qa/grants-at-fh469-native-r2"
-_FH_QA_PATH = ".github/workflows/verify-at-grants-at-fh469-r2.yml"
+_FH_QA_BRANCH = "qa/grants-at-fh469-native-r3"
+_FH_QA_PATH = ".github/workflows/verify-at-grants-at-fh469-r3.yml"
 _FH_NATIVE_HANDOFF = None
 _LEGACY_SOURCE_SHA256 = "53061cf5e6a42f8395252218fb4ee45af4af5f6710f3fa6c2b0ef3107a737977"
 _LEGACY_WORKFLOW_SHA256 = "1d6fd8b2a43ec3b5160532e50985823efc26bc7510a8aecd51807a89b8612b3e"
