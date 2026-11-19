@@ -25,10 +25,19 @@ CERT = QA / "review-cert.pem"
 SCOPE_BYTES = (QA / "scope.json").read_bytes()
 SCOPE = json.loads(SCOPE_BYTES)
 MAINTAINER_ID = 12278069
+RUN_LIMIT_SECONDS = 1740
 
 
 class EvidenceError(RuntimeError):
     """An exact QA guard with a literal, publishable reason."""
+
+
+class InfrastructureError(EvidenceError):
+    """Record a bounded GitHub API failure without logging credentials or body."""
+
+    def __init__(self, route, status, reason):
+        super().__init__(f"GitHub {route}: {reason}")
+        self.status = status
 
 
 def require(condition, message):
@@ -78,6 +87,37 @@ def grant_lines(head):
         f"Approved Ernst Mach FH native head {head}",
         f"Ernst Mach FH native scope {sha(SCOPE_BYTES)}",
     )
+
+
+def arm_infrastructure(adapter):
+    """Start the source's one nonrenewable deadline before its first API read."""
+    require(adapter._RUN_END is None and adapter._COLLECTION_END is None,
+            "Original source startup deadline already initialized")
+    adapter._RUN_END = time.monotonic() + RUN_LIMIT_SECONDS
+    original = adapter.workflow_api
+
+    def read(path):
+        try:
+            return original(path)
+        except adapter.AdapterError as error:
+            if path.startswith("/actions/runs/"):
+                route = "run verification"
+            elif path.startswith("/actions/workflows/"):
+                route = "workflow inventory"
+            elif path.startswith("/issues/"):
+                route = "maintainer grant"
+            else:
+                route = "repository or source binding"
+            status = error.status
+            if type(status) is int and 100 <= status <= 599:
+                reason = f"HTTP {status}"
+            elif str(error) == "Absolute operation deadline exhausted":
+                reason = "original operation deadline exhausted"
+            else:
+                reason = "original infrastructure transport refused the read"
+            raise InfrastructureError(route, status, reason) from None
+
+    adapter.workflow_api = read
 
 
 def verify_grant(api, run):
@@ -426,28 +466,33 @@ def serial(value):
 def main():
     output = Path(os.environ["RUNNER_TEMP"]) / "grants-at-fh469-qa"
     output.mkdir(mode=0o700)
-    report = {"observer": "failed", "publisher_requests": 0}
+    report = {"observer": "failed", "publisher_requests": 0, "stage": "startup"}
     capture = {"requests": [], "writes": []}
     adapter = None
     try:
         spec = importlib.util.spec_from_file_location("adapter", SOURCE / "adapter.py")
         adapter = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(adapter)
+        arm_infrastructure(adapter)
+        report["stage"] = "hosted_preflight"
         run, grant = verify_hosted(adapter.workflow_api)
         seal(b"grants.at reviewer preflight")
         report.update(run_id=run["id"], head_sha=run["head_sha"],
                       grant_id=grant, scope_sha256=sha(SCOPE_BYTES))
         install_native_binding(adapter, run, grant, capture)
+        report["stage"] = "original_test"
         original = run_original(adapter)
         capture["original"] = original
         report["original_outcome"] = original["outcome"]
         adapter.current_run_identity = lambda: (run["id"], run["run_attempt"])
+        report["stage"] = "owned_state_export"
         adapter.export_family_artifact()
         owned = Path(os.environ["GRANTS_AT_PACING_ARTIFACT_PATH"]).read_bytes()
         envelope = json.loads(owned)
         report["owned_state_sha256"] = envelope["state_sha256"]
         capture["terminal_state"] = envelope["state"]
         if original["outcome"] == 0:
+            report["stage"] = "website_validation"
             report.update(verify_output(adapter, original, capture, envelope["state"]))
             report["observer"] = "passed"
     except BaseException as error:
@@ -455,6 +500,8 @@ def main():
         capture["error_type"] = type(error).__name__
         if isinstance(error, EvidenceError):
             report["guard_reason"] = str(error)
+        if isinstance(error, InfrastructureError) and type(error.status) is int:
+            report["github_http_status"] = error.status
     finally:
         if adapter is not None:
             with contextlib.suppress(BaseException):
