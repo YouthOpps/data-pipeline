@@ -75,6 +75,7 @@ def now():
 
 
 SOURCE_ID = 'ch-eth-zurich-summer-research-fellowship'
+COPYRIGHT_NOTICE = 'https://inf.ethz.ch/footer/disclaimer-copyright.html'
 SOURCE_URL = ENTRY
 WEBSITE_URL = 'https://inf.ethz.ch/studies/summer-research-fellowship.html'
 DISPLAY_NAME = 'ETH Zürich'
@@ -418,7 +419,7 @@ def validate(value):
         if v is not None and (not isinstance(v, str)
                               or not re.fullmatch('[0-9a-f]{32}', v)):
             raise Stop('Invalid transaction owner')
-    if value['target'] is not None and value['target'] not in URLS:
+    if value['target'] is not None and value['target'] not in (*URLS, COPYRIGHT_NOTICE):
         raise Stop('Unreviewed target')
     if value['outcome'] not in ('initial_reviewed_state', 'reserved',
                                 'response_assessed'):
@@ -1347,25 +1348,25 @@ ARTIFACT_NAME = SOURCE_ID + "-pacing-state"
 ADAPTER_PATH = f"adapters/{SOURCE_ID}/adapter.py"
 NATIVE_BRANCH = "qa/456-eth-zurich-fellowship-native"
 NATIVE_PATH = f".github/workflows/verify-{SOURCE_ID}.yml"
-NATIVE_FLOOR_SHA256 = "a4778932694baa910b15584516aee84afb8c45ca6d3f3d404507e57bd08c7fa1"
+NATIVE_FLOOR_SHA256 = '0c050b6ea1e939d3dc8fae1d4e2095dd2aaf47c6f8875762dac91382e950813c'
 NATIVE_FLOOR = {'blocked': False,
- 'completed': 1795078878.9784756,
- 'completed_logical_id': 'd874d815859044d7a81ff3bad546ac77',
- 'completed_physical_id': 'c92c7792bbda4737a848277dd41a6bbb',
+ 'completed': 1795084564.4918673,
+ 'completed_logical_id': '4857770969244aa88bdc0f92e8cf58dc',
+ 'completed_physical_id': '881cd55458c74db38aec7fc968639852',
  'family': 'youthopps-eth-zurich-fellowship-publisher-v1',
  'in_flight': False,
  'interval': 12.2,
  'inventory_completed': 1795078878.9784756,
  'legacy_policy_history_unknown': True,
  'legacy_rate_history_unknown': True,
- 'logical_id': 'd874d815859044d7a81ff3bad546ac77',
- 'not_before': 1795078891.1784756,
- 'observed_at': 1795078878.9784756,
+ 'logical_id': '4857770969244aa88bdc0f92e8cf58dc',
+ 'not_before': 1795084576.6918674,
+ 'observed_at': 1795084564.4918673,
  'outcome': 'response_assessed',
  'page_interval': 30,
- 'physical_id': 'c92c7792bbda4737a848277dd41a6bbb',
+ 'physical_id': '881cd55458c74db38aec7fc968639852',
  'physical_pending': False,
- 'physical_started': 1795078876.5514343,
+ 'physical_started': 1795084559.6899292,
  'policy': {'body_sha256': '8be19d1865e3430bd8d68f0639540906977716496bc315db7167b8296c5171d4',
             'legacy_allowed': True,
             'new_allowed': True,
@@ -1373,11 +1374,18 @@ NATIVE_FLOOR = {'blocked': False,
             'unavailable': True,
             'url': 'https://inf.ethz.ch/robots.txt'},
  'rate_limit_strikes': 0,
- 'rate_limit_until': 1795078865.361548,
+ 'rate_limit_until': 1795084544.379665,
  'rates': [],
  'schema': 1,
- 'starts': [1795078857.9057171, 1795078876.5514343],
- 'target': 'https://inf.ethz.ch/studies/summer-research-fellowship/how-to-apply.html'}
+ 'starts': [1795078857.9057171,
+            1795078859.9547296,
+            1795078876.5514343,
+            1795078878.4587603,
+            1795084534.8380752,
+            1795084538.8010068,
+            1795084559.6899292,
+            1795084563.7403414],
+ 'target': 'https://inf.ethz.ch/footer/disclaimer-copyright.html'}
 FIRST_HOSTED = None
 HOSTED = os.environ.get("GITHUB_ACTIONS") == "true"
 HOSTED_EXPORT = None
@@ -1703,8 +1711,19 @@ def verify_research_owner():
     }
     exact_owned_attempt(lambda path: api_bytes(RESEARCH_REPOSITORY, path, token_name=None),
                         owner, RESEARCH_REPOSITORY)
-    if digest(canonical(NATIVE_FLOOR)) != NATIVE_FLOOR_SHA256:
-        raise Stop('Retained ETH research state differs from the exact captured floor')
+    notice_owner = {
+        'workflow_id': 423697141, 'path': '.github/workflows/qa-eth-zurich-fellowship-copyright.yml',
+        'run_id': 44506872846, 'head': 'e08ab803f09d853ac1b466d23a3f40a0e1715877',
+        'branch': 'qa/eth-zurich-fellowship-copyright', 'job_id': 135500661330,
+        'job': 'First contact ethz456notice', 'artifact_id': 14520785314,
+        'artifact_name': 'notice-research-ethz456notice-44506872846-1',
+        'zip_digest': 'sha256:70027b87e7e112e5c2f8601f988cdcbe6ecf01211c53957addfeb72b98828149',
+    }
+    exact_owned_attempt(lambda path: api_bytes(RESEARCH_REPOSITORY, path, token_name=None),
+                        notice_owner, RESEARCH_REPOSITORY)
+    if (digest(canonical(NATIVE_FLOOR)) != NATIVE_FLOOR_SHA256
+            or NATIVE_FLOOR['target'] != COPYRIGHT_NOTICE):
+        raise Stop('Retained ETH research state differs from the exact copyright notice floor')
 
 
 def maintainer_grant(lines, run_created):
@@ -1830,7 +1849,7 @@ def hosted_floor(binding, owner):
     return floor
 
 
-def retained_native_state():
+def retained_native_state(*, include_unsettled=False):
     """Return the original closed, exact-run journal to the hosted observer."""
     if NATIVE_EXPORT is None:
         raise Stop('Native fellowship collection did not finish')
@@ -1841,7 +1860,9 @@ def retained_native_state():
         journal.capture_claim = claim
         journal.verify_capture()
         raw = journal.ack
-        if raw != canonical(state) or any(state[k] for k in ('blocked', 'in_flight', 'physical_pending')):
+        if raw != canonical(state):
+            raise Stop('Native publisher state changed before export')
+        if not include_unsettled and any(state[k] for k in ('blocked', 'in_flight', 'physical_pending')):
             raise Stop('Native publisher state is unsettled')
         writes = AUDIT['persistence']
         if not writes or not writes[-1]['acknowledged'] or writes[-1].get('actual_journal_bytes') != raw:
