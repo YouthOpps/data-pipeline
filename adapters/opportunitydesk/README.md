@@ -318,6 +318,17 @@ flags. No denied scope or feed item is truncated to fit. The 32 KiB state and
 bounded artifact reader fail closed if their evidence cannot fit; these storage
 bounds do not define a smaller source frontier.
 
+### Preserve pacing when category review is required
+
+An article with an unsupported taxonomy still fails the full collection and
+keeps the last successful dataset. If the current owner has acknowledged the
+article's complete HTTP 200 body and the exact target's allowed robots decision,
+the adapter finishes its pacing transaction and exports the current attempt's
+state with the original receipts and timing limits. An unfinished response,
+policy decision or journal write still stops export. The original 20 October
+run skipped its pacing artifact after this taxonomy failure. That historical
+state requires its own evidence to recover. [Run 39381478331](https://github.com/YouthOpps/data-pipeline/actions/runs/39381478331)
+
 The ordinary connection loop retains its actual maximum of TWO attempts. Retry
 permission is intentionally narrower than the old broad exception tuple: only
 an actual opener-started, typed temporary pre-response network fault can retry.
