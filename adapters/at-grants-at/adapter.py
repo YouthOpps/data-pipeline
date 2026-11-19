@@ -37,6 +37,15 @@ ATTRIBUTION = "Source: grants.at / OeAD (© OeAD)"
 SERVICE_URL = "https://ajs.scholarships.at/"
 SCRIPT_URL = SERVICE_URL + "JS_1.0/STIMAQuery.min.js"
 IMPRINT_URL = "https://oead.at/en/imprint-en"
+ERNST_MACH_FH_KEY = (44772, 0)
+ERNST_MACH_FH_TITLE = (
+    "Ernst Mach Grant for studying at an Austrian university of applied "
+    "sciences (Fachhochschule)"
+)
+ERNST_MACH_FH_FAQ = (
+    "https://oead.at/en/study-research-teaching/overview-grants-and-scholarships/"
+    "ernst-mach-grant/faq-ernst-mach-grant-fachhochschule"
+)
 _ALLOWED_HOSTS = {"grants.at", "ajs.scholarships.at", "oead.at"}
 _ROBOTS = {}
 _PAGE_COMPLETED = None
@@ -164,6 +173,134 @@ _COLLECTION_ATTEMPTED = _COLLECTION_CLOSED = False
 _WORKFLOW_ID = 385560984
 _WORKFLOW_PATH = ".github/workflows/fetch-at-grants-at.yml"
 _ADAPTER_PATH = "adapters/at-grants-at/adapter.py"
+_FH_QA_BRANCH = "qa/grants-at-fh469-native-r3"
+_FH_QA_PATH = ".github/workflows/verify-at-grants-at-fh469-r3.yml"
+_FH_ADJUDICATED_SHA256 = (
+    "35ff56501c90037ca9c75b62fc575dd9b0f53fb4b80674ca76aff595fa33a122"
+)
+_FH_NATIVE_HANDOFF = {'approval': 7007976653,
+ 'workflow': 423745837,
+ 'run': 44514449207,
+ 'job': 135526691523,
+ 'head': 'bdb549862fc2872cdc3cc0d7ebec746937ab1c0e',
+ 'artifact': 14525706679,
+ 'artifact_sha256': 'sha256:40dd2fb3a6bba3b46d8c75f4b19aafbcc619ab84e3b3f41224344eaa362749c9',
+ 'state_sha256': '3cb4e5fafd7d618bae7635d4281c3873de7b75b8c5f0cd27e948647ce4691e6d',
+ 'state': {'blocked': False,
+           'completed': 1795087935.6897078,
+           'completed_id': '3d1a2a8d6c1410c60e9dd7867f281c47',
+           'family': 'youthopps-grants-at-publisher-v1',
+           'interval': 12.2,
+           'inventory_completed': 1795087921.0287254,
+           'legacy_history_unknown': True,
+           'legacy_owned': {'repository': 'YouthOpps/data-pipeline',
+                            'run_attempt': 1,
+                            'run_id': 41990792713,
+                            'schema': 1,
+                            'source': 'at-grants-at',
+                            'state': {'blocked': False,
+                                      'completed': 1793865924.5074487,
+                                      'family': 'youthopps-grants-at-publisher-v1',
+                                      'interval': 12.2,
+                                      'not_before': 1793865567.157777,
+                                      'observed_at': 1793865924.5074487,
+                                      'page_interval': 30,
+                                      'rate_limit_strikes': 0,
+                                      'rate_limit_until': 0,
+                                      'schema': 1,
+                                      'starts': [1793865892.6449895,
+                                                 1793865923.6611776]}},
+           'not_before': 1795087532.57692,
+           'observed_at': 1795087935.6897373,
+           'page_interval': 30,
+           'pending': False,
+           'pending_id': None,
+           'pending_kind': None,
+           'pending_started': 1795087934.9532437,
+           'rate_limit_strikes': 0,
+           'rate_limit_until': 0,
+           'schema': 2,
+           'starts': [1792068163.257482,
+                      1792068194.6272607,
+                      1793865892.6449895,
+                      1793865923.6611776,
+                      1794918863.4620998,
+                      1794918879.9591222,
+                      1794918896.6567416,
+                      1794918910.2872803,
+                      1794918923.461708,
+                      1794918937.3685918,
+                      1794918951.4805322,
+                      1794918983.202406,
+                      1794919014.6145973,
+                      1794919045.38211,
+                      1794919075.8144252,
+                      1794919106.8373353,
+                      1794919137.7704546,
+                      1794919168.5432615,
+                      1794919199.431933,
+                      1794919230.031033,
+                      1795087887.120077,
+                      1795087919.971606,
+                      1795087934.9617982]},
+ 'adjudicated_state': {'blocked': False,
+                       'completed': 1795086504.5311074,
+                       'completed_id': '3eb43ff5cdd041fd44ecbe997ec8ed94',
+                       'family': 'youthopps-grants-at-publisher-v1',
+                       'interval': 12.2,
+                       'inventory_completed': 1795078889.8790877,
+                       'legacy_history_unknown': True,
+                       'legacy_owned': {'repository': 'YouthOpps/data-pipeline',
+                                        'run_attempt': 1,
+                                        'run_id': 41990792713,
+                                        'schema': 1,
+                                        'source': 'at-grants-at',
+                                        'state': {'blocked': False,
+                                                  'completed': 1793865924.5074487,
+                                                  'family': 'youthopps-grants-at-publisher-v1',
+                                                  'interval': 12.2,
+                                                  'not_before': 1793865567.157777,
+                                                  'observed_at': 1793865924.5074487,
+                                                  'page_interval': 30,
+                                                  'rate_limit_strikes': 0,
+                                                  'rate_limit_until': 0,
+                                                  'schema': 1,
+                                                  'starts': [1793865892.6449895,
+                                                             1793865923.6611776]}},
+                       'not_before': 1795086504.524705,
+                       'observed_at': 1795086504.5311081,
+                       'page_interval': 30,
+                       'pending': False,
+                       'pending_id': None,
+                       'pending_kind': None,
+                       'pending_started': 1795086504.5263364,
+                       'rate_limit_strikes': 0,
+                       'rate_limit_until': 0,
+                       'schema': 2,
+                       'starts': [1792068163.257482,
+                                  1792068194.6272607,
+                                  1793865892.6449895,
+                                  1793865923.6611776,
+                                  1794918863.4620998,
+                                  1794918879.9591222,
+                                  1794918896.6567416,
+                                  1794918910.2872803,
+                                  1794918923.461708,
+                                  1794918937.3685918,
+                                  1794918951.4805322,
+                                  1794918983.202406,
+                                  1794919014.6145973,
+                                  1794919045.38211,
+                                  1794919075.8144252,
+                                  1794919106.8373353,
+                                  1794919137.7704546,
+                                  1794919168.5432615,
+                                  1794919199.431933,
+                                  1794919230.031033,
+                                  1795078858.214553,
+                                  1795078889.0366285,
+                                  1795086504.529334]},
+ 'production_predecessor': 44491548727}
 _LEGACY_SOURCE_SHA256 = "53061cf5e6a42f8395252218fb4ee45af4af5f6710f3fa6c2b0ef3107a737977"
 _LEGACY_WORKFLOW_SHA256 = "1d6fd8b2a43ec3b5160532e50985823efc26bc7510a8aecd51807a89b8612b3e"
 _WORKFLOW_SHA256 = '54d611bdd987b6c71881d34092efe664e82827658bba81c8ead348a2edb08f0e'
@@ -1266,6 +1403,62 @@ def programme_url(identifier, group):
     return SOURCE_URL + "?=" + base64.b64encode(native).decode("ascii")
 
 
+def add_ernst_mach_fh_call(record):
+    """Read the application deadline from the official award FAQ."""
+    if record["title"].casefold() != ERNST_MACH_FH_TITLE.casefold():
+        raise AdapterError("Ernst Mach FH programme identity changed", "parse")
+    visible = VisibleText()
+    visible.feed(fetch_source(ERNST_MACH_FH_FAQ))
+    visible.close()
+    text = " ".join(" ".join(visible.text).split())
+    eligibility = (
+        r"studying a Master['’]s or a Bachelor['’]s programme at a university "
+        r"in one of the defined countries of origin",
+        r"Bachelor students must also have successfully completed at least "
+        r"4 semesters",
+        r"The maximum age is 35 years",
+        r"Applicants need to be accepted as exchange scholars from an Austrian "
+        r"university of applied sciences",
+    )
+    if any(not re.search(rule, text, re.IGNORECASE) for rule in eligibility):
+        raise AdapterError("Changed Ernst Mach FH eligibility wording", "parse")
+    matches = set(re.findall(
+        r"\bThe deadline for all applications for stays during the academic year "
+        r"(\d{4})\s*/\s*(\d{2}|\d{4}) is February (\d{1,2})"
+        r"(?:st|nd|rd|th)?,\s*(\d{4}),\s*(\d{2}):(\d{2})\s*"
+        r"\(CET(?:\s*[-–]\s*Central European Time)?\)",
+        text, flags=re.IGNORECASE,
+    ))
+    if len(matches) != 1:
+        raise AdapterError("Missing or conflicting Ernst Mach FH call", "parse")
+    start, end, day, year, hour, minute = matches.pop()
+    next_year = str(int(start) + 1)
+    if year != start or end not in {next_year, next_year[-2:]}:
+        raise AdapterError("Inconsistent Ernst Mach FH call year", "parse")
+    try:
+        deadline = datetime(
+            int(year), 2, int(day), int(hour), int(minute),
+            tzinfo=timezone(timedelta(hours=1)),
+        )
+    except ValueError:
+        raise AdapterError("Invalid Ernst Mach FH deadline", "parse") from None
+    record["deadline"] = deadline.astimezone(timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    record["host_countries"] = ["AT"]
+    record["summary"] = (
+        f"Funding for a {start}/{next_year} exchange or visiting stay at an "
+        "Austrian university of applied sciences. Applicants must study for "
+        "a bachelor's or master's degree at a university in an eligible "
+        "non-European country and secure acceptance from an Austrian host. "
+        "Bachelor's students need four completed semesters. The maximum age "
+        "is 35."
+    )
+    record["classification"]["evidence"].append(
+        "Call deadline and prior acceptance: " + ERNST_MACH_FH_FAQ
+    )
+
+
 def collect_body():
     """Read the complete public funding index and reconcile every partition."""
     home = fetch_source(SOURCE_URL)
@@ -1359,6 +1552,8 @@ def collect_body():
         record["summary_language"] = "en"
         if item["institution"]:
             record["institution"] = item["institution"]
+        if (identifier, group) == ERNST_MACH_FH_KEY:
+            add_ernst_mach_fh_call(record)
         records.append(record)
     validate_records(records)
     print(
@@ -1383,6 +1578,8 @@ def run():
               "using DATA_SOURCE_TOKEN"),
     )
     args = parser.parse_args()
+    if args.publish and _FH_NATIVE_HANDOFF is None:
+        raise AdapterError("Reviewed Ernst Mach FH native handoff is OFF", "access")
     global _RUN_END
     if _RUN_END is None:
         _RUN_END = time.monotonic() + 1740
@@ -3002,6 +3199,98 @@ def retained_hosted_max(incoming):
     return merge_budget(incoming, validate_budget(candidate))
 
 
+def transfer_fh_native_state(incoming, predecessor):
+    """Adopt the exact retired native owner, or its validated production descendant."""
+    approval = _FH_NATIVE_HANDOFF
+    if (not isinstance(approval, dict) or set(approval) != {
+            "approval", "workflow", "run", "job", "head", "artifact",
+            "artifact_sha256", "state_sha256", "state", "adjudicated_state",
+            "production_predecessor"}
+            or any(type(approval[field]) is not int or approval[field] <= 0
+                   for field in ("approval", "workflow", "run", "job",
+                                 "artifact", "production_predecessor"))
+            or not re.fullmatch(r"[0-9a-f]{40}", approval["head"])
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", approval["artifact_sha256"])):
+        raise AdapterError("Reviewed Ernst Mach FH native handoff is OFF", "access")
+    native = validate_budget(approval["state"])
+    if (hashlib.sha256(json.dumps(native, sort_keys=True, separators=(",", ":"))
+                      .encode()).hexdigest() != approval["state_sha256"]
+            or native["blocked"] or native["pending"]):
+        raise AdapterError("Native handoff digest or access state differs", "access")
+    adjudicated = validate_budget(approval["adjudicated_state"])
+    if (hashlib.sha256(json.dumps(adjudicated, sort_keys=True, separators=(",", ":"))
+                      .encode()).hexdigest() != _FH_ADJUDICATED_SHA256
+            or adjudicated["pending"] or adjudicated["blocked"]
+            or len(adjudicated["starts"]) != 23
+            or native["observed_at"] <= adjudicated["observed_at"]):
+        raise AdapterError("The signed pre-native adjudication differs", "access")
+    retained = merge_budget(native, adjudicated)
+    if predecessor["id"] != approval["production_predecessor"]:
+        # Established journals prune request starts outside the rolling window.
+        recent = dict(retained, starts=[started for started in retained["starts"]
+                                       if incoming["observed_at"] - started < 60])
+        combined = merge_budget(incoming, recent)
+        if combined != incoming or incoming["observed_at"] <= native["observed_at"]:
+            raise AdapterError("Latest production owner did not retain the native handoff",
+                               "access")
+        return incoming
+
+    run_id = approval["run"]
+    workflow = workflow_api(f'/actions/workflows/{approval["workflow"]}')
+    if (workflow.get("id") != approval["workflow"]
+            or workflow.get("path") != _FH_QA_PATH
+            or workflow.get("state") != "disabled_manually"):
+        raise AdapterError("Exact native owner is not retired", "access")
+    expected = {
+        "id": run_id, "workflow_id": approval["workflow"], "run_attempt": 1,
+        "head_sha": approval["head"], "head_branch": _FH_QA_BRANCH,
+        "path": _FH_QA_PATH, "event": "push", "status": "completed",
+        "conclusion": "success",
+    }
+    inventory = workflow_api(f'/actions/workflows/{approval["workflow"]}/runs?per_page=2')
+    rows = inventory.get("workflow_runs")
+    run = workflow_api(f"/actions/runs/{run_id}/attempts/1")
+    if (inventory.get("total_count") != 1 or not isinstance(rows, list) or len(rows) != 1
+            or any(run.get(field) != value or rows[0].get(field) != value
+                   for field, value in expected.items())
+            or any(run.get(field, {}).get("full_name") != "YouthOpps/data-pipeline"
+                   for field in ("head_repository", "repository"))):
+        raise AdapterError("Exact native run or chronology differs", "access")
+    jobs = workflow_api(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=2")
+    matching = jobs.get("jobs")
+    if (jobs.get("total_count") != 1 or not isinstance(matching, list)
+            or len(matching) != 1 or any(
+                matching[0].get(field) != value for field, value in {
+                    "id": approval["job"], "run_id": run_id, "name": "verify",
+                    "head_sha": approval["head"], "status": "completed",
+                    "conclusion": "success",
+                }.items())):
+        raise AdapterError("Exact native verification job differs", "access")
+    comment = workflow_api(f'/issues/comments/{approval["approval"]}')
+    decision = (f'Approved Ernst Mach FH production state {approval["state_sha256"]}')
+    if (comment.get("issue_url") != _WORKFLOW_GITHUB + "/issues/469"
+            or comment.get("user", {}).get("id") != 12278069
+            or comment.get("user", {}).get("type") != "User"
+            or comment.get("created_at") != comment.get("updated_at")
+            or epoch(comment.get("created_at")) < epoch(matching[0].get("completed_at"))
+            or comment.get("body", "").splitlines().count(decision) != 1):
+        raise AdapterError("Exact production handoff decision is absent", "access")
+    artifacts = [row for row in run_artifacts(run)
+                 if row.get("name") == "grants-at-fh469-qa-state-1"]
+    if (len(artifacts) != 1 or artifacts[0].get("id") != approval["artifact"]
+            or artifacts[0].get("digest") != approval["artifact_sha256"]
+            or artifacts[0].get("expired") is not False
+            or artifacts[0].get("workflow_run", {}).get("id") != run_id
+            or artifacts[0].get("workflow_run", {}).get("head_sha") != approval["head"]):
+        raise AdapterError("Exact retired native state artifact differs", "access")
+    witnessed = download_inert_artifact(
+        (run_id, 1, SOURCE_ID, approval["head"]), approval["artifact"],
+        approval["artifact_sha256"])
+    if witnessed != native:
+        raise AdapterError("Reviewed native state differs from original bytes", "access")
+    return merge_budget(incoming, retained)
+
+
 def restore_family_artifact():
     global _RESTORED, _STATE_TRUSTED, _STARTUP_QUIET_UNTIL
     if _RESTORED:
@@ -3033,6 +3322,8 @@ def restore_family_artifact():
     if incoming is None:
         raise AdapterError("No exact owned source state", "access")
     incoming = retained_hosted_max(incoming)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        incoming = transfer_fh_native_state(incoming, run)
     with journal_restore_scope(incoming), locked_budget():
         local = load_budget()
         combined = merge_budget(local, incoming)
