@@ -104,7 +104,7 @@ _BUDGETS = {}
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
 FAMILY = "youthopps-de-fulbright-germany-publisher-v1"
 FAMILY_SOURCES = {SOURCE_ID}
-_LOCAL_WORKFLOW_ID = 378390061
+_FAMILY_WORKFLOW_ID = 378390061
 _LOCAL_START_VERIFIED = False
 _STATE_SCHEMA = 3
 _NEW_STATE_DIRECTORY = False
@@ -1771,7 +1771,7 @@ def verify_local_workflow_pause(definition=None):
     if (
         not isinstance(definition, dict)
         or type(definition.get("id")) is not int
-        or definition["id"] != _LOCAL_WORKFLOW_ID
+        or definition["id"] != _FAMILY_WORKFLOW_ID
         or definition.get("path")
         != ".github/workflows/fetch-" + SOURCE_ID + ".yml"
         or definition.get("state") != "disabled_manually"
@@ -1915,8 +1915,10 @@ def scan_family_history():
     definition = workflow_api("/actions/workflows/fetch-" + SOURCE_ID + ".yml")
     expected_path = ".github/workflows/fetch-" + SOURCE_ID + ".yml"
     if (
-        type(definition.get("id")) is not int
-        or definition["id"] <= 0
+        FAMILY_SOURCES != {SOURCE_ID}
+        or not isinstance(definition, dict)
+        or type(definition.get("id")) is not int
+        or definition["id"] != _FAMILY_WORKFLOW_ID
         or definition.get("path") != expected_path
     ):
         raise AdapterError("Untrusted family workflow definition", "access")
@@ -1926,12 +1928,8 @@ def scan_family_history():
     current_seen = False
     total, scanned = None, 0
     seen_ids = set()
+    route = f"/actions/workflows/{_FAMILY_WORKFLOW_ID}/runs"
     for page in range(1, 101):
-        route = (
-            "/actions/runs"
-            if hosted
-            else ("/actions/workflows/" + str(definition["id"]) + "/runs")
-        )
         result = workflow_api(route + f"?per_page=100&page={page}")
         count, runs = result.get("total_count"), result.get("workflow_runs")
         if (
@@ -1958,12 +1956,8 @@ def scan_family_history():
                 )
             seen_ids.add(run_id)
             source = family_source(run)
-            if not source:
-                if not hosted:
-                    raise AdapterError(
-                        "Unexpected local family source", "access"
-                    )
-                continue
+            if source != SOURCE_ID:
+                raise AdapterError("Unexpected family source", "access")
             if (
                 run.get(("repository"), {}).get(("full_name"))
                 != ("YouthOpps/data-pipeline")
@@ -1974,7 +1968,10 @@ def scan_family_history():
                 raise AdapterError(
                     ("Workflow repository or branch mismatch"), ("access")
                 )
-            if run.get("workflow_id") != definition["id"]:
+            if (
+                type(run.get("workflow_id")) is not int
+                or run["workflow_id"] != _FAMILY_WORKFLOW_ID
+            ):
                 raise AdapterError(
                     "Family workflow identity mismatch", "access"
                 )

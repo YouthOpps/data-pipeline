@@ -53,6 +53,15 @@ publish in parallel. Existing source-only atomic publication rebases on
 unrelated repository updates, uses up to three publication attempts, and never
 force-overwrites newer data.
 
+Both hosted and local restoration enumerate the complete history of the
+registered workflow `.github/workflows/fetch-de-fulbright-germany.yml` (GitHub
+workflow ID `378390061`). The current-run and exact-attempt ownership checks
+remain in force, including reruns and chronological ordering by job completion.
+Restoration requires the newest applicable owned artifact even when that attempt
+failed. See [issue #479](https://github.com/YouthOpps/data-pipeline/issues/479)
+for the historical inventory comparison and inert validation. This change has
+no new native collection result.
+
 ## Source display name
 
 Published metadata uses `display_name` = **Fulbright Germany** for the visible
