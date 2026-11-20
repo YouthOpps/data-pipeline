@@ -1,0 +1,44 @@
+name: qa-hungary481-homepage-research
+on:
+  push:
+    branches: [qa/hungary481-homepage-research]
+permissions:
+  actions: read
+  issues: read
+  contents: read
+concurrency:
+  group: youthopps-hu-fulbright-hungary-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  research:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.ref == 'refs/heads/qa/hungary481-homepage-research' && github.run_attempt == 1 && github.event.created == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Inspect the reviewed Hungary homepage response
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/hungary481-homepage/runner.py
+      - name: Retain original publisher custody receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hungary481-homepage-state-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hungary481-homepage-research/*.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Retain encrypted response evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hungary481-homepage-capture-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hungary481-homepage-research/capture.cms
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,27 @@
+{
+  "branch": "qa/hungary481-homepage-research",
+  "enabled": false,
+  "issue": 481,
+  "maintainer_account": 12278069,
+  "origin": "YouthOpps/data-pipeline",
+  "original_adapter_sha256": "15ebd45537138ae35282dffbdd6cd01180a1b9b649f5bd55a5498e5e1ad7a791",
+  "production_inventory_count": 68,
+  "production_inventory_sha256": "43362899d4bf223ab873362cbc849164c442c8790792a008077b5163ecc9551c",
+  "production_owner": {
+    "artifact": 14585920986,
+    "attempt": 1,
+    "digest": "sha256:0921cc3fa6da6f1b4ebfbf5a4fffa9cf335da9d42b1ab0cbec6777c2f35e5733",
+    "head": "11fa75c3e745c5e0d8c12ee8a5c9f8371417d764",
+    "job": 135964674585,
+    "run": 44638956027
+  },
+  "production_workflow_path": ".github/workflows/fetch-hu-fulbright-hungary.yml",
+  "production_workflow_sha256": "a16db40490c4a5df9731d7ad8dff50ffbc0930dcc6afce8acf3cab8ba99ca960",
+  "publisher_workflow": 378774441,
+  "reviewer_sha256": "c8bfa742ffcd2638a1926c8068b58c3f0cc9bcda7077b95ab3ac8a8ac5b01531",
+  "routes": [
+    "https://fulbright.hu/robots.txt",
+    "https://fulbright.hu/"
+  ],
+  "workflow": ".github/workflows/qa-hungary481-homepage-research.yml"
+}
