@@ -5,6 +5,7 @@ import gzip
 import io
 import json
 import os
+import re
 from pathlib import Path
 import importlib.util
 import unittest
@@ -55,8 +56,49 @@ def test_original(case, capture):
     capture.update(stdout=stdout.getvalue(), stderr=stderr.getvalue(), native_exit=int(not result.wasSuccessful()))
 
 
+class ArchiveOpener:
+    """Admit one authenticated predecessor download and its exact signed redirect."""
+    endpoint = 'https://api.github.com/repos/YouthOpps/data-pipeline/actions/artifacts/14489820002/zip'
+
+    def __init__(self, opener):
+        self.opener = opener
+        self.started = False
+        self.destination = None
+
+    def open(self, request, *args, **kwargs):
+        require(request.get_method() == 'GET' and request.data is None, 'Unexpected archive method')
+        headers = {k.lower(): v for k, v in request.header_items()}
+        if request.full_url == self.endpoint:
+            require(not self.started and headers.get('authorization') == 'Bearer ' + os.environ['GITHUB_TOKEN'],
+                    'Unexpected archive authority')
+            self.started = True
+            try:
+                response = self.opener(request, *args, **kwargs)
+            except urllib.error.HTTPError as error:
+                self.record_redirect(error)
+                raise
+            self.record_redirect(response)
+            return response
+        require(self.destination is not None and request.full_url == self.destination
+                and not {'authorization', 'cookie', 'proxy-authorization'}.intersection(headers),
+                'Unauthorized artifact redirect')
+        self.destination = None
+        return self.opener(request, *args, **kwargs)
+
+    def record_redirect(self, response):
+        value = response.headers.get('Location', '')
+        parsed = urllib.parse.urlsplit(value)
+        require(response.status == 302 and parsed.scheme == 'https' and not parsed.username
+                and not parsed.password and parsed.port is None and not parsed.fragment
+                and re.fullmatch(r'productionresultssa[0-9]+\.blob\.core\.windows\.net', parsed.hostname or '')
+                and parsed.path.startswith('/actions-results/') and bool(parsed.query),
+                'Unrecognized signed GitHub artifact destination')
+        self.destination = value
+
+
 def instrument(adapter, custody, capture, escrow):
     original_open = adapter._OPENER.open
+    archive = ArchiveOpener(original_open)
     original_save = adapter.save_budget
     def attach(response, event):
         event['status'] = response.status
@@ -94,7 +136,9 @@ def instrument(adapter, custody, capture, escrow):
     def opened(request, *args, **kwargs):
         url = request.full_url
         host = urllib.parse.urlsplit(url).hostname
-        require(host == 'www.fulbright.de' and request.get_method() == 'GET' and request.data is None,
+        if host != 'www.fulbright.de':
+            return archive.open(request, *args, **kwargs)
+        require( request.get_method() == 'GET' and request.data is None,
                 'Unexpected adapter transport outside authorized publisher GETs')
         require(url in {adapter.SOURCE_URL, 'https://www.fulbright.de/robots.txt'},
                 'URL outside exact native collection scope')
