@@ -1,7 +1,7 @@
 name: Attest exact Fulbright Germany history
 on:
   push:
-    branches: [qa/479-germany-state-only-v3]
+    branches: [qa/479-germany-state-only-v4]
 permissions:
   contents: read
   actions: read

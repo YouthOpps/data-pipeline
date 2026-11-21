@@ -4,11 +4,15 @@ import json
 import os
 import subprocess
 import sys
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 REPO = 'YouthOpps/data-pipeline'
-REF = 'refs/heads/qa/479-germany-state-only-v3'
-WORKFLOW = '.github/workflows/verify-479-state-v3.yml'
+REF = 'refs/heads/qa/479-germany-state-only-v4'
+WORKFLOW = '.github/workflows/verify-479-state-v4.yml'
 PRODUCTION = '.github/workflows/fetch-de-fulbright-germany.yml'
 DIGEST = 'd4d4c9280a122f4e33e0242cb40fa682d69d8f801de63cbdd6e9663eb35835c1'
 LOGS = {
@@ -19,6 +23,37 @@ LOGS = {
 
 def gh(path):
     return subprocess.check_output(['gh', 'api', f'repos/{REPO}/{path}'], timeout=60)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, target, code, msg, headers, new_url):
+        return None
+
+
+def original_bytes(path, limit):
+    allowed = {f'actions/jobs/{job}/logs' for job in LOGS} | {'actions/artifacts/14489820002/zip'}
+    assert path in allowed
+    opener = urllib.request.build_opener(NoRedirect())
+    request = urllib.request.Request(f'https://api.github.com/repos/{REPO}/{path}', headers={
+        'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json',
+        'User-Agent': 'YouthOpps-incident-479',
+    })
+    try:
+        reply = opener.open(request, timeout=20)
+    except urllib.error.HTTPError as error:
+        reply = error
+    with reply:
+        assert reply.status == 302
+        location = reply.headers['Location']
+    uri = urllib.parse.urlsplit(location)
+    assert uri.scheme == 'https' and not uri.username and not uri.password and not uri.port and not uri.fragment
+    assert re.fullmatch(r'productionresultssa[0-9]+\.blob\.core\.windows\.net', uri.hostname or '')
+    assert uri.path.startswith('/actions-results/') and uri.query
+    with opener.open(urllib.request.Request(location), timeout=30) as body:
+        assert body.status == 200
+        content = body.read(limit + 1)
+    assert 0 < len(content) <= limit
+    return content
 
 
 def api(path):
@@ -39,6 +74,7 @@ def guard():
     unsuccessful = [
         (44889794525, 136802938151, 'b406143031ea19d9bcb4822cd8a249925ed56c4f', '.github/workflows/verify-479-state.yml'),
         (44889919336, 136803305481, '8fe99d5bedd0b01a1349c398619b3aec420bc32b', '.github/workflows/verify-479-state-v2.yml'),
+        (44890140664, 136803965292, '504d6d68a492779dc34bf8af7a85bfb939cceeb5', '.github/workflows/verify-479-state-v3.yml'),
     ]
     for old_id, job_id, old_sha, path in unsuccessful:
         prior = api(f'actions/runs/{old_id}/attempts/1')
@@ -91,11 +127,11 @@ def main():
     private = temp / 'germany479-private'
     private.mkdir(mode=0o700)
     for job, digest in LOGS.items():
-        raw = gh(f'actions/jobs/{job}/logs')
+        raw = original_bytes(f'actions/jobs/{job}/logs', 64 * 1024)
         normalized = raw.decode('utf-8-sig').replace('\r\n', '\n').encode()
         assert hashlib.sha256(normalized).hexdigest() == digest
         (private / f'job-{job}.log').write_bytes(raw)
-    archive = gh('actions/artifacts/14489820002/zip')
+    archive = original_bytes('actions/artifacts/14489820002/zip', 463)
     assert hashlib.sha256(archive).hexdigest() == DIGEST
     (private / 'independent-custody-14489820002.zip').write_bytes(archive)
     subprocess.run([sys.executable, '-B', str(Path(__file__).with_name('audit.py'))], check=True)
