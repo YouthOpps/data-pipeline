@@ -2,6 +2,7 @@
 import base64
 import contextlib
 import copy
+from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import io
@@ -56,6 +57,7 @@ native_exit=None
 diagnostic=None
 stdout,stderr=io.StringIO(),io.StringIO()
 data_output={}
+filter_at=None
 
 def gate():
     q.paused(a,scope)
@@ -118,7 +120,9 @@ def save(state):
             q.demand(state["completed"]>=row["wall_end"] and state["not_before"]>=row["wall_end"]+state["interval"]
                      and state["starts"]==row["reservation"]["state"]["starts"],
                      "Settlement values differ from the physical operation")
-            durable(f"settled-{len(opens):02}",{"journal":attempt,"reservation_sha256":row["reservation"]["sha256"]})
+            physical={k:row.get(k) for k in ("url","start","wall_start","end","wall_end","closed","status","read_failure","close_failure")}
+            durable(f"settled-{len(opens):02}",{"journal":attempt,"physical":physical,
+                    "reservation_sha256":row["reservation"]["sha256"]})
             pending=False
         return result
     except BaseException as exc:
@@ -189,7 +193,8 @@ try:
     if native_exit==0:
         records=json.loads(stdout.getvalue())
         a.validate_records(records)
-        filtered=a.remove_expired_records(records)
+        filter_at=datetime.now(timezone.utc).isoformat()
+        filtered=a.remove_expired_records(records,datetime.fromisoformat(filter_at))
         stamp=a.utc_now()
         for name,rows in (("raw",records),("filtered",filtered),("empty",[])):
             a.validate_records(rows,allow_empty=not rows)
@@ -201,7 +206,7 @@ pending_names={f.name[:10] for f in out.glob("pending-[0-9][0-9].json")}
 settled_names={"pending-"+f.name[8:10] for f in out.glob("settled-[0-9][0-9]-ack.json")}
 unresolved=bool(pending_names - settled_names)
 raw=q.canonical({"identity":identity,"native_exit":native_exit,"observer_error":diagnostic,"stdout":stdout.getvalue(),
-                 "stderr":stderr.getvalue(),"opens":opens,"journal":journal,"final":final,"consumer":data_output})
+                 "stderr":stderr.getvalue(),"opens":opens,"journal":journal,"final":final,"filter_at":filter_at,"consumer":data_output})
 if identity is not None:
     terminal={"identity":identity,"number_opened":len(opens),"native_exit":native_exit,
               "settled_count":len(settled_names),"unresolved":unresolved or pending,
