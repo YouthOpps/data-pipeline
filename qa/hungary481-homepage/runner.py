@@ -26,7 +26,6 @@ REPOSITORY = "YouthOpps/data-pipeline"
 BRANCH = "qa/hungary481-homepage-research"
 WORKFLOW = ".github/workflows/qa-hungary481-homepage-research.yml"
 ROUTES = ("https://fulbright.hu/robots.txt", "https://fulbright.hu/")
-PREVIOUS_ASSESSMENT = "2026-11-19T23:38:13Z"
 def demand(condition, reason):
     if not condition:
         raise RuntimeError(reason)
@@ -86,7 +85,8 @@ def authenticate(a, scope, head):
         and owner(event.get("sender"), account), "Expected first branch creation by maintainer",
     )
     issue = scope["issue"]
-    approvals = a.workflow_api(f"/issues/{issue}/comments?since={PREVIOUS_ASSESSMENT}&per_page=100")
+    previous_assessment = scope["production_owner"]["completed_at"]
+    approvals = a.workflow_api(f"/issues/{issue}/comments?since={previous_assessment}&per_page=100")
     demand(isinstance(approvals, list) and len(approvals) < 100, "Incomplete grant inventory")
     lines = {f"Approved Hungary homepage research head {head}",
              f"Hungary homepage research scope {sha256(canonical(scope)).hexdigest()}"}
@@ -98,7 +98,7 @@ def authenticate(a, scope, head):
     demand(
         type(grant.get("id")) is int and grant["id"] > 0
         and isinstance(created, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", created)
-        and created > PREVIOUS_ASSESSMENT and grant.get("updated_at") == created
+        and created > previous_assessment and grant.get("updated_at") == created
         and grant.get("issue_url") == f"https://api.github.com/repos/{REPOSITORY}/issues/{issue}"
         and grant.get("html_url") == f"https://github.com/{REPOSITORY}/issues/{issue}#issuecomment-{grant['id']}",
         "Exact unedited maintainer grant identity differs",
@@ -229,8 +229,8 @@ def restore_exact(a, scope):
     jobs = result.get("jobs")
     demand(result.get("total_count") == 1 and len(jobs) == 1, "Production job count changed")
     job = jobs[0]
-    demand(job.get("id") == owner["job"] and job.get("conclusion") == "failure"
-           and job.get("completed_at") == PREVIOUS_ASSESSMENT, "Exact production job differs")
+    demand(job.get("id") == owner["job"] and job.get("conclusion") == owner["conclusion"]
+           and job.get("completed_at") == owner["completed_at"], "Exact production job differs")
 
     def pinned_history():
         a._HISTORY_COMPLETED = completed
