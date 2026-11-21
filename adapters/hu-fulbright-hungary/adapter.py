@@ -24,6 +24,7 @@ from email.utils import parsedate_to_datetime
 import fcntl
 import functools
 import hashlib
+import http.client
 from html.parser import HTMLParser
 import io
 import ipaddress
@@ -2521,23 +2522,27 @@ def workflow_api(path):
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = "Bearer " + token
-    try:
-        separator = "&" if "?" in path else "?"
-        status, _, body = infrastructure_request_bytes(
-            _WORKFLOW_GITHUB
-            + path
-            + separator
-            + "_fresh="
-            + str(time.time_ns()),
-            headers=headers,
-        )
-        if status != 200:
-            raise ValueError("Workflow API status")
-        return json.loads(body)
-    except Exception:
-        raise AdapterError(
-            "Workflow pacing state unavailable", "access"
-        ) from None
+    separator = "&" if "?" in path else "?"
+    for attempt in range(2):
+        url = _WORKFLOW_GITHUB + path + separator + "_fresh=" + str(time.time_ns())
+        try:
+            status, response_headers, body = infrastructure_request_bytes(url, headers=headers)
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
+            cause = getattr(error, "reason", error)
+            transient = isinstance(cause, (TimeoutError, ConnectionError, http.client.IncompleteRead))
+            reason = type(cause).__name__
+        else:
+            if status == 200:
+                try:
+                    return json.loads(body)
+                except (UnicodeError, ValueError):
+                    raise AdapterError("Invalid GitHub workflow metadata JSON", "access") from None
+            reason = f"HTTP {status}"
+            # Never shorten a server-provided restriction or automatically retry a denial.
+            transient = status in {408, 500, 502, 503, 504} and response_headers.get("Retry-After") is None
+        if attempt or not transient or request_timeout() <= 2:
+            raise AdapterError(f"GitHub workflow metadata unavailable ({reason})", "access") from None
+        time.sleep(1)
 
 
 def current_run_identity():
@@ -4678,9 +4683,89 @@ def main():
                 export_family_artifact()
 
 
+# Frozen exact completed jobs reviewed for #481. Older attempts already have
+# full job receipts in _LEGACY_JOB_PINS. The first attempt's SHA, conclusion
+# and real job start/end (UTC epoch seconds) are immutable. Every run identity
+# still comes from the fresh, source-scoped run inventory.
+_REVIEWED_FIRST_ATTEMPTS = {
+    38822222470: ("a9fe27eeabc210f171f4d1109f4fa1a95e008edd", "failure", 1792105988, 1792106344),
+    38827446846: ("77b5911162e0ab635225298393523b409638e6b1", "success", 1792109126, 1792109328),
+    38958484823: ("655a89e3b0209641586ebdf0512327f42b352369", "success", 1792180539, 1792180789),
+    39061950656: ("46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", "success", 1792264760, 1792264968),
+    39158630473: ("46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", "success", 1792351475, 1792351677),
+    39327899805: ("46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", "success", 1792445374, 1792445584),
+    39492901468: ("46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", "success", 1792528375, 1792528569),
+    39671654738: ("46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", "success", 1792614944, 1792615141),
+    39849744151: ("46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", "success", 1792701153, 1792701365),
+    40018869460: ("46fe9e001ccd2f684b6d4941dbb69bcbc63f598b", "success", 1792787024, 1792787221),
+    40125411389: ("d9fabfa516330910e4ad56f8b08db03999a0e6e9", "success", 1792870077, 1792870272),
+    40226650099: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1792956853, 1792957064),
+    40405933795: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793050658, 1793050859),
+    40585427515: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793135815, 1793136034),
+    40773564366: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793223487, 1793223685),
+    40960458471: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793310337, 1793310545),
+    41131246327: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793395682, 1793395901),
+    41238930274: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793478404, 1793478627),
+    41350565452: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793567390, 1793567588),
+    41548679476: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793663541, 1793663739),
+    41729431657: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793744229, 1793744416),
+    41926599630: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793831729, 1793831944),
+    42123371821: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1793918389, 1793918588),
+    42301690142: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1794002608, 1794002810),
+    42412993674: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1794084646, 1794084847),
+    42523449163: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1794171952, 1794172151),
+    42730023308: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "success", 1794271201, 1794271395),
+    42913614231: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "failure", 1794349219, 1794349417),
+    43119984384: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "failure", 1794439663, 1794439873),
+    43322510246: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "failure", 1794523409, 1794523632),
+    43520502724: ("5fd9fa82d5d2d5f0871aba653376765a6e00c897", "failure", 1794609322, 1794609530),
+    43908312961: ("dd15bee13fc772ecbf6d72fa19ea02f0f6ffd31a", "success", 1794846653, 1794846868),
+    43990574205: ("9e8e59d64d479829912bc343fc23b526f6519aea", "success", 1794876499, 1794876695),
+    44202865628: ("14d919910e81aa3e9ad06fcd69051e8d9fbf8c9c", "success", 1794959443, 1794959656),
+    44420389385: ("1dcca6beb3023cf918f50cb87f68f3522b9978b2", "success", 1795044233, 1795044436),
+    44638956027: ("11fa75c3e745c5e0d8c12ee8a5c9f8371417d764", "failure", 1795131337, 1795131493),
+    44834154987: ("11fa75c3e745c5e0d8c12ee8a5c9f8371417d764", "success", 1795215928, 1795216134),
+    44890448073: ("5d509a0f117020ab8d2ed30e1b538c24d4fb21b3", "success", 1795253840, 1795254044),
+    44893106360: ("509e127831977a3e71fd0fad4f5fc7bacc71175b", "failure", 1795255867, 1795255911),
+}
+
+
+def reviewed_job_bounds(run, identity):
+    """Return immutable bounds only for an exact, previously verified attempt."""
+    run_id, attempt, source, head = identity
+    if attempt != 1 or run.get("status") != "completed":
+        return None
+    legacy = _LEGACY_JOB_PINS.get(str(run_id))
+    if legacy is not None:
+        if (attempt, head, run.get("conclusion")) != (
+            legacy["attempt"], legacy["head"], legacy["conclusion"]
+        ):
+            raise AdapterError("Reviewed historical attempt changed", "access")
+        if not legacy["jobs"]:
+            _HISTORY_JOBLESS.append(identity)
+            return ()
+        start = min(datetime.fromisoformat(j["started_at"].replace("Z", "+00:00")).timestamp()
+                    for j in legacy["jobs"])
+        end = max(datetime.fromisoformat(j["completed_at"].replace("Z", "+00:00")).timestamp()
+                  for j in legacy["jobs"])
+    else:
+        recorded = _REVIEWED_FIRST_ATTEMPTS.get(run_id)
+        if recorded is None:
+            return None
+        expected_head, conclusion, start, end = recorded
+        if (head, run.get("conclusion")) != (expected_head, conclusion):
+            raise AdapterError("Reviewed historical attempt changed", "access")
+    if not 0 <= start <= end <= time.time() + 1:
+        raise AdapterError("Invalid reviewed family chronology", "access")
+    return end, start, run_id, attempt, source, head
+
+
 def completed_identity(run, expected=None):
     """Use exact immutable attempts/jobs; retain the pinned jobless cancel."""
     identity = validate_family_identity(run, expected)
+    reviewed = reviewed_job_bounds(run, identity)
+    if reviewed is not None:
+        return reviewed or None
     run_id, attempt, source, head = identity
     exact = workflow_api(f"/actions/runs/{run_id}/attempts/{attempt}")
     validate_family_identity(exact, identity)
@@ -4783,6 +4868,12 @@ def scan_family_history():
             if identity in seen:
                 raise AdapterError("Duplicate workflow run", "access")
             seen.add(identity)
+            legacy = _LEGACY_JOB_PINS.get(str(identity))
+            recorded = _REVIEWED_FIRST_ATTEMPTS.get(identity)
+            if legacy is not None or recorded is not None:
+                pinned_head = legacy["head"] if legacy is not None else recorded[0]
+                if head != pinned_head or attempt == 1 and run.get("status") != "completed":
+                    raise AdapterError("Historical run identity or status changed", "access")
             if current and identity == current[0]:
                 if (identity, attempt) != current or head != os.environ[
                     "GITHUB_SHA"
@@ -4817,6 +4908,9 @@ def scan_family_history():
         if scanned >= total:
             if scanned != total or hosted and not current_seen:
                 raise AdapterError("Incomplete family run inventory", "access")
+            required = set(_REVIEWED_FIRST_ATTEMPTS) | {int(key) for key in _LEGACY_JOB_PINS}
+            if not required.issubset(seen):
+                raise AdapterError("Reviewed family run missing from inventory", "access")
             _HISTORY_COMPLETED = sorted(candidates)
             if (
                 len(candidates) > 1
