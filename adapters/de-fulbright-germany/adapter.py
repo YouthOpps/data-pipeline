@@ -2199,7 +2199,8 @@ def verify_handoff_owner():
     handoff_require((current["head_branch"], current["head_sha"], current["path"], current["status"],
                      current["workflow_id"], current["event"], current["run_attempt"]) ==
                     ("main", head, path, "in_progress", _FAMILY_WORKFLOW_ID, "workflow_dispatch", 1)
-                    and current["actor"]["id"] == current["triggering_actor"]["id"] == 12278069
+                    and all((current[field]["id"], current[field]["login"], current[field]["type"])
+                            == (12278069, "fmarslan", "User") for field in ("actor", "triggering_actor"))
                     and current["repository"]["full_name"] == current["head_repository"]["full_name"] ==
                     "YouthOpps/data-pipeline", "dispatch scope differs")
     keys = ("id", "run_attempt", "head_sha", "status", "conclusion", "path", "head_branch", "workflow_id")
@@ -2214,9 +2215,9 @@ def verify_handoff_owner():
     grants = [comment for comment in comments if comment["body"] == grant]
     handoff_require(len(grants) == 1, "exact separate production grant missing")
     comment = grants[0]
-    handoff_require(comment["user"]["id"] == 12278069 and comment["user"]["type"] == "User"
+    handoff_require((comment["user"]["id"], comment["user"]["login"], comment["user"]["type"])
+                    == (12278069, "fmarslan", "User")
                     and comment["issue_url"] == _WORKFLOW_GITHUB + "/issues/479"
-                    and comment["author_association"] in ("OWNER", "MEMBER")
                     and comment["created_at"] == comment["updated_at"] <= current["created_at"],
                     "production grant changed")
     return current
