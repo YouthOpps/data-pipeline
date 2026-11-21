@@ -215,7 +215,12 @@ if identity is not None:
               "observer_error":None if diagnostic is None else diagnostic.split(":",1)[0],
               "remote_checkpoints":{f.stem.replace("-ack",""):json.loads(f.read_bytes())
                                     for f in sorted(out.glob("*-ack.json"))}}
-    try:durable("terminal",terminal)
+    try:
+        # The original standalone test closes its execution deadline before this infrastructure readback.
+        with a.execution():
+            a._RUN_END=min(a._RUN_END,job_limit)
+            with a.phase("export",90):
+                durable("terminal",terminal)
     except Exception as exc:
         diagnostic=diagnostic or ("Terminal escrow failure: "+type(exc).__name__)
 sealed=q.seal(raw)

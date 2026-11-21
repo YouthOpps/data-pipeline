@@ -11,7 +11,7 @@
     "qa/hu481-native/escrow.py": "f84c2f1637a56a644cccdea715637be56d4d5869bfa3913364319dc16eb1e35f",
     "qa/hu481-native/launch.js": "6aedafe1184858212d3223484bee217b93ea790f7175ba6a10921d668dccb910",
     "qa/hu481-native/reviewer.pem": "c8bfa742ffcd2638a1926c8068b58c3f0cc9bcda7077b95ab3ac8a8ac5b01531",
-    "qa/hu481-native/runner.py": "2b0c723e2acde7296d6aa3f7546792b17c779d1a6078f246273bda25224b31cf",
+    "qa/hu481-native/runner.py": "03ca3f8900df81d8915e34512f708a68334a10736d1f236311699848141c2065",
     "qa/hu481-native/support.py": "3e534f421d487f5241d0d1a304926987ab49507346eba6635b25f3c7caf07e3f"
   },
   "issue": 481,
