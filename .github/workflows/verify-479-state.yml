@@ -1,0 +1,33 @@
+name: Attest exact Fulbright Germany history
+on:
+  push:
+    branches: [qa/479-germany-state-only]
+permissions:
+  contents: read
+  actions: read
+  issues: read
+concurrency:
+  group: youthopps-de-fulbright-germany-publisher-v1
+  cancel-in-progress: false
+  queue: max
+jobs:
+  attest:
+    name: Attest exact Fulbright Germany history
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && !github.event.deleted && github.run_attempt == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify both pre-publisher attempts and preserve original archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B qa-479/attest.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: germany479-attestation-${{ github.run_id }}-1
+          path: ${{ runner.temp }}/germany479-evidence/
+          if-no-files-found: error
+          retention-days: 7
