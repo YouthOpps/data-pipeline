@@ -1959,7 +1959,6 @@ def export_state():
     if HOSTED_EXPORT is None:
         return
     binding, state, expected, claim = HOSTED_EXPORT
-    _, run_id, attempt, head = binding
     if workflow_binding() != binding:
         raise Stop("Production ownership changed before artifact export")
     encoded_state = canonical(state)
@@ -1975,6 +1974,12 @@ def export_state():
         if (not writes or not writes[-1]["acknowledged"]
                 or writes[-1].get("actual_journal_bytes") != encoded_state):
             raise Stop("Publisher journal lacks exact original acknowledgements")
+    write_owned_state(binding, state)
+
+
+def write_owned_state(binding, state, *, restrictive_owner=None):
+    """Write the verified budget in the current attempt's owned envelope."""
+    _, run_id, attempt, head = binding
     runner = Path(os.environ["RUNNER_TEMP"])
     target = Path(os.environ["KLAGENFURT_PACING_ARTIFACT_PATH"])
     if runner.resolve() != runner or target != runner / "pacing-state.json":
@@ -2001,6 +2006,11 @@ def export_state():
         raise
     finally:
         checked_close([(parent, parent_id)], primary)
+    if restrictive_owner is not None:
+        # No source request or publication was made. Only the latest verified
+        # predecessor may pass on its still-restrictive state to this job.
+        if workflow_binding() != binding or workflow_history(binding) != restrictive_owner:
+            raise Stop("Production ownership changed before restrictive state export")
     output = Path(os.environ["GITHUB_OUTPUT"])
     fd = os.open(output, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
@@ -2017,8 +2027,11 @@ def export_state():
 def require_settled_production():
     """Authenticate the producer and its pacing floor before opening the data-source repository."""
     binding = workflow_binding()
-    state = hosted_floor(binding, workflow_history(binding))
+    owner = workflow_history(binding)
+    state = hosted_floor(binding, owner)
     if any(state[key] for key in ("blocked", "in_flight", "physical_pending")):
+        if owner is not None and not GATE_FAILED and not AUDIT["requests"] and not AUDIT["persistence"]:
+            write_owned_state(binding, state, restrictive_owner=owner)
         raise Stop("Newest publisher state has unresolved access restrictions")
 
 
