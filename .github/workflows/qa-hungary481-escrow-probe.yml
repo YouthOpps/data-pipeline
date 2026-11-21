@@ -1,0 +1,25 @@
+name: Hungary receipt upload infrastructure probe
+on:
+  push:
+    branches: [qa/hungary481-escrow-infrastructure-probe]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  escrow:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Exercise two synthetic encrypted checkpoints
+        uses: ./qa/hungary481-escrow-probe
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Make pinned uploader bundle available to the runner
+        if: ${{ false }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          path: qa/hungary481-escrow-probe/action.yml
