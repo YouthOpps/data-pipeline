@@ -91,7 +91,14 @@ cannot enter the unavailable-REP cache or establish healthy completion.
 Robots 200 requires explicit text/plain, complete non-markup REP and the existing
 query/percent-octet/wildcard matcher. Decisions retain their actual target,
 policy-body digest and physical receipt. Unreviewed rate extensions, denied
-routes or policy failures stop the collection. Generic copyright notices do not
+routes or policy failures stop the collection. Bounded REP parser errors identify
+the failing check and, where applicable, its line. Policy parse failures include
+the origin and SHA-256 digest without copying publisher text. When a policy
+failure leaves a trusted physical journal with an unresolved logical owner,
+production retains its validated timing and owner fields in a separate
+`google-pending-review-<attempt>` diagnostic archive. Restoration only accepts
+the existing pacing artifact format and name. Integrity failures do not export
+an untrusted journal. Generic copyright notices do not
 alone become an access prohibition.
 
 Responses accept one supported chunked transfer coding only when the standard

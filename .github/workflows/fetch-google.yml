@@ -55,3 +55,11 @@ jobs:
           path: ${{ runner.temp }}/pacing-state.json
           if-no-files-found: error
           retention-days: 90
+      - name: Preserve unresolved state for manual review
+        if: failure() && steps.collect.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-pending-review-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/google-pending-review.json
+          if-no-files-found: ignore
+          retention-days: 90
