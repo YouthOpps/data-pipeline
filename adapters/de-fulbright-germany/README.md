@@ -53,6 +53,15 @@ publish in parallel. Existing source-only atomic publication rebases on
 unrelated repository updates, uses up to three publication attempts, and never
 force-overwrites newer data.
 
+Both hosted and local restoration enumerate the complete history of the
+registered workflow `.github/workflows/fetch-de-fulbright-germany.yml` (GitHub
+workflow ID `378390061`). The current-run and exact-attempt ownership checks
+remain in force, including reruns and chronological ordering by job completion.
+Restoration requires the newest applicable owned artifact even when that attempt
+failed. See [issue #479](https://github.com/YouthOpps/data-pipeline/issues/479)
+for the historical inventory comparison and inert validation. This change has
+no new native collection result.
+
 ## Source display name
 
 Published metadata uses `display_name` = **Fulbright Germany** for the visible
@@ -312,3 +321,21 @@ public native evidence retains its original revision and date; no new publisher
 requests, original expired raw-body replay, publication or production run are
 claimed. Collection, facts, identifiers, deadlines, expiry, state schema,
 pending transactions, MAX constraints and workflow behavior are unchanged.
+
+### November 2026 production custody
+
+Only an independently examined original native journal, its exact native
+run/job and two retained archive identities can supply the incident-specific
+receipt under #479. [Native run 44890531348](https://github.com/YouthOpps/data-pipeline/actions/runs/44890531348)
+completed its genuine nonpublishing collection with two physical requests. Its
+signed terminal log and encrypted evidence agreed on the settled journal.
+Production pins native evidence archive 14701639156 and anchor 14701782047.
+The first normal dispatch must have a separate unedited maintainer grant on
+#479 naming its exact main SHA and receipt digest. The workflow rechecks all
+63 previous run identities at restore and after each pacing wait, before
+persisting a request reservation. A later
+owner or rerun cannot use the receipt. The adapter validates the original
+predecessor archive and merges its starts and MAX timing limits with the
+reviewer-decoded settled native journal. An unresolved owner, integrity
+failure or history overflow blocks admission. Later runs restore their own
+latest production archive normally.

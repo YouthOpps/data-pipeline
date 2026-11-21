@@ -104,7 +104,7 @@ _BUDGETS = {}
 _WORKFLOW_GITHUB = "https://api.github.com/repos/YouthOpps/data-pipeline"
 FAMILY = "youthopps-de-fulbright-germany-publisher-v1"
 FAMILY_SOURCES = {SOURCE_ID}
-_LOCAL_WORKFLOW_ID = 378390061
+_FAMILY_WORKFLOW_ID = 378390061
 _LOCAL_START_VERIFIED = False
 _STATE_SCHEMA = 3
 _NEW_STATE_DIRECTORY = False
@@ -1328,6 +1328,11 @@ def publisher_pace():
                     "Publisher backoff exceeds collection budget", "access"
                 )
             time.sleep(wait)
+        if _ISSUE479_ADMITTED:
+            verify_handoff_owner()
+            check_deadline()
+            if _PHASE_END - time.monotonic() < 120:
+                raise AdapterError("Handback verification exhausted collection time", "access")
         now = time.time()
         if now < target:
             raise AdapterError(
@@ -1771,7 +1776,7 @@ def verify_local_workflow_pause(definition=None):
     if (
         not isinstance(definition, dict)
         or type(definition.get("id")) is not int
-        or definition["id"] != _LOCAL_WORKFLOW_ID
+        or definition["id"] != _FAMILY_WORKFLOW_ID
         or definition.get("path")
         != ".github/workflows/fetch-" + SOURCE_ID + ".yml"
         or definition.get("state") != "disabled_manually"
@@ -1915,8 +1920,10 @@ def scan_family_history():
     definition = workflow_api("/actions/workflows/fetch-" + SOURCE_ID + ".yml")
     expected_path = ".github/workflows/fetch-" + SOURCE_ID + ".yml"
     if (
-        type(definition.get("id")) is not int
-        or definition["id"] <= 0
+        FAMILY_SOURCES != {SOURCE_ID}
+        or not isinstance(definition, dict)
+        or type(definition.get("id")) is not int
+        or definition["id"] != _FAMILY_WORKFLOW_ID
         or definition.get("path") != expected_path
     ):
         raise AdapterError("Untrusted family workflow definition", "access")
@@ -1926,12 +1933,8 @@ def scan_family_history():
     current_seen = False
     total, scanned = None, 0
     seen_ids = set()
+    route = f"/actions/workflows/{_FAMILY_WORKFLOW_ID}/runs"
     for page in range(1, 101):
-        route = (
-            "/actions/runs"
-            if hosted
-            else ("/actions/workflows/" + str(definition["id"]) + "/runs")
-        )
         result = workflow_api(route + f"?per_page=100&page={page}")
         count, runs = result.get("total_count"), result.get("workflow_runs")
         if (
@@ -1958,12 +1961,8 @@ def scan_family_history():
                 )
             seen_ids.add(run_id)
             source = family_source(run)
-            if not source:
-                if not hosted:
-                    raise AdapterError(
-                        "Unexpected local family source", "access"
-                    )
-                continue
+            if source != SOURCE_ID:
+                raise AdapterError("Unexpected family source", "access")
             if (
                 run.get(("repository"), {}).get(("full_name"))
                 != ("YouthOpps/data-pipeline")
@@ -1974,7 +1973,10 @@ def scan_family_history():
                 raise AdapterError(
                     ("Workflow repository or branch mismatch"), ("access")
                 )
-            if run.get("workflow_id") != definition["id"]:
+            if (
+                type(run.get("workflow_id")) is not int
+                or run["workflow_id"] != _FAMILY_WORKFLOW_ID
+            ):
                 raise AdapterError(
                     "Family workflow identity mismatch", "access"
                 )
@@ -2157,6 +2159,162 @@ def read_inert_artifact(identity, artifact_id, digest=None):
             ("Invalid or unavailable family pacing artifact"), ("access")
         ) from None
 
+# Original signed native settlement. A separate grant must bind its digest to
+# the exact deployed main SHA before the single production dispatch.
+_ISSUE479_RECEIPT = {'anchor': {'id': 14701782047,
+            'sha256': 'f681cf150bab8cdfd6f1e89e58f4b7687307589bea1bf85ed90bc7d9c6299bb7'},
+ 'evidence': {'id': 14701639156,
+              'sha256': '264bad1089460f443f6ce86d0c98b70ca1c5cfa14abe3c15400f85f278483459'},
+ 'head_sha': '6e9c24a54d91310a4fbe1d62672d25434cc2711a',
+ 'job_id': 136805143248,
+ 'journal_base64': 'eyJzY2hlbWEiOjMsImZhbWlseSI6InlvdXRob3Bwcy1kZS1mdWxicmlnaHQtZ2VybWFueS1wdWJsaXNoZXItdjEiLCJvYnNlcnZlZF9hdCI6MTc5NTI1NDAxOS4xNTQxMTE5LCJub3RfYmVmb3JlIjoxNzk1MjU0MDMxLjM1NDExMiwic3RhcnRzIjpbMTc5NTI1NDAwMS4yMjc4NTMzLDE3OTUyNTQwMTUuOTk5NjA3M10sImJsb2NrZWQiOmZhbHNlLCJpbl9mbGlnaHQiOmZhbHNlLCJpbnRlcnZhbCI6MTIuMiwicGFnZV9pbnRlcnZhbCI6MzAsImxlZ2FjeV9yYXRlX2hpc3RvcnlfdW5rbm93biI6dHJ1ZSwicmF0ZV9mYWlsdXJlcyI6MH0=',
+ 'journal_sha256': '12c4b7950442efb4e0217d88d3744329a4b6b39fdf574871470c9a9bee64f430',
+ 'run_id': 44890531348,
+ 'state_sha256': '9a854f6bf45bcdea5c2f6d4acba44b03fd7b5bc86286c22c94786a7175a0ad5b',
+ 'workflow_id': 425847876}
+_ISSUE479_ADMITTED = False
+_ISSUE479_FRONTIER = (44846595786, 1, SOURCE_ID)
+_ISSUE479_HISTORY = "3870ea5f8d783da017211851eea9924bb0bb4dc6e62e7788e9dec75d86461709"
+_ISSUE479_ORIGINAL = "d4d4c9280a122f4e33e0242cb40fa682d69d8f801de63cbdd6e9663eb35835c1"
+_ISSUE479_NATIVE_BRANCH = "qa/479-germany-native"
+_ISSUE479_NATIVE_WORKFLOW = ".github/workflows/verify-germany479-native.yml"
+
+
+def handoff_require(condition, reason):
+    if not condition:
+        raise AdapterError("Fulbright Germany handback: " + reason, "access")
+
+
+def handoff_digest(data):
+    raw = json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def verify_handoff_owner():
+    """Require exactly one authorized dispatch following the 63 reviewed runs."""
+    run_id, attempt = current_run_identity()
+    head = os.environ.get("GITHUB_SHA", "")
+    handoff_require(attempt == 1 and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+                    and os.environ.get("GITHUB_ACTOR_ID") == "12278069"
+                    and re.fullmatch("[a-f0-9]{40}", head), "original maintainer dispatch required")
+    path = ".github/workflows/fetch-de-fulbright-germany.yml"
+    workflow = workflow_api(f"/actions/workflows/{_FAMILY_WORKFLOW_ID}")
+    handoff_require((workflow["id"], workflow["state"], workflow["path"]) ==
+                    (_FAMILY_WORKFLOW_ID, "active", path), "producer definition differs")
+    rows = workflow_api(f"/actions/workflows/{_FAMILY_WORKFLOW_ID}/runs?per_page=100")
+    handoff_require(rows["total_count"] == len(rows["workflow_runs"]) == 64, "source history changed")
+    current = [r for r in rows["workflow_runs"] if r["id"] == run_id]
+    handoff_require(len(current) == 1, "current owner missing or ambiguous")
+    current = current[0]
+    handoff_require((current["head_branch"], current["head_sha"], current["path"], current["status"],
+                     current["workflow_id"], current["event"], current["run_attempt"]) ==
+                    ("main", head, path, "in_progress", _FAMILY_WORKFLOW_ID, "workflow_dispatch", 1)
+                    and all((current[field]["id"], current[field]["login"], current[field]["type"])
+                            == (12278069, "fmarslan", "User") for field in ("actor", "triggering_actor"))
+                    and current["repository"]["full_name"] == current["head_repository"]["full_name"] ==
+                    "YouthOpps/data-pipeline", "dispatch scope differs")
+    keys = ("id", "run_attempt", "head_sha", "status", "conclusion", "path", "head_branch", "workflow_id")
+    prior = [{key: row[key] for key in keys} for row in rows["workflow_runs"] if row["id"] != run_id]
+    handoff_require(handoff_digest(prior) == _ISSUE479_HISTORY, "source lineage changed")
+    receipt = _ISSUE479_RECEIPT
+    grant = (f"Authorize one Fulbright Germany production handback at {head} "
+             f"from native {receipt['run_id']}/1, receipt {handoff_digest(receipt)}, under #479.")
+    issue = workflow_api("/issues/479")
+    comments = workflow_api("/issues/479/comments?per_page=100")
+    handoff_require(issue["state"] == "open" and issue["comments"] == len(comments) <= 100, "grant inventory incomplete")
+    grants = [comment for comment in comments if comment["body"] == grant]
+    handoff_require(len(grants) == 1, "exact separate production grant missing")
+    comment = grants[0]
+    handoff_require((comment["user"]["id"], comment["user"]["login"], comment["user"]["type"])
+                    == (12278069, "fmarslan", "User")
+                    and comment["issue_url"] == _WORKFLOW_GITHUB + "/issues/479"
+                    and comment["created_at"] == comment["updated_at"] <= current["created_at"],
+                    "production grant changed")
+    return current
+
+
+def verified_handoff_archive(receipt):
+    """Bind the reviewed archive and terminal attempt to their native workflow."""
+    run_id = receipt["run_id"]
+    run = workflow_api(f"/actions/runs/{run_id}")
+    handoff_require((run["id"], run["run_attempt"], run["workflow_id"], run["head_branch"], run["head_sha"],
+                     run["path"], run["status"], run["conclusion"], run["event"]) ==
+                    (run_id, 1, receipt["workflow_id"], _ISSUE479_NATIVE_BRANCH, receipt["head_sha"],
+                     _ISSUE479_NATIVE_WORKFLOW, "completed", "success", "push")
+                    and run["repository"]["full_name"] == run["head_repository"]["full_name"] ==
+                    "YouthOpps/data-pipeline", "native lineage differs")
+    runs = workflow_api(f'/actions/workflows/{receipt["workflow_id"]}/runs?per_page=2')
+    handoff_require(runs["total_count"] == len(runs["workflow_runs"]) == 1
+                    and runs["workflow_runs"][0]["id"] == run_id, "native workflow reused")
+    jobs = workflow_api(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=2")
+    handoff_require(jobs["total_count"] == len(jobs["jobs"]) == 1, "native job ambiguous")
+    job = jobs["jobs"][0]
+    handoff_require((job["id"], job["run_id"], job["head_sha"], job["run_attempt"], job["name"],
+                     job["status"], job["conclusion"]) ==
+                    (receipt["job_id"], run_id, receipt["head_sha"], 1, "Verify Fulbright Germany native",
+                     "completed", "success"), "native job differs")
+    archives = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=3")
+    handoff_require(archives["total_count"] == len(archives["artifacts"]) == 2, "native archive inventory changed")
+    for purpose, prefix in (("evidence", "germany479-native"), ("anchor", "germany479-recovery-key")):
+        expected = receipt[purpose]
+        name = f"{prefix}-{run_id}-1"
+        found = [item for item in archives["artifacts"] if item["name"] == name]
+        handoff_require(len(found) == 1, "required native archive missing")
+        item = found[0]
+        handoff_require(item == workflow_api(f'/actions/artifacts/{expected["id"]}')
+                        and item["id"] == expected["id"] and item["expired"] is False
+                        and item["digest"] == "sha256:" + expected["sha256"]
+                        and item["workflow_run"]["id"] == run_id
+                        and item["workflow_run"]["head_sha"] == receipt["head_sha"], "native archive differs")
+
+
+def reviewed_issue479_state():
+    global _ISSUE479_ADMITTED
+    receipt = _ISSUE479_RECEIPT
+    handoff_require(type(receipt) is dict and not _ISSUE479_ADMITTED
+                    and os.environ.get("GITHUB_ACTIONS") == "true", "uninstalled or reused receipt")
+    verify_handoff_owner()
+    verified_handoff_archive(receipt)
+    for ident in (44846595786, 44652934438):
+        data = workflow_api(f"/actions/runs/{ident}/artifacts?per_page=2")
+        handoff_require(data["total_count"] == 0 and data["artifacts"] == [], "historical gap changed")
+    original_id = 44435787861
+    original_key = (original_id, 1)
+    handoff_require(_ATTEMPT_HEADS.get(original_key) == "1dcca6beb3023cf918f50cb87f68f3522b9978b2",
+                    "historical owner missing")
+    original = workflow_api(f"/actions/runs/{original_id}/artifacts?per_page=2")
+    handoff_require(original["total_count"] == len(original["artifacts"]) == 1, "historical archive ambiguous")
+    archive = original["artifacts"][0]
+    handoff_require(archive["expired"] is False and archive["id"] == 14489820002
+                    and archive["digest"] == "sha256:" + _ISSUE479_ORIGINAL
+                    and archive["name"] == _ARTIFACT_NAME + "-1"
+                    and archive["workflow_run"]["id"] == original_id
+                    and archive["workflow_run"]["head_sha"] == _ATTEMPT_HEADS[original_key],
+                    "historical archive differs")
+    initial = download_inert_artifact((*original_key, SOURCE_ID), archive["id"], archive["digest"])
+    state = merge_reviewed_native_journal(receipt, initial)
+    _ISSUE479_ADMITTED = True
+    return state
+
+
+def merge_reviewed_native_journal(receipt, initial):
+    """Check the exact reviewer-decoded final journal and retain previous limits."""
+    raw = base64.b64decode(receipt["journal_base64"], validate=True)
+    handoff_require(0 < len(raw) <= 16384 and hashlib.sha256(raw).hexdigest() == receipt["journal_sha256"],
+                    "native journal bytes differ")
+    state = validate_budget(json.loads(raw))
+    handoff_require(handoff_digest(state) == receipt["state_sha256"]
+                    and not (state["in_flight"] or state["blocked"] or initial["in_flight"] or initial["blocked"])
+                    and state["legacy_rate_history_unknown"] and initial["legacy_rate_history_unknown"]
+                    and state["observed_at"] >= initial["observed_at"], "native journal unsettled")
+    starts = sorted(set(state["starts"] + initial["starts"]))
+    handoff_require(len(starts) <= 10, "combined history exceeds journal capacity")
+    state["starts"] = starts
+    for key in ("not_before", "page_interval", "interval", "rate_failures"):
+        state[key] = max(state[key], initial[key])
+    return validate_budget(state)
+
+
 def restore_family_artifact():
     global _RESTORED, _STATE_TRUSTED
     if _RESTORED:
@@ -2164,7 +2322,9 @@ def restore_family_artifact():
     latest = latest_family_run()
     if latest is None:
         raise AdapterError("Mature family history is missing", "access")
-    if latest[:2] in {(x[0], x[1]) for x in _LEGACY_ATTEMPTS}:
+    if latest == _ISSUE479_FRONTIER and _ISSUE479_RECEIPT is not None:
+        incoming = reviewed_issue479_state()
+    elif latest[:2] in {(x[0], x[1]) for x in _LEGACY_ATTEMPTS}:
         incoming = reviewed_legacy_state(latest)
     else:
         run_id, attempt, source = latest
