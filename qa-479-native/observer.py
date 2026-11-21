@@ -1,7 +1,6 @@
 """Capture the original Fulbright Germany native test and preserve its actual journal in custody."""
 import base64
 import contextlib
-import copy
 import gzip
 import io
 import json
@@ -12,7 +11,6 @@ import unittest
 import subprocess
 import sys
 import time
-from types import ModuleType
 import urllib.error
 import urllib.parse
 
@@ -24,6 +22,7 @@ SOURCE = ROOT / 'adapters/de-fulbright-germany/adapter.py'
 TEST = SOURCE.with_name('test_adapter.py')
 PACKET = ROOT / 'qa-479-native'
 RECIPIENT = PACKET / 'reviewer.pem'
+
 def json_bytes(value):
     if isinstance(value, bytes):
         return {'base64': base64.b64encode(value).decode('ascii')}
@@ -95,8 +94,8 @@ def instrument(adapter, custody, capture, escrow):
     def opened(request, *args, **kwargs):
         url = request.full_url
         host = urllib.parse.urlsplit(url).hostname
-        if host not in {'fulbright.de', 'www.fulbright.de'}:
-            return original_open(request, *args, **kwargs)
+        require(host == 'www.fulbright.de' and request.get_method() == 'GET' and request.data is None,
+                'Unexpected adapter transport outside authorized publisher GETs')
         require(url in {adapter.SOURCE_URL, 'https://www.fulbright.de/robots.txt'},
                 'URL outside exact native collection scope')
         headers = {k.casefold(): v for k, v in request.header_items()}
