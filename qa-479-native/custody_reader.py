@@ -13,9 +13,9 @@ import zipfile
 
 from authority import API, OPENER, REPOSITORY, USER, api, canonical, digest, matches, require
 
-BRANCH = 'qa/479-germany-state-only-v2'
+BRANCH = 'qa/479-germany-state-only-v3'
 REF = 'refs/heads/' + BRANCH
-WORKFLOW = '.github/workflows/verify-479-state-v2.yml'
+WORKFLOW = '.github/workflows/verify-479-state-v3.yml'
 FAILED = ((44846595786, 136667720087), (44652934438, 136012035069))
 FAILED_HEAD = '11fa75c3e745c5e0d8c12ee8a5c9f8371417d764'
 
