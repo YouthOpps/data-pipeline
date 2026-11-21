@@ -329,7 +329,8 @@ run/job and two retained archive identities can supply the incident-specific
 receipt under #479. The incident path is off until this receipt is installed.
 The first normal dispatch must have a separate unedited maintainer grant on
 #479 naming its exact main SHA and receipt digest. The workflow rechecks all
-63 previous run identities at restore and again after startup quiet. A later
+63 previous run identities at restore and after each pacing wait, before
+persisting a request reservation. A later
 owner or rerun cannot use the receipt. The adapter validates the original
 predecessor archive and merges its starts and MAX timing limits with the
 reviewer-decoded settled native journal. An unresolved owner, integrity

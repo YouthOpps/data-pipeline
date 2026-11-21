@@ -1328,6 +1328,11 @@ def publisher_pace():
                     "Publisher backoff exceeds collection budget", "access"
                 )
             time.sleep(wait)
+        if _ISSUE479_ADMITTED:
+            verify_handoff_owner()
+            check_deadline()
+            if _PHASE_END - time.monotonic() < 120:
+                raise AdapterError("Handback verification exhausted collection time", "access")
         now = time.time()
         if now < target:
             raise AdapterError(
@@ -1354,7 +1359,7 @@ def publisher_pace():
 def publisher_attempt(publisher, inventory=False):
     """Retain completion gates around each actual publisher transport."""
     global _PUBLISHER_COMPLETED_MONOTONIC, _PUBLISHER_GATE_FAILED
-    global _PAGE_COMPLETED, _LOCAL_START_VERIFIED, _ISSUE479_FIRST_WIRE
+    global _PAGE_COMPLETED, _LOCAL_START_VERIFIED
     if not publisher:
         yield
         return
@@ -1367,9 +1372,6 @@ def publisher_attempt(publisher, inventory=False):
             "Exclusive healthy publisher collector required", "access"
         )
     check_deadline()
-    if _ISSUE479_ADMITTED and not _ISSUE479_FIRST_WIRE:
-        verify_handoff_owner()
-        _ISSUE479_FIRST_WIRE = True
     if os.environ.get("GITHUB_ACTIONS") != "true" and not _LOCAL_START_VERIFIED:
         verify_local_workflow_pause()
         _LOCAL_START_VERIFIED = True
@@ -2161,7 +2163,6 @@ def read_inert_artifact(identity, artifact_id, digest=None):
 # path remains unavailable until the exact artifact, journal and owner are known.
 _ISSUE479_RECEIPT = None
 _ISSUE479_ADMITTED = False
-_ISSUE479_FIRST_WIRE = False
 _ISSUE479_FRONTIER = (44846595786, 1, SOURCE_ID)
 _ISSUE479_HISTORY = "3870ea5f8d783da017211851eea9924bb0bb4dc6e62e7788e9dec75d86461709"
 _ISSUE479_ORIGINAL = "d4d4c9280a122f4e33e0242cb40fa682d69d8f801de63cbdd6e9663eb35835c1"
