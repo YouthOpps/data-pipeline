@@ -30,6 +30,7 @@ import ipaddress
 import json
 import math
 import os
+from pathlib import Path
 import re
 import signal
 import ssl
@@ -267,7 +268,12 @@ def dated_calls(root):
         if nodes(node, "p", "deadline") and nodes(node, "h3")
     ]
     if not cards:
-        message = "No published award cards with titles and deadlines"
+        message = (
+            "No published award cards with titles and deadlines"
+            f"; boxes={len(nodes(root, 'div', 'box'))}"
+            f"; headings={len(nodes(root, 'h3'))}"
+            f"; deadlines={len(nodes(root, 'p', 'deadline'))}"
+        )
         if root.response_evidence:
             evidence = root.response_evidence
             message += (
@@ -2895,7 +2901,98 @@ def workflow_mode_guard():
             )
 
 
-def production_maintenance_state(incoming):
+_HU481_DECISION = "https://github.com/YouthOpps/data-pipeline/issues/481#issuecomment-7060584820"
+_HU481_FLOOR_DIGEST = "accbdbefa7c15910afd7bee07f15da9a5001085e66ec8bf278d16e268054646f"
+_HU481_PRODUCER = (44834154987, 1, SOURCE_ID, "11fa75c3e745c5e0d8c12ee8a5c9f8371417d764")
+_HU481_DIAGNOSTIC = 44889284262
+_HU481_HEAD = "b2050609e12561fbdffd3412ae91e2b8fed26c30"
+
+
+def verify_diagnostic_handback(latest, incoming, artifact_id, artifact_digest):
+    """Bind the reviewed, unsent reservation to its unique canonical predecessor."""
+    if latest != _HU481_PRODUCER:
+        rows = sorted(_HISTORY_COMPLETED)
+        prior = [i for i, row in enumerate(rows) if row[2:] == _HU481_PRODUCER]
+        if len(prior) != 1 or prior[0] + 1 >= len(rows):
+            raise AdapterError("Missing Hungary handback production transition", "access")
+        first = rows[prior[0] + 1]
+        if first[1] <= 1795253081 or rows[-1][2:] != latest:
+            raise AdapterError("Unexpected Hungary handback chronology", "access")
+        # The first successor must have run the reviewed collector and workflow.
+        # The immutable workflow pins the collector blob without self-referencing it.
+        collector = workflow_api(f"/contents/adapters/hu-fulbright-hungary/adapter.py?ref={first[5]}")
+        pinned = os.environ.get("HUNGARY_HANDOFF_COLLECTOR_BLOB", "")
+        if not re.fullmatch(r"[a-f0-9]{40}", pinned) or collector.get("sha") != pinned:
+            raise AdapterError("First Hungary production successor ran another collector", "access")
+        path = ".github/workflows/fetch-hu-fulbright-hungary.yml"
+        blob = workflow_api(f"/contents/{path}?ref={first[5]}")
+        if blob.get("type") != "file" or blob.get("path") != path or blob.get("encoding") != "base64":
+            raise AdapterError("Hungary handback successor workflow unavailable", "access")
+        content = base64.b64decode("".join(blob["content"].splitlines()), validate=True).decode()
+        seeds = re.findall(r"^\s+HUNGARY_PACING_MAINTENANCE: '([^']+)'$", content, re.M)
+        blob_pins = re.findall(r"^\s+HUNGARY_HANDOFF_COLLECTOR_BLOB: '([^']+)'$", content, re.M)
+        if seeds != [os.environ["HUNGARY_PACING_MAINTENANCE"]] or blob_pins != [pinned]:
+            raise AdapterError("First Hungary production successor did not inherit handback", "access")
+        return
+    code = Path(__file__).read_bytes()
+    actual_blob = hashlib.sha1(f"blob {len(code)}\0".encode() + code).hexdigest()
+    if os.environ.get("HUNGARY_HANDOFF_COLLECTOR_BLOB") != actual_blob:
+        raise AdapterError("Original Hungary recovery collector differs", "access")
+    digest = hashlib.sha256(json.dumps(incoming, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if (artifact_id != 14676763124
+            or artifact_digest != "sha256:2a606102fcf91190a0b4fe704e45d1ba899a6112a800c13daa7d77c89b9b4a77"
+            or digest != "92272526be8ca99dd01fe4be39add18bbd1f0e85becba59b535ac62205924a01"):
+        raise AdapterError("Original Hungary handback predecessor differs", "access")
+    path = ".github/workflows/qa-hungary481-homepage-research.yml"
+    branch = "qa/hungary481-homepage-research"
+    owner = "/actions/workflows/425838931"
+    definition = workflow_api(owner)
+    history = workflow_api(owner + "/runs?per_page=2")
+    expected_run = dict(id=_HU481_DIAGNOSTIC, workflow_id=425838931, run_attempt=1, head_sha=_HU481_HEAD,
+                        head_branch=branch, path=path, event="push", status="completed", conclusion="failure")
+    runs = history.get("workflow_runs")
+    if (definition.get("id") != 425838931 or definition.get("state") != "disabled_manually"
+            or definition.get("path") != path or history.get("total_count") != 1 or not isinstance(runs,list)
+            or len(runs) != 1 or any(runs[0].get(k) != v for k,v in expected_run.items())
+            or any(runs[0][k]["full_name"] != "YouthOpps/data-pipeline" for k in ("repository","head_repository"))
+            or any(runs[0][k]["id"] != 12278069 for k in ("actor","triggering_actor"))):
+        raise AdapterError("Retired Hungary diagnostic ownership differs", "access")
+    jobs = workflow_api(f"/actions/runs/{_HU481_DIAGNOSTIC}/attempts/1/jobs?per_page=2")
+    if jobs.get("total_count") != 1 or len(jobs.get("jobs",[])) != 1:
+        raise AdapterError("Hungary diagnostic job ambiguous", "access")
+    job = jobs["jobs"][0]
+    fields = dict(id=136801343527, run_id=_HU481_DIAGNOSTIC, run_attempt=1, head_sha=_HU481_HEAD,
+                  head_branch=branch, name="research", status="completed", conclusion="failure",
+                  completed_at="2026-11-21T09:24:41Z")
+    steps = {s["name"]:s["conclusion"] for s in job.get("steps",[])}
+    if (any(job.get(k) != v for k,v in fields.items())
+            or steps.get("Inspect the reviewed Hungary homepage response") != "failure"
+            or steps.get("Retain original publisher custody receipts") != "success"
+            or steps.get("Retain encrypted response evidence") != "success"):
+        raise AdapterError("Hungary diagnostic job disposition differs", "access")
+    expected = {
+        (14700993720, "hu481-44889284262-1-pending-01",
+         "sha256:c2b1d14186d48a02da2257d2f9944d404e0e0e44a1e5c66ad0664e4222be2792"),
+        (14701168290, "hu481-44889284262-1-pending-02",
+         "sha256:4743fdebb364850b972ef96db2992c1a6a25244d405f6c59a7cfdddab075d5b9"),
+        (14701516474, "hu481-44889284262-1-settled-01",
+         "sha256:748078785f8dcfec3ba0d2a88fa438764127f23bef59e248f65e11bb58fe6b85"),
+        (14701785047, "hungary481-homepage-capture-1",
+         "sha256:8e054b9f3c67b9318943434850a2fca51effde775cfd639c6e1a0578849b8b11"),
+        (14701213346, "hungary481-homepage-state-1",
+         "sha256:23e65b34d28c6d2164494825181d5c32aa17a36c01862ca86bf029318dc7d145"),
+    }
+    result = workflow_api(f"/actions/runs/{_HU481_DIAGNOSTIC}/artifacts?per_page=6")
+    rows = result.get("artifacts")
+    if (result.get("total_count") != 5 or not isinstance(rows,list) or len(rows) != 5
+            or {(r.get("id"), r.get("name"), r.get("digest")) for r in rows} != expected
+            or any(r.get("expired") is not False or r["workflow_run"]["id"] != _HU481_DIAGNOSTIC
+                   or r["workflow_run"]["head_sha"] != _HU481_HEAD
+                   or r["workflow_run"]["head_branch"] != branch for r in rows)):
+        raise AdapterError("Hungary diagnostic archive ownership differs", "access")
+
+
+def production_maintenance_state(incoming, *, owner=None):
     """Preserve full native MAX on the first production family transition."""
     raw = os.environ.get("HUNGARY_PACING_MAINTENANCE", "")
     if not raw:
@@ -2913,13 +3010,19 @@ def production_maintenance_state(incoming):
             or approval["schema"] != 1
             or approval["family"] != FAMILY
             or not isinstance(approval["evidence"], str)
-            or not re.fullmatch(
+            or approval["evidence"] != _HU481_DECISION and not re.fullmatch(
                 r"https://github\.com/YouthOpps/data-pipeline/issues/(?:278|367)"
                 r"#issuecomment-[1-9][0-9]*",
                 approval["evidence"],
             )
         ):
             raise ValueError("Untrusted full-native approval")
+        if approval["evidence"] == _HU481_DECISION:
+            compact = json.dumps(approval["state"], sort_keys=True, separators=(",", ":")).encode()
+            if hashlib.sha256(compact).hexdigest() != _HU481_FLOOR_DIGEST or owner is None:
+                raise ValueError("Hungary diagnostic floor mismatch")
+            latest, artifact_id, artifact_digest = owner
+            verify_diagnostic_handback(latest, incoming, artifact_id, artifact_digest)
         return merge_budgets(incoming, approval["state"], time.time())
     except Exception:
         raise AdapterError(
@@ -2976,7 +3079,8 @@ def restored_state():
             "Invalid Fulbright Hungary artifact binding", "access"
         )
     return production_maintenance_state(
-        download_inert_artifact(latest, artifact["id"], artifact["digest"])
+        download_inert_artifact(latest, artifact["id"], artifact["digest"]),
+        owner=(latest, artifact["id"], artifact["digest"]),
     )
 
 
