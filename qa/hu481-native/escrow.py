@@ -19,7 +19,7 @@ def require(condition, message):
 
 
 def upload(identity, stem, receipt, api, seal):
-    require(re.fullmatch(r"(pending|settled)-0[1-6]", stem), "Unexpected escrow checkpoint")
+    require(re.fullmatch(r"(?:(?:pending|settled)-0[1-6]|terminal)", stem), "Unexpected escrow checkpoint")
     name = f"hu481-native-{identity['run_id']}-{identity['run_attempt']}-{stem}"
     bundle = Path(os.environ["RUNNER_TEMP"]).parent / "_actions/actions/upload-artifact" / UPLOAD_REVISION / "dist/upload/index.js"
     require(hashlib.sha256(bundle.read_bytes()).hexdigest() == UPLOAD_SHA256, "Artifact client differs")

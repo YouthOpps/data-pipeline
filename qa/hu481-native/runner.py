@@ -60,6 +60,7 @@ data_output={}
 def gate():
     q.paused(a,scope)
     q.demand(identity is not None and job_limit is not None,"Native job is unbound")
+    q.verify_grant(a,identity,scope)
     a._RUN_END=min(job_limit,a._RUN_END)
 
 def history():
@@ -196,12 +197,26 @@ try:
         q.demand(len(opens)==len(routes) and not pending and final is not None,"Incomplete source evidence")
 except BaseException as exc:
     diagnostic=type(exc).__name__+": "+str(exc)
+pending_names={f.name[:10] for f in out.glob("pending-[0-9][0-9].json")}
+settled_names={"pending-"+f.name[8:10] for f in out.glob("settled-[0-9][0-9]-ack.json")}
+unresolved=bool(pending_names - settled_names)
 raw=q.canonical({"identity":identity,"native_exit":native_exit,"observer_error":diagnostic,"stdout":stdout.getvalue(),
                  "stderr":stderr.getvalue(),"opens":opens,"journal":journal,"final":final,"consumer":data_output})
+if identity is not None:
+    terminal={"identity":identity,"number_opened":len(opens),"native_exit":native_exit,
+              "settled_count":len(settled_names),"unresolved":unresolved or pending,
+              "final_journal":final,"evidence_sha256":digest(raw),
+              "request_ids":[r["reservation"]["state"]["request_id"] for r in opens],
+              "observer_error":None if diagnostic is None else diagnostic.split(":",1)[0],
+              "remote_checkpoints":{f.stem.replace("-ack",""):json.loads(f.read_bytes())
+                                    for f in sorted(out.glob("*-ack.json"))}}
+    try:durable("terminal",terminal)
+    except Exception as exc:
+        diagnostic=diagnostic or ("Terminal escrow failure: "+type(exc).__name__)
 sealed=q.seal(raw)
 q.store(out/"evidence.cms",sealed)
 summary={"identity":identity,"native_exit":native_exit,"observer_error":None if not diagnostic else diagnostic.split(":",1)[0],
-         "physical_requests":len(opens),"pending":pending,"evidence_sha256":digest(sealed),"consumers":data_output}
+         "physical_requests":len(opens),"pending":unresolved or pending,"evidence_sha256":digest(sealed),"consumers":data_output}
 q.store(out/"summary.json",q.canonical(summary))
 print(json.dumps(summary))
 raise SystemExit(0 if native_exit==0 and not diagnostic else 1)

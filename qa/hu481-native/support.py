@@ -123,6 +123,8 @@ def authenticate(a, scope, head):
         demand(status.get("status") in {"queued", "requested", "pending", "waiting"} and retry < 4,
                "Hosted research run did not become active")
         time.sleep(2)
+    demand(isinstance(status.get("created_at"), str) and created < status["created_at"],
+           "Grant must predate the original native run")
     definition = a.workflow_api(f"/actions/workflows/{workflow}")
     history = a.workflow_api(f"/actions/workflows/{workflow}/runs?per_page=100")
     jobs = a.workflow_api(f"/actions/runs/{run}/attempts/1/jobs?per_page=100")
@@ -146,7 +148,8 @@ def authenticate(a, scope, head):
            "Active research job start time differs")
     a._RUN_END = min(a._RUN_END, time.monotonic() + 1800 - max(elapsed, 0) - 2)
     return {"run_id": run, "run_attempt": 1, "workflow_id": workflow,
-            "job_id": job["id"], "head": head, "grant": grant["id"], "ref": ref}
+            "job_id": job["id"], "head": head, "grant": grant["id"], "ref": ref,
+            "grant_created": created, "grant_sha256": sha256(grant["body"].encode()).hexdigest()}
 
 
 def verify_inventory(snapshot, scope):
@@ -183,3 +186,12 @@ def original_ack(a):
                 "state": a.validate_budget(json.loads(raw))}
 
 
+
+
+def verify_grant(a, identity, scope):
+    grant = a.workflow_api(f"/issues/comments/{identity['grant']}")
+    demand(grant.get("id") == identity["grant"] and owner(grant.get("user"), scope["maintainer_account"])
+           and grant.get("issue_url") == f"https://api.github.com/repos/{REPOSITORY}/issues/{scope['issue']}"
+           and grant.get("created_at") == grant.get("updated_at") == identity["grant_created"]
+           and isinstance(grant.get("body"), str) and sha256(grant["body"].encode()).hexdigest() == identity["grant_sha256"],
+           "Native grant changed or was withdrawn")
