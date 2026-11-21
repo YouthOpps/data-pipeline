@@ -1,6 +1,6 @@
 {
   "branch": "qa/hungary481-homepage-research",
-  "enabled": false,
+  "enabled": true,
   "issue": 481,
   "maintainer_account": 12278069,
   "origin": "YouthOpps/data-pipeline",
