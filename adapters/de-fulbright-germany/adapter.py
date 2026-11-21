@@ -2159,9 +2159,19 @@ def read_inert_artifact(identity, artifact_id, digest=None):
             ("Invalid or unavailable family pacing artifact"), ("access")
         ) from None
 
-# Filled only from independently inspected terminal native evidence. The incident
-# path remains unavailable until the exact artifact, journal and owner are known.
-_ISSUE479_RECEIPT = None
+# Original signed native settlement. A separate grant must bind its digest to
+# the exact deployed main SHA before the single production dispatch.
+_ISSUE479_RECEIPT = {'anchor': {'id': 14701782047,
+            'sha256': 'f681cf150bab8cdfd6f1e89e58f4b7687307589bea1bf85ed90bc7d9c6299bb7'},
+ 'evidence': {'id': 14701639156,
+              'sha256': '264bad1089460f443f6ce86d0c98b70ca1c5cfa14abe3c15400f85f278483459'},
+ 'head_sha': '6e9c24a54d91310a4fbe1d62672d25434cc2711a',
+ 'job_id': 136805143248,
+ 'journal_base64': 'eyJzY2hlbWEiOjMsImZhbWlseSI6InlvdXRob3Bwcy1kZS1mdWxicmlnaHQtZ2VybWFueS1wdWJsaXNoZXItdjEiLCJvYnNlcnZlZF9hdCI6MTc5NTI1NDAxOS4xNTQxMTE5LCJub3RfYmVmb3JlIjoxNzk1MjU0MDMxLjM1NDExMiwic3RhcnRzIjpbMTc5NTI1NDAwMS4yMjc4NTMzLDE3OTUyNTQwMTUuOTk5NjA3M10sImJsb2NrZWQiOmZhbHNlLCJpbl9mbGlnaHQiOmZhbHNlLCJpbnRlcnZhbCI6MTIuMiwicGFnZV9pbnRlcnZhbCI6MzAsImxlZ2FjeV9yYXRlX2hpc3RvcnlfdW5rbm93biI6dHJ1ZSwicmF0ZV9mYWlsdXJlcyI6MH0=',
+ 'journal_sha256': '12c4b7950442efb4e0217d88d3744329a4b6b39fdf574871470c9a9bee64f430',
+ 'run_id': 44890531348,
+ 'state_sha256': '9a854f6bf45bcdea5c2f6d4acba44b03fd7b5bc86286c22c94786a7175a0ad5b',
+ 'workflow_id': 425847876}
 _ISSUE479_ADMITTED = False
 _ISSUE479_FRONTIER = (44846595786, 1, SOURCE_ID)
 _ISSUE479_HISTORY = "3870ea5f8d783da017211851eea9924bb0bb4dc6e62e7788e9dec75d86461709"

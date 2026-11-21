@@ -326,7 +326,10 @@ pending transactions, MAX constraints and workflow behavior are unchanged.
 
 Only an independently examined original native journal, its exact native
 run/job and two retained archive identities can supply the incident-specific
-receipt under #479. The incident path is off until this receipt is installed.
+receipt under #479. [Native run 44890531348](https://github.com/YouthOpps/data-pipeline/actions/runs/44890531348)
+completed its genuine nonpublishing collection with two physical requests. Its
+signed terminal log and encrypted evidence agreed on the settled journal.
+Production pins native evidence archive 14701639156 and anchor 14701782047.
 The first normal dispatch must have a separate unedited maintainer grant on
 #479 naming its exact main SHA and receipt digest. The workflow rechecks all
 63 previous run identities at restore and after each pacing wait, before
