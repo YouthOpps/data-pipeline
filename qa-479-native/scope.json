@@ -1,10 +1,19 @@
 {
   "adapter_sha256": "40437106973d5956ae73badeaeb527729386dd2dbbf2bd177b38ab090aabc008",
   "approval_issue": 479,
-  "attestation": null,
+  "attestation": {
+    "archive_sha256": "c784687921a2d24ee8436fcfaac62c32659c316f4f78df5a9c1d820f913902cb",
+    "artifact_id": 14701368145,
+    "grant_comment_id": 7060686393,
+    "job_id": 136804605649,
+    "provenance_sha256": "feea660eafdbb037f8ac1a182c73c9e0c752b4d3196ce96043761fe47ced10af",
+    "run_id": 44890354307,
+    "sha": "932cb740495b5108000ed5f288fe88869f0b5d94",
+    "workflow_id": 425846576
+  },
   "candidate": "13e2f396f9a3a7c642d3a48c47d6c0eaf0e109da",
   "candidate_pr": 480,
-  "enabled": false,
+  "enabled": true,
   "production": {
     "archive_sha256": "d4d4c9280a122f4e33e0242cb40fa682d69d8f801de63cbdd6e9663eb35835c1",
     "archive_size": 463,
