@@ -488,6 +488,13 @@ def request_bytes(
             result = response.status, response.headers, body
         if result is None:
             raise AdapterError("Publisher response ended without assessment", "access")
+        if publisher and not robots and visible_challenge(body, response.headers):
+            budget["blocked"] = True
+            budget["html_global_hold"] = True
+            budget["observed_at"] = time.time()
+            write_budget(budget)
+            settled = True
+            raise AdapterError("Visible publisher challenge or denial", "access")
         settled = True
         return result
     except HeaderRateLimitStop as error:
@@ -2121,18 +2128,12 @@ def has_429_head_refusal(body, headers):
     ))
 
 
-def reject_visible_challenge(body, headers, *, challenge_only=False):
+def visible_challenge(body, headers, *, challenge_only=False):
     if challenge_only and has_429_head_refusal(body, headers):
-        with locked_budget():
-            state = load_budget()
-            state["blocked"] = True
-            state["html_global_hold"] = True
-            state["observed_at"] = time.time()
-            write_budget(state)
-        raise AdapterError("Visible publisher challenge or denial", "access")
+        return True
 
     if "html" not in headers.get("Content-Type", "").lower():
-        return
+        return False
     parser = VisibleText()
     parser.feed(body.decode("utf-8", "replace"))
     text = " ".join(" ".join(parser.text).lower().split())
@@ -2151,14 +2152,7 @@ def reject_visible_challenge(body, headers, *, challenge_only=False):
             "request blocked",
             "unusual traffic",
         )
-    if any(phrase in text for phrase in phrases):
-        with locked_budget():
-            state = load_budget()
-            state["blocked"] = True
-            state["html_global_hold"] = True
-            state["observed_at"] = time.time()
-            write_budget(state)
-        raise AdapterError("Visible publisher challenge or denial", "access")
+    return any(phrase in text for phrase in phrases)
 
 
 def source_request(
@@ -2193,10 +2187,6 @@ def source_request(
                 else None
             ),
         )
-        if not robots:
-            reject_visible_challenge(
-                body, headers, challenge_only=status == 429
-            )
         if status in {301, 302, 303, 307, 308}:
             if not headers.get("Location") or hop == 3:
                 raise AdapterError("Invalid source redirect", "fetch")
