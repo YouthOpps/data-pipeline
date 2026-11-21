@@ -257,3 +257,7 @@ seed, application command or workflow blob is required. Independent handoff
 review passed, including all capacity and negative controls. Maintainer PR merge
 and verification of the single automatic hosted publication/site refresh
 remain required before issue closure.
+
+An explicit French call for residency applications supplies evidence of an
+opportunity even when the subject has no more specific catalogue category.
+The original category and publisher article identity remain authoritative.
