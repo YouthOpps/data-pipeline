@@ -1998,19 +1998,28 @@ def write_owned_state(binding, state, *, restrictive_owner=None):
         if identity(runner.lstat()) != parent_id:
             raise Stop("Original artifact parent differs")
         raw, state_id = create_once(parent, target.name, payload)
-        if (identity(runner.lstat()) != parent_id or identity(target.lstat()) != state_id
-                or target.read_bytes() != raw):
-            raise Stop("Closed original artifact changed")
+        if restrictive_owner is not None:
+            # No source request or publication was made. Only the latest verified
+            # predecessor may pass on its still-restrictive state to this job.
+            if workflow_binding() != binding or workflow_history(binding) != restrictive_owner:
+                raise Stop("Production ownership changed before restrictive state export")
+        descriptor = os.open(target.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        descriptor_identity = identity(os.fstat(descriptor))
+        try:
+            before = os.fstat(descriptor)
+            private_file(before)
+            if (identity(before) != state_id or os.pread(descriptor, len(raw) + 1, 0) != raw
+                    or version(before) != version(os.fstat(descriptor))
+                    or identity(runner.lstat()) != parent_id
+                    or identity(os.stat(target.name, dir_fd=parent, follow_symlinks=False)) != state_id):
+                raise Stop("Closed original artifact changed")
+        finally:
+            checked_close([(descriptor, descriptor_identity)], sys.exc_info()[1])
     except BaseException as error:
         primary = error
         raise
     finally:
         checked_close([(parent, parent_id)], primary)
-    if restrictive_owner is not None:
-        # No source request or publication was made. Only the latest verified
-        # predecessor may pass on its still-restrictive state to this job.
-        if workflow_binding() != binding or workflow_history(binding) != restrictive_owner:
-            raise Stop("Production ownership changed before restrictive state export")
     output = Path(os.environ["GITHUB_OUTPUT"])
     fd = os.open(output, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
