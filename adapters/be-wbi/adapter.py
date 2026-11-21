@@ -895,8 +895,8 @@ def wbi_single_record(native, title, body, url):
         kind = "institutional-grant"
     if category == "other":
         # A call for residency applications establishes the opportunity kind.
-        residency_call = re.search(
-            r"\bappel (?:de|à) candidatures?\s*[|:–—-]\s*résidence\b", wording
+        residency_call = "/actualites/" in url and re.match(
+            r"appel (?:de|à) candidatures?\s*[|:–—-]\s*résidence\b", wording
         )
         kind = "opportunity" if residency_call else "unknown"
     summaries = {
