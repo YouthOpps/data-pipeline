@@ -1,6 +1,6 @@
 {
   "branch": "qa/hungary481-native-validation",
-  "enabled": false,
+  "enabled": true,
   "files": {
     ".github/workflows/fetch-hu-fulbright-hungary.yml": "cb16c9be4eff36aff13c5bbc7eea6be98a59e4e702caf5abbae6e9c8ce394995",
     ".github/workflows/qa-hungary481-native-validation.yml": "709219bb8047f80174273d94fe647f0ac265236e3e3fec92d842bb27848b7960",
