@@ -1,0 +1,22 @@
+name: Verify IKY reservation persistence offline
+on:
+  push:
+    branches:
+      - qa/273-iky-reservation-restart
+permissions:
+  contents: read
+jobs:
+  offline:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && github.run_attempt == '1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exercise base failure and candidate restart controls without publisher traffic
+        run: |
+          git show 286f436823a6e4d262469a533e2e22b6b429c1db:adapters/gr-iky/adapter.py > before.py
+          python -B qa-273/baseline.py
+          python -B qa-273/fixed.py
+          python -B qa-273/edges.py
