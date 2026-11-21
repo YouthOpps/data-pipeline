@@ -298,6 +298,7 @@ def merge_refusal_scope(combined, local, incoming):
         # A genuinely empty local runner has no hold. An unknown/mixed old
         # blocked state cannot inherit the API-only scope of an artifact.
         local_global = local["blocked"]
+    combined["request_pending"] = local.get("request_pending", False) or incoming.get("request_pending", False)
     combined["blocked"] = True
     combined["html_global_hold"] = (
         incoming["html_global_hold"] or local_global
@@ -314,6 +315,8 @@ def pace(url, interval=12.2):
     state = locked_budget()
     try:
         budget = load_budget()
+        if budget.get("request_pending", False):
+            raise AdapterError("Unresolved publisher request", "access")
         if (
             not scoped_refusal_valid(budget)
             or budget["html_global_hold"]
@@ -357,6 +360,7 @@ def pace(url, interval=12.2):
                     "Retained pacing exceeds collection budget", "access"
                 )
             if ready <= now:
+                budget["request_pending"] = True
                 budget["starts"] = starts + [now]
                 budget["observed_at"] = now
                 write_budget(budget)
@@ -404,6 +408,8 @@ def request_bytes(
         if robots and urllib.parse.urlsplit(url).path != "/robots.txt":
             raise AdapterError("Robots purpose requires robots.txt", "access")
     state, budget = pace(url, interval) if publisher else (None, None)
+    settled = False
+    rate_stop = result = None
     try:
         request = urllib.request.Request(
             url,
@@ -470,22 +476,34 @@ def request_bytes(
                 budget["observed_at"] = time.time()
                 write_budget(budget)
             if publisher and response.status == 429:
-                raise HeaderRateLimitStop(
+                rate_stop = HeaderRateLimitStop(
                     "Publisher stopped: HTTP 429", "access", 429
                 )
+                raise rate_stop
             body = response.read(byte_limit + 1)
             if len(body) > byte_limit:
                 raise AdapterError(
                     "Response exceeds bounded native limit", "fetch"
                 )
-            return response.status, response.headers, body
+            result = response.status, response.headers, body
+        if result is None:
+            raise AdapterError("Publisher response ended without assessment", "access")
+        settled = True
+        return result
+    except HeaderRateLimitStop as error:
+        # A normal header-only stop exits the response scope after its 429
+        # restrictions have been acknowledged. Close failures keep the marker.
+        settled = error is rate_stop
+        raise
     finally:
         if state is not None:
             _PUBLISHER_GATE_FAILED = True
             try:
-                budget["completed"] = budget["observed_at"] = time.time()
-                write_budget(budget)
-                _PUBLISHER_GATE_FAILED = False
+                if settled and not _GUARD_FATAL:
+                    budget["request_pending"] = False
+                    budget["completed"] = budget["observed_at"] = time.time()
+                    write_budget(budget)
+                    _PUBLISHER_GATE_FAILED = False
             finally:
                 state.close()
 
@@ -959,9 +977,9 @@ def validate_budget(state):
         "rate_limit_until",
         "completed",
     }
-    if not isinstance(state, dict) or set(state) not in (
+    if not isinstance(state, dict) or set(state) - {"request_pending"} not in (
         base_keys, base_keys | {"refusal_scope", "html_global_hold"}
-    ):
+    ) or type(state.get("request_pending", False)) is not bool:
         raise AdapterError("Invalid publisher pacing state", "access")
     if "refusal_scope" in state and not scoped_refusal_valid(state):
         raise AdapterError("Unrecognised refusal annotation", "access")
