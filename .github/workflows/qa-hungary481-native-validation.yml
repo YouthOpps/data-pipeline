@@ -1,0 +1,51 @@
+name: Fulbright Hungary original native acceptance
+on:
+  push:
+    branches: [qa/hungary481-native-validation]
+permissions:
+  contents: read
+  actions: read
+  issues: read
+concurrency:
+  group: youthopps-hu-fulbright-hungary-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  native:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 0c6ff4818953aca266178c6c5e84cdd90e6f6550
+          path: _website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run full original Hungary standalone test
+        uses: ./qa/hu481-native
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HU481_WEBSITE: ${{ github.workspace }}/_website
+      - name: Retain encrypted native result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hu481-native-final-${{ github.run_id }}-1
+          path: ${{ runner.temp }}/hu481-native/evidence.cms
+          retention-days: 7
+          if-no-files-found: error
+      - name: Retain native summary and custody checkpoints
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hu481-native-summary-${{ github.run_id }}-1
+          path: ${{ runner.temp }}/hu481-native/*.json
+          retention-days: 90
+          if-no-files-found: error
