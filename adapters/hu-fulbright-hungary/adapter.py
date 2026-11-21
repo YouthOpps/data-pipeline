@@ -3228,6 +3228,50 @@ def verify_hu481_native_archives(native):
         raise AdapterError("Hungary exact native proof archives differ", "access")
 
 
+_HU481_PREWIRE = (44893106360, 1, SOURCE_ID, "509e127831977a3e71fd0fad4f5fc7bacc71175b")
+_HU481_PREWIRE_OWNER = (44890448073, 1, SOURCE_ID, "5d509a0f117020ab8d2ed30e1b538c24d4fb21b3")
+
+
+def restore_hu481_prewire(latest, inventory):
+    """Recover only the exact independently reviewed pre-publisher infrastructure failure."""
+    rows = sorted(_HISTORY_COMPLETED)
+    if (latest != _HU481_PREWIRE or inventory != {"total_count": 0, "artifacts": []}
+            or len(rows) < 2 or [row[2:] for row in rows[-2:]] != [_HU481_PREWIRE_OWNER, latest]):
+        raise AdapterError("Hungary prewire ownership changed", "access")
+    grant = workflow_api("/issues/comments/7061138411")
+    if (grant.get("issue_url") != _WORKFLOW_GITHUB + "/issues/481"
+            or grant.get("user", {}).get("id") != 12278069
+            or grant.get("author_association") != "MEMBER"
+            or grant.get("created_at") != "2026-11-21T10:17:58Z"
+            or grant.get("updated_at") != grant["created_at"]
+            or hashlib.sha256(grant.get("body", "").encode()).hexdigest()
+            != "b4bbb3ea7c66fc8a48e7ddf74d93bf450085c9b9902384d1adedb2c56159f53d"):
+        raise AdapterError("Hungary prewire decision changed", "access")
+    jobs = workflow_api("/actions/runs/44893106360/attempts/1/jobs?per_page=2")
+    if jobs.get("total_count") != 1 or len(jobs.get("jobs", [])) != 1:
+        raise AdapterError("Hungary prewire job inventory changed", "access")
+    job = jobs["jobs"][0]
+    fields = dict(id=136812964857, run_id=latest[0], run_attempt=1, head_sha=latest[3],
+                  head_branch="main", status="completed", conclusion="failure",
+                  completed_at="2026-11-21T10:11:51Z")
+    steps = {step["name"]: step["conclusion"] for step in job["steps"]}
+    if (any(job.get(key) != value for key, value in fields.items())
+            or steps.get("Collect and publish this source") != "failure"
+            or steps.get("Preserve owned publisher pacing state") != "skipped"):
+        raise AdapterError("Hungary prewire disposition changed", "access")
+    archive = 14701479702
+    digest = "sha256:635af08d695299322c4d17a529566e2121d6916838d98078ed4d542fe249e1a0"
+    state = download_inert_artifact(_HU481_PREWIRE_OWNER, archive, digest)
+    original = production_maintenance_state(state, owner=(latest, archive, digest))
+    proof = json.loads(os.environ["HUNGARY_NATIVE_HANDOFF"])
+    encoded = json.dumps(original, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    if hashlib.sha256(encoded).hexdigest() != proof["original_merged_sha256"]:
+        raise AdapterError("Hungary prewire predecessor state changed", "access")
+    combined = adopt_completed_hu481_native(original, latest, archive)
+    verify_hu481_native_archives(proof["native"])
+    return combined
+
+
 def restored_state():
     """Newest exact artifact is mandatory after the one reviewed legacy set."""
     latest = latest_family_run()
@@ -3242,6 +3286,8 @@ def restored_state():
         return production_maintenance_state(legacy_transition_state())
     run_id, attempt, source, head = latest
     result = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=100")
+    if latest == _HU481_PREWIRE:
+        return restore_hu481_prewire(latest, result)
     artifacts = result.get("artifacts")
     if (
         not isinstance(artifacts, list)

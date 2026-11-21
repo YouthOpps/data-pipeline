@@ -10,6 +10,7 @@ on:
     - cron: '12 17 * * *'
 permissions:
   actions: read
+  issues: read
   contents: read
 concurrency:
   group: youthopps-hu-fulbright-hungary-publisher-v1
