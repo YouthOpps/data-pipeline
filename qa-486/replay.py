@@ -52,7 +52,18 @@ def run(case):
         stack.enter_context(patch.dict(os.environ,{'RUNNER_TEMP':temp,'KLAGENFURT_PACING_ARTIFACT_PATH':str(target),'GITHUB_OUTPUT':str(out)}))
         obj(sys,'argv',['adapter.py','--publish']);obj(a,'HOSTED',True)
         obj(a,'workflow_binding',return_value=binding)
-        obj(a,'workflow_history',side_effect=[owner,(3,123,1,head) if case=='owner-change' else owner])
+        checks=iter((1,2))
+        def history(current):
+            assert current==binding
+            if next(checks)==2:
+                if case=='owner-change':return (3,123,1,head)
+                if case=='target-replacement':
+                    replacement=root/'replacement'
+                    replacement.write_bytes(target.read_bytes())
+                    replacement.chmod(0o600)
+                    os.replace(replacement,target)
+            return owner
+        obj(a,'workflow_history',side_effect=history)
         obj(a,'authenticated_source_hash',return_value=origin_sha)
         def api(path):
             assert path == f'/actions/runs/{previous}/artifacts?per_page=100'
@@ -84,5 +95,5 @@ def run(case):
         else:assert not out.read_bytes()
         if case in ('missing','corrupt','dirty'):assert not target.exists()
         if case=='preexisting':assert target.read_bytes()==b'existing'
-for c in ('pending','missing','corrupt','owner-change','preexisting','dirty'):run(c)
+for c in ('pending','missing','corrupt','owner-change','preexisting','dirty','target-replacement'):run(c)
 print('PASS actual historical pending bytes, refusal, current export identity; missing/corrupt/changed-owner/collision/dirty state fail closed; zero publisher and data requests.')
