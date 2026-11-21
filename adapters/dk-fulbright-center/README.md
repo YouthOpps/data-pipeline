@@ -547,3 +547,9 @@ command, existing daily schedule and serialized family remain unchanged. Native
 acceptance and committed handoff readiness do not establish successful hosted
 publication or live indexing. Those require the actual post-merge producer,
 owned artifact, data-source pair and website verification.
+
+A received response retains its physical reservation until its body has been
+handled and its response context has closed successfully. Entry, body or
+close failures prevent another publisher opener in the same collection.
+An ordinary connection failure before any response still follows the
+existing bounded retry path.

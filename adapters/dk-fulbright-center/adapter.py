@@ -4144,7 +4144,7 @@ def publisher_attempt(inventory=False):
     try:
         yield frame
     except PolicyStop:
-        frame["assessed"] = True
+        frame["assessed"] = not _PUBLISHER_GATE_FAILED
         raise
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         ordinary_no_response = (
@@ -4508,11 +4508,7 @@ def request_bytes(
                 ) from None
             raise
         frame["received"] = True
-        with (
-            header_rate_limit_response(response)
-            if response.status == 429
-            else response
-        ):
+        with publisher_response(response, frame):
             status, response_headers = response.status, response.headers
             record_retry_after(
                 response_headers.get_all("Retry-After", []), status
@@ -7207,22 +7203,40 @@ def close_directory_descriptor(descriptor, expected):
 
 
 @contextlib.contextmanager
-def header_rate_limit_response(response):
-    """Defer an assessed policy stop until response closure is verified."""
-    stop = None
+def publisher_response(response, frame):
+    """Assess a received response only after successful body handling and close."""
+    primary = None
+    entered = False
     try:
         with response:
+            entered = True
             try:
                 yield
-            except PolicyStop as error:
-                stop = error
+            except BaseException as error:
+                primary = error
     except BaseException as error:
-        error._header429_unassessed = True
-        with contextlib.suppress(BaseException):
-            journal_failure()
+        if not entered:
+            with contextlib.suppress(BaseException):
+                response.close()
+        frame["assessed"] = False
+        error._response_unassessed = True
+        if response.status == 429:
+            error._header429_unassessed = True
+        journal_failure()
+        if primary is not None:
+            primary._response_unassessed = True
+            if response.status == 429:
+                primary._header429_unassessed = True
+            raise primary from error
         raise
-    if stop is not None:
-        raise stop
+    if primary is not None:
+        if not isinstance(primary, PolicyStop):
+            frame["assessed"] = False
+            primary._response_unassessed = True
+            if response.status == 429:
+                primary._header429_unassessed = True
+            journal_failure()
+        raise primary
 
 
 if __name__ == "__main__":
