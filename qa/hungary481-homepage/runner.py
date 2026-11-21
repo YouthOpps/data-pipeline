@@ -1,4 +1,4 @@
-"""Capture the exact homepage through the Study in Croatia transport."""
+"""Capture the exact homepage through the original Fulbright Hungary transport."""
 
 import base64
 import contextlib
@@ -15,6 +15,8 @@ import subprocess
 import time
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
+
+import escrow
 
 
 HERE = Path(__file__).resolve().parent
@@ -312,13 +314,16 @@ def instrument(a, scope, pins, wire, output, identity):
                and state["request_inventory"] == (url == ROUTES[1])
                and 0 < len(state["starts"]) <= 5, "No exact durable reservation for this request")
         sequence = len(wire) + 1
-        store(output / f"pending-{sequence:02}.json", canonical({
+        pending = {
             "identity": identity(), "url": url, "sequence": sequence, "reservation": reservation,
-        }))
+        }
+        stem = f"pending-{sequence:02}"
+        pending["escrow"] = escrow.upload(identity(), stem, pending, a.workflow_api, seal)
+        store(output / (stem + ".json"), canonical(pending))
         demand(original_ack(a) == reservation, "Publisher reservation changed")
         pins()
         row = {
-            "url": url, "reservation": reservation,
+            "url": url, "reservation": reservation, "identity": identity(),
             "opened_at": time.monotonic(), "opened_wall": time.time(),
             "user_agent": a._USER_AGENT,
         }
@@ -353,10 +358,13 @@ def settle(a, wire, output):
            and state["completed"] >= row["closed_wall"]
            and state["not_before"] >= row["closed_wall"] + state["interval"]
            and state["starts"] == earlier["starts"], "Original physical and logical closure remain unproved")
-    store(output / f"settled-{len(wire):02}.json", canonical({
+    settlement = {
         "url": row["url"], "status": row["status"], "closed_at": row["closed_wall"],
         "reservation_sha256": row["reservation"]["sha256"], "settlement": current,
-    }))
+    }
+    stem = f"settled-{len(wire):02}"
+    settlement["escrow"] = escrow.upload(row["identity"], stem, settlement, a.workflow_api, seal)
+    store(output / (stem + ".json"), canonical(settlement))
     row["settlement_sha256"] = current["sha256"]
 
 
@@ -463,6 +471,7 @@ def main():
            "Research requires isolated nonpublishing credentials")
     demand(sha256(CERTIFICATE.read_bytes()).hexdigest() == scope["reviewer_sha256"],
            "Reviewed research recipient differs")
+    subprocess.run(["openssl", "x509", "-in", str(CERTIFICATE), "-checkend", "1800", "-noout"], check=True)
     seal(b"Hungary homepage research CMS preflight")
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=CHECKOUT, text=True).strip()
     demand(re.fullmatch(r"[0-9a-f]{40}", head) and head == os.environ.get("GITHUB_SHA"),
@@ -473,7 +482,7 @@ def main():
     demand(sha256(SOURCE.read_bytes()).hexdigest() == scope["original_adapter_sha256"],
            "Original reviewed production adapter differs")
     production = CHECKOUT / scope["production_workflow_path"]
-    protected = (SOURCE, SCOPE, CERTIFICATE, Path(__file__), CHECKOUT / WORKFLOW, production)
+    protected = (SOURCE, SCOPE, CERTIFICATE, Path(__file__), HERE / "escrow.py", HERE / "action.yml", HERE / "launch.js", CHECKOUT / WORKFLOW, production)
     hashes = {path: sha256(path.read_bytes()).hexdigest() for path in protected}
 
     def pins():

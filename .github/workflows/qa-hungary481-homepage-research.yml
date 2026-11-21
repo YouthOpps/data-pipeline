@@ -25,20 +25,20 @@ jobs:
       - name: Inspect the reviewed Hungary homepage response
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python -B qa/hungary481-homepage/runner.py
+        uses: ./qa/hungary481-homepage
       - name: Retain original publisher custody receipts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: hungary481-homepage-state-${{ github.run_attempt }}
           path: ${{ runner.temp }}/hungary481-homepage-research/*.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 90
       - name: Retain encrypted response evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: hungary481-homepage-capture-${{ github.run_attempt }}
           path: ${{ runner.temp }}/hungary481-homepage-research/capture.cms
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
