@@ -1,0 +1,30 @@
+{
+  "adapter_sha256": "45c5f956614d0189f653786fa23c6a54fe22b401e869c4098482bc858429244c",
+  "approval_issue": 482,
+  "candidate": "14eae8b37549ee44f3a19eeea0efa6d164eab62d",
+  "candidate_pr": 483,
+  "enabled": false,
+  "production": {
+    "archive_sha256": "28d52b9cd81db9ea1871d67c733204038dd5a58f6623489ade2ae3f4ac05d3e1",
+    "archive_size": 4700,
+    "artifact": 14645409744,
+    "head": "11fa75c3e745c5e0d8c12ee8a5c9f8371417d764",
+    "history_count": 63,
+    "history_sha256": "034a5c1a17ca41c879405d78ae8a1dfb165b75f126222e50e7d4802c6ad94831",
+    "id": 378390052,
+    "job": 136405842759,
+    "path": ".github/workflows/fetch-be-wbi.yml",
+    "run": 44770298747,
+    "state_sha256": "012a6818ab8a3cc60a893ad3cecfdc141a132d4cf111dece2f17f0689392980c"
+  },
+  "reviewer_sha256": "c8bfa742ffcd2638a1926c8068b58c3f0cc9bcda7077b95ab3ac8a8ac5b01531",
+  "test_sha256": "9affa7abd6d666eff20bc967ef1918957419b3f1add9adc76aaa3e27c189dc6c",
+  "website": {
+    "files": {
+      "assets/discovery.js": "39dccc7be14705e2c338ae065044b2f6736d5e0b7bec70436937ad543a8741bb",
+      "package.json": "7cd869b0bff66038195746c4bac649e863b140c6b6505b39bed557ec1b4b1833",
+      "scripts/data.mjs": "bc9d9f9f83c58061c6d29f3fd3d6b04b56ad1b7503b12a009c2f91e24b4deef3"
+    },
+    "revision": "0c6ff4818953aca266178c6c5e84cdd90e6f6550"
+  }
+}
