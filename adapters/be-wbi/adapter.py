@@ -6753,6 +6753,99 @@ def reviewed_wbi_handoff():
     return state
 
 
+_WBI_RESIDENCY_HANDOFF = None
+
+
+def apply_wbi_residency_handoff(incoming, latest):
+    """Carry the exact reviewed native budget above the original production owner."""
+    approved = _WBI_RESIDENCY_HANDOFF
+    if not isinstance(approved, dict) or set(approved) != {
+        'decision', 'proof_sha256', 'predecessor', 'predecessor_state_sha256',
+        'native', 'state_sha256', 'state_base64',
+    }:
+        raise AdapterError('WBI residency handback approval is absent', 'access')
+    if not (re.fullmatch(r'https://github\.com/YouthOpps/data-pipeline/issues/482#issuecomment-[1-9][0-9]*',
+                         approved['decision'])
+            and re.fullmatch(r'[a-f0-9]{64}', approved['proof_sha256'])):
+        raise AdapterError('WBI residency handback decision differs', 'access')
+    try:
+        raw = base64.b64decode(approved['state_base64'], validate=True)
+        if len(raw) > 16384:
+            raise ValueError()
+        floor = validate_budget(json.loads(raw))
+        compact = json.dumps(floor, sort_keys=True, separators=(',', ':')).encode()
+        if hashlib.sha256(compact).hexdigest() != approved['state_sha256']:
+            raise ValueError()
+        if (floor['schema'] != 4 or not floor['blocked'] or floor['in_flight']
+                or floor['refusal_scope']['additional_holds']):
+            raise ValueError()
+    except (ValueError, TypeError, KeyError):
+        raise AdapterError('WBI residency native journal differs', 'access') from None
+    if tuple(approved['predecessor']) == latest:
+        # The original strict decoder has already verified this production artifact.
+        compact = json.dumps(incoming, sort_keys=True, separators=(',', ':')).encode()
+        if hashlib.sha256(compact).hexdigest() != approved['predecessor_state_sha256']:
+            raise AdapterError('Pinned WBI predecessor journal differs', 'access')
+        verify_wbi_residency_owner(approved['native'])
+        return merge_budget(incoming, floor)
+    retained_scope = incoming.get('refusal_scope', {})
+    scopes = ('decision', 'initial_refusal', 'original_journal_base64', 'extensions')
+    values = ('until', 'interval', 'page_gap', 'completed', 'inventory_completed',
+              'observed_429_since_transition', 'rate_limit_until', 'observed_at')
+    if (incoming.get('schema') != 4 or not incoming['blocked']
+            or any(retained_scope.get(key) != floor['refusal_scope'][key] for key in scopes)
+            or any(incoming[key] < floor[key] for key in values)
+            or any(stamp > incoming['observed_at'] - 60 and stamp not in incoming['starts']
+                   for stamp in floor['starts'])):
+        raise AdapterError('Newest canonical WBI artifact has not inherited the native floor', 'access')
+    return incoming
+
+
+def verify_wbi_residency_owner(native):
+    """Bind the original, retired QA job and both authentic handback archives."""
+    def matches(row, **fields):
+        return all(type(row.get(key)) is type(value) and row[key] == value for key, value in fields.items())
+
+    workflow = workflow_api(f'/actions/workflows/{native["workflow"]}')
+    if not matches(workflow, id=native['workflow'], path=native['path'], state='disabled_manually'):
+        raise AdapterError('WBI native workflow must be retired before handback', 'access')
+    inventory = workflow_api(f'/actions/workflows/{native["workflow"]}/runs?per_page=2')
+    endpoint = f'/actions/runs/{native["run"]}/attempts/1'
+    exact = workflow_api(endpoint)
+    if (inventory['total_count'] != 1 or len(inventory['workflow_runs']) != 1
+            or inventory['workflow_runs'][0]['id'] != native['run']
+            or not matches(exact, id=native['run'], workflow_id=native['workflow'],
+                           path=native['path'], run_attempt=1, event='push', status='completed',
+                           conclusion='success', head_sha=native['head'], head_branch=native['branch'])
+            or exact['actor']['id'] != 12278069 or exact['actor']['type'] != 'User'
+            or exact['triggering_actor']['id'] != 12278069 or exact['triggering_actor']['type'] != 'User'
+            or exact['repository']['full_name'] != 'YouthOpps/data-pipeline'
+            or exact['head_repository']['full_name'] != 'YouthOpps/data-pipeline'):
+        raise AdapterError('WBI native original attempt differs', 'access')
+    jobs = workflow_api(endpoint + '/jobs?per_page=2')
+    if (jobs['total_count'] != 1 or len(jobs['jobs']) != 1
+            or not matches(jobs['jobs'][0], id=native['job'], run_id=native['run'], run_attempt=1,
+                           head_sha=native['head'], head_branch=native['branch'], status='completed',
+                           conclusion='success', name='Verify WBI native residency')):
+        raise AdapterError('WBI native original job differs', 'access')
+    steps = {item['name']: item['conclusion'] for item in jobs['jobs'][0]['steps']}
+    if any(steps.get(name) != 'success' for name in (
+        'Upload the before-wire recovery public key',
+        'Run the original WBI nonpublishing test under reviewed custody',
+        'Upload encrypted result and exact owned state evidence',
+    )):
+        raise AdapterError('WBI native outcome or custody is incomplete', 'access')
+    artifacts = workflow_api(f'/actions/runs/{native["run"]}/artifacts?per_page=3')
+    if artifacts['total_count'] != 2 or len(artifacts['artifacts']) != 2:
+        raise AdapterError('WBI native artifact inventory differs', 'access')
+    for expected in native['artifacts']:
+        found = workflow_api(f'/actions/artifacts/{expected["id"]}')
+        if (not matches(found, **expected, expired=False) or found not in artifacts['artifacts']
+                or not matches(found['workflow_run'], id=native['run'], head_sha=native['head'],
+                               head_branch=native['branch'])):
+            raise AdapterError('Exact WBI native archive differs', 'access')
+
+
 def restore_family_artifact():
     """Exact reviewed zero-artifact ancestry, then strict newest owned state."""
     global _RESTORED, _STATE_TRUSTED, _RESTORED_LATEST, _RESTORED_HISTORY
@@ -6801,6 +6894,7 @@ def restore_family_artifact():
             recovery_bound,
         )
     # This never replaces ownership: the exact modern decoder ran above.
+    incoming = apply_wbi_residency_handoff(incoming, raw_latest)
     incoming = merge_budget(incoming, reviewed_wbi_handoff())
     _VERIFIED_REMOTE_CREATE = incoming
     try:

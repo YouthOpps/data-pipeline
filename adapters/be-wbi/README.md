@@ -261,3 +261,9 @@ remain required before issue closure.
 An explicit French call for residency applications supplies evidence of an
 opportunity even when the subject has no more specific catalogue category.
 The original category and publisher article identity remain authoritative.
+
+The residency verification carries its separately reviewed exact native budget
+into the first production refresh after validating the newest canonical owned
+artifact. The existing #373 MAX floor also applies. Later production attempts
+validate the latest owned state and its inherited timing and refusal scope.
+The verified native state never substitutes for an absent production archive.
