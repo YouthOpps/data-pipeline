@@ -321,3 +321,17 @@ public native evidence retains its original revision and date; no new publisher
 requests, original expired raw-body replay, publication or production run are
 claimed. Collection, facts, identifiers, deadlines, expiry, state schema,
 pending transactions, MAX constraints and workflow behavior are unchanged.
+
+### November 2026 production custody
+
+Only an independently examined original native journal, its exact native
+run/job and two retained archive identities can supply the incident-specific
+receipt under #479. The incident path is off until this receipt is installed.
+The first normal dispatch must have a separate unedited maintainer grant on
+#479 naming its exact main SHA and receipt digest. The workflow rechecks all
+63 previous run identities at restore and again after startup quiet. A later
+owner or rerun cannot use the receipt. The adapter validates the original
+predecessor archive and merges its starts and MAX timing limits with the
+reviewer-decoded settled native journal. An unresolved owner, integrity
+failure or history overflow blocks admission. Later runs restore their own
+latest production archive normally.

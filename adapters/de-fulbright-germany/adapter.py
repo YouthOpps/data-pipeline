@@ -1354,7 +1354,7 @@ def publisher_pace():
 def publisher_attempt(publisher, inventory=False):
     """Retain completion gates around each actual publisher transport."""
     global _PUBLISHER_COMPLETED_MONOTONIC, _PUBLISHER_GATE_FAILED
-    global _PAGE_COMPLETED, _LOCAL_START_VERIFIED
+    global _PAGE_COMPLETED, _LOCAL_START_VERIFIED, _ISSUE479_FIRST_WIRE
     if not publisher:
         yield
         return
@@ -1367,6 +1367,9 @@ def publisher_attempt(publisher, inventory=False):
             "Exclusive healthy publisher collector required", "access"
         )
     check_deadline()
+    if _ISSUE479_ADMITTED and not _ISSUE479_FIRST_WIRE:
+        verify_handoff_owner()
+        _ISSUE479_FIRST_WIRE = True
     if os.environ.get("GITHUB_ACTIONS") != "true" and not _LOCAL_START_VERIFIED:
         verify_local_workflow_pause()
         _LOCAL_START_VERIFIED = True
@@ -2154,6 +2157,152 @@ def read_inert_artifact(identity, artifact_id, digest=None):
             ("Invalid or unavailable family pacing artifact"), ("access")
         ) from None
 
+# Filled only from independently inspected terminal native evidence. The incident
+# path remains unavailable until the exact artifact, journal and owner are known.
+_ISSUE479_RECEIPT = None
+_ISSUE479_ADMITTED = False
+_ISSUE479_FIRST_WIRE = False
+_ISSUE479_FRONTIER = (44846595786, 1, SOURCE_ID)
+_ISSUE479_HISTORY = "3870ea5f8d783da017211851eea9924bb0bb4dc6e62e7788e9dec75d86461709"
+_ISSUE479_ORIGINAL = "d4d4c9280a122f4e33e0242cb40fa682d69d8f801de63cbdd6e9663eb35835c1"
+_ISSUE479_NATIVE_BRANCH = "qa/479-germany-native"
+_ISSUE479_NATIVE_WORKFLOW = ".github/workflows/verify-germany479-native.yml"
+
+
+def handoff_require(condition, reason):
+    if not condition:
+        raise AdapterError("Fulbright Germany handback: " + reason, "access")
+
+
+def handoff_digest(data):
+    raw = json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def verify_handoff_owner():
+    """Require exactly one authorized dispatch following the 63 reviewed runs."""
+    run_id, attempt = current_run_identity()
+    head = os.environ.get("GITHUB_SHA", "")
+    handoff_require(attempt == 1 and os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+                    and os.environ.get("GITHUB_ACTOR_ID") == "12278069"
+                    and re.fullmatch("[a-f0-9]{40}", head), "original maintainer dispatch required")
+    path = ".github/workflows/fetch-de-fulbright-germany.yml"
+    workflow = workflow_api(f"/actions/workflows/{_FAMILY_WORKFLOW_ID}")
+    handoff_require((workflow["id"], workflow["state"], workflow["path"]) ==
+                    (_FAMILY_WORKFLOW_ID, "active", path), "producer definition differs")
+    rows = workflow_api(f"/actions/workflows/{_FAMILY_WORKFLOW_ID}/runs?per_page=100")
+    handoff_require(rows["total_count"] == len(rows["workflow_runs"]) == 64, "source history changed")
+    current = [r for r in rows["workflow_runs"] if r["id"] == run_id]
+    handoff_require(len(current) == 1, "current owner missing or ambiguous")
+    current = current[0]
+    handoff_require((current["head_branch"], current["head_sha"], current["path"], current["status"],
+                     current["workflow_id"], current["event"], current["run_attempt"]) ==
+                    ("main", head, path, "in_progress", _FAMILY_WORKFLOW_ID, "workflow_dispatch", 1)
+                    and current["actor"]["id"] == current["triggering_actor"]["id"] == 12278069
+                    and current["repository"]["full_name"] == current["head_repository"]["full_name"] ==
+                    "YouthOpps/data-pipeline", "dispatch scope differs")
+    keys = ("id", "run_attempt", "head_sha", "status", "conclusion", "path", "head_branch", "workflow_id")
+    prior = [{key: row[key] for key in keys} for row in rows["workflow_runs"] if row["id"] != run_id]
+    handoff_require(handoff_digest(prior) == _ISSUE479_HISTORY, "source lineage changed")
+    receipt = _ISSUE479_RECEIPT
+    grant = (f"Authorize one Fulbright Germany production handback at {head} "
+             f"from native {receipt['run_id']}/1, receipt {handoff_digest(receipt)}, under #479.")
+    issue = workflow_api("/issues/479")
+    comments = workflow_api("/issues/479/comments?per_page=100")
+    handoff_require(issue["state"] == "open" and issue["comments"] == len(comments) <= 100, "grant inventory incomplete")
+    grants = [comment for comment in comments if comment["body"] == grant]
+    handoff_require(len(grants) == 1, "exact separate production grant missing")
+    comment = grants[0]
+    handoff_require(comment["user"]["id"] == 12278069 and comment["user"]["type"] == "User"
+                    and comment["issue_url"] == _WORKFLOW_GITHUB + "/issues/479"
+                    and comment["author_association"] in ("OWNER", "MEMBER")
+                    and comment["created_at"] == comment["updated_at"] <= current["created_at"],
+                    "production grant changed")
+    return current
+
+
+def verified_handoff_archive(receipt):
+    """Bind the reviewed archive and terminal attempt to their native workflow."""
+    run_id = receipt["run_id"]
+    run = workflow_api(f"/actions/runs/{run_id}")
+    handoff_require((run["id"], run["run_attempt"], run["workflow_id"], run["head_branch"], run["head_sha"],
+                     run["path"], run["status"], run["conclusion"], run["event"]) ==
+                    (run_id, 1, receipt["workflow_id"], _ISSUE479_NATIVE_BRANCH, receipt["head_sha"],
+                     _ISSUE479_NATIVE_WORKFLOW, "completed", "success", "push")
+                    and run["repository"]["full_name"] == run["head_repository"]["full_name"] ==
+                    "YouthOpps/data-pipeline", "native lineage differs")
+    runs = workflow_api(f'/actions/workflows/{receipt["workflow_id"]}/runs?per_page=2')
+    handoff_require(runs["total_count"] == len(runs["workflow_runs"]) == 1
+                    and runs["workflow_runs"][0]["id"] == run_id, "native workflow reused")
+    jobs = workflow_api(f"/actions/runs/{run_id}/attempts/1/jobs?per_page=2")
+    handoff_require(jobs["total_count"] == len(jobs["jobs"]) == 1, "native job ambiguous")
+    job = jobs["jobs"][0]
+    handoff_require((job["id"], job["run_id"], job["head_sha"], job["run_attempt"], job["name"],
+                     job["status"], job["conclusion"]) ==
+                    (receipt["job_id"], run_id, receipt["head_sha"], 1, "Verify Fulbright Germany native",
+                     "completed", "success"), "native job differs")
+    archives = workflow_api(f"/actions/runs/{run_id}/artifacts?per_page=3")
+    handoff_require(archives["total_count"] == len(archives["artifacts"]) == 2, "native archive inventory changed")
+    for purpose, prefix in (("evidence", "germany479-native"), ("anchor", "germany479-recovery-key")):
+        expected = receipt[purpose]
+        name = f"{prefix}-{run_id}-1"
+        found = [item for item in archives["artifacts"] if item["name"] == name]
+        handoff_require(len(found) == 1, "required native archive missing")
+        item = found[0]
+        handoff_require(item == workflow_api(f'/actions/artifacts/{expected["id"]}')
+                        and item["id"] == expected["id"] and item["expired"] is False
+                        and item["digest"] == "sha256:" + expected["sha256"]
+                        and item["workflow_run"]["id"] == run_id
+                        and item["workflow_run"]["head_sha"] == receipt["head_sha"], "native archive differs")
+
+
+def reviewed_issue479_state():
+    global _ISSUE479_ADMITTED
+    receipt = _ISSUE479_RECEIPT
+    handoff_require(type(receipt) is dict and not _ISSUE479_ADMITTED
+                    and os.environ.get("GITHUB_ACTIONS") == "true", "uninstalled or reused receipt")
+    verify_handoff_owner()
+    verified_handoff_archive(receipt)
+    for ident in (44846595786, 44652934438):
+        data = workflow_api(f"/actions/runs/{ident}/artifacts?per_page=2")
+        handoff_require(data["total_count"] == 0 and data["artifacts"] == [], "historical gap changed")
+    original_id = 44435787861
+    original_key = (original_id, 1)
+    handoff_require(_ATTEMPT_HEADS.get(original_key) == "1dcca6beb3023cf918f50cb87f68f3522b9978b2",
+                    "historical owner missing")
+    original = workflow_api(f"/actions/runs/{original_id}/artifacts?per_page=2")
+    handoff_require(original["total_count"] == len(original["artifacts"]) == 1, "historical archive ambiguous")
+    archive = original["artifacts"][0]
+    handoff_require(archive["expired"] is False and archive["id"] == 14489820002
+                    and archive["digest"] == "sha256:" + _ISSUE479_ORIGINAL
+                    and archive["name"] == _ARTIFACT_NAME + "-1"
+                    and archive["workflow_run"]["id"] == original_id
+                    and archive["workflow_run"]["head_sha"] == _ATTEMPT_HEADS[original_key],
+                    "historical archive differs")
+    initial = download_inert_artifact((*original_key, SOURCE_ID), archive["id"], archive["digest"])
+    state = merge_reviewed_native_journal(receipt, initial)
+    _ISSUE479_ADMITTED = True
+    return state
+
+
+def merge_reviewed_native_journal(receipt, initial):
+    """Check the exact reviewer-decoded final journal and retain previous limits."""
+    raw = base64.b64decode(receipt["journal_base64"], validate=True)
+    handoff_require(0 < len(raw) <= 16384 and hashlib.sha256(raw).hexdigest() == receipt["journal_sha256"],
+                    "native journal bytes differ")
+    state = validate_budget(json.loads(raw))
+    handoff_require(handoff_digest(state) == receipt["state_sha256"]
+                    and not (state["in_flight"] or state["blocked"] or initial["in_flight"] or initial["blocked"])
+                    and state["legacy_rate_history_unknown"] and initial["legacy_rate_history_unknown"]
+                    and state["observed_at"] >= initial["observed_at"], "native journal unsettled")
+    starts = sorted(set(state["starts"] + initial["starts"]))
+    handoff_require(len(starts) <= 10, "combined history exceeds journal capacity")
+    state["starts"] = starts
+    for key in ("not_before", "page_interval", "interval", "rate_failures"):
+        state[key] = max(state[key], initial[key])
+    return validate_budget(state)
+
+
 def restore_family_artifact():
     global _RESTORED, _STATE_TRUSTED
     if _RESTORED:
@@ -2161,7 +2310,9 @@ def restore_family_artifact():
     latest = latest_family_run()
     if latest is None:
         raise AdapterError("Mature family history is missing", "access")
-    if latest[:2] in {(x[0], x[1]) for x in _LEGACY_ATTEMPTS}:
+    if latest == _ISSUE479_FRONTIER and _ISSUE479_RECEIPT is not None:
+        incoming = reviewed_issue479_state()
+    elif latest[:2] in {(x[0], x[1]) for x in _LEGACY_ATTEMPTS}:
         incoming = reviewed_legacy_state(latest)
     else:
         run_id, attempt, source = latest
