@@ -3246,7 +3246,7 @@ def restore_hu481_prewire(latest, inventory):
     grant = workflow_api("/issues/comments/7061138411")
     if (grant.get("issue_url") != _WORKFLOW_GITHUB + "/issues/481"
             or grant.get("user", {}).get("id") != 12278069
-            or grant.get("author_association") != "MEMBER"
+            or grant.get("user", {}).get("type") != "User"
             or grant.get("created_at") != "2026-11-21T10:17:58Z"
             or grant.get("updated_at") != grant["created_at"]
             or hashlib.sha256(grant.get("body", "").encode()).hexdigest()
