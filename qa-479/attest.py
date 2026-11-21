@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 REPO = 'YouthOpps/data-pipeline'
-REF = 'refs/heads/qa/479-germany-state-only'
-WORKFLOW = '.github/workflows/verify-479-state.yml'
+REF = 'refs/heads/qa/479-germany-state-only-v2'
+WORKFLOW = '.github/workflows/verify-479-state-v2.yml'
 PRODUCTION = '.github/workflows/fetch-de-fulbright-germany.yml'
 DIGEST = 'd4d4c9280a122f4e33e0242cb40fa682d69d8f801de63cbdd6e9663eb35835c1'
 LOGS = {
@@ -36,6 +36,13 @@ def guard():
     assert event['created'] is True and event['deleted'] is False
     assert event['before'] == '0' * 40 and event['after'] == sha
     assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == sha
+    prior = api('actions/runs/44889794525/attempts/1')
+    assert prior['head_sha'] == 'b406143031ea19d9bcb4822cd8a249925ed56c4f'
+    assert prior['status'] == 'completed' and prior['conclusion'] == 'failure'
+    assert prior['path'] == '.github/workflows/verify-479-state.yml' and prior['run_attempt'] == 1
+    old_jobs = api('actions/runs/44889794525/attempts/1/jobs')
+    assert old_jobs['total_count'] == len(old_jobs['jobs']) == 1 and old_jobs['jobs'][0]['id'] == 136802938151
+    assert api('actions/runs/44889794525/artifacts')['total_count'] == 0
     source = api('actions/workflows/378390061')
     assert (source['id'], source['path'], source['state']) == (378390061, PRODUCTION, 'disabled_manually')
     me = api(f'actions/runs/{run_id}/attempts/1')
