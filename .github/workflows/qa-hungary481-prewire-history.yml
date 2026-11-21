@@ -1,7 +1,7 @@
 name: Verify Hungary prewire production history
 on:
   push:
-    branches: [qa/hungary481-prewire-history]
+    branches: [qa/hungary481-prewire-receipt]
 permissions:
   issues: read
   actions: read

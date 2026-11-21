@@ -31,6 +31,7 @@ with a.execution(),a.phase("restore",180):
     # This independent read-only workflow is outside the canonical producer inventory.
     # Scan every real completed producer. No current production job exists to exclude.
     os.environ.pop("GITHUB_ACTIONS")
+    g=a.workflow_api("/issues/comments/7061138411");print(g.get("issue_url"),g.get("author_association"),g.get("user",{}).get("id"),g.get("created_at"),g.get("updated_at"),hashlib.sha256(g.get("body","").encode()).hexdigest())
     state=a.restored_state()
     assert a._HISTORY_COMPLETED[-1][2:]==a._HU481_PREWIRE
     assert len(a._HISTORY_COMPLETED)==70 and len(a._HISTORY_JOBLESS)==1
