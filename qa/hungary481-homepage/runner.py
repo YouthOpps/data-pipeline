@@ -320,6 +320,7 @@ def instrument(a, scope, pins, wire, output, identity):
         stem = f"pending-{sequence:02}"
         pending["escrow"] = escrow.upload(identity(), stem, pending, a.workflow_api, seal)
         store(output / (stem + ".json"), canonical(pending))
+        paused(a, scope)
         demand(original_ack(a) == reservation, "Publisher reservation changed")
         pins()
         row = {
