@@ -138,15 +138,15 @@ def instrument(adapter, custody, capture, escrow):
         host = urllib.parse.urlsplit(url).hostname
         if host != 'www.fulbright.de':
             return archive.open(request, *args, **kwargs)
-        require( request.get_method() == 'GET' and request.data is None,
+        require(request.get_method() == 'GET' and request.data is None,
                 'Unexpected adapter transport outside authorized publisher GETs')
         require(url in {adapter.SOURCE_URL, 'https://www.fulbright.de/robots.txt'},
                 'URL outside exact native collection scope')
         headers = {k.casefold(): v for k, v in request.header_items()}
         require(headers.get('user-agent') == adapter._USER_AGENT and 'authorization' not in headers,
                 'Publisher identity changed')
-        custody.before_publisher()
         raw = capture['last_journal']
+        require(capture.pop('pending_authority', None) == digest(raw), 'Missing current custody reservation')
         escrow.require_pending(raw)
         state = json.loads(raw)
         require(state['in_flight'] is True and state['starts'], 'Missing durable reservation')
@@ -166,11 +166,19 @@ def instrument(adapter, custody, capture, escrow):
         return response
 
     def save(state):
+        previous = capture.get('last_journal')
+        reservation = state['in_flight'] and previous is not None and not json.loads(previous)['in_flight']
+        if reservation:
+            # This is after publisher_pace has waited and before its durable
+            # reservation. A revoked grant leaves the last settled state intact.
+            custody.before_publisher()
         original_save(state)
         raw = adapter.journal_read()
         require(json.loads(raw) == state, 'Durable write differs')
         escrow.acknowledge(raw, pending=state['in_flight'], opener_count=len(capture['requests']))
         capture['last_journal'] = raw
+        if reservation:
+            capture['pending_authority'] = digest(raw)
 
     adapter._OPENER.open = opened
     adapter.save_budget = save
