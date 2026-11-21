@@ -1,0 +1,30 @@
+{
+  "adapter_sha256": "40437106973d5956ae73badeaeb527729386dd2dbbf2bd177b38ab090aabc008",
+  "approval_issue": 479,
+  "attestation": null,
+  "candidate": "13e2f396f9a3a7c642d3a48c47d6c0eaf0e109da",
+  "candidate_pr": 480,
+  "enabled": false,
+  "production": {
+    "archive_sha256": "d4d4c9280a122f4e33e0242cb40fa682d69d8f801de63cbdd6e9663eb35835c1",
+    "archive_size": 463,
+    "artifact": 14489820002,
+    "head": "1dcca6beb3023cf918f50cb87f68f3522b9978b2",
+    "history_count": 63,
+    "history_sha256": "3870ea5f8d783da017211851eea9924bb0bb4dc6e62e7788e9dec75d86461709",
+    "id": 378390061,
+    "job": 135264177722,
+    "path": ".github/workflows/fetch-de-fulbright-germany.yml",
+    "run": 44435787861
+  },
+  "reviewer_sha256": "ee9cdb5ec5245649e14e04742cd2eebfb87bdc5fd2ff42887edd566320d67a72",
+  "test_sha256": "aa59454245715eb2d83c3f4744d3d7fe142d75ca1229b084b36f23ebf33372e7",
+  "website": {
+    "files": {
+      "assets/discovery.js": "39dccc7be14705e2c338ae065044b2f6736d5e0b7bec70436937ad543a8741bb",
+      "package.json": "7cd869b0bff66038195746c4bac649e863b140c6b6505b39bed557ec1b4b1833",
+      "scripts/data.mjs": "bc9d9f9f83c58061c6d29f3fd3d6b04b56ad1b7503b12a009c2f91e24b4deef3"
+    },
+    "revision": "0c6ff4818953aca266178c6c5e84cdd90e6f6550"
+  }
+}
