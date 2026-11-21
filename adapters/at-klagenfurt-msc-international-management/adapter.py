@@ -1959,7 +1959,6 @@ def export_state():
     if HOSTED_EXPORT is None:
         return
     binding, state, expected, claim = HOSTED_EXPORT
-    _, run_id, attempt, head = binding
     if workflow_binding() != binding:
         raise Stop("Production ownership changed before artifact export")
     encoded_state = canonical(state)
@@ -1975,6 +1974,12 @@ def export_state():
         if (not writes or not writes[-1]["acknowledged"]
                 or writes[-1].get("actual_journal_bytes") != encoded_state):
             raise Stop("Publisher journal lacks exact original acknowledgements")
+    write_owned_state(binding, state)
+
+
+def write_owned_state(binding, state, *, restrictive_owner=None):
+    """Write the verified budget in the current attempt's owned envelope."""
+    _, run_id, attempt, head = binding
     runner = Path(os.environ["RUNNER_TEMP"])
     target = Path(os.environ["KLAGENFURT_PACING_ARTIFACT_PATH"])
     if runner.resolve() != runner or target != runner / "pacing-state.json":
@@ -1993,9 +1998,23 @@ def export_state():
         if identity(runner.lstat()) != parent_id:
             raise Stop("Original artifact parent differs")
         raw, state_id = create_once(parent, target.name, payload)
-        if (identity(runner.lstat()) != parent_id or identity(target.lstat()) != state_id
-                or target.read_bytes() != raw):
-            raise Stop("Closed original artifact changed")
+        if restrictive_owner is not None:
+            # No source request or publication was made. Only the latest verified
+            # predecessor may pass on its still-restrictive state to this job.
+            if workflow_binding() != binding or workflow_history(binding) != restrictive_owner:
+                raise Stop("Production ownership changed before restrictive state export")
+        descriptor = os.open(target.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        descriptor_identity = identity(os.fstat(descriptor))
+        try:
+            before = os.fstat(descriptor)
+            private_file(before)
+            if (identity(before) != state_id or os.pread(descriptor, len(raw) + 1, 0) != raw
+                    or version(before) != version(os.fstat(descriptor))
+                    or identity(runner.lstat()) != parent_id
+                    or identity(os.stat(target.name, dir_fd=parent, follow_symlinks=False)) != state_id):
+                raise Stop("Closed original artifact changed")
+        finally:
+            checked_close([(descriptor, descriptor_identity)], sys.exc_info()[1])
     except BaseException as error:
         primary = error
         raise
@@ -2017,8 +2036,11 @@ def export_state():
 def require_settled_production():
     """Authenticate the producer and its pacing floor before opening the data-source repository."""
     binding = workflow_binding()
-    state = hosted_floor(binding, workflow_history(binding))
+    owner = workflow_history(binding)
+    state = hosted_floor(binding, owner)
     if any(state[key] for key in ("blocked", "in_flight", "physical_pending")):
+        if owner is not None and not GATE_FAILED and not AUDIT["requests"] and not AUDIT["persistence"]:
+            write_owned_state(binding, state, restrictive_owner=owner)
         raise Stop("Newest publisher state has unresolved access restrictions")
 
 
