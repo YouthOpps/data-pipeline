@@ -268,12 +268,7 @@ def dated_calls(root):
         if nodes(node, "p", "deadline") and nodes(node, "h3")
     ]
     if not cards:
-        message = (
-            "No published award cards with titles and deadlines"
-            f"; boxes={len(nodes(root, 'div', 'box'))}"
-            f"; headings={len(nodes(root, 'h3'))}"
-            f"; deadlines={len(nodes(root, 'p', 'deadline'))}"
-        )
+        message = "No published award cards with titles and deadlines"
         if root.response_evidence:
             evidence = root.response_evidence
             message += (
@@ -2901,7 +2896,7 @@ def workflow_mode_guard():
             )
 
 
-_HU481_DECISION = "https://github.com/YouthOpps/data-pipeline/issues/481#issuecomment-7060584820"
+_HU481_DECISION = "https://github.com/YouthOpps/data-pipeline/issues/481#issuecomment-7060666160"
 _HU481_FLOOR_DIGEST = "accbdbefa7c15910afd7bee07f15da9a5001085e66ec8bf278d16e268054646f"
 _HU481_PRODUCER = (44834154987, 1, SOURCE_ID, "11fa75c3e745c5e0d8c12ee8a5c9f8371417d764")
 _HU481_DIAGNOSTIC = 44889284262
