@@ -3025,6 +3025,209 @@ def production_maintenance_state(incoming, *, owner=None):
         ) from None
 
 
+
+_HU481_NATIVE_PROOF_SHA256 = "6eb94b94d8161d7172bc274683baa1e79d851edc61e0ce1385428beb4e43474e"
+
+
+def adopt_completed_hu481_native(original_merged, latest, original_artifact):
+    """Apply after the entire #485 production_maintenance_state, keeping its historical pins unchanged."""
+    raw = os.environ.get("HUNGARY_NATIVE_HANDOFF", "")
+    if hashlib.sha256(raw.encode()).hexdigest() != _HU481_NATIVE_PROOF_SHA256:
+        raise AdapterError("Hungary native proof configuration differs", "access")
+    approval = json.loads(raw)
+    if not isinstance(approval, dict) or set(approval) != {
+        "decision",
+        "audit_digest",
+        "source",
+        "original_merged_sha256",
+        "native",
+        "full_floor",
+        "floor_digest",
+    }:
+        raise AdapterError("No reviewed Hungary native handback", "access")
+
+    def sha(value):
+        return hashlib.sha256(
+            json.dumps(
+                value, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
+        ).hexdigest()
+
+    if not re.fullmatch(
+        r"https://github\.com/YouthOpps/data-pipeline/issues/481#issuecomment-[1-9][0-9]*",
+        approval["decision"],
+    ) or not re.fullmatch(r"[a-f0-9]{64}", approval["audit_digest"]):
+        raise AdapterError("Hungary native decision differs", "access")
+    source = approval["source"]
+    expected = (44890448073, 1, SOURCE_ID, "5d509a0f117020ab8d2ed30e1b538c24d4fb21b3")
+    if tuple(source["owner"]) != expected or source["artifact"] != 14701479702:
+        raise AdapterError("Hungary native original producer changed", "access")
+    floor = validate_budget(approval["full_floor"])
+    if (
+        sha(floor) != approval["floor_digest"]
+        or floor["in_flight"]
+        or floor["request_outcome"] != "response_assessed"
+        or not floor["legacy_rate_history_unknown"]
+    ):
+        raise AdapterError("Hungary native did not provide a settled floor", "access")
+    blob = os.environ.get("HUNGARY_NATIVE_HANDOFF_COLLECTOR_BLOB", "")
+    if not re.fullmatch(r"[a-f0-9]{40}", blob):
+        raise AdapterError("Hungary second-layer collector pin missing", "access")
+    if latest == expected:
+        code = Path(__file__).read_bytes()
+        if (
+            original_artifact != source["artifact"]
+            or sha(original_merged) != approval["original_merged_sha256"]
+            or hashlib.sha1(f"blob {len(code)}\0".encode() + code).hexdigest() != blob
+        ):
+            raise AdapterError("Hungary first native adoption owner changed", "access")
+        verify_hu481_native_archives(approval["native"])
+    else:
+        rows = sorted(_HISTORY_COMPLETED)
+        indices = [i for i, row in enumerate(rows) if row[2:] == expected]
+        if (
+            len(indices) != 1
+            or indices[0] + 1 >= len(rows)
+            or rows[-1][2:] != latest
+            or rows[indices[0] + 1][1] <= approval["native"]["completed_s"]
+        ):
+            raise AdapterError("Hungary native successor chronology changed", "access")
+        first = rows[indices[0] + 1]
+        path = ".github/workflows/fetch-hu-fulbright-hungary.yml"
+        producer = workflow_api(
+            f"/contents/adapters/hu-fulbright-hungary/adapter.py?ref={first[5]}"
+        )
+        config = workflow_api(f"/contents/{path}?ref={first[5]}")
+        if config.get("encoding") != "base64" or config.get("path") != path:
+            raise AdapterError(
+                "Hungary native first successor workflow unavailable", "access"
+            )
+        text = base64.b64decode(
+            "".join(config["content"].splitlines()), validate=True
+        ).decode()
+        pins = re.findall(
+            r"^\s+HUNGARY_NATIVE_HANDOFF_COLLECTOR_BLOB: '([^']+)'$", text, re.M
+        )
+        if producer.get("sha") != blob or pins != [blob]:
+            raise AdapterError(
+                "Hungary first successor lacks the accepted native transition", "access"
+            )
+    # The previous approved floor is applied first at every entry, including all new normal production runs.
+    return merge_budgets(original_merged, floor, time.time())
+
+
+def verify_hu481_native_archives(native):
+    """Bind one successful retired native, its original job and the six ordered pending/settled receipts."""
+    path = ".github/workflows/qa-hungary481-native-validation.yml"
+    branch = "qa/hungary481-native-validation"
+    workflow = native["workflow"]
+    run = native["run"]
+    head = native["head"]
+    endpoint = f"/actions/workflows/{workflow}"
+    info = workflow_api(endpoint)
+    runs = workflow_api(endpoint + "/runs?per_page=2")
+    if (
+        info.get("id") != workflow
+        or info.get("path") != path
+        or info.get("state") != "disabled_manually"
+    ):
+        raise AdapterError("Hungary native must be retired for handback", "access")
+    if runs.get("total_count") != 1 or len(runs.get("workflow_runs", [])) != 1:
+        raise AdapterError("Hungary native run inventory differs", "access")
+    row = runs["workflow_runs"][0]
+    expected = dict(
+        id=run,
+        workflow_id=workflow,
+        path=path,
+        event="push",
+        run_attempt=1,
+        head_sha=head,
+        head_branch=branch,
+        status="completed",
+        conclusion=native["conclusion"],
+    )
+    if (
+        any(row.get(k) != v for k, v in expected.items())
+        or row["repository"]["full_name"] != "YouthOpps/data-pipeline"
+        or row["head_repository"]["full_name"] != "YouthOpps/data-pipeline"
+        or any(
+            row[k]["id"] != 12278069 or row[k]["type"] != "User"
+            for k in ("actor", "triggering_actor")
+        )
+    ):
+        raise AdapterError("Hungary native run owner differs", "access")
+    jobs = workflow_api(f"/actions/runs/{run}/attempts/1/jobs?per_page=2")
+    if jobs.get("total_count") != 1 or len(jobs.get("jobs", [])) != 1:
+        raise AdapterError("Hungary native job inventory differs", "access")
+    job = jobs["jobs"][0]
+    wanted = dict(
+        id=native["job"],
+        run_id=run,
+        run_attempt=1,
+        head_sha=head,
+        head_branch=branch,
+        name="native",
+        status="completed",
+        conclusion=native["conclusion"],
+    )
+    steps = {item["name"]: item["conclusion"] for item in job["steps"]}
+    if (
+        native["conclusion"] not in {"success", "failure"}
+        or any(job.get(k) != v for k, v in wanted.items())
+        or datetime.fromisoformat(
+            job["completed_at"].replace("Z", "+00:00")
+        ).timestamp()
+        != native["completed_s"]
+    ):
+        raise AdapterError("Hungary native original job outcome differs", "access")
+    count = native["count"]
+    if type(count) is not int or not 1 <= count <= 6:
+        raise AdapterError("Hungary native request count differs", "access")
+    names = {
+        f"hu481-native-{run}-1-{stage}-{i:02}"
+        for stage in ("pending", "settled")
+        for i in range(1, count + 1)
+    }
+    terminal = f"hu481-native-{run}-1-terminal"
+    extras = {terminal, f"hu481-native-final-{run}-1", f"hu481-native-summary-{run}-1"}
+    declared = {r[0] for r in native["artifacts"]}
+    if not names <= declared <= names | extras or terminal not in declared:
+        raise AdapterError("Hungary native closed receipt frontier differs", "access")
+    if native["conclusion"] == "success" and (
+        count != 6
+        or declared != names | extras
+        or any(
+            steps.get(k) != "success"
+            for k in (
+                "Run full original Hungary standalone test",
+                "Retain encrypted native result",
+                "Retain native summary and custody checkpoints",
+            )
+        )
+    ):
+        raise AdapterError("Hungary native successful outcome lacks evidence", "access")
+    inventory = workflow_api(f"/actions/runs/{run}/artifacts?per_page=20")
+    rows = inventory.get("artifacts")
+    if (
+        not isinstance(rows, list)
+        or inventory.get("total_count") != len(rows)
+        or len(rows) != len(declared)
+        or len(native["artifacts"]) != len(declared)
+        or {r["name"] for r in rows} != declared
+        or {(r["name"], r["id"], r["digest"]) for r in rows}
+        != set(map(tuple, native["artifacts"]))
+        or any(
+            r["expired"] is not False
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", r["digest"])
+            or r["workflow_run"]["id"] != run
+            or r["workflow_run"]["head_sha"] != head
+            or r["workflow_run"]["head_branch"] != branch
+            for r in rows
+        )
+    ):
+        raise AdapterError("Hungary exact native proof archives differ", "access")
+
+
 def restored_state():
     """Newest exact artifact is mandatory after the one reviewed legacy set."""
     latest = latest_family_run()
@@ -3073,10 +3276,11 @@ def restored_state():
         raise AdapterError(
             "Invalid Fulbright Hungary artifact binding", "access"
         )
-    return production_maintenance_state(
+    original_merged = production_maintenance_state(
         download_inert_artifact(latest, artifact["id"], artifact["digest"]),
         owner=(latest, artifact["id"], artifact["digest"]),
     )
+    return adopt_completed_hu481_native(original_merged, latest, artifact["id"])
 
 
 def prepare_collection():
