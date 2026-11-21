@@ -1,0 +1,17 @@
+name: Verify Denmark Fulbright response closure without publisher requests
+on:
+  push:
+    branches: [qa/343-dk-fulbright-response-close]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+      - run: python -B qa-343-denmark/check.py
