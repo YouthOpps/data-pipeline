@@ -195,3 +195,11 @@ def verify_grant(a, identity, scope):
            and grant.get("created_at") == grant.get("updated_at") == identity["grant_created"]
            and isinstance(grant.get("body"), str) and sha256(grant["body"].encode()).hexdigest() == identity["grant_sha256"],
            "Native grant changed or was withdrawn")
+
+
+def persist_terminal(a, job_limit, persist):
+    """Read back terminal custody inside an infrastructure-only deadline after the original native exits."""
+    with a.execution():
+        a._RUN_END=min(a._RUN_END,job_limit)
+        with a.phase("export",90):
+            return persist()

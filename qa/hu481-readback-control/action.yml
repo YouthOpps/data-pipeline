@@ -1,0 +1,5 @@
+name: Run the isolated Hungary capture with per-request artifact custody
+description: Expose the Actions artifact client to the hosted capture
+runs:
+  using: node24
+  main: launch.js
