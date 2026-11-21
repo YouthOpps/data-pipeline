@@ -1950,6 +1950,7 @@ def retain_policy_review_state():
         file.flush()
         os.fsync(file.fileno())
         os.link(file.name, review_path)
+    journal_output_signal("true", key="pending_review_ready")
 
 
 def export_family_artifact():
@@ -4636,7 +4637,7 @@ def journal_invalidate_owned_output(path):
             raise errors[0]
 
 
-def journal_output_signal(value):
+def journal_output_signal(value, *, key="pacing_ready"):
     """Bind fresh step output and all nested descriptors through close."""
     path = os.environ.get("GITHUB_OUTPUT")
     if not path:
@@ -4702,7 +4703,7 @@ def journal_output_signal(value):
                     raise AdapterError("Workflow output path changed", "access")
 
         verify()
-        line = ("pacing_ready=" + value + "\n").encode()
+        line = (key + "=" + value + "\n").encode()
         if os.write(descriptor, line) != len(line):
             raise AdapterError("Incomplete workflow output signal", "access")
         verify()
