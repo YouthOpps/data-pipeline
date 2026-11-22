@@ -1497,7 +1497,29 @@ def download_inert_artifact(identity, artifact_id, digest=None):
         ) from None
 
 
-_IKY_NATIVE_HANDOFF = None
+_IKY_NATIVE_HANDOFF = {'decision': 'https://github.com/YouthOpps/data-pipeline/issues/273#issuecomment-7077631898',
+ 'native': {'artifacts': [{'digest': 'sha256:ee91132d82428fd433bfe264cc501a5ee39bbf911e93fcd323afdfa92139d091',
+                           'id': 14749905630,
+                           'name': 'iky491-recovery-key-45010176328-1',
+                           'size_in_bytes': 620},
+                          {'digest': 'sha256:6982a4d4783c8f343ead7039eab765fe4fa0ffc0497d13c2ea434c10ce9d10a1',
+                           'id': 14749542311,
+                           'name': 'iky491-native-45010176328-1',
+                           'size_in_bytes': 2184084}],
+            'branch': 'qa/491-iky-full-native',
+            'command_step': 'success',
+            'conclusion': 'success',
+            'head': '5099fd6ececf3f595afa1532deb546bb38a388e9',
+            'job': 137170576546,
+            'path': '.github/workflows/verify-iky-full-native.yml',
+            'run': 45010176328,
+            'upload_step': 'success',
+            'workflow': 426699043},
+ 'predecessor': [44966003124, 1, 'gr-iky'],
+ 'predecessor_state_sha256': 'e4a576ae33dd72ce4ac2a348976aab51655444c48326449a490194f72969f85d',
+ 'proof_sha256': 'e0f695761cb03e38d90cb300aa365fc7c97902bcefaf16b19098369d3b83f5af',
+ 'state_base64': 'eyJzY2hlbWEiOjEsImZhbWlseSI6InlvdXRob3Bwcy1pa3ktcHVibGlzaGVyLXYxIiwib2JzZXJ2ZWRfYXQiOjE3OTUzNDIxNDkuMDQ3NjY4LCJub3RfYmVmb3JlIjoxNzk1MzQxNjU5Ljc0MDg4ODYsInN0YXJ0cyI6WzE3OTUzNDIwOTguMDUyOTIzNCwxNzk1MzQyMTEzLjk0Nzk3OTIsMTc5NTM0MjEyOS43MDExNDUsMTc5NTM0MjE0NS43NjgyM10sImJsb2NrZWQiOnRydWUsImludGVydmFsIjoxMi4yLCJwYWdlX2ludGVydmFsIjozMCwicmF0ZV9saW1pdF9zdHJpa2VzIjowLCJyYXRlX2xpbWl0X3VudGlsIjowLCJjb21wbGV0ZWQiOjE3OTUzNDIxNDkuMDQ3NjY4LCJyZXF1ZXN0X3BlbmRpbmciOmZhbHNlLCJodG1sX2dsb2JhbF9ob2xkIjpmYWxzZSwicmVmdXNhbF9zY29wZSI6eyJtaWdyYXRpb24iOiJpa3ktcHVibGljLWh0bWwtYXBpNDAxLXYxIiwicG9saWN5X3NoYTI1NiI6IjhmNTFkZjQ0ZWEzZWJiYjQyNjlmMjlmMDAxYmI4Y2RkMjA5OTM5YjQ0ZWNkYTI0YmFiOTJjNmJjN2UzZGRiNTgiLCJsZWdhY3lfc3RhdGVfc2hhMjU2IjoiNjQxZTk0YWVjYjg2NzgxMzc4YmMyNmYxNWExNGRjNWY4YWZkY2I1ZWUzZTQ1OTY5YTYyNjVjODMyMGJmMjE4MyIsImxlZ2FjeV9zdGF0ZSI6eyJzY2hlbWEiOjEsImZhbWlseSI6InlvdXRob3Bwcy1pa3ktcHVibGlzaGVyLXYxIiwib2JzZXJ2ZWRfYXQiOjE3OTIwNzQ4OTEuNzYxMDU5OCwibm90X2JlZm9yZSI6MTc5MjA3NDIzNi4yNjI2MjMzLCJzdGFydHMiOlsxNzkyMDc0ODg2Ljc1OTIwNjNdLCJibG9ja2VkIjp0cnVlLCJpbnRlcnZhbCI6MTIuMiwicGFnZV9pbnRlcnZhbCI6MzAsInJhdGVfbGltaXRfc3RyaWtlcyI6MCwicmF0ZV9saW1pdF91bnRpbCI6MCwiY29tcGxldGVkIjoxNzkyMDc0ODkxLjc2MTA1OTh9LCJsZWdhY3lfcmF3X2Jhc2U2NCI6ImV5SnpZMmhsYldFaU9qRXNJbVpoYldsc2VTSTZJbmx2ZFhSb2IzQndjeTFwYTNrdGNIVmliR2x6YUdWeUxYWXhJaXdpYjJKelpYSjJaV1JmWVhRaU9qRTNPVEl3TnpRNE9URXVOell4TURVNU9Dd2libTkwWDJKbFptOXlaU0k2TVRjNU1qQTNOREl6Tmk0eU5qSTJNak16TENKemRHRnlkSE1pT2xzeE56a3lNRGMwT0RnMkxqYzFPVEl3TmpOZExDSmliRzlqYTJWa0lqcDBjblZsTENKcGJuUmxjblpoYkNJNk1USXVNaXdpY0dGblpWOXBiblJsY25aaGJDSTZNekFzSW5KaGRHVmZiR2x0YVhSZmMzUnlhV3RsY3lJNk1Dd2ljbUYwWlY5c2FXMXBkRjkxYm5ScGJDSTZNQ3dpWTI5dGNHeGxkR1ZrSWpveE56a3lNRGMwT0RreExqYzJNVEExT1RoOSIsInJlZnVzZWRfdXJsIjoiaHR0cHM6Ly93d3cuaWt5LmdyL3dwLWpzb24vd3AvdjIvcGFnZXM/c2x1Zz1kaWRha3RvcmlrZXMteXBvdHJvZmllcy1lc3BhLTIwMTQtMjAyMCUyQ2RpZGFrdG9yaWtlcy15cG90cm9maWVzLWVzcGEtMjAyMS0yMDI3JTJDZGlkYWt0b3Jpa2VzLXlwb3Ryb2ZpZXMtaS1rLXktc3RvLWV2cm8lMkNkb3JlYS1kaW9ueXNpb3UtYW5nZWxvcG91bG91JTJDZWZwYXRoZWlzLWtvaW5vbmlrZXMtb21hZGVzLWVrby1lc3BhLTIwMjEtMjAyNyUyQ2Vpcy1tbmltaW4tbWFyaWFzLXphb3VzaSUyQ2Vrb2lreSUyQ2VsbGluby1nYWxsaWtpLXN5bmVyZ2FzaWElMkNlbGxpbm8tdnJldGFuaWtpLXN5bmVyZ2FzaWElMkNlbGxpbm92cmV0YW5pa2lzJTJDZW5pc2NoeXNpLXN5bW1ldG9jaGlzLXNlLWRpZXRobmVpcy1kaWFnJTJDZXJldm5hLWVwaS1mbG9yZW50aWFzJTJDZmFuaS1zYXJpZ2lhbm5pJTJDaWt5LWRhYWQlMkNpa3ktZXZkYXAlMkNpa3ktZnVsYnJpZ2h0JTJDa2xpbG9kb3RpbWEtbnhyaXNvdmVyZ2klMkNrbGlyb2RvdGltYXRhLXRoZW9kb3JpZGVpb24lMkNrbGlyb2RvdGltYXRhLXRzb3VyaWRpLXByb3B0dXhpYWthJTJDa2xpcm9kb3RpbWF0YS14YXR6b3BvdWxvdS1wcm9wdHV4aWFrYSUyQ3Byb2dyYW1tYS1odWJlcnQtY3VyaWVuJTJDdnJhdmVpYS1kaWFrcmlzaXMtc2UtZGlldGhuZWlzLWRpYWdvbiUyQ3lwb3Ryb2ZpZXMtZXNwYS0yMDIxLTIwMjclMkN5cG90cm9maWVzLWdpYS1lcmV2bmEta2xpcm9kb3RpbWEtbGVvbmlkYS1uaWtvbGFpZGklMkN5cG90cm9maWVzLWlreS1mdWxicmlnaHQtZ3JlZWNlJTJDeXBvdHJvZmllcy1zdGluLW1uaW1pLXRvdS1rYXRoaWdpdGkta29uc3RhbnRpbm91LWQta2VyYW1lb3MlMkN5cG90cm9maWVzLXN5bmVyZ2FzaWFzLW1lLWZvcmVpcy1lbGxpbmlrb3ktcG9saXRpc21veSUyQyVDRSVCMiVDRiU4MSVDRSVCMSVDRSVCMiVDRSVCNSVDRSVBRiVDRSVCMS0lQ0UlQjElQ0YlODElQ0UlQjklQ0YlODMlQ0YlODQlQ0UlQjUlQ0UlQUYlQ0UlQjElQ0YlODItJUNFJUIxJUNGJTgwJUNFJUJGJUNGJTg2JUNFJUJGJUNFJUFGJUNGJTg0JUNGJTg5JUNFJUJELSVDRSVCMSVDRSVCNSVDRSVCOSUyQyVDRSVCNSVDRiU4MSVDRSVCNSVDRiU4NSVDRSVCRCVDRSVCMS0lQ0UlQjUlQ0YlODMlQ0YlODAlQ0UlQjEtMjAxNC0yMDIwJnBlcl9wYWdlPTEwMCZvcmRlcmJ5PWlkJm9yZGVyPWFzYyZfZmllbGRzPWlkJTJDbGluayUyQ3RpdGxlJTJDZGF0ZV9nbXQlMkNzbHVnJnBhZ2U9MSIsInJlZnVzZWRfc3RhdHVzIjo0MDEsInJldmlldyI6Imh0dHBzOi8vZ2l0aHViLmNvbS9Zb3V0aE9wcHMvZGF0YS1waXBlbGluZS9pc3N1ZXMvNDAjaXNzdWVjb21tZW50LTYxOTU1NTY1NTAifX0=',
+ 'state_sha256': '682fdfb3acdd8f01cd72277a919291096dd7f1062faeba304fb693a17e286a64'}
 
 
 def apply_iky_native_handoff(incoming, latest):
