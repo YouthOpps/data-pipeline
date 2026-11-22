@@ -1,0 +1,30 @@
+{
+  "adapter_sha256": "834b2cd50da44fc9708b024211283cb50f4560834e0351e44182d44f9c8fa6b6",
+  "approval_issue": 343,
+  "candidate": "fa45461cfe0399a6f85e3e65c7de389eaf151c34",
+  "candidate_pr": 490,
+  "enabled": false,
+  "production": {
+    "archive_sha256": "a1e9c848230f4edb6150cbbd5833f0ed04ba3b3d82b068e674d6e9f396269c27",
+    "archive_size": 656,
+    "artifact": 14718674163,
+    "head": "286f436823a6e4d262469a533e2e22b6b429c1db",
+    "history_count": 70,
+    "history_sha256": "82ae9aa8387863c4ad24492a8c53cb194a818738804953f778e2646325922b9e",
+    "id": 378390318,
+    "job": 136936028827,
+    "path": ".github/workflows/fetch-dk-fulbright-center.yml",
+    "run": 44933826138,
+    "state_sha256": "f832e0574be9f53d26b8e289701fec7a2c35a73411143d2d288376b5785fb5b6"
+  },
+  "reviewer_sha256": "c8bfa742ffcd2638a1926c8068b58c3f0cc9bcda7077b95ab3ac8a8ac5b01531",
+  "test_sha256": "562ff56e7bd8b36e2e4d0bb220a771b8c4d9f1476fac282a305cc1bb546efc42",
+  "website": {
+    "files": {
+      "assets/discovery.js": "39dccc7be14705e2c338ae065044b2f6736d5e0b7bec70436937ad543a8741bb",
+      "package.json": "7cd869b0bff66038195746c4bac649e863b140c6b6505b39bed557ec1b4b1833",
+      "scripts/data.mjs": "bc9d9f9f83c58061c6d29f3fd3d6b04b56ad1b7503b12a009c2f91e24b4deef3"
+    },
+    "revision": "4b2e3d576f757cc31b798e6d65e5e80af1c585c9"
+  }
+}
