@@ -4,6 +4,8 @@ import contextlib
 import copy
 import gzip
 import io
+from email.message import Message
+from importlib.util import module_from_spec, spec_from_file_location
 import json
 import os
 from pathlib import Path
@@ -314,6 +316,36 @@ def assess(adapter, capture):
     require(all(b['start'] - a['completion'] >= b['page_gap'] for a,b in zip(inventory,inventory[1:]))
             and all(sum(r['start']-60 < u['start'] <= r['start'] for u in events) <= 5 for r in events),
             'Inventory pacing or rolling start limit exceeded')
+    documents = {}
+    for event in events:
+        if urllib.parse.urlsplit(event['url']).path == '/robots.txt':
+            continue
+        headers = Message()
+        for key, value in event['headers']:
+            headers[key] = value
+        document = b''.join(event['segments']).decode(headers.get_content_charset() or 'utf-8')
+        require(event['url'] not in documents or documents[event['url']] == document,
+                'One publisher URL delivered inconsistent bodies')
+        documents[event['url']] = document
+    spec = spec_from_file_location('denmark490_inert_replay', SOURCE)
+    replay = module_from_spec(spec)
+    spec.loader.exec_module(replay)
+    replay.utc_now = lambda: records[0]['last_checked_at']
+    replay.check_robots = lambda url: 12.2
+    visited = set()
+    def captured_fetch(url, **kwargs):
+        visited.add(url)
+        return documents[url]
+    def no_access(*args, **kwargs):
+        raise AssertionError('Native replay cannot make network calls')
+    replay._OPENER.open = no_access
+    replay.fetch_source = captured_fetch
+    replay.fetch_inventory_page = lambda fetch, *args, **kwargs: fetch(*args, inventory=True, **kwargs)
+    def material(rows):
+        volatile = {'created_at','updated_at','first_seen_at','last_seen_at','last_checked_at'}
+        return {r['id']: {k:v for k,v in r.items() if k not in volatile} for r in rows}
+    require(material(replay.collect_programme()) == material(records) and visited == set(documents),
+            'Full genuine parser frontier or output differs on independent replay')
     stamp = adapter.utc_now()
     visible = adapter.remove_expired_records(records, stamp)
     results = {'raw': consume(adapter, records, stamp), 'filtered': consume(adapter, visible, stamp)}
@@ -324,7 +356,7 @@ def assess(adapter, capture):
         results['valid_empty'] = consume(adapter, empty, stamp)
     capture['consumer'] = results
     return {'records': len(records), 'filtered_records': len(visible),
-            'actual_responses': len(events), 'minimum_gap': min(gaps)}
+            'actual_responses': len(events), 'complete_replayed_documents': len(documents), 'minimum_gap': min(gaps)}
 
 def write_once(path, raw):
     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
