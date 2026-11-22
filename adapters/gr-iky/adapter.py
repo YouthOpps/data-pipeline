@@ -298,6 +298,7 @@ def merge_refusal_scope(combined, local, incoming):
         # A genuinely empty local runner has no hold. An unknown/mixed old
         # blocked state cannot inherit the API-only scope of an artifact.
         local_global = local["blocked"]
+    combined["request_pending"] = local.get("request_pending", False) or incoming.get("request_pending", False)
     combined["blocked"] = True
     combined["html_global_hold"] = (
         incoming["html_global_hold"] or local_global
@@ -314,6 +315,8 @@ def pace(url, interval=12.2):
     state = locked_budget()
     try:
         budget = load_budget()
+        if budget.get("request_pending", False):
+            raise AdapterError("Unresolved publisher request", "access")
         if (
             not scoped_refusal_valid(budget)
             or budget["html_global_hold"]
@@ -357,6 +360,7 @@ def pace(url, interval=12.2):
                     "Retained pacing exceeds collection budget", "access"
                 )
             if ready <= now:
+                budget["request_pending"] = True
                 budget["starts"] = starts + [now]
                 budget["observed_at"] = now
                 write_budget(budget)
@@ -404,6 +408,8 @@ def request_bytes(
         if robots and urllib.parse.urlsplit(url).path != "/robots.txt":
             raise AdapterError("Robots purpose requires robots.txt", "access")
     state, budget = pace(url, interval) if publisher else (None, None)
+    settled = False
+    rate_stop = result = None
     try:
         request = urllib.request.Request(
             url,
@@ -470,22 +476,41 @@ def request_bytes(
                 budget["observed_at"] = time.time()
                 write_budget(budget)
             if publisher and response.status == 429:
-                raise HeaderRateLimitStop(
+                rate_stop = HeaderRateLimitStop(
                     "Publisher stopped: HTTP 429", "access", 429
                 )
+                raise rate_stop
             body = response.read(byte_limit + 1)
             if len(body) > byte_limit:
                 raise AdapterError(
                     "Response exceeds bounded native limit", "fetch"
                 )
-            return response.status, response.headers, body
+            result = response.status, response.headers, body
+        if result is None:
+            raise AdapterError("Publisher response ended without assessment", "access")
+        if publisher and not robots and visible_challenge(body, response.headers):
+            budget["blocked"] = True
+            budget["html_global_hold"] = True
+            budget["observed_at"] = time.time()
+            write_budget(budget)
+            settled = True
+            raise AdapterError("Visible publisher challenge or denial", "access")
+        settled = True
+        return result
+    except HeaderRateLimitStop as error:
+        # A normal header-only stop exits the response scope after its 429
+        # restrictions have been acknowledged. Close failures keep the marker.
+        settled = error is rate_stop
+        raise
     finally:
         if state is not None:
             _PUBLISHER_GATE_FAILED = True
             try:
-                budget["completed"] = budget["observed_at"] = time.time()
-                write_budget(budget)
-                _PUBLISHER_GATE_FAILED = False
+                if settled and not _GUARD_FATAL:
+                    budget["request_pending"] = False
+                    budget["completed"] = budget["observed_at"] = time.time()
+                    write_budget(budget)
+                    _PUBLISHER_GATE_FAILED = False
             finally:
                 state.close()
 
@@ -959,9 +984,9 @@ def validate_budget(state):
         "rate_limit_until",
         "completed",
     }
-    if not isinstance(state, dict) or set(state) not in (
+    if not isinstance(state, dict) or set(state) - {"request_pending"} not in (
         base_keys, base_keys | {"refusal_scope", "html_global_hold"}
-    ):
+    ) or type(state.get("request_pending", False)) is not bool:
         raise AdapterError("Invalid publisher pacing state", "access")
     if "refusal_scope" in state and not scoped_refusal_valid(state):
         raise AdapterError("Unrecognised refusal annotation", "access")
@@ -1472,6 +1497,151 @@ def download_inert_artifact(identity, artifact_id, digest=None):
         ) from None
 
 
+_IKY_NATIVE_HANDOFF = {'decision': 'https://github.com/YouthOpps/data-pipeline/issues/273#issuecomment-7077631898',
+ 'native': {'artifacts': [{'digest': 'sha256:ee91132d82428fd433bfe264cc501a5ee39bbf911e93fcd323afdfa92139d091',
+                           'id': 14749905630,
+                           'name': 'iky491-recovery-key-45010176328-1',
+                           'size_in_bytes': 620},
+                          {'digest': 'sha256:6982a4d4783c8f343ead7039eab765fe4fa0ffc0497d13c2ea434c10ce9d10a1',
+                           'id': 14749542311,
+                           'name': 'iky491-native-45010176328-1',
+                           'size_in_bytes': 2184084}],
+            'branch': 'qa/491-iky-full-native',
+            'command_step': 'success',
+            'conclusion': 'success',
+            'head': '5099fd6ececf3f595afa1532deb546bb38a388e9',
+            'job': 137170576546,
+            'path': '.github/workflows/verify-iky-full-native.yml',
+            'run': 45010176328,
+            'upload_step': 'success',
+            'workflow': 426699043},
+ 'predecessor': [44966003124, 1, 'gr-iky'],
+ 'predecessor_state_sha256': 'e4a576ae33dd72ce4ac2a348976aab51655444c48326449a490194f72969f85d',
+ 'proof_sha256': 'e0f695761cb03e38d90cb300aa365fc7c97902bcefaf16b19098369d3b83f5af',
+ 'state_base64': 'eyJzY2hlbWEiOjEsImZhbWlseSI6InlvdXRob3Bwcy1pa3ktcHVibGlzaGVyLXYxIiwib2JzZXJ2ZWRfYXQiOjE3OTUzNDIxNDkuMDQ3NjY4LCJub3RfYmVmb3JlIjoxNzk1MzQxNjU5Ljc0MDg4ODYsInN0YXJ0cyI6WzE3OTUzNDIwOTguMDUyOTIzNCwxNzk1MzQyMTEzLjk0Nzk3OTIsMTc5NTM0MjEyOS43MDExNDUsMTc5NTM0MjE0NS43NjgyM10sImJsb2NrZWQiOnRydWUsImludGVydmFsIjoxMi4yLCJwYWdlX2ludGVydmFsIjozMCwicmF0ZV9saW1pdF9zdHJpa2VzIjowLCJyYXRlX2xpbWl0X3VudGlsIjowLCJjb21wbGV0ZWQiOjE3OTUzNDIxNDkuMDQ3NjY4LCJyZXF1ZXN0X3BlbmRpbmciOmZhbHNlLCJodG1sX2dsb2JhbF9ob2xkIjpmYWxzZSwicmVmdXNhbF9zY29wZSI6eyJtaWdyYXRpb24iOiJpa3ktcHVibGljLWh0bWwtYXBpNDAxLXYxIiwicG9saWN5X3NoYTI1NiI6IjhmNTFkZjQ0ZWEzZWJiYjQyNjlmMjlmMDAxYmI4Y2RkMjA5OTM5YjQ0ZWNkYTI0YmFiOTJjNmJjN2UzZGRiNTgiLCJsZWdhY3lfc3RhdGVfc2hhMjU2IjoiNjQxZTk0YWVjYjg2NzgxMzc4YmMyNmYxNWExNGRjNWY4YWZkY2I1ZWUzZTQ1OTY5YTYyNjVjODMyMGJmMjE4MyIsImxlZ2FjeV9zdGF0ZSI6eyJzY2hlbWEiOjEsImZhbWlseSI6InlvdXRob3Bwcy1pa3ktcHVibGlzaGVyLXYxIiwib2JzZXJ2ZWRfYXQiOjE3OTIwNzQ4OTEuNzYxMDU5OCwibm90X2JlZm9yZSI6MTc5MjA3NDIzNi4yNjI2MjMzLCJzdGFydHMiOlsxNzkyMDc0ODg2Ljc1OTIwNjNdLCJibG9ja2VkIjp0cnVlLCJpbnRlcnZhbCI6MTIuMiwicGFnZV9pbnRlcnZhbCI6MzAsInJhdGVfbGltaXRfc3RyaWtlcyI6MCwicmF0ZV9saW1pdF91bnRpbCI6MCwiY29tcGxldGVkIjoxNzkyMDc0ODkxLjc2MTA1OTh9LCJsZWdhY3lfcmF3X2Jhc2U2NCI6ImV5SnpZMmhsYldFaU9qRXNJbVpoYldsc2VTSTZJbmx2ZFhSb2IzQndjeTFwYTNrdGNIVmliR2x6YUdWeUxYWXhJaXdpYjJKelpYSjJaV1JmWVhRaU9qRTNPVEl3TnpRNE9URXVOell4TURVNU9Dd2libTkwWDJKbFptOXlaU0k2TVRjNU1qQTNOREl6Tmk0eU5qSTJNak16TENKemRHRnlkSE1pT2xzeE56a3lNRGMwT0RnMkxqYzFPVEl3TmpOZExDSmliRzlqYTJWa0lqcDBjblZsTENKcGJuUmxjblpoYkNJNk1USXVNaXdpY0dGblpWOXBiblJsY25aaGJDSTZNekFzSW5KaGRHVmZiR2x0YVhSZmMzUnlhV3RsY3lJNk1Dd2ljbUYwWlY5c2FXMXBkRjkxYm5ScGJDSTZNQ3dpWTI5dGNHeGxkR1ZrSWpveE56a3lNRGMwT0RreExqYzJNVEExT1RoOSIsInJlZnVzZWRfdXJsIjoiaHR0cHM6Ly93d3cuaWt5LmdyL3dwLWpzb24vd3AvdjIvcGFnZXM/c2x1Zz1kaWRha3RvcmlrZXMteXBvdHJvZmllcy1lc3BhLTIwMTQtMjAyMCUyQ2RpZGFrdG9yaWtlcy15cG90cm9maWVzLWVzcGEtMjAyMS0yMDI3JTJDZGlkYWt0b3Jpa2VzLXlwb3Ryb2ZpZXMtaS1rLXktc3RvLWV2cm8lMkNkb3JlYS1kaW9ueXNpb3UtYW5nZWxvcG91bG91JTJDZWZwYXRoZWlzLWtvaW5vbmlrZXMtb21hZGVzLWVrby1lc3BhLTIwMjEtMjAyNyUyQ2Vpcy1tbmltaW4tbWFyaWFzLXphb3VzaSUyQ2Vrb2lreSUyQ2VsbGluby1nYWxsaWtpLXN5bmVyZ2FzaWElMkNlbGxpbm8tdnJldGFuaWtpLXN5bmVyZ2FzaWElMkNlbGxpbm92cmV0YW5pa2lzJTJDZW5pc2NoeXNpLXN5bW1ldG9jaGlzLXNlLWRpZXRobmVpcy1kaWFnJTJDZXJldm5hLWVwaS1mbG9yZW50aWFzJTJDZmFuaS1zYXJpZ2lhbm5pJTJDaWt5LWRhYWQlMkNpa3ktZXZkYXAlMkNpa3ktZnVsYnJpZ2h0JTJDa2xpbG9kb3RpbWEtbnhyaXNvdmVyZ2klMkNrbGlyb2RvdGltYXRhLXRoZW9kb3JpZGVpb24lMkNrbGlyb2RvdGltYXRhLXRzb3VyaWRpLXByb3B0dXhpYWthJTJDa2xpcm9kb3RpbWF0YS14YXR6b3BvdWxvdS1wcm9wdHV4aWFrYSUyQ3Byb2dyYW1tYS1odWJlcnQtY3VyaWVuJTJDdnJhdmVpYS1kaWFrcmlzaXMtc2UtZGlldGhuZWlzLWRpYWdvbiUyQ3lwb3Ryb2ZpZXMtZXNwYS0yMDIxLTIwMjclMkN5cG90cm9maWVzLWdpYS1lcmV2bmEta2xpcm9kb3RpbWEtbGVvbmlkYS1uaWtvbGFpZGklMkN5cG90cm9maWVzLWlreS1mdWxicmlnaHQtZ3JlZWNlJTJDeXBvdHJvZmllcy1zdGluLW1uaW1pLXRvdS1rYXRoaWdpdGkta29uc3RhbnRpbm91LWQta2VyYW1lb3MlMkN5cG90cm9maWVzLXN5bmVyZ2FzaWFzLW1lLWZvcmVpcy1lbGxpbmlrb3ktcG9saXRpc21veSUyQyVDRSVCMiVDRiU4MSVDRSVCMSVDRSVCMiVDRSVCNSVDRSVBRiVDRSVCMS0lQ0UlQjElQ0YlODElQ0UlQjklQ0YlODMlQ0YlODQlQ0UlQjUlQ0UlQUYlQ0UlQjElQ0YlODItJUNFJUIxJUNGJTgwJUNFJUJGJUNGJTg2JUNFJUJGJUNFJUFGJUNGJTg0JUNGJTg5JUNFJUJELSVDRSVCMSVDRSVCNSVDRSVCOSUyQyVDRSVCNSVDRiU4MSVDRSVCNSVDRiU4NSVDRSVCRCVDRSVCMS0lQ0UlQjUlQ0YlODMlQ0YlODAlQ0UlQjEtMjAxNC0yMDIwJnBlcl9wYWdlPTEwMCZvcmRlcmJ5PWlkJm9yZGVyPWFzYyZfZmllbGRzPWlkJTJDbGluayUyQ3RpdGxlJTJDZGF0ZV9nbXQlMkNzbHVnJnBhZ2U9MSIsInJlZnVzZWRfc3RhdHVzIjo0MDEsInJldmlldyI6Imh0dHBzOi8vZ2l0aHViLmNvbS9Zb3V0aE9wcHMvZGF0YS1waXBlbGluZS9pc3N1ZXMvNDAjaXNzdWVjb21tZW50LTYxOTU1NTY1NTAifX0=',
+ 'state_sha256': '682fdfb3acdd8f01cd72277a919291096dd7f1062faeba304fb693a17e286a64'}
+
+
+def apply_iky_native_handoff(incoming, latest):
+    """Keep the authenticated native terminal floor across its first normal owner."""
+    approved = _IKY_NATIVE_HANDOFF
+    if approved is None:
+        return incoming
+    if (not isinstance(approved, dict) or set(approved) != {
+            "decision", "proof_sha256", "predecessor", "predecessor_state_sha256",
+            "native", "state_sha256", "state_base64"}):
+        raise AdapterError("Invalid IKY native decision", "access")
+    if not (re.fullmatch(r"https://github\.com/YouthOpps/data-pipeline/issues/273#issuecomment-[1-9][0-9]*",
+                         approved["decision"]) and re.fullmatch(r"[a-f0-9]{64}", approved["proof_sha256"])):
+        raise AdapterError("Malformed IKY handback proof", "access")
+    try:
+        raw = base64.b64decode(approved["state_base64"], validate=True)
+        if not 0 < len(raw) <= 16384:
+            raise ValueError()
+        floor = validate_budget(json.loads(raw))
+        fingerprint = lambda state: hashlib.sha256(
+            json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if (fingerprint(floor) != approved["state_sha256"] or not scoped_refusal_valid(floor)
+                or floor["html_global_hold"] or floor.get("request_pending")):
+            raise ValueError()
+    except (ValueError, TypeError, KeyError):
+        raise AdapterError("Unsettled or changed IKY native terminal evidence", "access") from None
+    fields = ("not_before", "interval", "page_interval", "rate_limit_strikes", "rate_limit_until", "completed")
+    if tuple(approved["predecessor"]) == latest:
+        if (fingerprint(incoming) != approved["predecessor_state_sha256"] or not scoped_refusal_valid(incoming)
+                or incoming["refusal_scope"] != floor["refusal_scope"] or incoming["html_global_hold"]
+                or incoming.get("request_pending") or floor["observed_at"] < incoming["observed_at"]):
+            raise AdapterError("Unexpected IKY production predecessor", "access")
+        comment_id = approved["decision"].rsplit("-", 1)[1]
+        grant = workflow_api(f"/issues/comments/{comment_id}")
+        if (grant.get("id") != int(comment_id) or grant.get("html_url") != approved["decision"]
+                or grant.get("issue_url") != "https://api.github.com/repos/YouthOpps/data-pipeline/issues/273"
+                or grant.get("user", {}).get("id") != 12278069 or grant["user"].get("type") != "User"
+                or grant.get("created_at") != grant.get("updated_at")
+                or (grant.get("body") or "").splitlines().count(
+                    "Approved IKY native handback proof " + approved["proof_sha256"]) != 1
+                or (grant.get("body") or "").splitlines().count(
+                    "IKY native terminal state " + approved["state_sha256"]) != 1):
+            raise AdapterError("IKY production handback grant differs", "access")
+        verify_iky_native_owner(approved["native"])
+        combined = empty_budget(floor["observed_at"])
+        merge_refusal_scope(combined, incoming, floor)
+        for field in fields:
+            combined[field] = max(combined[field], incoming[field], floor[field])
+        starts = sorted(set(incoming["starts"] + floor["starts"]))
+        if len(starts) > 10 and starts[-11] > floor["observed_at"] - 60:
+            raise AdapterError("Live native reservations exceed IKY state capacity", "access")
+        combined["starts"] = starts[-10:]
+        return validate_budget(combined)
+    if (not scoped_refusal_valid(incoming) or incoming["refusal_scope"] != floor["refusal_scope"]
+            or incoming["observed_at"] < floor["observed_at"]
+            or any(incoming[key] < floor[key] for key in fields)
+            or any(stamp > incoming["observed_at"] - 60 and stamp not in incoming["starts"]
+                   for stamp in floor["starts"])):
+        raise AdapterError("Newest IKY archive does not preserve the native floor", "access")
+    return incoming
+
+
+def verify_iky_native_owner(native):
+    """Bind the original, retired QA job and both authentic handback archives."""
+    def matches(row, **fields):
+        return all(type(row.get(key)) is type(value) and row[key] == value for key, value in fields.items())
+
+    conclusion = native["conclusion"]
+    if conclusion not in {"success", "failure"}:
+        raise AdapterError("Invalid native handback result", "access")
+    if not (native["branch"] == "qa/491-iky-full-native"
+            and native["path"] == ".github/workflows/verify-iky-full-native.yml"):
+        raise AdapterError("Invalid native handback workflow", "access")
+    workflow = workflow_api(f'/actions/workflows/{native["workflow"]}')
+    if not matches(workflow, id=native['workflow'], path=native['path'], state='disabled_manually'):
+        raise AdapterError('IKY native workflow must be retired before handback', 'access')
+    inventory = workflow_api(f'/actions/workflows/{native["workflow"]}/runs?per_page=2')
+    endpoint = f'/actions/runs/{native["run"]}/attempts/1'
+    exact = workflow_api(endpoint)
+    if (inventory['total_count'] != 1 or len(inventory['workflow_runs']) != 1
+            or inventory['workflow_runs'][0]['id'] != native['run']
+            or not matches(exact, id=native['run'], workflow_id=native['workflow'],
+                           path=native['path'], run_attempt=1, event='push', status='completed',
+                           conclusion=conclusion, head_sha=native['head'], head_branch=native['branch'])
+            or exact['actor']['id'] != 12278069 or exact['actor']['type'] != 'User'
+            or exact['triggering_actor']['id'] != 12278069 or exact['triggering_actor']['type'] != 'User'
+            or exact['repository']['full_name'] != 'YouthOpps/data-pipeline'
+            or exact['head_repository']['full_name'] != 'YouthOpps/data-pipeline'):
+        raise AdapterError('IKY native original attempt differs', 'access')
+    jobs = workflow_api(endpoint + '/jobs?per_page=2')
+    if (jobs['total_count'] != 1 or len(jobs['jobs']) != 1
+            or not matches(jobs['jobs'][0], id=native['job'], run_id=native['run'], run_attempt=1,
+                           head_sha=native['head'], head_branch=native['branch'], status='completed',
+                           conclusion=conclusion, name='Verify IKY native HTML collection')):
+        raise AdapterError('IKY native original job differs', 'access')
+    steps = {item['name']: item['conclusion'] for item in jobs['jobs'][0]['steps']}
+    upload = "Upload encrypted result and exact owned state evidence"
+    original = "Run the original IKY nonpublishing test under reviewed custody"
+    if (steps.get("Upload the before-wire recovery public key") != "success"
+            or steps.get(original) != native["command_step"] or steps.get(upload) != native["upload_step"]
+            or (conclusion == "success" and (steps[original], steps[upload]) != ("success", "success"))
+            or steps[original] not in {"success", "failure"} or steps[upload] not in {"success", "failure"}):
+        raise AdapterError("IKY native recovery steps differ", "access")
+    artifacts = workflow_api(f'/actions/runs/{native["run"]}/artifacts?per_page=3')
+    expected_count = len(native["artifacts"])
+    expected_names = {f'iky491-recovery-key-{native["run"]}-1'}
+    if expected_count == 2:
+        expected_names.add(f'iky491-native-{native["run"]}-1')
+    if (expected_count not in {1, 2} or (steps[upload] == "success" and expected_count != 2)
+            or expected_names != {row["name"] for row in native["artifacts"]}
+            or artifacts["total_count"] != expected_count or len(artifacts["artifacts"]) != expected_count):
+        raise AdapterError("IKY native artifact inventory differs", "access")
+    for expected in native["artifacts"]:
+        found = workflow_api(f'/actions/artifacts/{expected["id"]}')
+        if (not matches(found, **expected, expired=False) or found not in artifacts['artifacts']
+                or not matches(found['workflow_run'], id=native['run'], head_sha=native['head'],
+                               head_branch=native['branch'])):
+            raise AdapterError('Exact IKY native archive differs', 'access')
+
+
+
+
 def restore_family_artifact():
     global _RESTORED, _STATE_TRUSTED
     if _RESTORED:
@@ -1537,6 +1707,7 @@ def restore_family_artifact():
         incoming = download_inert_artifact(
             latest, artifact[("id")], artifact.get(("digest"))
         )
+    incoming = apply_iky_native_handoff(incoming, latest)
     with journal_restore_scope(incoming), locked_budget():
         local = load_budget()
         now = time.time()
@@ -2103,18 +2274,12 @@ def has_429_head_refusal(body, headers):
     ))
 
 
-def reject_visible_challenge(body, headers, *, challenge_only=False):
+def visible_challenge(body, headers, *, challenge_only=False):
     if challenge_only and has_429_head_refusal(body, headers):
-        with locked_budget():
-            state = load_budget()
-            state["blocked"] = True
-            state["html_global_hold"] = True
-            state["observed_at"] = time.time()
-            write_budget(state)
-        raise AdapterError("Visible publisher challenge or denial", "access")
+        return True
 
     if "html" not in headers.get("Content-Type", "").lower():
-        return
+        return False
     parser = VisibleText()
     parser.feed(body.decode("utf-8", "replace"))
     text = " ".join(" ".join(parser.text).lower().split())
@@ -2133,14 +2298,7 @@ def reject_visible_challenge(body, headers, *, challenge_only=False):
             "request blocked",
             "unusual traffic",
         )
-    if any(phrase in text for phrase in phrases):
-        with locked_budget():
-            state = load_budget()
-            state["blocked"] = True
-            state["html_global_hold"] = True
-            state["observed_at"] = time.time()
-            write_budget(state)
-        raise AdapterError("Visible publisher challenge or denial", "access")
+    return any(phrase in text for phrase in phrases)
 
 
 def source_request(
@@ -2175,10 +2333,6 @@ def source_request(
                 else None
             ),
         )
-        if not robots:
-            reject_visible_challenge(
-                body, headers, challenge_only=status == 429
-            )
         if status in {301, 302, 303, 307, 308}:
             if not headers.get("Location") or hop == 3:
                 raise AdapterError("Invalid source redirect", "fetch")

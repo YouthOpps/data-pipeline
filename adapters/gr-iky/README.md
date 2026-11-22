@@ -265,3 +265,12 @@ closed instead of continuing or truncating that update. These checks retain the
 existing 16 KiB journal bound, state schema, MAX restrictions and publication
 behavior. They detect observed generation changes; they are not filesystem
 compare-and-swap operations.
+
+A physical publisher request writes a pending marker before opening the connection.
+The marker is cleared after a closed, assessed response and a successful
+completion write. A failed restrictive write or response close leaves the
+reservation pending. The collector refuses a new request while either its
+local or restored state has a pending reservation. Earlier journal versions
+without the marker remain readable with their existing restrictions.
+
+The source can retain an independently accepted terminal state from its isolated native test. With an approved handback, the first normal restore authenticates the retired test owner and its archives against the existing production predecessor. Later restores must retain the native refusal scope, timing floors and still-live starts. The original API refusal remains enforced.
