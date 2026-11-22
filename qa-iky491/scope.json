@@ -1,0 +1,30 @@
+{
+  "adapter_sha256": "a693b38949a8952c0466068566e8729f316bfd3c3225b4d6dac3f625d9aa6fdc",
+  "approval_issue": 273,
+  "candidate": "132a846e67c65ebc156b05c57cbd7de4b4ce10fa",
+  "candidate_pr": 491,
+  "enabled": false,
+  "production": {
+    "archive_sha256": "a4efc4eeeef9b4f04351f0cb3f35c288a1b194b147f269767b5202c9bcfc34dd",
+    "archive_size": 1565,
+    "artifact": 14732190521,
+    "head": "286f436823a6e4d262469a533e2e22b6b429c1db",
+    "history_count": 39,
+    "history_sha256": "c819a2569b8724b3d850ed96d4628b9cdeefa79257501d1eaf89cf35651029b5",
+    "id": 385743125,
+    "job": 137035054845,
+    "path": ".github/workflows/fetch-gr-iky.yml",
+    "run": 44966003124,
+    "state_sha256": "e4a576ae33dd72ce4ac2a348976aab51655444c48326449a490194f72969f85d"
+  },
+  "reviewer_sha256": "c8bfa742ffcd2638a1926c8068b58c3f0cc9bcda7077b95ab3ac8a8ac5b01531",
+  "test_sha256": "16ed64b02373f545fb19974a1c497e9bfdd0d2265357f208b29a913aae87a04c",
+  "website": {
+    "files": {
+      "assets/discovery.js": "39dccc7be14705e2c338ae065044b2f6736d5e0b7bec70436937ad543a8741bb",
+      "package.json": "7cd869b0bff66038195746c4bac649e863b140c6b6505b39bed557ec1b4b1833",
+      "scripts/data.mjs": "bc9d9f9f83c58061c6d29f3fd3d6b04b56ad1b7503b12a009c2f91e24b4deef3"
+    },
+    "revision": "4b2e3d576f757cc31b798e6d65e5e80af1c585c9"
+  }
+}
