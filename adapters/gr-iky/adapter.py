@@ -1497,6 +1497,105 @@ def download_inert_artifact(identity, artifact_id, digest=None):
         ) from None
 
 
+_IKY_NATIVE_HANDOFF = None
+
+
+def apply_iky_native_handoff(incoming, latest):
+    """Keep the authenticated native terminal floor across its first normal owner."""
+    approved = _IKY_NATIVE_HANDOFF
+    if approved is None:
+        return incoming
+    if (not isinstance(approved, dict) or set(approved) != {
+            "decision", "proof_sha256", "predecessor", "predecessor_state_sha256",
+            "native", "state_sha256", "state_base64"}):
+        raise AdapterError("Invalid IKY native decision", "access")
+    if not (re.fullmatch(r"https://github\.com/YouthOpps/data-pipeline/issues/273#issuecomment-[1-9][0-9]*",
+                         approved["decision"]) and re.fullmatch(r"[a-f0-9]{64}", approved["proof_sha256"])):
+        raise AdapterError("Malformed IKY handback proof", "access")
+    try:
+        raw = base64.b64decode(approved["state_base64"], validate=True)
+        if not 0 < len(raw) <= 16384:
+            raise ValueError()
+        floor = validate_budget(json.loads(raw))
+        fingerprint = lambda state: hashlib.sha256(
+            json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if (fingerprint(floor) != approved["state_sha256"] or not scoped_refusal_valid(floor)
+                or floor["html_global_hold"] or floor.get("request_pending")):
+            raise ValueError()
+    except (ValueError, TypeError, KeyError):
+        raise AdapterError("Unsettled or changed IKY native terminal evidence", "access") from None
+    fields = ("not_before", "interval", "page_interval", "rate_limit_strikes", "rate_limit_until", "completed")
+    if tuple(approved["predecessor"]) == latest:
+        if (fingerprint(incoming) != approved["predecessor_state_sha256"] or not scoped_refusal_valid(incoming)
+                or incoming["refusal_scope"] != floor["refusal_scope"] or incoming["html_global_hold"]
+                or incoming.get("request_pending") or floor["observed_at"] < incoming["observed_at"]):
+            raise AdapterError("Unexpected IKY production predecessor", "access")
+        verify_iky_native_owner(approved["native"])
+        combined = empty_budget(floor["observed_at"])
+        merge_refusal_scope(combined, incoming, floor)
+        for field in fields:
+            combined[field] = max(combined[field], incoming[field], floor[field])
+        starts = sorted(set(incoming["starts"] + floor["starts"]))
+        if len(starts) > 10 and starts[-11] > floor["observed_at"] - 60:
+            raise AdapterError("Live native reservations exceed IKY state capacity", "access")
+        combined["starts"] = starts[-10:]
+        return validate_budget(combined)
+    if (not scoped_refusal_valid(incoming) or incoming["refusal_scope"] != floor["refusal_scope"]
+            or incoming["observed_at"] < floor["observed_at"]
+            or any(incoming[key] < floor[key] for key in fields)
+            or any(stamp > incoming["observed_at"] - 60 and stamp not in incoming["starts"]
+                   for stamp in floor["starts"])):
+        raise AdapterError("Newest IKY archive does not preserve the native floor", "access")
+    return incoming
+
+
+def verify_iky_native_owner(native):
+    """Bind the original, retired QA job and both authentic handback archives."""
+    def matches(row, **fields):
+        return all(type(row.get(key)) is type(value) and row[key] == value for key, value in fields.items())
+
+    workflow = workflow_api(f'/actions/workflows/{native["workflow"]}')
+    if not matches(workflow, id=native['workflow'], path=native['path'], state='disabled_manually'):
+        raise AdapterError('IKY native workflow must be retired before handback', 'access')
+    inventory = workflow_api(f'/actions/workflows/{native["workflow"]}/runs?per_page=2')
+    endpoint = f'/actions/runs/{native["run"]}/attempts/1'
+    exact = workflow_api(endpoint)
+    if (inventory['total_count'] != 1 or len(inventory['workflow_runs']) != 1
+            or inventory['workflow_runs'][0]['id'] != native['run']
+            or not matches(exact, id=native['run'], workflow_id=native['workflow'],
+                           path=native['path'], run_attempt=1, event='push', status='completed',
+                           conclusion='success', head_sha=native['head'], head_branch=native['branch'])
+            or exact['actor']['id'] != 12278069 or exact['actor']['type'] != 'User'
+            or exact['triggering_actor']['id'] != 12278069 or exact['triggering_actor']['type'] != 'User'
+            or exact['repository']['full_name'] != 'YouthOpps/data-pipeline'
+            or exact['head_repository']['full_name'] != 'YouthOpps/data-pipeline'):
+        raise AdapterError('IKY native original attempt differs', 'access')
+    jobs = workflow_api(endpoint + '/jobs?per_page=2')
+    if (jobs['total_count'] != 1 or len(jobs['jobs']) != 1
+            or not matches(jobs['jobs'][0], id=native['job'], run_id=native['run'], run_attempt=1,
+                           head_sha=native['head'], head_branch=native['branch'], status='completed',
+                           conclusion='success', name='Verify IKY native HTML collection')):
+        raise AdapterError('IKY native original job differs', 'access')
+    steps = {item['name']: item['conclusion'] for item in jobs['jobs'][0]['steps']}
+    if any(steps.get(name) != 'success' for name in (
+        'Upload the before-wire recovery public key',
+        'Run the original IKY nonpublishing test under reviewed custody',
+        'Upload encrypted result and exact owned state evidence',
+    )):
+        raise AdapterError('IKY native outcome or custody is incomplete', 'access')
+    artifacts = workflow_api(f'/actions/runs/{native["run"]}/artifacts?per_page=3')
+    if artifacts['total_count'] != 2 or len(artifacts['artifacts']) != 2:
+        raise AdapterError('IKY native artifact inventory differs', 'access')
+    for expected in native['artifacts']:
+        found = workflow_api(f'/actions/artifacts/{expected["id"]}')
+        if (not matches(found, **expected, expired=False) or found not in artifacts['artifacts']
+                or not matches(found['workflow_run'], id=native['run'], head_sha=native['head'],
+                               head_branch=native['branch'])):
+            raise AdapterError('Exact IKY native archive differs', 'access')
+
+
+
+
 def restore_family_artifact():
     global _RESTORED, _STATE_TRUSTED
     if _RESTORED:
@@ -1562,6 +1661,7 @@ def restore_family_artifact():
         incoming = download_inert_artifact(
             latest, artifact[("id")], artifact.get(("digest"))
         )
+    incoming = apply_iky_native_handoff(incoming, latest)
     with journal_restore_scope(incoming), locked_budget():
         local = load_budget()
         now = time.time()

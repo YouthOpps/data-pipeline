@@ -272,3 +272,5 @@ completion write. A failed restrictive write or response close leaves the
 reservation pending. The collector refuses a new request while either its
 local or restored state has a pending reservation. Earlier journal versions
 without the marker remain readable with their existing restrictions.
+
+The source can retain an independently accepted terminal state from its isolated native test. With an approved handback, the first normal restore authenticates the retired test owner and its archives against the existing production predecessor. Later restores must retain the native refusal scope, timing floors and still-live starts. The original API refusal remains enforced.
