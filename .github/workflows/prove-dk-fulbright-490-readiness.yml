@@ -1,0 +1,25 @@
+name: Verify Denmark native acceptance readiness without publisher access
+on:
+  push:
+    branches: [qa/490-dk-fulbright-offline-acceptance]
+permissions:
+  actions: read
+  contents: read
+  issues: read
+  pull-requests: read
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && !github.event.deleted && github.run_attempt == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Authenticate current source owner, decode original ZIP and verify OFF gates
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa-denmark490/readiness.py
