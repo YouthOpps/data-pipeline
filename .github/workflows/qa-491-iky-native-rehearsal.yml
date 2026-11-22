@@ -1,0 +1,20 @@
+name: Verify IKY authenticated predecessor and state handback
+on:
+  push:
+    branches: [qa/491-iky-native]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && github.run_attempt == 1 && github.actor_id == '12278069'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Decode the original authenticated production archive and exercise restrictive handback
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa/iky491/rehearse.py
