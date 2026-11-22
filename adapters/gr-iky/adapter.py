@@ -1530,6 +1530,17 @@ def apply_iky_native_handoff(incoming, latest):
                 or incoming["refusal_scope"] != floor["refusal_scope"] or incoming["html_global_hold"]
                 or incoming.get("request_pending") or floor["observed_at"] < incoming["observed_at"]):
             raise AdapterError("Unexpected IKY production predecessor", "access")
+        comment_id = approved["decision"].rsplit("-", 1)[1]
+        grant = workflow_api(f"/issues/comments/{comment_id}")
+        if (grant.get("id") != int(comment_id) or grant.get("html_url") != approved["decision"]
+                or grant.get("issue_url") != "https://api.github.com/repos/YouthOpps/data-pipeline/issues/273"
+                or grant.get("user", {}).get("id") != 12278069 or grant["user"].get("type") != "User"
+                or grant.get("created_at") != grant.get("updated_at")
+                or (grant.get("body") or "").splitlines().count(
+                    "Approved IKY native handback proof " + approved["proof_sha256"]) != 1
+                or (grant.get("body") or "").splitlines().count(
+                    "IKY native terminal state " + approved["state_sha256"]) != 1):
+            raise AdapterError("IKY production handback grant differs", "access")
         verify_iky_native_owner(approved["native"])
         combined = empty_budget(floor["observed_at"])
         merge_refusal_scope(combined, incoming, floor)
