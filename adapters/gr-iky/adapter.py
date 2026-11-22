@@ -1554,6 +1554,12 @@ def verify_iky_native_owner(native):
     def matches(row, **fields):
         return all(type(row.get(key)) is type(value) and row[key] == value for key, value in fields.items())
 
+    conclusion = native["conclusion"]
+    if conclusion not in {"success", "failure"}:
+        raise AdapterError("Invalid native handback result", "access")
+    if not (native["branch"] == "qa/491-iky-full-native"
+            and native["path"] == ".github/workflows/verify-iky-full-native.yml"):
+        raise AdapterError("Invalid native handback workflow", "access")
     workflow = workflow_api(f'/actions/workflows/{native["workflow"]}')
     if not matches(workflow, id=native['workflow'], path=native['path'], state='disabled_manually'):
         raise AdapterError('IKY native workflow must be retired before handback', 'access')
@@ -1564,7 +1570,7 @@ def verify_iky_native_owner(native):
             or inventory['workflow_runs'][0]['id'] != native['run']
             or not matches(exact, id=native['run'], workflow_id=native['workflow'],
                            path=native['path'], run_attempt=1, event='push', status='completed',
-                           conclusion='success', head_sha=native['head'], head_branch=native['branch'])
+                           conclusion=conclusion, head_sha=native['head'], head_branch=native['branch'])
             or exact['actor']['id'] != 12278069 or exact['actor']['type'] != 'User'
             or exact['triggering_actor']['id'] != 12278069 or exact['triggering_actor']['type'] != 'User'
             or exact['repository']['full_name'] != 'YouthOpps/data-pipeline'
@@ -1574,19 +1580,26 @@ def verify_iky_native_owner(native):
     if (jobs['total_count'] != 1 or len(jobs['jobs']) != 1
             or not matches(jobs['jobs'][0], id=native['job'], run_id=native['run'], run_attempt=1,
                            head_sha=native['head'], head_branch=native['branch'], status='completed',
-                           conclusion='success', name='Verify IKY native HTML collection')):
+                           conclusion=conclusion, name='Verify IKY native HTML collection')):
         raise AdapterError('IKY native original job differs', 'access')
     steps = {item['name']: item['conclusion'] for item in jobs['jobs'][0]['steps']}
-    if any(steps.get(name) != 'success' for name in (
-        'Upload the before-wire recovery public key',
-        'Run the original IKY nonpublishing test under reviewed custody',
-        'Upload encrypted result and exact owned state evidence',
-    )):
-        raise AdapterError('IKY native outcome or custody is incomplete', 'access')
+    upload = "Upload encrypted result and exact owned state evidence"
+    original = "Run the original IKY nonpublishing test under reviewed custody"
+    if (steps.get("Upload the before-wire recovery public key") != "success"
+            or steps.get(original) != native["command_step"] or steps.get(upload) != native["upload_step"]
+            or (conclusion == "success" and (steps[original], steps[upload]) != ("success", "success"))
+            or steps[original] not in {"success", "failure"} or steps[upload] not in {"success", "failure"}):
+        raise AdapterError("IKY native recovery steps differ", "access")
     artifacts = workflow_api(f'/actions/runs/{native["run"]}/artifacts?per_page=3')
-    if artifacts['total_count'] != 2 or len(artifacts['artifacts']) != 2:
-        raise AdapterError('IKY native artifact inventory differs', 'access')
-    for expected in native['artifacts']:
+    expected_count = len(native["artifacts"])
+    expected_names = {f'iky491-recovery-key-{native["run"]}-1'}
+    if expected_count == 2:
+        expected_names.add(f'iky491-native-{native["run"]}-1')
+    if (expected_count not in {1, 2} or (steps[upload] == "success" and expected_count != 2)
+            or expected_names != {row["name"] for row in native["artifacts"]}
+            or artifacts["total_count"] != expected_count or len(artifacts["artifacts"]) != expected_count):
+        raise AdapterError("IKY native artifact inventory differs", "access")
+    for expected in native["artifacts"]:
         found = workflow_api(f'/actions/artifacts/{expected["id"]}')
         if (not matches(found, **expected, expired=False) or found not in artifacts['artifacts']
                 or not matches(found['workflow_run'], id=native['run'], head_sha=native['head'],
