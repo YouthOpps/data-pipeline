@@ -238,14 +238,18 @@ class Custody:
                 and matches(artifact['workflow_run'], {'id': ident, 'head_sha': p['head'], 'head_branch': 'main'}),
                 'Exact initial archive differs')
 
-    def before_publisher(self):
-        run = self.active_run()
-        require(run['status'] == 'in_progress' and run['workflow_id'] == self.workflow_id,
-                'QA no longer owns its running job')
+    def active_job(self):
         job = api(f'/actions/jobs/{self.job_id}')
         require(matches(job, {'id': self.job_id, 'run_id': self.run, 'run_attempt': 1,
                               'head_sha': self.head, 'head_branch': BRANCH, 'runner_id': self.runner_id,
                               'status': 'in_progress'}), 'QA active job changed')
+        return job
+
+    def before_publisher(self):
+        run = self.active_run()
+        require(run['status'] == 'in_progress' and run['workflow_id'] == self.workflow_id,
+                'QA no longer owns its running job')
+        self.active_job()
         require(api('/git/ref/heads/' + BRANCH)['object']['sha'] == self.head, 'QA branch moved')
         comment = api('/issues/comments/' + self.grant.rsplit('-', 1)[-1])
         require(matches(comment['user'], USER) and comment['html_url'] == self.grant

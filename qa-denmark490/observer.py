@@ -44,6 +44,8 @@ def authorized_overlay(raw):
          b'    _QA_PUBLISHER_GUARD()\n    incoming = restored_state()'),
         (b'    hosted = os.environ.get("GITHUB_ACTIONS") == "true"\n    current = current_run_identity() if hosted else None',
          b'    hosted = False\n    current = None'),
+        (b'        if now < target:\n            raise AdapterError("Publisher clock moved backwards", "access")',
+         b'        _QA_BEFORE_RESERVATION(state)\n        now = time.time()\n        if now < target:\n            raise AdapterError("Publisher clock moved backwards", "access")'),
     )
     executable = raw
     for old, new in edits:
@@ -62,7 +64,17 @@ def load_adapter(custody, capture):
     capture['executable_sha256'] = digest(executable)
     adapter = ModuleType('adapter')
     adapter.__file__ = str(SOURCE)
-    adapter._QA_PUBLISHER_GUARD = custody.before_publisher
+    def verify_job_clock():
+        custody.before_publisher()
+        row = custody.active_job()
+        from datetime import datetime
+        started = datetime.fromisoformat(row['started_at'].replace('Z', '+00:00')).timestamp()
+        elapsed = time.time() - started
+        require(-1 <= elapsed < 1800 - adapter.EXPORT_TIMEOUT, 'Native job budget exhausted')
+        adapter._RUN_END = min(adapter._RUN_END, time.monotonic() + 1800 - max(0, elapsed) - 2)
+        adapter.check_deadline()
+
+    adapter._QA_PUBLISHER_GUARD = verify_job_clock
     old = sys.modules.get('adapter')
     require(old is None, 'Unexpected preloaded adapter')
     sys.modules['adapter'] = adapter
@@ -120,12 +132,19 @@ def instrument(adapter, custody, capture, escrow):
     def opened(request, *args, **kwargs):
         url = request.full_url
         if not adapter.is_publisher(url):
+            uri = urllib.parse.urlsplit(url)
+            host = uri.hostname or ''
+            headers = {key.casefold(): value for key, value in request.header_items()}
+            require(uri.scheme == 'https' and not uri.username and not uri.password and not uri.port
+                    and request.get_method() == 'GET'
+                    and ((host == 'api.github.com' and uri.path.startswith('/repos/YouthOpps/data-pipeline/'))
+                         or (host.endswith('.blob.core.windows.net') or host.endswith('.actions.githubusercontent.com'))
+                         and 'authorization' not in headers), 'Unexpected infrastructure destination')
             return original_open(request, *args, **kwargs)
         headers = dict((k.casefold(), v) for k, v in request.header_items())
-        require(headers.get('user-agent') == adapter._USER_AGENT and 'authorization' not in headers,
+        require(headers.get('user-agent') == adapter._USER_AGENT and not {'authorization','proxy-authorization','cookie'}.intersection(headers),
                 'Outbound publisher identity changed')
         require(capture.get('source_floor') is not None, 'Publisher open without predecessor')
-        custody.before_publisher()
         adapter.verify_journal()
         raw = os.pread(adapter._JOURNAL_FD, 65537, 0)
         escrow.require_pending(raw)
@@ -133,7 +152,7 @@ def instrument(adapter, custody, capture, escrow):
         require(state['in_flight'] and state['starts'], 'Physical opener lacks an acknowledged reservation')
         event = {'escrow_sequence': escrow.sequence, 'url': url, 'start': time.monotonic(), 'wall_start': time.time(), 'completion': None,
                  'startup_quiet_until': adapter._STARTUP_QUIET_UNTIL, 'request_headers': headers,
-                 'reservation': state['starts'][-1], 'interval': state['interval'], 'page_gap': state['page_interval'],
+                 'reservation': state['starts'][-1], 'request_id': state['request_id'], 'interval': state['interval'], 'page_gap': state['page_interval'],
                  'segments': [], 'inventory': bool(state['request_inventory'])}
         capture['requests'].append(event)
         try:
@@ -184,14 +203,29 @@ def instrument(adapter, custody, capture, escrow):
         return result
 
 
-    original_attempt = adapter.publisher_attempt
-    @contextlib.contextmanager
-    def guarded_attempt(inventory=False):
-        custody.before_publisher()
-        with original_attempt(inventory) as frame:
-            yield frame
+    original_begin = adapter.begin_transaction
 
-    adapter.publisher_attempt = guarded_attempt
+    def guarded_begin(kind):
+        custody.before_publisher()
+        return original_begin(kind)
+
+    def before_reservation(state):
+        try:
+            custody.before_publisher()
+        except Exception as error:
+            # Only an empty, exclusively held logical operation can end through
+            # the adapter's own policy-only finalizer. A prior unresolved
+            # request follows the original failure and custody behavior.
+            if (not adapter._PUBLISHER_GATE_FAILED and not adapter._REQUEST_FRAMES
+                    and adapter._ACTIVE_REQUEST_ID is None and state['in_flight']
+                    and state['flight_id'] == adapter._ACTIVE_FLIGHT_ID
+                    and state['request_id'] == state['completed_request_id']
+                    and state['request_outcome'] != 'reserved'):
+                raise adapter.PolicyStop('Native authorization ended before reservation', 'access') from error
+            raise
+
+    adapter.begin_transaction = guarded_begin
+    adapter._QA_BEFORE_RESERVATION = before_reservation
     adapter.download_inert_artifact = download
     adapter._OPENER.open = opened
     adapter.save_budget = write
@@ -271,6 +305,15 @@ def assess(adapter, capture):
     gaps = [b['start']-a['completion'] for a,b in zip(events,events[1:])]
     require(gaps and all(gap >= events[i+1]['interval'] for i,gap in enumerate(gaps)),
             'Observed requests violated physical pacing')
+    require(all(r['wall_start'] >= r['reservation'] and r['start'] >= r['startup_quiet_until']
+                and r['request_id'] and any(w.get('acknowledged') and
+                w['after']['completed_request_id'] == r['request_id'] and
+                w['after']['request_outcome'] == 'response_assessed' for w in capture['persistence'])
+                for r in events), 'A real request lacks its original completion receipt')
+    inventory = [r for r in events if r['inventory']]
+    require(all(b['start'] - a['completion'] >= b['page_gap'] for a,b in zip(inventory,inventory[1:]))
+            and all(sum(r['start']-60 < u['start'] <= r['start'] for u in events) <= 5 for r in events),
+            'Inventory pacing or rolling start limit exceeded')
     stamp = adapter.utc_now()
     visible = adapter.remove_expired_records(records, stamp)
     results = {'raw': consume(adapter, records, stamp), 'filtered': consume(adapter, visible, stamp)}
