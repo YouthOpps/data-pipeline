@@ -3,7 +3,7 @@
   "approval_issue": 273,
   "candidate": "132a846e67c65ebc156b05c57cbd7de4b4ce10fa",
   "candidate_pr": 491,
-  "enabled": false,
+  "enabled": true,
   "production": {
     "archive_sha256": "a4efc4eeeef9b4f04351f0cb3f35c288a1b194b147f269767b5202c9bcfc34dd",
     "archive_size": 1565,
