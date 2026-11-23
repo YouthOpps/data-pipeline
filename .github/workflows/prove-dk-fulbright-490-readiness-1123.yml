@@ -1,7 +1,7 @@
 name: Verify Denmark native acceptance readiness without publisher access
 on:
   push:
-    branches: [qa/490-dk-fulbright-offline-acceptance]
+    branches: [qa/490-dk-fulbright-offline-1123]
 permissions:
   actions: read
   contents: read
