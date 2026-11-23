@@ -1,0 +1,15 @@
+name: Check WBI current attempt visibility
+on:
+  push:
+    branches: [qa/365-wbi-visibility-20261123]
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python -B qa/wbi-visibility/control.py adapters/be-wbi/adapter.py
