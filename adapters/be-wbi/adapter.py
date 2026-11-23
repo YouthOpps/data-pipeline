@@ -4571,7 +4571,7 @@ def completed_identity(run, expected=None, revision=None):
 
 
 def latest_family_run():
-    """Restart only count-drift races, without reusing partial candidates."""
+    """Restart incomplete GitHub inventory observations without reusing candidates."""
     for attempt in range(3):
         try:
             return scan_family_history()
@@ -5668,7 +5668,7 @@ def scan_family_history():
                 "Family inventory exceeds bounded metadata scan", "access"
             )
     if hosted and not current_seen:
-        raise AdapterError(
+        raise InventoryRace(
             "Current attempt missing from complete family history", "access"
         )
     ordered = sorted(value for value in candidates if value is not None)

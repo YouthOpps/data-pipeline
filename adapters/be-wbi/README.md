@@ -267,3 +267,5 @@ into the first production refresh after validating the newest canonical owned
 artifact. The existing #373 MAX floor also applies. Later production attempts
 validate the latest owned state and its inherited timing and refusal scope.
 The verified native state never substitutes for an absent production archive.
+
+The producer rereads the complete GitHub workflow inventory when its authenticated active attempt is temporarily absent or the advertised count changes between pages. After three incomplete observations it stops before publisher access. A conflicting current attempt or an invalid identity still stops immediately.
