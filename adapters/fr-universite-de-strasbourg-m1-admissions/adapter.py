@@ -2323,13 +2323,26 @@ def main():
         export_pacing()
 
 
+def failure_location(error):
+    """Identify the innermost adapter frame without exposing request or response data."""
+    frame = error.__traceback__
+    location = {}
+    while frame is not None:
+        if frame.tb_frame.f_globals is globals():
+            location = {'function': frame.tb_frame.f_code.co_name, 'line': frame.tb_lineno}
+        frame = frame.tb_next
+    if isinstance(error, AdapterError) and type(error.status) is int and 100 <= error.status <= 599:
+        location['http_status'] = error.status
+    return location
+
+
 if __name__ == '__main__':
     try:
         main()
-    except Exception:
+    except Exception as error:
         phases = [{'phase': item['phase'], 'response_status': item.get('status'),
                    'body_complete': item.get('body_complete', False), 'closed': item.get('closed', False),
                    'settled': item.get('settled_sha256') is not None} for item in AUDIT['requests']]
         print('Strasbourg M1 admissions collection or publication failed', file=sys.stderr)
-        print(json.dumps({'publisher_phases': phases}), file=sys.stderr)
+        print(json.dumps({'publisher_phases': phases, 'failure_location': failure_location(error)}), file=sys.stderr)
         sys.exit(1)
