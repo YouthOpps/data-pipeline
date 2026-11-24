@@ -1,0 +1,16 @@
+name: Verify Strasbourg failure location diagnostics
+on:
+  push:
+    branches: [qa/365-strasbourg-failure-location]
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python -B .github/qa/strasbourg-failure-location.py
