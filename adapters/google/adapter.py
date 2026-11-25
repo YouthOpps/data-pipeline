@@ -1924,12 +1924,43 @@ def mark_pacing_artifact_ready(runner_parent, runner_root):
     journal_output_signal("true")
 
 
+def retain_policy_review_state():
+    """Capture an unresolved journal for human review, never for admission."""
+    run_id, attempt = current_run_identity()
+    head = os.environ["GITHUB_SHA"]
+    if _HOSTED_IDENTITY != (run_id, attempt, SOURCE_ID, head):
+        raise AdapterError("Unverified Google review owner", "access")
+    with locked_budget():
+        state = load_budget()
+        if not state["in_flight"]:
+            return
+        journal_verify()
+    root = os.environ["RUNNER_TEMP"]
+    review_path = os.path.join(root, "google-pending-review.json")
+    with tempfile.NamedTemporaryFile(dir=root, mode="w", encoding="utf-8") as file:
+        json.dump({
+            "purpose": "manual-review-only",
+            "repository": "YouthOpps/data-pipeline",
+            "source": SOURCE_ID,
+            "head_sha": head,
+            "run_id": run_id,
+            "run_attempt": attempt,
+            "pending_journal": state,
+        }, file)
+        file.flush()
+        os.fsync(file.fileno())
+        os.link(file.name, review_path)
+    journal_output_signal("true", key="pending_review_ready")
+
+
 def export_family_artifact():
     path = os.environ.get("GOOGLE_PACING_ARTIFACT_PATH")
     if not path:
         return
     if not _STATE_TRUSTED or _PUBLISHER_GATE_FAILED or _JOURNAL_FATAL:
         journal_invalidate_export()
+        if _STATE_TRUSTED and _PUBLISHER_GATE_FAILED and not _JOURNAL_FATAL:
+            retain_policy_review_state()
         return
 
     def payload():
@@ -2571,7 +2602,7 @@ def normalize_octets(value):
         and len(value) <= 8192
         and (not any((ord(c) < 32 or ord(c) == 127 for c in value)))
     ):
-        raise AdapterError("Invalid bounded robots policy or URI", "access")
+        raise AdapterError("Invalid robots URI length or control character", "access")
     out = []
     i = 0
     while i < len(value):
@@ -2582,7 +2613,7 @@ def normalize_octets(value):
                 and re.fullmatch("[a-fA-F0-9]{2}", value[i + 1 : i + 3])
             ):
                 raise AdapterError(
-                    "Invalid bounded robots policy or URI", "access"
+                    "Malformed robots URI percent escape", "access"
                 )
             n = int(value[i + 1 : i + 3], 16)
             out.append(
@@ -2601,15 +2632,15 @@ def normalize_octets(value):
 
 def groups(body):
     if not (isinstance(body, bytes) and len(body) <= 65536):
-        raise AdapterError("Invalid bounded robots policy or URI", "access")
+        raise AdapterError("Robots policy exceeds byte bound or has invalid type", "access")
     lines = body.decode("utf-8-sig", "strict").splitlines()
     if not len(lines) <= 2048:
-        raise AdapterError("Invalid bounded robots policy or URI", "access")
+        raise AdapterError("Robots policy exceeds line bound", "access")
     result = []
     agents = []
     rules = []
     directives = False
-    for line in lines + [""]:
+    for line_number, line in enumerate(lines + [""], start=1):
         line = line.split("#", 1)[0].strip()
         if not line:
             if agents and directives:
@@ -2630,12 +2661,12 @@ def groups(body):
                 directives = False
             if not (value == "*" or re.fullmatch("[A-Za-z_-]+", value)):
                 raise AdapterError(
-                    "Invalid bounded robots policy or URI", "access"
+                    f"Invalid robots user-agent token at line {line_number}", "access"
                 )
             agents.append(value.lower())
             if not len(agents) <= 32:
                 raise AdapterError(
-                    "Invalid bounded robots policy or URI", "access"
+                    f"Robots group exceeds user-agent bound at line {line_number}", "access"
                 )
         elif key in {"allow", "disallow"} and agents:
             directives = True
@@ -2645,18 +2676,21 @@ def groups(body):
                 value.startswith("/") and len(value) <= 2048 and (value.count("*") <= 8)
             ):
                 raise AdapterError(
-                    "Invalid bounded robots policy or URI", "access"
+                    f"Invalid robots rule path, length or wildcard count at line {line_number}", "access"
                 )
-            value = normalize_octets(value)
+            try:
+                value = normalize_octets(value)
+            except AdapterError as error:
+                raise AdapterError(f"{error} at line {line_number}", "access") from error
             rules.append((key == "allow", value))
             if not len(rules) <= 512:
                 raise AdapterError(
-                    "Invalid bounded robots policy or URI", "access"
+                    f"Robots group exceeds rule bound at line {line_number}", "access"
                 )
         elif agents:
             directives = True
     if not len(result) <= 100:
-        raise AdapterError("Invalid bounded robots policy or URI", "access")
+        raise AdapterError("Robots policy exceeds group bound", "access")
     return result
 
 
@@ -2673,7 +2707,7 @@ def rep_allowed(body, url, agent=None):
         and (not p.fragment)
         and (p.port in {None, 443})
     ):
-        raise AdapterError("Invalid bounded robots policy or URI", "access")
+        raise AdapterError("Invalid robots target origin or URI", "access")
     target = normalize_octets((p.path or "/") + ("?" + p.query if "?" in url else ""))
     best = -1
     chosen = []
@@ -2737,7 +2771,13 @@ def check_robots(url):
             text = body.decode("utf-8-sig", "strict")
             if re.search(r"<\s*[A-Za-z!/?]", text):
                 raise AdapterError("Markup is not Google REP", "access")
-            groups(body)
+            try:
+                groups(body)
+            except AdapterError as error:
+                digest = hashlib.sha256(body).hexdigest()
+                raise AdapterError(
+                    f"{origin}/robots.txt ({digest}): {error}", "access"
+                ) from error
             _ROBOTS[origin] = body
             body_digest = hashlib.sha256(body).hexdigest()
         else:
@@ -4597,7 +4637,7 @@ def journal_invalidate_owned_output(path):
             raise errors[0]
 
 
-def journal_output_signal(value):
+def journal_output_signal(value, *, key="pacing_ready"):
     """Bind fresh step output and all nested descriptors through close."""
     path = os.environ.get("GITHUB_OUTPUT")
     if not path:
@@ -4663,7 +4703,7 @@ def journal_output_signal(value):
                     raise AdapterError("Workflow output path changed", "access")
 
         verify()
-        line = ("pacing_ready=" + value + "\n").encode()
+        line = (key + "=" + value + "\n").encode()
         if os.write(descriptor, line) != len(line):
             raise AdapterError("Incomplete workflow output signal", "access")
         verify()
