@@ -416,3 +416,15 @@ public native evidence retains its original revision and date; no new publisher
 requests, original expired raw-body replay, publication or production run are
 claimed. Collection, facts, identifiers, deadlines, expiry, state schema,
 pending transactions, MAX constraints and workflow behavior are unchanged.
+
+### Pacing artifact upload acknowledgement (#365)
+
+The hosted workflow uploads pacing state only after the adapter verifies the
+export and finishes releasing publisher custody. It checks that the resulting
+file is still the verified generation before signalling readiness. A failed
+collection can still upload its verified state for the next run. A failed
+restore or export leaves the collection step's original error visible without
+a second upload error for an absent file.
+
+This guard does not reconstruct the missing state from run 40861980075. The
+newest exact owned-state requirement continues to govern collection admission.

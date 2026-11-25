@@ -3923,6 +3923,7 @@ def export_family_artifact():
     parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     parent_identity = None
     output_identity = None
+    output_generation = None
     output_handles = ()
     try:
         directory = os.fstat(parent)
@@ -4083,8 +4084,9 @@ def export_family_artifact():
                 io_artifact_descriptor(guard, identity)
                 io_verify_current_parent(parent, root, parent_identity)
                 named = os.stat(name, dir_fd=parent, follow_symlinks=False)
-                if identity != (named.st_dev, named.st_ino):
+                if journal_generation(named) != before_read:
                     raise AdapterError("Owned artifact changed", "access")
+                output_generation = before_read
         except BaseException:
             journal_failed()
             # Cleanup must never replace the primary handoff/body failure.
@@ -4154,6 +4156,122 @@ def export_family_artifact():
                         )
         if close_error is not None and primary is None:
             raise close_error
+    if output_generation is not None and not _GUARD_FATAL:
+        return root, name, parent_identity, output_generation
+
+
+@contextlib.contextmanager
+def pacing_step_output(root, parent_identity, output_name, expected=None):
+    """Hold and verify the runner's exact output descriptors."""
+    command_name = "_runner_file_commands"
+    directory = os.O_RDONLY | os.O_DIRECTORY
+    with contextlib.ExitStack() as handles:
+
+        def open_owned(path, flags, parent=None, is_directory=False):
+            fd = os.open(
+                path, flags | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+            )
+            info = os.fstat(fd)
+            identity = (info.st_dev, info.st_ino)
+            handles.callback(io_close_owned_descriptor, fd, identity, is_directory)
+            io_verify_owned_descriptor(fd, identity, is_directory)
+            return fd, identity
+
+        parent, _ = open_owned(root, directory, is_directory=True)
+        commands, command_id = open_owned(command_name, directory, parent, True)
+        output, output_id = open_owned(
+            output_name, os.O_RDWR | os.O_APPEND, commands
+        )
+
+        actual = (command_id, output_id)
+        if expected is not None and actual != expected:
+            raise AdapterError("Pacing step output owner changed", "access")
+
+        def verify_output():
+            io_verify_current_parent(parent, root, parent_identity)
+            for fd, identity, owner, path, is_directory in (
+                (commands, command_id, parent, command_name, True),
+                (output, output_id, commands, output_name, False),
+            ):
+                info = io_verify_owned_descriptor(fd, identity, is_directory)
+                named = os.stat(path, dir_fd=owner, follow_symlinks=False)
+                if (named.st_dev, named.st_ino) != identity:
+                    raise AdapterError("Pacing step output changed", "access")
+            return info
+
+        verify_output()
+        yield parent, output, actual, verify_output
+
+
+def mark_pacing_artifact_ready(root, name, parent_identity, generation):
+    """Acknowledge the verified export only after publisher finalization."""
+    step_output = os.environ.get("GITHUB_OUTPUT", "")
+    parent_path, output_name = os.path.split(step_output)
+    if (
+        parent_path != os.path.join(root, "_runner_file_commands")
+        or not re.fullmatch(r"set_output_[A-Za-z0-9_-]+", output_name)
+    ):
+        raise AdapterError("Unexpected pacing step output path", "access")
+    line = b"pacing_ready=true\n"
+    signal_owner = None
+    try:
+        with pacing_step_output(root, parent_identity, output_name) as receipt:
+            parent, output, owner, verify_output = receipt
+
+            def verify_export():
+                named = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if journal_generation(named) != generation:
+                    raise AdapterError("Finalized pacing artifact changed", "access")
+
+            if verify_output().st_size != 0:
+                raise AdapterError("Expected fresh pacing step output", "access")
+            verify_export()
+            signal_owner = owner
+            if os.write(output, line) != len(line):
+                raise AdapterError("Incomplete pacing-ready handoff", "access")
+            os.fsync(output)
+            verify_output()
+            verify_export()
+            if os.pread(output, len(line) + 1, 0) != line:
+                raise AdapterError("Pacing-ready handoff changed", "access")
+        if _GUARD_FATAL:
+            raise AdapterError("Pacing step output did not close cleanly", "access")
+    except BaseException:
+        if signal_owner is not None:
+            # Reopen only our original fresh output. A close attempt may have
+            # consumed its descriptor before reporting failure.
+            with contextlib.suppress(BaseException):
+                with pacing_step_output(
+                    root, parent_identity, output_name, expected=signal_owner
+                ) as receipt:
+                    _, output, _, verify_output = receipt
+                    before_read = journal_generation(verify_output())
+                    marker = os.pread(output, len(line) + 1, 0)
+                    if (
+                        marker
+                        and line.startswith(marker)
+                        and journal_generation(verify_output()) == before_read
+                    ):
+                        try:
+                            os.ftruncate(output, 0)
+                        except OSError:
+                            if (
+                                marker not in (line, line.rstrip())
+                                or journal_generation(verify_output()) != before_read
+                                or os.pread(output, len(line) + 1, 0) != marker
+                                or journal_generation(verify_output()) != before_read
+                            ):
+                                raise
+                            # Actions uses the last assignment to an output.
+                            denial = b"pacing_ready=false\n"
+                            if not marker.endswith(b"\n"):
+                                denial = b"\n" + denial
+                            if os.write(output, denial) != len(denial):
+                                raise AdapterError(
+                                    "Could not revoke pacing-ready handoff", "access"
+                                )
+                        os.fsync(output)
+        raise
 
 
 def prepare_collection():
@@ -5240,6 +5358,7 @@ def run_body(publishing):
 
 def run_lifecycle(publishing):
     result = None
+    handoff = None
     try:
         result = run_body(publishing)
     except PhaseExpired:
@@ -5247,8 +5366,9 @@ def run_lifecycle(publishing):
     finally:
         try:
             with phase("export", EXPORT_TIMEOUT):
-                export_family_artifact()
+                handoff = export_family_artifact()
         except (Exception, PhaseExpired):
+            handoff = None
             try:
                 arm_alarm(_RUN_END)
                 print(
@@ -5259,7 +5379,7 @@ def run_lifecycle(publishing):
                 pass
             if result == 0:
                 result = 1
-    return result
+    return result, handoff
 
 
 def main():
@@ -5268,9 +5388,20 @@ def main():
     args = parser.parse_args()
     try:
         with execution():
-            return run_lifecycle(args.publish)
+            result, handoff = run_lifecycle(args.publish)
     except PhaseExpired:
         return 1
+    if (
+        handoff is not None
+        and not _GUARD_FATAL
+        and os.environ.get("GITHUB_ACTIONS") == "true"
+    ):
+        try:
+            mark_pacing_artifact_ready(*handoff)
+        except (AdapterError, OSError):
+            print("Timing artifact upload acknowledgement failed", file=sys.stderr)
+            return 1
+    return result
 
 
 _GUARD_PARENT = _GUARD_PARENT_ID = None
