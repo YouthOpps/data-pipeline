@@ -42,10 +42,10 @@ _COUNTRIES = dict(
         "Israel|Fidschi|Dominikanische Republik|Malawi|Tschechien|Chile|"
         "Griechenland|Niederlande|Nepal|Kenia|Philippinen|Indonesien|Litauen|"
         "Italien|Kasachstan|Albanien|Brasilien|Bolivien|Mosambik|Kosovo|"
-        "Bosnien und Herzegowina".split("|"),
+        "Bosnien und Herzegowina|Lesotho".split("|"),
         "FR US DE KR IS AT TG EC IN UG TZ TH KH CO RS GE PE GH ZA RW GB AU IE "
         "NO BE CA ES RO CR PT EE FI NZ PL CH KG DK NA BW VN IL FJ DO MW CZ CL "
-        "GR NL NP KE PH ID LT IT KZ AL BR BO MZ XK BA".split(),
+        "GR NL NP KE PH ID LT IT KZ AL BR BO MZ XK BA LS".split(),
     )
 )
 
