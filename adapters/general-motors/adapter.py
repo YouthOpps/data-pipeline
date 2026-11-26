@@ -110,7 +110,8 @@ def parse_page(body):
     parser = InventoryParser()
     parser.feed(body.decode('utf-8'))
     parser.close()
-    summary = re.fullmatch(r'Showing ([0-9,]+) to ([0-9,]+) of ([0-9,]+) matching jobs',
+    number = r'(0|[1-9][0-9]*|[1-9][0-9]{0,2}(?:,[0-9]{3})+)'
+    summary = re.fullmatch(rf'Showing {number} to {number} of {number} matching jobs',
                            text(parser.summary))
     if not summary or not parser.grid or parser.current:
         raise InventoryError('Incomplete search inventory')
@@ -122,8 +123,9 @@ def parse_page(body):
         team, title = text(card.team), text(card.title)
         link = urlsplit(card.href)
         path = re.fullmatch(r'/en/jobs/(jr-[0-9]+)/[^/]+/', link.path, re.IGNORECASE)
-        if (not path or (link.scheme and link.scheme != 'https') or
-                (link.netloc and link.netloc != 'search-careers.gm.com') or
+        official_link = card.href.startswith('/en/jobs/') or card.href.startswith(
+            'https://search-careers.gm.com/en/jobs/')
+        if (not official_link or not path or
                 link.query or link.fragment or path[1].upper() != card.identifier or
                 card.identifier in rows or not team or not title):
             raise InventoryError('Inconsistent requisition, team, title or detail link')
