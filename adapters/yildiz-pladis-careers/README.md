@@ -323,3 +323,9 @@ Failed refresh metadata uses the same safe error details when last-good data
 exists. No partial first snapshot is published; the original exception still
 fails the job and the owned pacing export runs unchanged. Diagnostics add no
 requests, retries, state reset or continuation exception.
+
+When a sitemap location is rejected, its one-based XML entry position and
+SHA-256 of the stripped UTF-8 location are included with the validation reason.
+A reviewer can compare these with a separately authorized inventory capture.
+The candidate location is never requested by the rejection handler. The full
+URL and publisher content stay out of logs and public failure metadata.
