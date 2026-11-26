@@ -12,10 +12,16 @@ Run the sole live, non-publishing test with Python 3.12:
 python -B test_adapter.py
 ```
 
-Complete raw JSON goes to stdout; diagnostics go to stderr. The original repaired live test and independent full-capture review passed.
-The matching production workflow remains disabled pending final durable-state
-handoff review and maintainer merge. Local success is not hosted publication
-acceptance.
+Complete raw JSON goes to stdout and diagnostics go to stderr. Normal production
+uses the canonical `fetch-be-wbi` workflow and its retained pacing artifact.
+
+WBI node 25163 advertises an A6 project officer recruitment competition. Its
+reviewed notice describes a full-time appointment requiring a master's-level
+qualification or an internal promotion exam. It specifies degree equivalence
+for qualifications obtained outside Belgium and provides no student or
+early-career programme. The adapter excludes this reviewed version by article
+identity and content digest. Updated wording receives normal classification.
+[Publisher evidence and decision](https://github.com/YouthOpps/data-pipeline/issues/497)
 
 ## Inventory and identities
 
