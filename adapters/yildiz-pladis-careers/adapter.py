@@ -257,7 +257,10 @@ def admit(state, url, method='GET'):
     require(not state['pending'], 'Unresolved physical transaction')
     require(not state['events'], 'New or unattributed refusal remains global')
     require(type(url) is str and method == 'GET', 'Only public GET admitted')
-    parsed = urllib.parse.urlsplit(url)
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        raise ScopeError('Malformed service URL') from None
     require(
         parsed.scheme == 'https' and
         parsed.netloc == 'pladis.wd3.myworkdayjobs.com',
