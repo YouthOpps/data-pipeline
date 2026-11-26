@@ -8,6 +8,9 @@ from urllib.parse import urlsplit
 
 NATIVE_ID = re.compile(r'jr-[0-9]+', re.IGNORECASE)
 YOUTH_TEAM = 'Students & Recent Graduates'
+SEARCH = 'https://search-careers.gm.com/en/jobs/'
+FILTER = 'team=Students+%26+Recent+Graduates&pagesize=20'
+FIRST_PAGE = SEARCH + '?search=&' + FILTER
 VOID = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
         'meta', 'param', 'source', 'track', 'wbr'}
 
@@ -148,3 +151,66 @@ def reconcile(pages):
     if not rows or len(rows) != expected_total:
         raise InventoryError('Inventory is incomplete')
     return {key: row for key, row in rows.items() if row['team'] == YOUTH_TEAM}
+
+
+class PaginationParser(HTMLParser):
+    """Read only the pagination navigation's declared immediate successor."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.nav = []
+        self.next_links = []
+        self.restricted = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == 'nav':
+            self.nav.append(attrs.get('aria-label') == 'Pagination')
+        if tag == 'meta' and (attrs.get('name') or '').casefold() in ('robots', 'youthoppsbot'):
+            self.restricted |= restricts_follow(attrs.get('content') or '')
+        if tag == 'a' and self.nav and self.nav[-1]:
+            rel = (attrs.get('rel') or '').casefold().split()
+            if 'page-link' in (attrs.get('class') or '').split() and 'next' in rel:
+                self.next_links.append((attrs.get('href'), 'nofollow' in rel))
+
+    def handle_endtag(self, tag):
+        if tag == 'nav' and self.nav:
+            self.nav.pop()
+
+
+def restricts_follow(value):
+    return bool({'nofollow', 'none'}.intersection(re.split(r'[,;:\s]+', value.casefold())))
+
+
+def collect_inventory(fetch_page, max_pages):
+    """Fetch only a complete publisher-linked inventory within the supplied budget.
+
+    The caller handles REP, source-family pacing and the response lifecycle. It
+    returns (body bytes, response header pairs) after the response has closed.
+    """
+    url = FIRST_PAGE
+    rows = {}
+    total = None
+    for number in range(1, max_pages + 1):
+        body, headers = fetch_page(url)
+        first, last, current_total, page = parse_page(body)
+        if total is None:
+            total = current_total
+        if (total > 20 * max_pages or current_total != total or
+                first != len(rows) + 1 or last != min(number * 20, total) or rows.keys() & page.keys()):
+            raise InventoryError('Catalogue changed, contains duplicates or exceeds complete collection budget')
+        rows.update(page)
+        nav = PaginationParser()
+        nav.feed(body.decode('utf-8'))
+        nav.close()
+        if last == total:
+            if nav.next_links or len(rows) != total:
+                raise InventoryError('Final inventory range is inconsistent with navigation')
+            return {key: row for key, row in rows.items() if row['team'] == YOUTH_TEAM}
+        successor = f'{SEARCH}?page={number + 1}&{FILTER}'
+        if (nav.restricted or any(name.casefold() == 'x-robots-tag' and restricts_follow(value)
+                                  for name, value in headers) or
+                nav.next_links != [(successor + '#results', False)]):
+            raise InventoryError('No permitted official link to the next inventory page')
+        url = successor
+    raise InventoryError('Inventory exceeds complete collection budget')
