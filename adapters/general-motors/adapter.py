@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 import json
 import re
 from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 
 NATIVE_ID = re.compile(r'jr-[0-9]+', re.IGNORECASE)
@@ -368,3 +369,45 @@ def parse_detail(body, url, identifier, title):
             'posted': posted, 'deadline': deadline,
             'enrollment_evidence': [line for line in facts if ENROLLMENT.search(line)],
             'work_authorization_evidence': [line for line in facts if WORK_RIGHTS.search(line)]}
+
+
+def parse_sitemap(body):
+    """Return each global requisition's literal English URL and native lastmod.
+
+    Translated paths are indexed by native ID only to detect an English
+    coverage gap. A sitemap timestamp does not assert youth eligibility.
+    """
+    if re.search(br'<!\s*(?:DOCTYPE|ENTITY)\b', body, re.IGNORECASE):
+        raise InventoryError('Unsupported sitemap declaration')
+    tree = ElementTree.fromstring(body)
+    ns = '{http://www.sitemaps.org/schemas/sitemap/0.9}'
+    if tree.tag != ns + 'urlset':
+        raise InventoryError('Unexpected sitemap structure')
+    translated = set()
+    english = {}
+    for row in tree:
+        locations = row.findall(ns + 'loc')
+        if row.tag != ns + 'url' or len(locations) != 1 or not locations[0].text:
+            raise InventoryError('Missing or conflicting sitemap URL')
+        url = locations[0].text
+        ref = urlsplit(url)
+        if (ref.scheme != 'https' or ref.netloc != 'search-careers.gm.com' or ref.query or ref.fragment):
+            raise InventoryError('Unexpected sitemap origin or URL form')
+        match = re.fullmatch(r'/([^/]+)/[^/]+/(jr-[0-9]+)/[^/]+/', ref.path, re.IGNORECASE)
+        if not match:
+            if re.search(r'/jr-[0-9]+(?:/|$)', ref.path, re.IGNORECASE):
+                raise InventoryError('Unrecognized requisition sitemap structure')
+            continue
+        identifier = match[2].upper()
+        if match[1] != 'en':
+            translated.add(identifier)
+            continue
+        if not ref.path.startswith('/en/jobs/') or identifier in english:
+            raise InventoryError('English requisition path or unique identity changed')
+        modified = row.findall(ns + 'lastmod')
+        if len(modified) != 1 or not modified[0].text:
+            raise InventoryError('Missing or conflicting requisition lastmod')
+        english[identifier] = {'url': url, 'lastmod': timestamp(modified[0].text)}
+    if not english or translated - english.keys():
+        raise InventoryError('Global sitemap has requisitions without an English canonical URL')
+    return english
