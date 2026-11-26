@@ -914,7 +914,7 @@ def sitemap_urls(text, state):
     require(root.tag == '{http://www.sitemaps.org/schemas/sitemap/0.9}urlset',
             'Sitemap format changed; no silent truncation')
     urls = []
-    for item in root:
+    for position, item in enumerate(root, start=1):
         require(item.tag.endswith('}url'), 'Unexpected sitemap entry')
         locations = item.findall(
             '{http://www.sitemaps.org/schemas/sitemap/0.9}loc')
@@ -922,9 +922,15 @@ def sitemap_urls(text, state):
             len(locations) == 1 and locations[0].text,
             'Missing/ambiguous sitemap URL')
         url = locations[0].text.strip()
-        admit(state, url)
-        require('/pladis_Careers/job/' in url, 'Non-job inventory entry')
-        require(url not in urls, 'Duplicate canonical sitemap URL')
+        try:
+            admit(state, url)
+            require('/pladis_Careers/job/' in url, 'Non-job inventory entry')
+            require(url not in urls, 'Duplicate canonical sitemap URL')
+        except ScopeError as error:
+            fingerprint = hashlib.sha256(url.encode('utf-8')).hexdigest()
+            raise ScopeError(
+                f'{error}; sitemap entry {position}, SHA256 {fingerprint}'
+            ) from error
         urls.append(url)
     require(urls, 'Empty publisher inventory')
     return urls
