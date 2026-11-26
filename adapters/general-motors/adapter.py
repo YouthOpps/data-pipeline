@@ -1,7 +1,9 @@
 """Read the visible requisition inventory from the official GM English search."""
 
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from html.parser import HTMLParser
+import json
 import re
 from urllib.parse import urlsplit
 
@@ -214,3 +216,155 @@ def collect_inventory(fetch_page, max_pages):
             raise InventoryError('No permitted official link to the next inventory page')
         url = successor
     raise InventoryError('Inventory exceeds complete collection budget')
+
+
+class DetailError(ValueError):
+    pass
+
+
+JOB_PATH = re.compile(r'/en/jobs/(jr-[0-9]+)/[a-z0-9-]+/')
+ENROLLMENT = re.compile(r'\b(currently (?:pursuing|enrolled)|must be (?:pursuing|enrolled))\b', re.I)
+WORK_RIGHTS = re.compile(r'\b(?:visa sponsorship|immigration sponsorship|work authori[sz]ation|'
+                         r'authori[sz]ed to work|sponsor(?:ship)? (?:for a )?(?:work|employment) visa)\b', re.I)
+
+
+def normalized(parts):
+    return ' '.join(''.join(parts).split())
+
+
+class DetailParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.canonical = []
+        self.scripts = []
+        self.detail_ids = []
+        self.titles = []
+        self.teams = []
+        self.posting_dates = []
+        self.meta = []
+        self.statements = []
+        self.apply = []
+
+    def active(self, role):
+        return any(role == frame[1] for frame in self.stack)
+
+    def handle_starttag(self, tag, pairs):
+        attrs = dict(pairs)
+        classes = (attrs.get('class') or '').split()
+        role, parts = None, None
+        if tag == 'link' and 'canonical' in (attrs.get('rel') or '').split():
+            self.canonical.append(attrs.get('href'))
+        if tag == 'div' and attrs.get('id') == 'js-job-detail':
+            self.detail_ids.append((attrs.get('data-id') or '').upper())
+            role = 'detail'
+        elif tag == 'section' and 'hero-job' in classes:
+            role = 'hero'
+        elif self.active('hero') and tag == 'h1' and 'hero-heading' in classes:
+            role, parts = 'title', []
+            self.titles.append(parts)
+        elif self.active('hero') and tag == 'p' and 'hero-sub-heading' in classes:
+            role, parts = 'team', []
+            self.teams.append(parts)
+        elif self.active('hero') and tag == 'ul' and 'job-meta' in classes:
+            role = 'meta'
+        elif self.active('meta') and tag == 'li':
+            role, parts = 'meta_item', []
+            self.meta.append(parts)
+        elif self.active('meta_item') and tag == 'time':
+            self.posting_dates.append(attrs.get('datetime'))
+        elif self.active('detail') and tag == 'article' and 'cms-content' in classes:
+            role = 'article'
+        elif self.active('article') and tag in ('p', 'li'):
+            role, parts = 'statement', []
+            self.statements.append(parts)
+        elif self.active('detail') and tag == 'a' and attrs.get('id') == 'js-apply-external':
+            role, parts = 'apply', []
+            self.apply.append((attrs.get('href'), parts))
+        elif tag == 'script' and attrs.get('type') == 'application/ld+json':
+            role, parts = 'schema', []
+            self.scripts.append(parts)
+        if tag == 'br':
+            self.handle_data(' ')
+        if tag not in VOID:
+            self.stack.append((tag, role, parts))
+
+    def handle_endtag(self, tag):
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                return
+
+    def handle_data(self, value):
+        for tag, role, parts in reversed(self.stack):
+            if tag in ('style', 'script') and role != 'schema':
+                return
+            if parts is not None:
+                parts.append(value)
+                return
+
+
+def job_schemas(value):
+    if isinstance(value, list):
+        for member in value:
+            yield from job_schemas(member)
+    elif isinstance(value, dict):
+        types = value.get('@type', [])
+        if types == 'JobPosting' or (isinstance(types, list) and 'JobPosting' in types):
+            yield value
+        if '@graph' in value:
+            yield from job_schemas(value['@graph'])
+
+
+def timestamp(value):
+    if not isinstance(value, str):
+        raise DetailError('Missing posting timestamp')
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        date.fromisoformat(value)
+    else:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            raise DetailError('Ambiguous local timestamp')
+    return value
+
+
+def parse_detail(body, url, identifier, title):
+    """Return verified facts only. Missing eligibility and deadlines stay unknown."""
+    ref = urlsplit(url)
+    path = JOB_PATH.fullmatch(ref.path)
+    if (not NATIVE_ID.fullmatch(identifier) or identifier != identifier.upper() or not path or path[1].upper() != identifier
+            or ref.scheme != 'https' or ref.netloc != 'search-careers.gm.com'
+            or ref.query or ref.fragment):
+        raise DetailError('Unexpected source reference')
+    page = DetailParser()
+    page.feed(body.decode('utf-8'))
+    page.close()
+    schemas = [job for chunk in page.scripts for job in job_schemas(json.loads(''.join(chunk)))]
+    if (page.canonical != [url] or page.detail_ids != [identifier] or len(schemas) != 1
+            or [normalized(t) for t in page.titles] != [title]
+            or [normalized(t) for t in page.teams] != [YOUTH_TEAM]):
+        raise DetailError('Visible identity or source team does not match inventory')
+    job = schemas[0]
+    if (job.get('identifier') != identifier or job.get('title') != title or job.get('url') != url
+            or job.get('mainEntityOfPage') != url or job.get('hiringOrganization', {}).get('name') != 'General Motors'):
+        raise DetailError('Structured posting identity mismatch')
+    meta = [normalized(item) for item in page.meta]
+    if meta.count('Job Requisition ' + identifier) != 1:
+        raise DetailError('Visible requisition mismatch')
+    posted = timestamp(job.get('datePosted'))
+    if page.posting_dates != [posted[:10]]:
+        raise DetailError('Visible posted date disagrees with structured posting')
+    if len(page.apply) != 1 or normalized(page.apply[0][1]) != 'Apply Now':
+        raise DetailError('Current application link is unverified')
+    apply_url = page.apply[0][0] or ''
+    apply_ref = urlsplit(apply_url)
+    if (apply_ref.scheme != 'https' or apply_ref.netloc != 'generalmotors.wd5.myworkdayjobs.com'
+            or not re.fullmatch(r'/Careers_GM/job/[^/?#]+/[^/?#]+_' + identifier + '/apply', apply_ref.path)
+            or apply_ref.query or apply_ref.fragment):
+        raise DetailError('Application link does not identify this official requisition')
+    facts = [normalized(item) for item in page.statements]
+    deadline = timestamp(job['validThrough']) if job.get('validThrough') else None
+    return {'identifier': identifier, 'title': title, 'url': url, 'apply_url': apply_url,
+            'posted': posted, 'deadline': deadline,
+            'enrollment_evidence': [line for line in facts if ENROLLMENT.search(line)],
+            'work_authorization_evidence': [line for line in facts if WORK_RIGHTS.search(line)]}
