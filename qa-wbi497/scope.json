@@ -1,0 +1,26 @@
+{
+  "adapter_sha256": "31bbb1bc4df5ce1398864e76ff9d929b8b8fd7325c5c1d86048517883206a93e",
+  "allowed": [
+    "https://www.wbi.be/robots.txt",
+    "https://www.wbi.be/fr/actualites/emploi-chargee-projet-wallonie-bruxelles-campus"
+  ],
+  "approval_issue": 497,
+  "candidate": "5f4d0f7c6b485a88e9f2901d6fe515ca5c1094db",
+  "enabled": false,
+  "node": "25163",
+  "production": {
+    "archive_sha256": "c075338212917064942dbbd790ded552e39304a032a487fb70a3cb522eeb178f",
+    "archive_size": 4707,
+    "artifact": 15049153151,
+    "head": "5f4d0f7c6b485a88e9f2901d6fe515ca5c1094db",
+    "history_count": 68,
+    "history_sha256": "b601e60c0c5447070684c3e348e7e05e5a851f01a69e49a8e8e5f8f75e73d87e",
+    "id": 378390052,
+    "job": 139402145953,
+    "path": ".github/workflows/fetch-be-wbi.yml",
+    "run": 45669937790,
+    "state_sha256": "2ea90dec978940a269675afa85ba64af54bcf9eb918e6121caff241f2532282d"
+  },
+  "reviewer_sha256": "fe1512b86bd026c743b9cac2bc1330409253bb9f30df619e7a46338c5be184fb",
+  "target": "https://www.wbi.be/fr/actualites/emploi-chargee-projet-wallonie-bruxelles-campus"
+}

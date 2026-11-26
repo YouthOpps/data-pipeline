@@ -1,0 +1,52 @@
+name: Capture WBI project officer evidence
+on:
+  push:
+    branches: [qa/497-wbi-role-capture]
+permissions:
+  actions: read
+  contents: read
+  issues: read
+concurrency:
+  group: youthopps-be-wbi-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.event.created && !github.event.deleted && github.run_attempt == '1'
+    name: Capture WBI project officer evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare the exact before-wire recovery key
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B qa-wbi497/anchor.py
+      - name: Upload the before-wire recovery public key
+        id: recovery-key
+        uses: actions/upload-artifact@v4
+        with:
+          name: wbi497-recovery-key-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/wbi497-recovery-key/anchor.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Capture one scoped WBI job detail under reviewed custody
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WBI_RECOVERY_ANCHOR_ID: ${{ steps.recovery-key.outputs.artifact-id }}
+          WBI_RECOVERY_ANCHOR_DIGEST: ${{ steps.recovery-key.outputs.artifact-digest }}
+        run: python -B qa-wbi497/observer.py
+      - name: Upload encrypted result and exact owned state evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wbi497-native-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/wbi497-native/
+          if-no-files-found: error
+          retention-days: 7
