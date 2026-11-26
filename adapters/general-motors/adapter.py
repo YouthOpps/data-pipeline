@@ -22,6 +22,7 @@ class Card:
     href: str = ''
     team: list[str] = field(default_factory=list)
     title: list[str] = field(default_factory=list)
+    team_markers: int = 0
 
 
 class InventoryParser(HTMLParser):
@@ -60,6 +61,9 @@ class InventoryParser(HTMLParser):
             elif tag == 'li' and 'list-inline-item' in classes:
                 role = 'metadata'
             elif tag == 'use' and (attrs.get('xlink:href') or attrs.get('href', '')).endswith('#briefcase'):
+                self.current.team_markers += 1
+                if self.current.team_markers != 1:
+                    raise InventoryError('Conflicting team markers on a job card')
                 for frame in reversed(self.tags):
                     if frame[1] == 'metadata':
                         frame[1] = 'team'
@@ -83,6 +87,8 @@ class InventoryParser(HTMLParser):
                 removed = self.tags[index:]
                 del self.tags[index:]
                 if any(frame[1] == 'card' for frame in removed):
+                    if self.current.team_markers != 1:
+                        raise InventoryError('Missing job card team')
                     self.cards.append(self.current)
                     self.current = None
                 return
