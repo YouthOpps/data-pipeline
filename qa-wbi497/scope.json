@@ -6,7 +6,7 @@
   ],
   "approval_issue": 497,
   "candidate": "5f4d0f7c6b485a88e9f2901d6fe515ca5c1094db",
-  "enabled": false,
+  "enabled": true,
   "node": "25163",
   "production": {
     "archive_sha256": "c075338212917064942dbbd790ded552e39304a032a487fb70a3cb522eeb178f",
