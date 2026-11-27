@@ -114,3 +114,27 @@ jobs:
               assert result['research_provenance'] == original['research_provenance']
               print('Authentic owned archive decoded. Stronger constraints, holds, pending state, starts and provenance preserved in memory.')
           PY
+      - name: Exercise fail-closed controls on the narrow rules exclusion
+        run: |
+          python -B - <<'PY'
+          import sys
+          sys.path.insert(0, 'adapters/pl-frse')
+          import adapter as a
+          catalog, other = a.SOURCE_URL+'konkursy', a.SOURCE_URL+'independent'
+          award, rules = a._EDU_AWARD, a._EDU_RULES
+          def page(text):
+              return a.document_root('<html><body><main><p>'+text+'</p></main></body></html>')
+          def decision(text='nie ma możliwości samodzielnego zgłoszenia', other_text='Other call', links=None, parents=None):
+              pages = {award:page(text), other:page(other_text), catalog:page('catalogue')}
+              return a.excluded_edu_rules(pages, {award, other, rules},
+                  [('award', [award,rules] if links is None else links, None)],
+                  {catalog, award} if parents is None else parents)
+          assert decision()
+          assert not decision(text='Open applications')
+          assert not decision(links=[rules])
+          assert not decision(links=[award])
+          assert not decision(parents={award})
+          assert not decision(parents={catalog,other})
+          assert not decision(other_text='<a href="'+rules+'#conditions">Conditions</a>')
+          print('All seven controls passed')
+          PY
