@@ -50,7 +50,10 @@ if os.getenv("FRSE_NATIVE_OBSERVER") == "1":
                 item["read_failure"] = type(error).__name__
                 raise
             item["parts"].append(data)
-            if not data or not args or args[0] < 0:
+            stream = getattr(response, "fp", None)
+            ended = any(callable(getattr(candidate, "isclosed", None))
+                        and candidate.isclosed() for candidate in (response, stream))
+            if not data or not args or args[0] < 0 or ended:
                 item["eof"] = True
             return data
         def complete():
@@ -88,6 +91,10 @@ if os.getenv("FRSE_NATIVE_OBSERVER") == "1":
                                           and len(body) == int(length)))
             rows.append({k:item.get(k) for k in ("url","start","completion","inventory","status",
                                                 "read_failure","open_failure","close_failure")})
+            raw_url = rows[-1].pop("url")
+            parsed = urllib.parse.urlsplit(raw_url)
+            rows[-1]["origin"] = parsed.scheme + "://" + parsed.netloc
+            rows[-1]["url_sha256"] = hashlib.sha256(raw_url.encode()).hexdigest()
             rows[-1]["fully_read"] = eof
             rows[-1].update(body_bytes=len(body), sha256=hashlib.sha256(body).hexdigest())
         bad_writes = sum(event.get("persisted") is None or
