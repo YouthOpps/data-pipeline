@@ -1,0 +1,32 @@
+name: FRSE 501 read-only evidence
+on:
+  push:
+    branches: [qa/501-referrer-readonly]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify production evidence and candidate syntax
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m py_compile adapters/pl-frse/adapter.py
+          for job in 139411205500 140087660744; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs" > "$RUNNER_TEMP/$job.log"
+          done
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          logs = Path(os.environ['RUNNER_TEMP'])
+          good = (logs/'139411205500.log').read_text()
+          failed = (logs/'140087660744.log').read_text()
+          path = 'https://eduinspiracje.org.pl/eduinspiracje/'
+          assert path + 'o-konkursie", "publisher explicitly requires nomination"' in good
+          assert path + 'regulamin", "supporting catalogue or rules, not another call"' in good
+          assert 'HTTP 404: ' + path + 'regulamin' in failed
+          print('Production classification and failed URL match.')
+          PY
