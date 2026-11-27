@@ -123,7 +123,7 @@ jobs:
           catalog, other = a.SOURCE_URL+'konkursy', a.SOURCE_URL+'independent'
           award, rules = a._EDU_AWARD, a._EDU_RULES
           def page(text):
-              return a.document_root('<html><body><main><p>'+text+'</p></main></body></html>')
+              return a.document_root('<html><body><main><section class="text_page"><p>'+text+'</p></section></main></body></html>')
           def decision(text='nie ma możliwości samodzielnego zgłoszenia', other_text='Other call', links=None, parents=None):
               pages = {award:page(text), other:page(other_text), catalog:page('catalogue')}
               return a.excluded_edu_rules(pages, {award, other, rules},
