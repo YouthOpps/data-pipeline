@@ -3019,13 +3019,15 @@ def workflow_api(path):
                 "Cache-Control": "no-cache",
             },
         )
-        if status != 200:
-            raise ValueError()
+    except Exception:
+        raise AdapterError("Workflow pacing state unavailable: request failed", "access") from None
+    if status != 200:
+        detail = f"HTTP {status}" if type(status) is int and 100 <= status <= 599 else "invalid status"
+        raise AdapterError(f"Workflow pacing state unavailable: {detail}", "access")
+    try:
         return json.loads(body)
     except Exception:
-        raise AdapterError(
-            "Workflow pacing state unavailable", "access"
-        ) from None
+        raise AdapterError("Workflow pacing state unavailable: invalid JSON", "access") from None
 
 
 def download_inert_artifact(identity, artifact_id, digest=None):
