@@ -452,3 +452,5 @@ in a dedicated issue #384 comment. The native-test acceptance comment is not
 that decision. Missing, malformed or native-only evidence refuses after the
 actual owned decoder, before any restored journal write or publisher access.
 Disabling the workflow externally is an additional control, not this gate.
+
+Production verifies the newest original pacing artifact before combining it with the reviewed [initial test](https://github.com/YouthOpps/data-pipeline/actions/runs/45966438770), [bounded research](https://github.com/YouthOpps/data-pipeline/actions/runs/45970910663) and [final native test](https://github.com/YouthOpps/data-pipeline/actions/runs/45972134394) timing states. The hash-bound handback preserves the terminal timers, holds, request starts and existing access history.
