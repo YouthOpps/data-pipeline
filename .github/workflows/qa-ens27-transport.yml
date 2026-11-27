@@ -1,0 +1,14 @@
+name: Verify ENS transport diagnostics without network
+on:
+  push:
+    branches: [qa/365-ens-transport-evidence]
+permissions:
+  contents: read
+jobs:
+  controls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python -B qa/ens27/check.py
