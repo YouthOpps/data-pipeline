@@ -1603,6 +1603,34 @@ def read_calendar():
     return root, links
 
 
+_EDU_AWARD = "https://eduinspiracje.org.pl/eduinspiracje/o-konkursie"
+_EDU_RULES = "https://eduinspiracje.org.pl/eduinspiracje/regulamin"
+_NOMINATION_ONLY = re.compile(
+    r"nie ma możliwości samodzielnego zgłoszenia|"
+    r"nie wymaga samodzielnego zgłoszenia|"
+    r"nie muszą ubiegać się o nagrodę|"
+    r"do udziału w konkursie są zapraszane osoby wytypowane|"
+    r"pierwszym etapem jest przyznanie przez nas nominacji", re.I)
+
+
+def excluded_edu_rules(pages, candidates, catalogues, parents):
+    """Verify a missing support document belongs only to a nomination award."""
+    award = pages.get(_EDU_AWARD)
+    if award is None or not _NOMINATION_ONLY.search(detail_content(award).text()):
+        return False
+    cards = [links for _, links, _ in catalogues if _EDU_RULES in links]
+    if not cards or any(_EDU_AWARD not in links for links in cards):
+        return False
+    catalog_parents = {parent for parent in parents if parent in pages and
+                       urllib.parse.urlsplit(parent)._replace(query="").geturl()
+                       == SOURCE_URL + "konkursy"}
+    if not catalog_parents or parents - catalog_parents - {_EDU_AWARD}:
+        return False
+    return not any(urllib.parse.urldefrag(link).url == _EDU_RULES
+                   for other in set(candidates) - {_EDU_AWARD, _EDU_RULES}
+                   for link in material_links(detail_content(pages[other]), other))
+
+
 def read_pages():
     """Exhaust advertised catalogue pages and discovered current call details."""
     pages, candidates, catalogues, supporting = {}, {}, [], {}
@@ -1694,6 +1722,7 @@ def read_pages():
 
     pending = list(candidates)
     visited = set()
+    missing_rules = None
     while pending:
         url = pending.pop(0)
         if url in visited:
@@ -1710,6 +1739,9 @@ def read_pages():
                     parsed = urllib.parse.urlsplit(parent)
                     print("Required detail linked from " + parsed.scheme +
                           "://" + parsed.netloc + parsed.path, file=sys.stderr)
+                if url == _EDU_RULES:
+                    missing_rules = error
+                    continue
             raise
         main = one(nodes(root, "main"), "detail main")
         for node in nodes(root, "a"):
@@ -1741,6 +1773,14 @@ def read_pages():
             if clean not in candidates:
                 pending.append(clean)
             discovered(clean, candidates[url], url)
+    if missing_rules is not None:
+        if not excluded_edu_rules(pages, candidates, catalogues,
+                                  referrers.get(_EDU_RULES, set())):
+            raise missing_rules
+        del candidates[_EDU_RULES]
+        supporting.get(_EDU_AWARD, set()).discard(_EDU_RULES)
+        print("Excluded unavailable rules for the nomination-only EduInspiracje award",
+              file=sys.stderr)
     fetch_inventory_page(read, "https://erasmusplus.org.pl/dokumenty")
     return pages, candidates, catalogues, supporting
 
@@ -2029,15 +2069,7 @@ def parse_inventory(pages):
             continue
         content = detail_content(root)
         text = content.text()
-        if re.search(
-                r"nie ma możliwości samodzielnego zgłoszenia|"
-                r"nie wymaga samodzielnego zgłoszenia|"
-                r"nie muszą ubiegać się o nagrodę|"
-                r"do udziału w konkursie są zapraszane osoby wytypowane|"
-                r"pierwszym etapem jest przyznanie przez nas nominacji",
-                text,
-                re.I,
-        ):
+        if _NOMINATION_ONLY.search(text):
             excluded.append((url, "publisher explicitly requires nomination"))
             continue
         specialized = any(
