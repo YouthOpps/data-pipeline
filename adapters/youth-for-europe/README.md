@@ -343,3 +343,5 @@ restore their newest authentic production artifact. They require the exact
 already-reviewed continuation on that owner's immutable source and refuse
 lost timing state. The first handoff uses the separate maintainer approval
 that bound this source and its genuine QA lineage.
+
+If a browse page has no native inventory configuration or more than one, collection stops. Failure metadata gives the configuration count, requested inventory type and page, and a SHA-256 fingerprint of the decoded HTML encoded as UTF-8. The response text is kept out of the public error message.

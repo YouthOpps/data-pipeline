@@ -496,12 +496,17 @@ def explore_page(kind="general", page=1):
     """Read a native server-rendered browse page and its inventory counts."""
     query = urllib.parse.urlencode({"type": kind, "sort": "latest", "pg": page})
     url = WEBSITE_URL + "explore/?" + query
-    tree = PublicHtml(fetch_inventory_page(source_text, url)).root
+    document = fetch_inventory_page(source_text, url)
+    tree = PublicHtml(document).root
     scripts = tree.find(
         lambda node: node.tag == "script" and
         node.attrs.get("id") == "case27-explore-configuration")
     if len(scripts) != 1:
-        raise AdapterError("Native opportunity inventory is unavailable")
+        digest = hashlib.sha256(document.encode("utf-8")).hexdigest()
+        raise AdapterError(
+            f"Expected one native inventory configuration; found {len(scripts)} "
+            f"on {kind} page {page} (decoded HTML SHA-256 {digest})"
+        )
     config = json.loads(scripts[0].text())
     types = config.get("ListingTypes", {})
     if (config.get("ActiveListingType") != kind or kind not in types or
