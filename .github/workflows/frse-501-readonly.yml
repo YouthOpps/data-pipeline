@@ -138,3 +138,43 @@ jobs:
           assert not decision(other_text='<a href="'+rules+'#conditions">Conditions</a>')
           print('All seven controls passed')
           PY
+      - name: Compare live YouthOpps FRSE indices and sitemap with the website data pin
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          import json, os, urllib.request, urllib.parse, xml.etree.ElementTree as ET
+          from pathlib import Path
+          class Index(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.urls=[]
+              def handle_starttag(self,tag,attrs):
+                  attrs=dict(attrs)
+                  if "collection" in attrs.get("class","").split() and attrs.get("data-index"):
+                      self.urls.append(attrs["data-index"])
+          site="https://youthopps.org"
+          def fetch(path):
+              url=urllib.parse.urljoin(site,path)
+              assert urllib.parse.urlsplit(url).netloc == 'youthopps.org'
+              request=urllib.request.Request(url,headers={"User-Agent":"YouthOppsBot/1.0 (+https://youthopps.org/bot/)","Cache-Control":"no-cache"})
+              with urllib.request.urlopen(request,timeout=40) as res: return res.read()
+          def index(path):
+              parser=Index(); parser.feed(fetch(path).decode())
+              assert len(parser.urls)==1
+              return json.loads(fetch(parser.urls[0]))
+          pinned=json.loads((Path(os.environ["RUNNER_TEMP"])/"raw/pl-frse/data.json").read_text())
+          expected={r["id"] for r in pinned}
+          global_rows=index("/opportunities/")
+          source_rows=index("/sources/publisher/pl-frse/")
+          root=ET.fromstring(fetch("/sitemap.xml"))
+          links=[item.text for item in root.iter() if item.tag.endswith("}loc")]
+          shards=[link for link in links if "sitemap-source-pl-frse" in link]
+          assert shards, links[:3]
+          sitemap=set()
+          for shard in shards:
+              for loc in ET.fromstring(fetch(shard)).iter():
+                  if loc.tag.endswith("}loc"):
+                      sitemap.add(urllib.parse.urlsplit(loc.text).path.rstrip("/").split("/")[-1])
+          actual={r["id"] for r in source_rows}
+          print("FRSE published",len(expected),"source index",len(actual),"global",sum(r["source"]=="pl-frse" for r in global_rows),"sitemap",len(sitemap))
+          assert expected==actual==sitemap=={r["id"] for r in global_rows if r["source"]=="pl-frse"}
+          PY
