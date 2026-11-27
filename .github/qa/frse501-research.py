@@ -9,6 +9,22 @@ import urllib.parse
 sys.path.insert(0,"/src/adapters/pl-frse")
 import adapter as a
 
+# Guard the physical opener as well as application discovery. A redirect to a
+# different publisher URL must not expand this bounded maintenance job.
+approved = set()
+open_wire = a._OPENER.open
+def scoped_open(request, *args, **kwargs):
+    parsed = urllib.parse.urlsplit(request.full_url)
+    if parsed.hostname in a._PUBLISHER_HOSTS and request.full_url not in approved:
+        raise a.AdapterError("Targeted research redirect outside accepted routes", "access")
+    return open_wire(request, *args, **kwargs)
+a._OPENER.open = scoped_open
+
+def approve(url):
+    parsed = urllib.parse.urlsplit(url)
+    assert parsed.netloc in {"www.frse.org.pl","eduinspiracje.org.pl"}
+    approved.update({url, "https://"+parsed.netloc+"/robots.txt"})
+
 facts = []
 def record(item):
     facts.append(item)
@@ -23,6 +39,7 @@ with a.execution(), a.phase("prepublication",800):
         pending.remove(page)
         visited.add(page)
         url = a.listing_url("konkursy",page)
+        approve(url)
         root = a.fetch_inventory_page(lambda u,**kw:a.read_html(u,**kw),url)
         pages = a.page_numbers(root)
         assert pages <= {1,2}
@@ -39,6 +56,7 @@ with a.execution(), a.phase("prepublication",800):
         if url not in catalogue_urls:
             record({"type":"not_advertised","url":url})
             continue
+        approve(url)
         doc = a.read_html(url)
         content=a.detail_content(doc)
         parts = [n.text() for n in content.walk() if n.tag in ("p","li","h1","h2","h3","h4","td")]
