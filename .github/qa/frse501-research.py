@@ -17,11 +17,16 @@ def record(item):
 with a.execution(), a.phase("prepublication",800):
     a.prepare_collection()
     catalogue_urls=set()
-    for page in range(1,3):
+    pending, visited = {1}, set()
+    while pending:
+        page = min(pending)
+        pending.remove(page)
+        visited.add(page)
         url = a.listing_url("konkursy",page)
         root = a.fetch_inventory_page(lambda u,**kw:a.read_html(u,**kw),url)
         pages = a.page_numbers(root)
         assert pages <= {1,2}
+        pending.update(pages - visited)
         for card in a.nodes(a.one(a.nodes(root,"main"),"main"),class_name="desc_holder"):
             title = a.one(a.nodes(card,"h2"),"contest title").text()
             links = a.material_links(card,url)
