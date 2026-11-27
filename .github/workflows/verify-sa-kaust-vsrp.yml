@@ -1,0 +1,42 @@
+name: verify-sa-kaust-vsrp
+on:
+  push:
+    branches:
+      - 'qa/504-kaust-073ef9be87d3692d'
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: youthopps-kaust-careers-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'YouthOpps/data-pipeline' && github.run_attempt == 1 && github.event.created && github.event.before == '0000000000000000000000000000000000000000'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: c3454929dc1d3dbf9f90251e70895eea613d6c94
+          path: _qa/website
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run the original sole nonpublishing test
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B .github/qa/kaust504-observer.py
+      - name: Retain original encrypted evidence and exact state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaust504-native-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/kaust504-native-evidence/
+          if-no-files-found: error
+          retention-days: 14
