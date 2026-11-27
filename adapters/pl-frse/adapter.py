@@ -980,6 +980,9 @@ def validate_records(records, *, allow_empty=False):
 
 def record_identity(url, reference=None):
     """Keep original URL hashes and literal recruitment-reference identities."""
+    # The official overview is the same award when its edition rules disappear.
+    if url == _EDU_AWARD_PAGES[_EDU_PRIMARY_RULES]:
+        url = _EDU_PRIMARY_RULES
     identity = url + ("|" + reference if reference else "")
     return hashlib.sha256(
         (SOURCE_ID + "|" + identity).encode()).hexdigest()[:24]
@@ -1603,8 +1606,17 @@ def read_calendar():
     return root, links
 
 
-_EDU_AWARD = "https://eduinspiracje.org.pl/eduinspiracje/o-konkursie"
-_EDU_RULES = "https://eduinspiracje.org.pl/eduinspiracje/regulamin"
+_EDU_ORIGIN = "https://eduinspiracje.org.pl/"
+_EDU_RULES = _EDU_ORIGIN + "eduinspiracje/regulamin"
+_EDU_PRIMARY_RULES = _EDU_ORIGIN + "eduinspirator/regulamin"
+_EDU_AWARD_PAGES = {
+    _EDU_RULES: _EDU_ORIGIN + "eduinspiracje/o-konkursie",
+    _EDU_PRIMARY_RULES: _EDU_ORIGIN + "eduinspirator/o-konkursie",
+    _EDU_ORIGIN + "eduinspiracje-media/regulamin":
+        _EDU_ORIGIN + "eduinspiracje-media/o-konkursie",
+}
+_EDU_SELF_APPLICATION = re.compile(
+    r"zgłosić swoją kandydaturę poprzez wypełnienie formularza zgłoszeniowego", re.I)
 _NOMINATION_ONLY = re.compile(
     r"nie ma możliwości samodzielnego zgłoszenia|"
     r"nie wymaga samodzielnego zgłoszenia|"
@@ -1613,21 +1625,27 @@ _NOMINATION_ONLY = re.compile(
     r"pierwszym etapem jest przyznanie przez nas nominacji", re.I)
 
 
-def excluded_edu_rules(pages, candidates, catalogues, parents):
-    """Verify a missing support document belongs only to a nomination award."""
-    award = pages.get(_EDU_AWARD)
-    if award is None or not _NOMINATION_ONLY.search(detail_content(award).text()):
+def verified_award_overview(rules, pages, candidates, catalogues, parents):
+    """Verify the current alternative and refuse unrelated missing dependencies."""
+    overview = _EDU_AWARD_PAGES[rules]
+    if overview not in pages:
         return False
-    cards = [links for _, links, _ in catalogues if _EDU_RULES in links]
-    if not cards or any(_EDU_AWARD not in links for links in cards):
+    text = detail_content(pages[overview]).text()
+    if rules == _EDU_PRIMARY_RULES:
+        if _NOMINATION_ONLY.search(text) or not _EDU_SELF_APPLICATION.search(text):
+            return False
+    elif not _NOMINATION_ONLY.search(text):
+        return False
+    cards = [links for _, links, _ in catalogues if rules in links]
+    if len(cards) != 1 or overview not in cards[0]:
         return False
     catalog_parents = {parent for parent in parents if parent in pages and
                        urllib.parse.urlsplit(parent)._replace(query="").geturl()
                        == SOURCE_URL + "konkursy"}
-    if not catalog_parents or parents - catalog_parents - {_EDU_AWARD}:
+    if not catalog_parents or parents - catalog_parents - {overview}:
         return False
-    return not any(urllib.parse.urldefrag(link).url == _EDU_RULES
-                   for other in set(candidates) - {_EDU_AWARD, _EDU_RULES}
+    return not any(urllib.parse.urldefrag(link).url == rules
+                   for other in candidates if other in pages and other != overview
                    for link in material_links(one(nodes(pages[other], "main"),
                                                   "detail main"), other))
 
@@ -1723,7 +1741,7 @@ def read_pages():
 
     pending = list(candidates)
     visited = set()
-    missing_rules = None
+    missing_rules = {}
     while pending:
         url = pending.pop(0)
         if url in visited:
@@ -1740,8 +1758,8 @@ def read_pages():
                     parsed = urllib.parse.urlsplit(parent)
                     print("Required detail linked from " + parsed.scheme +
                           "://" + parsed.netloc + parsed.path, file=sys.stderr)
-                if url == _EDU_RULES:
-                    missing_rules = error
+                if url in _EDU_AWARD_PAGES:
+                    missing_rules[url] = error
                     continue
             raise
         main = one(nodes(root, "main"), "detail main")
@@ -1774,13 +1792,14 @@ def read_pages():
             if clean not in candidates:
                 pending.append(clean)
             discovered(clean, candidates[url], url)
-    if missing_rules is not None:
-        if not excluded_edu_rules(pages, candidates, catalogues,
-                                  referrers.get(_EDU_RULES, set())):
-            raise missing_rules
-        del candidates[_EDU_RULES]
-        supporting.get(_EDU_AWARD, set()).discard(_EDU_RULES)
-        print("Excluded unavailable rules for the nomination-only EduInspiracje award",
+    for rules, error in missing_rules.items():
+        if not verified_award_overview(rules, pages, candidates, catalogues,
+                                       referrers.get(rules, set())):
+            raise error
+        del candidates[rules]
+        overview = _EDU_AWARD_PAGES[rules]
+        supporting.get(overview, set()).discard(rules)
+        print("Verified official award overview for missing rules: " + overview,
               file=sys.stderr)
     fetch_inventory_page(read, "https://erasmusplus.org.pl/dokumenty")
     return pages, candidates, catalogues, supporting
@@ -2029,15 +2048,23 @@ def parse_inventory(pages):
     records = {}
     excluded = []
     attachments = set().union(*supporting.values()) if supporting else set()
-    primary_rules = "https://eduinspiracje.org.pl/eduinspirator/regulamin"
+    primary_rules = _EDU_PRIMARY_RULES
+    primary_overview = _EDU_AWARD_PAGES[primary_rules]
+    overview_title = None
+    if primary_rules not in documents:
+        titles = [title for title, links, _ in catalogues
+                  if primary_rules in links and primary_overview in links]
+        if titles:
+            overview_title = one(titles, "EduInspirator catalogue title")
     support_roots = {
         "https://selfieplus.frse.org.pl/",
         "https://selfieplus.frse.org.pl/o-selfie",
-        "https://eduinspiracje.org.pl/eduinspirator/o-konkursie",
         "https://etwinning.pl/konkursy/konkursy-polskie",
         SOURCE_URL + "wydawnictwo",
         SOURCE_URL + "wydawnictwo/regulamin",
     }
+    if not overview_title:
+        support_roots.add(primary_overview)
     for url in sorted(candidates, key=lambda value: (value in ALIASES, value)):
         category = candidates[url]
         root = documents[url]
@@ -2047,6 +2074,16 @@ def parse_inventory(pages):
              "lista-plikow" in url)):
             excluded.append(
                 (url, "supporting catalogue or rules, not another call"))
+            continue
+        if url == primary_overview and overview_title:
+            record = record_from_content(url, overview_title, detail_content(root), category)
+            record["kind"] = "programme-overview"
+            if record["status"] != "expired":
+                record["status"] = "unknown"
+            record["limitations"].append(
+                "The organiser describes self-application. The catalogue rules page "
+                "is unavailable; an open round and its current terms are unverified.")
+            records[record["id"]] = record
             continue
         if category == "jobs":
             boxes = nodes(root, class_name="module_faq_box")
