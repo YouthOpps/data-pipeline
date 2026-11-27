@@ -30,3 +30,45 @@ jobs:
           assert 'HTTP 404: ' + path + 'regulamin' in failed
           print('Production classification and failed URL match.')
           PY
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 16988009c49f282cec94f33dc3677a370abea0c5
+          path: website
+          persist-credentials: false
+      - name: Verify pinned FRSE publication through the raw and expiry-filtered consumer
+        env:
+          DATA_REV: 4be7cae4f3916eb524da350936e4c3d734fb240a
+        run: |
+          test "$(git -C website ls-tree HEAD data-source | cut -f1 | awk '{print $3}')" = "$DATA_REV"
+          mkdir -p "$RUNNER_TEMP/raw/pl-frse" "$RUNNER_TEMP/filtered/pl-frse"
+          for name in data metadata; do
+            curl --silent --show-error --fail "https://raw.githubusercontent.com/YouthOpps/data-source/$DATA_REV/datas/pl-frse/$name.json" > "$RUNNER_TEMP/raw/pl-frse/$name.json"
+          done
+          python - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'adapters/pl-frse')
+          import adapter
+          root = Path(os.environ['RUNNER_TEMP'])
+          records = json.loads((root/'raw/pl-frse/data.json').read_text())
+          meta = json.loads((root/'raw/pl-frse/metadata.json').read_text())
+          assert len(records) == 63
+          current = adapter.remove_expired_records(records, adapter.utc_now())
+          folder = root/'filtered/pl-frse'
+          (folder/'data.json').write_text(json.dumps(current))
+          (folder/'metadata.json').write_text(json.dumps(adapter.metadata(adapter.utc_now(), {}, current)))
+          print(f'Pinned raw records: {len(records)}; current after source expiry filtering: {len(current)}')
+          PY
+          node --input-type=module <<'JS'
+          import {readFile} from 'node:fs/promises';
+          import assert from 'node:assert/strict';
+          import {loadData} from './website/scripts/data.mjs';
+          for (const kind of ['raw','filtered']) {
+            const root = process.env.RUNNER_TEMP + '/' + kind;
+            const expected = JSON.parse(await readFile(root + '/pl-frse/data.json','utf8'));
+            const parsed = await loadData(root);
+            assert.deepEqual(parsed.opportunities.map(x=>x.id).sort(), expected.map(x=>x.id).sort());
+            console.log(kind, parsed.opportunities.length, 'exact IDs accepted');
+          }
+          JS
