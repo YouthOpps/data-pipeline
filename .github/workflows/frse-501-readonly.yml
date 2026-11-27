@@ -28,6 +28,17 @@ jobs:
           assert path + 'o-konkursie", "publisher explicitly requires nomination"' in good
           assert path + 'regulamin", "supporting catalogue or rules, not another call"' in good
           assert 'HTTP 404: ' + path + 'regulamin' in failed
+          import re
+          for name, log in [('success',good),('failure',failed)]:
+              starts = re.findall(r'"event": "request_start", "url": "([^"]+)"', log)
+              rules = starts.index(path + 'regulamin')
+              assert starts[rules-1] == path + 'o-konkursie'
+              assert starts.index('https://www.frse.org.pl/konkursy') < rules
+              if name == 'success':
+                  assert rules < starts.index('https://www.frse.org.pl/praca-w-frse')
+              else:
+                  assert 'https://www.frse.org.pl/praca-w-frse' not in starts
+              print(name, 'fetch order confirms competition catalogue candidates preceded the jobs seed')
           print('Production classification and failed URL match.')
           PY
       - uses: actions/checkout@v4
