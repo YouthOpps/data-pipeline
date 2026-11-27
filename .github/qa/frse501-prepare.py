@@ -1,5 +1,8 @@
 """Authorize a single independent, nonpublishing FRSE maintenance container."""
 import hashlib
+import io
+import urllib.request
+import zipfile
 import json
 import os
 from pathlib import Path
@@ -11,10 +14,10 @@ sys.path.insert(0, str(ROOT / "adapters/pl-frse"))
 import adapter as a
 
 REPOSITORY = "YouthOpps/data-pipeline"
-PREFIX = ".github/workflows/frse-501-native.yml"
+PREFIX = ".github/workflows/frse-501-research.yml"
 branch = os.environ["GITHUB_REF_NAME"]
-live = branch == "qa/501-native-live"
-assert branch in {"qa/501-native-preflight", "qa/501-native-live"}
+live = branch == "qa/501-research-live"
+assert branch in {"qa/501-research-preflight", "qa/501-research-live"}
 assert os.environ["GITHUB_WORKFLOW_REF"] == f"{REPOSITORY}/{PREFIX}@refs/heads/{branch}"
 assert os.environ["GITHUB_WORKFLOW_SHA"] == os.environ["GITHUB_SHA"]
 assert not os.getenv("DATA_SOURCE_TOKEN")
@@ -46,9 +49,9 @@ with a.execution(), a.phase("preparation", 180):
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
         assert event["created"] is True and event["deleted"] is False
         assert event["before"] == "0"*40 and event["after"] == run["head_sha"]
-        assert event["ref"] == "refs/heads/qa/501-native-live"
+        assert event["ref"] == "refs/heads/qa/501-research-live"
         assert run["created_at"].startswith("2026-11-27T")
-        prior = a.workflow_api("/actions/runs?branch=qa%2F501-native-live"
+        prior = a.workflow_api("/actions/runs?branch=qa%2F501-research-live"
                                "&event=push&per_page=100")
         assert prior["total_count"] == 1 and len(prior["workflow_runs"]) == 1
         assert prior["workflow_runs"][0]["id"] == run_id
@@ -66,6 +69,25 @@ with a.execution(), a.phase("preparation", 180):
     assert metadata["digest"] == digest
     a._ATTEMPT_HEADS[owner[:2]] = owner_head
     state = a.production_maintenance_state(a.download_inert_artifact(owner, 15144177944, digest))
+    research = a.workflow_api("/actions/artifacts/15183924820")
+    source_run = a.workflow_api("/actions/runs/45966438770/attempts/1")
+    assert source_run["conclusion"] == "failure" and source_run["head_branch"] == "qa/501-native-live"
+    assert source_run["head_sha"] == "3eef7977b94fa7cbeddb143440651b2d5c3d8e84"
+    assert research["workflow_run"]["head_sha"] == source_run["head_sha"]
+    assert research["workflow_run"]["id"] == source_run["id"]
+    assert research["name"] == "frse-501-maintenance-state-1" and research["expired"] is False
+    payload = subprocess.check_output(["gh","api","--allow-escape-sequences",
+        "repos/YouthOpps/data-pipeline/actions/artifacts/15183924820/zip"],
+        env={**os.environ,"GH_TOKEN":os.environ["GITHUB_TOKEN"]})
+    assert len(payload) == research["size_in_bytes"] == 10998
+    assert hashlib.sha256(payload).hexdigest() == research["digest"][7:] == "3dcb3b768b4b59b28d7fd2a4a2c3ef6fe1aea08324491060d355e83daa28fa47"
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        assert set(archive.namelist()) == {"terminal-state.json","receipts.json"}
+        terminal = archive.read("terminal-state.json")
+        proof = json.loads(archive.read("receipts.json"))
+        assert proof["invalid_write_count"] == 0 and len(proof["requests"]) == 96
+    assert hashlib.sha256(terminal).hexdigest() == "873d9884758abce1851753b21ab2b937fb0d3df1f4e7e9b0d26788a43c3ddc46"
+    state = a.merge_budget(state, a.validate_budget(json.loads(terminal)))
     assert not state["in_flight"] and not state["blocked"]
     write = Path(os.environ["RUNNER_TEMP"]) / "frse-seed"
     write.mkdir(mode=0o700)

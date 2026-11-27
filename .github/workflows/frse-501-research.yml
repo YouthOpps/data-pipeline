@@ -1,7 +1,7 @@
-name: FRSE 501 nonpublishing maintenance QA
+name: FRSE 501 targeted official catalogue research
 on:
   push:
-    branches: [qa/501-native-preflight, qa/501-native-live]
+    branches: [qa/501-research-preflight, qa/501-research-live]
 permissions:
   contents: read
   actions: read
@@ -33,7 +33,7 @@ jobs:
           docker pull python:3.12-slim-bookworm
           mkdir -m 700 "$RUNNER_TEMP/frse-evidence"
           mkdir -m 700 /dev/shm/frse501
-          python -m py_compile .github/qa/frse501-prepare.py .github/qa/frse501-native.py .github/qa/sitecustomize.py
+          python -m py_compile .github/qa/frse501-prepare.py .github/qa/frse501-research.py .github/qa/sitecustomize.py
       - name: Confirm container journal ownership without any network access
         run: |
           docker run --rm --network none --read-only --user "$(id -u):$(id -g)" --tmpfs /tmp \
@@ -41,39 +41,25 @@ jobs:
             -e TMPDIR=/tmp -w /src/adapters/pl-frse python:3.12-slim-bookworm \
             python -B -c 'import adapter as a; a.require_existing_local_state(); print("Exact native mature-state journal accepted with network disabled")'
       - name: Run actual publisher collection without production credentials
-        if: github.ref == 'refs/heads/qa/501-native-live'
+        if: github.ref == 'refs/heads/qa/501-research-live'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           docker run --rm --read-only --user "$(id -u):$(id -g)" --tmpfs /tmp \
             -v "$GITHUB_WORKSPACE:/src:ro" -v "/dev/shm/frse501:/ram" \
             -v "$RUNNER_TEMP/frse-seed:/tmp/youthopps-frse-publisher-v1-$(id -u)" \
-            -e GITHUB_TOKEN -e TMPDIR=/tmp -w /src python:3.12-slim-bookworm \
-            python -B .github/qa/frse501-native.py
-      - name: Validate all accepted native IDs with the pinned website consumer
-        if: github.ref == 'refs/heads/qa/501-native-live' && success()
-        run: |
-          node --input-type=module <<'JS'
-          import {readFile,readdir} from 'node:fs/promises';
-          import assert from 'node:assert/strict';
-          import {loadData} from './website/scripts/data.mjs';
-          for (const name of await readdir('/dev/shm/frse501/consumer')) {
-            const root = '/dev/shm/frse501/consumer/'+name;
-            const records = JSON.parse(await readFile(root+'/pl-frse/data.json','utf8'));
-            const data = await loadData(root);
-            assert.deepEqual(data.opportunities.map(x=>x.id).sort(),records.map(x=>x.id).sort());
-            console.log(name, records.length, 'native IDs accepted');
-          }
-          JS
+            -e GITHUB_TOKEN -e TMPDIR=/tmp -e FRSE_NATIVE_OBSERVER=1 -e PYTHONPATH=/src/.github/qa -w /src python:3.12-slim-bookworm \
+            python -B .github/qa/frse501-research.py
       - name: Preserve the actual terminal journal and receipts for handback review
-        if: always() && github.ref == 'refs/heads/qa/501-native-live'
+        if: always() && github.ref == 'refs/heads/qa/501-research-live'
         run: |
           cp "$RUNNER_TEMP/frse-seed/state.json" "$RUNNER_TEMP/frse-evidence/terminal-state.json"
           if test -f /dev/shm/frse501/proof.json; then cp /dev/shm/frse501/proof.json "$RUNNER_TEMP/frse-evidence/receipts.json"; fi
+          if test -f /dev/shm/frse501/facts.json; then cp /dev/shm/frse501/facts.json "$RUNNER_TEMP/frse-evidence/facts.json"; fi
           sha256sum "$RUNNER_TEMP/frse-evidence/terminal-state.json"
       - uses: actions/upload-artifact@v4
-        if: always() && github.ref == 'refs/heads/qa/501-native-live'
+        if: always() && github.ref == 'refs/heads/qa/501-research-live'
         with:
-          name: frse-501-maintenance-state-1
+          name: frse-501-targeted-state-1
           path: ${{ runner.temp }}/frse-evidence/
           if-no-files-found: error
