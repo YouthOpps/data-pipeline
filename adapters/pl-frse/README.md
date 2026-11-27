@@ -48,7 +48,7 @@ python -B adapters/pl-frse/test_adapter.py
 
 The sole live, nonpublishing test validates all actual records and emits the complete JSON on stdout, with diagnostics on stderr. Responses and records stay in memory. Checks in that same test perturb a late field of genuine retrieved HTML, verify freshness and distinguish full closing dates from unknown/projected/event/project dates. These checks do not substitute fixtures for real retrieval. The test receives no publication credential and writes no dataset files.
 
-Preparation retains its absolute 1,800-second bound and request-start guard. Total execution remains bounded to 2,190 seconds, with separate publication/failure phases and reserved pacing export. An incomplete or oversized frontier fails rather than publishing partial data.
+Preparation retains its absolute 1,800-second bound and request-start guard. Total execution remains bounded to 2,190 seconds, with separate publication/failure phases and reserved pacing export. An incomplete or oversized frontier fails rather than publishing partial data. If a required detail page returns HTTP 404, stderr lists the referring catalogue, homepage or detail paths observed before the failure. Query parameters are omitted.
 
 Production remains `python -B adapters/pl-frse/adapter.py --publish`,
 atomically publishing only
