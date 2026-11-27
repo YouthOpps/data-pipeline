@@ -34,6 +34,12 @@ jobs:
           mkdir -m 700 "$RUNNER_TEMP/frse-evidence"
           mkdir -m 700 /dev/shm/frse501
           python -m py_compile .github/qa/frse501-prepare.py .github/qa/frse501-native.py .github/qa/sitecustomize.py
+      - name: Confirm container journal ownership without any network access
+        run: |
+          docker run --rm --network none --read-only --user "$(id -u):$(id -g)" --tmpfs /tmp \
+            -v "$GITHUB_WORKSPACE:/src:ro" -v "$RUNNER_TEMP/frse-seed:/tmp/youthopps-frse-publisher-v1-$(id -u)" \
+            -e TMPDIR=/tmp -w /src/adapters/pl-frse python:3.12-slim-bookworm \
+            python -B -c 'import adapter as a; a.require_existing_local_state(); print("Exact native mature-state journal accepted with network disabled")'
       - name: Run actual publisher collection without production credentials
         if: github.ref == 'refs/heads/qa/501-native-live'
         env:
