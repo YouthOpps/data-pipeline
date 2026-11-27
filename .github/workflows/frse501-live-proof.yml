@@ -1,0 +1,25 @@
+name: FRSE final live publication and Sources UI
+on:
+  push:
+    branches: [qa/501-published-verify]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check completed normal publication and live data routes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FRSE_DATA_REVISION: d57d3657275a0f76098dfb7b3a6f391869e73bdb
+          FRSE_SITE_REVISION: 1e2d74ba9060cd6f9c9fca793bb9e66729a5034f
+        run: python -B .github/qa/frse501-published.py
+      - name: Verify the production Sources search and green FRSE status in Chrome
+        run: |
+          python -m pip install --quiet playwright==1.56.0
+          python -B .github/qa/frse501-sources-ui.py
