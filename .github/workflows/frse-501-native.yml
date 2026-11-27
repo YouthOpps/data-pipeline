@@ -1,0 +1,30 @@
+name: FRSE 501 nonpublishing maintenance QA
+on:
+  push:
+    branches: [qa/501-native-preflight, qa/501-native-live]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: youthopps-frse-publisher-v1
+  queue: max
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: YouthOpps/youthopps.github.io
+          ref: 16988009c49f282cec94f33dc3677a370abea0c5
+          path: website
+          persist-credentials: false
+      - name: Verify exact run, candidate, previous owner and real ZIP
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -B .github/qa/frse501-prepare.py
