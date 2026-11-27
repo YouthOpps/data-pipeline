@@ -121,12 +121,13 @@ jobs:
           sys.path.insert(0, 'adapters/pl-frse')
           import adapter as a
           catalog, other = a.SOURCE_URL+'konkursy', a.SOURCE_URL+'independent'
-          award, rules = a._EDU_AWARD, a._EDU_RULES
+          rules = a._EDU_RULES
+          award = a._EDU_AWARD_PAGES[rules]
           def page(text):
               return a.document_root('<html><body><main><section class="text_page"><p>'+text+'</p></section></main></body></html>')
           def decision(text='nie ma możliwości samodzielnego zgłoszenia', other_text='Other call', links=None, parents=None):
               pages = {award:page(text), other:page(other_text), catalog:page('catalogue')}
-              return a.excluded_edu_rules(pages, {award, other, rules},
+              return a.verified_award_overview(rules, pages, {award, other, rules},
                   [('award', [award,rules] if links is None else links, None)],
                   {catalog, award} if parents is None else parents)
           assert decision()
@@ -136,7 +137,23 @@ jobs:
           assert not decision(parents={award})
           assert not decision(parents={catalog,other})
           assert not decision(other_text='<a href="'+rules+'#conditions">Conditions</a>')
-          print('All seven controls passed')
+          rules = a._EDU_PRIMARY_RULES
+          award = a._EDU_AWARD_PAGES[rules]
+          self_apply = "Należy zgłosić swoją kandydaturę poprzez wypełnienie formularza zgłoszeniowego"
+          assert decision(text=self_apply)
+          assert not decision(text="Open applications")
+          assert not decision(text=self_apply + "; nie ma możliwości samodzielnego zgłoszenia")
+          assert a.record_identity(award) == a.record_identity(rules)
+          overview = '<h1>EDUinspirator</h1>'+self_apply
+          doc = page(overview)
+          inventory = ({award:doc}, {award:"competitions"},
+                       [("Konkurs EDUinspirator",[award,rules],None)], {})
+          rows = a.parse_inventory(inventory)
+          assert len(rows) == 1 and rows[0]["url"] == award
+          assert rows[0]["id"] == a.record_identity(rules)
+          assert (rows[0]["kind"],rows[0]["status"]) == ("programme-overview","unknown")
+          assert any("current terms" in note for note in rows[0]["limitations"])
+          print('Nomination, genuine self-application, identity, rejection and fallback controls passed')
           PY
       - name: Compare live YouthOpps FRSE indices and sitemap with the website data pin
         run: |
