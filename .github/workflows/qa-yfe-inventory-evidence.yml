@@ -1,0 +1,30 @@
+name: QA Youth for Europe inventory diagnostics
+on:
+  push:
+    branches: [qa/365-yfe-inventory-evidence-20261127]
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check inventory diagnostics without contacting the publisher
+        working-directory: adapters/youth-for-europe
+        run: |
+          python -B - <<'PY'
+          import hashlib
+          from unittest.mock import patch
+          import adapter
+          for count in (0, 2, 3):
+              body = "private response" + '<script id="case27-explore-configuration">{}</script>' * count
+              with patch.object(adapter, "fetch_inventory_page", return_value=body):
+                  try:
+                      adapter.explore_page("general", 4)
+                  except adapter.AdapterError as error:
+                      assert f"found {count} on general page 4" in str(error)
+                      assert hashlib.sha256(body.encode()).hexdigest() in str(error)
+                      assert "private response" not in str(error)
+                  else:
+                      raise AssertionError("Ambiguous inventory was accepted")
+          PY
