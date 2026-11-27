@@ -1,7 +1,7 @@
-name: FRSE 501 nonpublishing maintenance QA
+name: FRSE 501 verified programme-overview native QA
 on:
   push:
-    branches: [qa/501-native-preflight, qa/501-native-live]
+    branches: [qa/501-native2-preflight, qa/501-native2-live]
 permissions:
   contents: read
   actions: read
@@ -41,7 +41,7 @@ jobs:
             -e TMPDIR=/tmp -w /src/adapters/pl-frse python:3.12-slim-bookworm \
             python -B -c 'import adapter as a; a.require_existing_local_state(); print("Exact native mature-state journal accepted with network disabled")'
       - name: Run actual publisher collection without production credentials
-        if: github.ref == 'refs/heads/qa/501-native-live'
+        if: github.ref == 'refs/heads/qa/501-native2-live'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -51,7 +51,7 @@ jobs:
             -e GITHUB_TOKEN -e TMPDIR=/tmp -w /src python:3.12-slim-bookworm \
             python -B .github/qa/frse501-native.py
       - name: Validate all accepted native IDs with the pinned website consumer
-        if: github.ref == 'refs/heads/qa/501-native-live' && success()
+        if: github.ref == 'refs/heads/qa/501-native2-live' && success()
         run: |
           node --input-type=module <<'JS'
           import {readFile,readdir} from 'node:fs/promises';
@@ -66,14 +66,14 @@ jobs:
           }
           JS
       - name: Preserve the actual terminal journal and receipts for handback review
-        if: always() && github.ref == 'refs/heads/qa/501-native-live'
+        if: always() && github.ref == 'refs/heads/qa/501-native2-live'
         run: |
           cp "$RUNNER_TEMP/frse-seed/state.json" "$RUNNER_TEMP/frse-evidence/terminal-state.json"
           if test -f /dev/shm/frse501/proof.json; then cp /dev/shm/frse501/proof.json "$RUNNER_TEMP/frse-evidence/receipts.json"; fi
           sha256sum "$RUNNER_TEMP/frse-evidence/terminal-state.json"
       - uses: actions/upload-artifact@v4
-        if: always() && github.ref == 'refs/heads/qa/501-native-live'
+        if: always() && github.ref == 'refs/heads/qa/501-native2-live'
         with:
-          name: frse-501-maintenance-state-1
+          name: frse-501-second-native-state-1
           path: ${{ runner.temp }}/frse-evidence/
           if-no-files-found: error
