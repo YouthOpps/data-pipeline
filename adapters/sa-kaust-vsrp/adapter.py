@@ -1621,7 +1621,7 @@ def hosted_authority():
     return binding, identity_proof, verify
 
 
-CI_QA = None
+CI_QA = {'branch': 'qa/504-kaust-073ef9be87d3692d', 'review_evidence': 'https://github.com/YouthOpps/data-pipeline/issues/504#issuecomment-7213169076'}
 NATIVE_TEST_EXPORT = None
 RESEARCH_REPO = 'YouthOpps/ai-workspace'
 RESEARCH_REPO_ID = 1410255493
