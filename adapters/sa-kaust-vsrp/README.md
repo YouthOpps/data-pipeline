@@ -6,6 +6,6 @@ Collection reads robots.txt and the complete project inventory once per refresh.
 
 Daily collection runs at 14:28 UTC. Publisher access shares the original KAUST family state, with at most five starts per rolling minute, at least 12.2 seconds after physical completion, and a 30-second inventory gap. The adapter honors retained holds and rate limits. Retrieval, indexing-policy, validation and publication failures preserve the last successful inventory. Successful replacement excludes stale removed listings and records with proven elapsed deadlines. Omitted deadlines remain eligible for publication.
 
-Run the nonpublishing test through its reviewed GitHub Actions job. The production job writes the source data and metadata together, preserving first-seen timestamps of unchanged records.
+The original nonpublishing test ran in the reviewed GitHub Actions job. To verify the parser again without contacting the publisher, pass the decoded inventory HTML from its retained evidence to `python adapters/sa-kaust-vsrp/test_adapter.py --replay-native-html PATH`. The replay verifies the original document digest and emits all normalized records. The production job writes the source data and metadata together, preserving first-seen timestamps of unchanged records.
 
 The [native GitHub Actions test](https://github.com/YouthOpps/data-pipeline/actions/runs/45963219634) verified the complete inventory with the website consumer and retained its pacing handoff. [Source review and production history](https://github.com/YouthOpps/data-pipeline/issues/504)
