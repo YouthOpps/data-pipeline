@@ -1,0 +1,16 @@
+name: Verify Luxembourg GitHub metadata diagnostics
+on:
+  push:
+    branches: [qa/365-lux-state-diagnostics]
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event.created && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Exercise read-only metadata response and failure cases without network
+        run: GITHUB_TOKEN=inert python -B qa/lux27/check.py
