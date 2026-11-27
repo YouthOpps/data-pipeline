@@ -83,3 +83,33 @@ jobs:
             console.log(kind, parsed.opportunities.length, 'exact IDs accepted');
           }
           JS
+      - name: Exercise the original owned decoder and maintenance MAX without contacting FRSE
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python -B - <<'PY'
+          import copy, sys
+          sys.path.insert(0, 'adapters/pl-frse')
+          import adapter as a
+          identity = (45871463683, 1, 'pl-frse')
+          run = a.workflow_api('/actions/runs/45871463683/attempts/1')
+          obj = a.workflow_api('/actions/artifacts/15144177944')
+          head = 'd0c2731027b50c6e85928883133c38cfe8153053'
+          digest = 'sha256:5860e76953a5c2add277e6596cadb957ff2d6fcef5e18c918331aabf6ed5b229'
+          assert run['workflow_id'] == a._LOCAL_WORKFLOW_ID and run['id'] == identity[0]
+          assert run['head_sha'] == head and run['head_branch'] == 'main' and run['conclusion'] == 'failure'
+          assert obj['workflow_run']['id'] == identity[0] and obj['workflow_run']['head_sha'] == head
+          assert obj['digest'] == digest and not obj['expired']
+          a._ATTEMPT_HEADS[identity[:2]] = head
+          original = a.download_inert_artifact(identity, 15144177944, digest)
+          assert not original['blocked'] and not original['in_flight']
+          merged = a.production_maintenance_state(original)
+          more = copy.deepcopy(original)
+          more.update(interval=max(90, more['interval']), page_gap=max(120, more['page_gap']), blocked=True, in_flight=True)
+          result = a.merge_budget(merged, more)
+          assert result['interval'] >= 90 and result['page_gap'] >= 120
+          assert result['blocked'] and result['in_flight']
+          assert set(original['starts']).issubset(result['starts'])
+          assert result['research_provenance'] == original['research_provenance']
+          print('Authentic owned archive decoded. Stronger constraints, holds, pending state, starts and provenance preserved in memory.')
+          PY
