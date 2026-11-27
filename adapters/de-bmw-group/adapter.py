@@ -829,12 +829,11 @@ def collect_body():
     for url in (GLOBAL_TERMS_URL, GLOBAL_LEGAL_URL, GB_LEGAL_URL):
         policy = NativeHTML(fetch_source(url)).root
         policy_text = clean(single(policy.find("main"), "policy body").text())
-        if (
-            hashlib.sha256(policy_text.encode()).hexdigest()
-            != REVIEWED_POLICY_HASHES[url]
-        ):
+        observed_digest = hashlib.sha256(policy_text.encode()).hexdigest()
+        if observed_digest != REVIEWED_POLICY_HASHES[url]:
             raise AdapterError(
-                "Reviewed publisher policy changed; review required", "access"
+                f"Reviewed publisher policy changed at {url} "
+                f"(observed SHA-256 {observed_digest}); review required", "access"
             )
     first = read_frontier(route, 2)
     closing = read_frontier(route, 1)
