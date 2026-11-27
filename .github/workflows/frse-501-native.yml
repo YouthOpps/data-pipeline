@@ -28,3 +28,46 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python -B .github/qa/frse501-prepare.py
+      - name: Prepare isolated maintenance runner
+        run: |
+          docker pull python:3.12-slim-bookworm
+          mkdir -m 700 "$RUNNER_TEMP/frse-evidence"
+          mkdir -m 700 /dev/shm/frse501
+          python -m py_compile .github/qa/frse501-prepare.py .github/qa/frse501-native.py .github/qa/sitecustomize.py
+      - name: Run actual publisher collection without production credentials
+        if: github.ref == 'refs/heads/qa/501-native-live'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm --read-only --user "$(id -u):$(id -g)" --tmpfs /tmp \
+            -v "$GITHUB_WORKSPACE:/src:ro" -v "/dev/shm/frse501:/ram" \
+            -v "$RUNNER_TEMP/frse-seed:/tmp/youthopps-frse-publisher-v1-$(id -u)" \
+            -e GITHUB_TOKEN -e TMPDIR=/tmp -w /src python:3.12-slim-bookworm \
+            python -B .github/qa/frse501-native.py
+      - name: Validate all accepted native IDs with the pinned website consumer
+        if: github.ref == 'refs/heads/qa/501-native-live' && success()
+        run: |
+          node --input-type=module <<'JS'
+          import {readFile,readdir} from 'node:fs/promises';
+          import assert from 'node:assert/strict';
+          import {loadData} from './website/scripts/data.mjs';
+          for (const name of await readdir('/dev/shm/frse501/consumer')) {
+            const root = '/dev/shm/frse501/consumer/'+name;
+            const records = JSON.parse(await readFile(root+'/pl-frse/data.json','utf8'));
+            const data = await loadData(root);
+            assert.deepEqual(data.opportunities.map(x=>x.id).sort(),records.map(x=>x.id).sort());
+            console.log(name, records.length, 'native IDs accepted');
+          }
+          JS
+      - name: Preserve the actual terminal journal and receipts for handback review
+        if: always() && github.ref == 'refs/heads/qa/501-native-live'
+        run: |
+          cp "$RUNNER_TEMP/frse-seed/state.json" "$RUNNER_TEMP/frse-evidence/terminal-state.json"
+          if test -f /dev/shm/frse501/proof.json; then cp /dev/shm/frse501/proof.json "$RUNNER_TEMP/frse-evidence/receipts.json"; fi
+          sha256sum "$RUNNER_TEMP/frse-evidence/terminal-state.json"
+      - uses: actions/upload-artifact@v4
+        if: always() && github.ref == 'refs/heads/qa/501-native-live'
+        with:
+          name: frse-501-maintenance-state-1
+          path: ${{ runner.temp }}/frse-evidence/
+          if-no-files-found: error
