@@ -1607,6 +1607,12 @@ def read_pages():
     """Exhaust advertised catalogue pages and discovered current call details."""
     pages, candidates, catalogues, supporting = {}, {}, [], {}
 
+    referrers = {}
+
+    def discovered(link, category, parent):
+        candidates.setdefault(link, category)
+        referrers.setdefault(link, set()).add(parent)
+
     def read(url, *, inventory=False):
         url = public_url(url)
         if url not in pages:
@@ -1659,7 +1665,7 @@ def read_pages():
                                     r"laurea|/aktualnosci/",
                                     urllib.parse.urlsplit(link).path,
                                 )):
-                            candidates.setdefault(public_url(link), category)
+                            discovered(public_url(link), category, url)
             else:
                 links = {
                     absolute_link(url, node.attrs["href"])
@@ -1670,7 +1676,7 @@ def read_pages():
                     raise AdapterError("Empty catalogue page: " + url)
                 signature = tuple(sorted(links))
                 for link in sorted(links):
-                    candidates.setdefault(link, category)
+                    discovered(link, category, url)
             if signature in signatures:
                 raise AdapterError("Repeated directory page: " + url)
             signatures.add(signature)
@@ -1683,8 +1689,8 @@ def read_pages():
     for node in nodes(homepage, "a"):
         href = node.attrs.get("href", "")
         if href.startswith("/aktualnosci/") and _CALL_WORDS.search(node.text()):
-            candidates.setdefault(absolute_link(SOURCE_URL, href),
-                                  "competitions")
+            discovered(absolute_link(SOURCE_URL, href), "competitions",
+                       SOURCE_URL)
 
     pending = list(candidates)
     visited = set()
@@ -1696,7 +1702,15 @@ def read_pages():
             raise AdapterError(
                 "Discovered detail inventory exceeds collection bound")
         visited.add(url)
-        root = read(url)
+        try:
+            root = read(url)
+        except AdapterError as error:
+            if error.stage == "fetch" and error.status == 404:
+                for parent in sorted(referrers.get(url, ())):
+                    parsed = urllib.parse.urlsplit(parent)
+                    print("Required detail linked from " + parsed.scheme +
+                          "://" + parsed.netloc + parsed.path, file=sys.stderr)
+            raise
         main = one(nodes(root, "main"), "detail main")
         for node in nodes(root, "a"):
             href = node.attrs.get("href", "")
@@ -1725,8 +1739,8 @@ def read_pages():
             if rules:
                 supporting.setdefault(url, set()).add(clean)
             if clean not in candidates:
-                candidates[clean] = candidates[url]
                 pending.append(clean)
+            discovered(clean, candidates[url], url)
     fetch_inventory_page(read, "https://erasmusplus.org.pl/dokumenty")
     return pages, candidates, catalogues, supporting
 
