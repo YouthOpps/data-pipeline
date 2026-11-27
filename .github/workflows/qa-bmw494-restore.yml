@@ -1,0 +1,15 @@
+name: Validate BMW pre-access recovery
+on:
+  push:
+    branches: [qa/494-history-no-publisher]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -B .github/qa/check-bmw-history.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
