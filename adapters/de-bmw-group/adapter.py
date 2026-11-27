@@ -3636,8 +3636,11 @@ def legal_review_handoff(incoming):
                     until=1795768857.9511, starts=[1795768830.2058296, 1795768831.621175,
                                                    1795768844.157197, 1795768845.5530152])
     state = merge_budget(incoming, observed)
+    # The receipt digest is independent of the clock on the restoring runner.
+    state["observed_at"] = max(incoming["observed_at"], observed["observed_at"])
+    validate_budget(state)
     digest = hashlib.sha256(json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    if digest != "340f8e8c3cefa4ad0694f3d13ae6522261b9b28dc3fbb6d5f0c40a8a208109b0":
+    if digest != "79958400a57921c2646c8c6a191168986e15b5338c6ee4a725ae84bde8d32cdc":
         raise AdapterError("BMW policy state handoff differs", "access")
     return state
 
