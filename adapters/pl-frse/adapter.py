@@ -4822,6 +4822,28 @@ _NATIVE_HANDOFF_STATE = {
 }
 
 
+# Completed issue #501 maintenance owners, in observed order.
+# Run 45966438770, artifact 15183924820, terminal SHA-256 873d9884758abce1851753b21ab2b937fb0d3df1f4e7e9b0d26788a43c3ddc46.
+# Run 45970910663, artifact 15184413815, terminal SHA-256 9929374843a57712e78adf38cbc2c836baa2662a3d19a4b30a96d0a629549637.
+# Run 45972134394, artifact 15187541476, terminal SHA-256 119309043cb9937668995749d61bd9d9416c387fc9e8c494dcc123101fdb6639.
+# Unchanged schema and legacy evidence are inherited from the verified seed.
+_EDU_QA_STATE = {
+    **_NATIVE_HANDOFF_STATE,
+    "completed": 1795772792.749179,
+    "inventory_completed": 1795772792.749179,
+    "observed_at": 1795772792.749179,
+    "starts": [
+        1795769866.039893, 1795769879.4925768, 1795769892.7319603,
+        1795769905.4416952, 1795769918.6568604, 1795770538.5327702,
+        1795770552.0799754, 1795770564.7522929, 1795770577.9401574,
+        1795770591.2671416, 1795772735.7853448, 1795772749.5501845,
+        1795772763.3469403, 1795772777.177056, 1795772790.4742017,
+    ],
+    "until": 1795771029.4525042,
+}
+_EDU_QA_SHA256 = "f6f2113f1598775f626385ed5b591f34c621b02b9df37ab7101e9b250290cfde"
+
+
 def production_maintenance_state(incoming):
     """Retain reviewed native MAX only after the real newest owned decoder."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -4842,7 +4864,12 @@ def production_maintenance_state(incoming):
         if (len(encoded) > 16384 or hashlib.sha256(encoded).hexdigest()
                 != _NATIVE_HANDOFF_BINDING["state_sha256"]):
             raise ValueError("Reviewed native MAX bytes changed")
-        return merge_budget(incoming, state)
+        current = validate_budget(copy.deepcopy(_EDU_QA_STATE))
+        payload = json.dumps(current, sort_keys=True, separators=(",", ":"),
+                             allow_nan=False).encode()
+        if hashlib.sha256(payload).hexdigest() != _EDU_QA_SHA256:
+            raise ValueError("Reviewed EDU award QA handback changed")
+        return merge_budget(merge_budget(incoming, state), current)
     except (ValueError, TypeError, KeyError, AdapterError) as error:
         raise AdapterError("Invalid committed native MAX handoff",
                            "access") from error
