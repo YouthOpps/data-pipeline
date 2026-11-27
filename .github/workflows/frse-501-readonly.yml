@@ -16,7 +16,7 @@ jobs:
         run: |
           python -m py_compile adapters/pl-frse/adapter.py
           for job in 139411205500 140087660744; do
-            gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs" > "$RUNNER_TEMP/$job.log"
+            gh api --allow-escape-sequences "repos/$GITHUB_REPOSITORY/actions/jobs/$job/logs" > "$RUNNER_TEMP/$job.log"
           done
           python - <<'PY'
           import os
