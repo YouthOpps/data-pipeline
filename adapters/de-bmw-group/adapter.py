@@ -1544,6 +1544,28 @@ def latest_family_run():
                                    "access") from None
 
 
+def reviewed_preaccess_owner(ordered):
+    """Restore the exact prior owner of the reviewed pre-access timeout (#494)."""
+    gap_id, prior_id = 45965303770, 45923888649
+    if (len(ordered) < 2 or ordered[-1][2:] != (gap_id, 1, SOURCE_ID)
+            or ordered[-2][2:] != (prior_id, 1, SOURCE_ID)
+            or _ATTEMPT_HEADS.get((gap_id, 1)) != "9e63b6308a211ae163194eb5dff7ebd1703f92ca"
+            or _ATTEMPT_HEADS.get((prior_id, 1)) != "d0c2731027b50c6e85928883133c38cfe8153053"
+            or len(ordered) > 2 and ordered[-2][0] == ordered[-3][0]):
+        raise AdapterError("Reviewed BMW pre-access lineage differs", "access")
+    jobs = workflow_api(f"/actions/runs/{gap_id}/attempts/1/jobs?per_page=100")
+    expected_job = {"id": 140392445847, "run_id": gap_id, "run_attempt": 1,
+                    "head_sha": _ATTEMPT_HEADS[(gap_id, 1)], "status": "completed",
+                    "conclusion": "failure", "name": "collect", "head_branch": "main"}
+    if (jobs.get("total_count") != 1 or len(jobs.get("jobs", [])) != 1
+            or any(jobs["jobs"][0].get(k) != v for k, v in expected_job.items())):
+        raise AdapterError("Reviewed BMW pre-access job differs", "access")
+    empty = workflow_api(f"/actions/runs/{gap_id}/artifacts?per_page=100")
+    if empty.get("total_count") != 0 or empty.get("artifacts") != []:
+        raise AdapterError("Reviewed BMW pre-access artifacts differ", "access")
+    return ordered[-2][2:]
+
+
 def scan_family_history():
     """Select newest completed chronology, including older-ID rerun attempts."""
     hosted = os.environ.get("GITHUB_ACTIONS") == "true"
@@ -1561,8 +1583,7 @@ def scan_family_history():
     total, scanned = None, 0
     seen_ids = set()
     for page in range(1, 101):
-        route = ("/actions/runs" if hosted else
-                 ("/actions/workflows/" + str(definition["id"]) + "/runs"))
+        route = "/actions/workflows/" + str(definition["id"]) + "/runs"
         result = workflow_api(route + f"?per_page=100&page={page}")
         count, runs = result.get("total_count"), result.get("workflow_runs")
         if (type(count) is not int or count < 0 or not isinstance(runs, list) or
@@ -1584,10 +1605,8 @@ def scan_family_history():
             seen_ids.add(run_id)
             source = family_source(run)
             if not source:
-                if not hosted:
-                    raise AdapterError("Unexpected local family source",
-                                       "access")
-                continue
+                raise AdapterError("Unexpected source in BMW workflow history",
+                                   "access")
             if (run.get(("repository"), {}).get(
                 ("full_name")) != ("YouthOpps/data-pipeline") or
                     run.get("head_repository", {}).get("full_name")
@@ -1662,6 +1681,8 @@ def scan_family_history():
             if len(ordered) > 1 and ordered[-1][0] == ordered[-2][0]:
                 raise AdapterError(("Ambiguous family attempt chronology"),
                                    ("access"))
+            if ordered[-1][2:] == (45965303770, 1, SOURCE_ID):
+                return reviewed_preaccess_owner(ordered)
             return ordered[-1][2:]
         if len(runs) != 100:
             raise AdapterError("Incomplete workflow inventory", "access")
@@ -3605,6 +3626,10 @@ def restore_family_artifact():
             type(artifact.get("size_in_bytes")) is not int or
             not 0 < artifact["size_in_bytes"] <= 32768):
         raise AdapterError("Invalid family artifact binding", "access")
+    if latest == (45923888649, 1, SOURCE_ID) and (
+            artifact["id"] != 15165713870 or artifact["size_in_bytes"] != 1132
+            or artifact["digest"] != "sha256:d4a398ac805706b549acbbb5496a9d83595b29615bd30d24adbe0f2600aed8f0"):
+        raise AdapterError("Reviewed November 27 state artifact differs", "access")
     incoming = download_inert_artifact(latest, artifact["id"],
                                        artifact["digest"])
     incoming = production_maintenance_state(incoming)
