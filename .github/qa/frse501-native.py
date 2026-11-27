@@ -13,7 +13,9 @@ try:
                                          "FRSE_NATIVE_OBSERVER": "1"}, capture_output=True)
     proof = json.loads(Path("/ram/proof.json").read_text())
     rows = proof["requests"]
-    assert proof["persisted"] and rows
+    assert proof["persisted"] and rows and not proof["invalid_write_count"]
+    assert all(r["fully_read"] and not any(r[k] for k in
+               ("read_failure","open_failure","close_failure")) for r in rows)
     assert all(row["completion"] is not None for row in rows)
     gaps = [b["start"]-a["completion"] for a,b in zip(rows,rows[1:])]
     inventory = [r for r in rows if r["inventory"]]

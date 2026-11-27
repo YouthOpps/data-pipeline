@@ -31,6 +31,9 @@ if os.getenv("FRSE_NATIVE_OBSERVER") == "1":
         except urllib.error.HTTPError as error:
             attach(error, item)
             raise
+        except BaseException as error:
+            item["open_failure"] = type(error).__name__
+            raise
         attach(response, item)
         return response
 
@@ -47,12 +50,17 @@ if os.getenv("FRSE_NATIVE_OBSERVER") == "1":
                 item["read_failure"] = type(error).__name__
                 raise
             item["parts"].append(data)
+            if not data or not args or args[0] < 0:
+                item["eof"] = True
             return data
         def complete():
             try:
-                return close()
-            finally:
-                item.setdefault("completion", time.monotonic())
+                result = close()
+            except BaseException as error:
+                item["close_failure"] = type(error).__name__
+                raise
+            item.setdefault("completion", time.monotonic())
+            return result
         response.read, response.close = capture, complete
 
     def observe_write(state):
@@ -74,8 +82,16 @@ if os.getenv("FRSE_NATIVE_OBSERVER") == "1":
         for item in requests:
             body = b"".join(item["parts"])
             assert item["headers"]["User-agent"] == "YouthOppsBot/1.0 (+https://youthopps.org/bot/)"
-            rows.append({k:item.get(k) for k in ("url","start","completion","inventory","status")})
+            headers = {k.lower():v for k,v in item.get("response_headers",[])}
+            length = headers.get("content-length")
+            eof = bool(item.get("eof") or (length is not None and length.isdecimal()
+                                          and len(body) == int(length)))
+            rows.append({k:item.get(k) for k in ("url","start","completion","inventory","status",
+                                                "read_failure","open_failure","close_failure")})
+            rows[-1]["fully_read"] = eof
             rows[-1].update(body_bytes=len(body), sha256=hashlib.sha256(body).hexdigest())
-        for event in writes:
-            assert json.loads(event["requested"]) == json.loads(event["persisted"])
-        receipt.write_text(json.dumps({"requests":rows,"persisted":len(writes)}))
+        bad_writes = sum(event.get("persisted") is None or
+                         json.loads(event["requested"]) != json.loads(event["persisted"])
+                         for event in writes)
+        receipt.write_text(json.dumps({"requests":rows,"persisted":len(writes),
+                                       "invalid_write_count":bad_writes}))

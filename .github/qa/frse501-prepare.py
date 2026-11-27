@@ -43,6 +43,16 @@ with a.execution(), a.phase("preparation", 180):
     production = a.workflow_api("/actions/workflows/fetch-pl-frse.yml")
     assert production["id"] == a._LOCAL_WORKFLOW_ID
     if live:
+        event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+        assert event["created"] is True and event["deleted"] is False
+        assert event["before"] == "0"*40 and event["after"] == run["head_sha"]
+        assert event["ref"] == "refs/heads/qa/501-native-live"
+        assert run["created_at"].startswith("2026-11-27T")
+        prior = a.workflow_api("/actions/runs?branch=qa%2F501-native-live"
+                               "&event=push&per_page=100")
+        assert prior["total_count"] == 1 and len(prior["workflow_runs"]) == 1
+        assert prior["workflow_runs"][0]["id"] == run_id
+        assert prior["workflow_runs"][0]["run_attempt"] == 1
         a.verify_local_workflow_pause(production)
     latest = a.workflow_api(f"/actions/workflows/{production['id']}/runs?per_page=1")
     assert latest["workflow_runs"][0]["id"] == owner[0]
