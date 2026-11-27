@@ -801,6 +801,19 @@ def read_frontier(route, passes_left):
     return records
 
 
+def policy_fingerprint(main):
+    """Exclude only the screen-reader hint describing a new-window link."""
+    for link in main.find("a"):
+        if link.attrs.get("target") != "_blank":
+            continue
+        descriptions = link.attrs.get("aria-describedby", "").split()
+        for hint in link.find("span", css="sr-only"):
+            if (hint.attrs.get("id") in descriptions
+                    and hint.children == ["(opens in a new window)"]):
+                hint.children.clear()
+    return hashlib.sha256(clean(main.text()).encode()).hexdigest()
+
+
 def collect_body():
     ("Reconcile two complete native basic-facts frontiers "
      "without detail crawling.")
@@ -828,8 +841,7 @@ def collect_body():
     # copyright clauses remain unresolved; this is not a legal-clearance claim.
     for url in (GLOBAL_TERMS_URL, GLOBAL_LEGAL_URL, GB_LEGAL_URL):
         policy = NativeHTML(fetch_source(url)).root
-        policy_text = clean(single(policy.find("main"), "policy body").text())
-        observed_digest = hashlib.sha256(policy_text.encode()).hexdigest()
+        observed_digest = policy_fingerprint(single(policy.find("main"), "policy body"))
         if observed_digest != REVIEWED_POLICY_HASHES[url]:
             raise AdapterError(
                 f"Reviewed publisher policy changed at {url} "
@@ -3599,6 +3611,40 @@ def production_maintenance_state(incoming):
     return merge_budget(validate_budget(incoming), validate_budget(candidate))
 
 
+def legal_review_handoff(incoming):
+    """Retain actual post-reservation starts and completed research scope (#494)."""
+    workflow = workflow_api("/actions/workflows/432522463")
+    if (workflow.get("id") != 432522463 or workflow.get("state") != "disabled_manually"
+            or workflow.get("path") != ".github/workflows/qa-bmw494-capture.yml"):
+        raise AdapterError("BMW policy research owner must remain retired", "access")
+    history = workflow_api("/actions/workflows/432522463/runs?per_page=2")
+    rows = history.get("workflow_runs", [])
+    if history.get("total_count") != 1 or len(rows) != 1:
+        raise AdapterError("BMW policy research history changed", "access")
+    expected = {"id": 45967296430, "run_attempt": 1, "status": "completed",
+                "conclusion": "success", "head_sha": "3162ff3c7404caeeea0ad1769b29b58ba8184826",
+                "head_branch": "qa/494-legal-body", "workflow_id": 432522463}
+    if any(rows[0].get(key) != value for key, value in expected.items()):
+        raise AdapterError("BMW policy research attempt changed", "access")
+    artifacts = workflow_api("/actions/runs/45967296430/artifacts?per_page=2")
+    rows = artifacts.get("artifacts", [])
+    if (artifacts.get("total_count") != 1 or len(rows) != 1
+            or rows[0].get("id") != 15183207238 or rows[0].get("expired") is not False
+            or rows[0].get("digest") != "sha256:4f29eb5f7f3b21b84dea6fa2552c37e999b8a16a8c4fb77e36ed0f5238c99a4e"):
+        raise AdapterError("Reviewed BMW policy archive differs", "access")
+    observed = dict(incoming, completed=1795768845.7511, observed_at=1795768845.7511,
+                    until=1795768857.9511, starts=[1795768830.2058296, 1795768831.621175,
+                                                   1795768844.157197, 1795768845.5530152])
+    state = merge_budget(incoming, observed)
+    # The receipt digest is independent of the clock on the restoring runner.
+    state["observed_at"] = max(incoming["observed_at"], observed["observed_at"])
+    validate_budget(state)
+    digest = hashlib.sha256(json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if digest != "79958400a57921c2646c8c6a191168986e15b5338c6ee4a725ae84bde8d32cdc":
+        raise AdapterError("BMW policy state handoff differs", "access")
+    return state
+
+
 def restore_family_artifact():
     global _RESTORED, _STATE_TRUSTED, _VERIFIED_REMOTE_CREATE
     latest = latest_family_run()
@@ -3632,6 +3678,8 @@ def restore_family_artifact():
         raise AdapterError("Reviewed November 27 state artifact differs", "access")
     incoming = download_inert_artifact(latest, artifact["id"],
                                        artifact["digest"])
+    if latest == (45966059718, 1, SOURCE_ID):
+        incoming = legal_review_handoff(incoming)
     incoming = production_maintenance_state(incoming)
     incoming = merge_budget(incoming, reviewed_research_transition())
     _VERIFIED_REMOTE_CREATE = copy.deepcopy(incoming)
