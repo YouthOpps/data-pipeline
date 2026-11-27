@@ -20,6 +20,8 @@ import os
 from pathlib import Path
 import re
 import signal
+import socket
+import ssl
 import stat
 import sys
 import time
@@ -1092,6 +1094,11 @@ class WitnessConnection(http.client.HTTPSConnection):
         self.witness = witness
         super().__init__(host, **kwargs)
 
+    def connect(self):
+        self.witness["connection_started"] = True
+        super().connect()
+        self.witness["connection_established"] = True
+
     def response_class(self, *args, **kwargs):
         return WitnessResponse(*args, witness=self.witness, **kwargs)
 
@@ -1100,6 +1107,7 @@ class WitnessConnection(http.client.HTTPSConnection):
         # Connecting through an existing proxy may already have parsed CONNECT.
         self.witness.update(statuses=[], status_line_eof=False,
                             response_file_closed=False, connection_closed=False)
+        self.witness["response_started"] = True
         return super().getresponse()
 
     def close(self):
@@ -1195,7 +1203,9 @@ def _request(journal, url):
                'request_headers': list(req.header_items()), 'headers': [],
                'segments': []}
     receipt['transport'] = {
-        "statuses": [], "status_line_eof": False, "response_file_closed": False,
+        "connection_started": False, "connection_established": False,
+        "response_started": False, "statuses": [], "status_line_eof": False,
+        "response_file_closed": False,
         "connection_closed": False, "opener_disconnected": False,
     }
     req._source_transport_witness = receipt['transport']
@@ -1305,6 +1315,14 @@ def _request(journal, url):
         if not isinstance(error, RateLimited):
             GATE_FAILED = True
         receipt['error'] = type(error).__name__
+        if isinstance(error, urllib.error.URLError):
+            # Never log a raw reason: proxy names, certificates or URLs may occur there.
+            reason = error.reason
+            for kind in (ssl.SSLCertVerificationError, ssl.SSLError, socket.gaierror,
+                         ConnectionRefusedError, ConnectionResetError, TimeoutError):
+                if isinstance(reason, kind):
+                    receipt["transport"]["url_error_reason"] = kind.__name__
+                    break
         raise
 
 
