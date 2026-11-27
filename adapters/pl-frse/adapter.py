@@ -1613,6 +1613,24 @@ _NOMINATION_ONLY = re.compile(
     r"pierwszym etapem jest przyznanie przez nas nominacji", re.I)
 
 
+def excluded_edu_rules(pages, candidates, catalogues, parents):
+    """Verify a missing support document belongs only to a nomination award."""
+    award = pages.get(_EDU_AWARD)
+    if award is None or not _NOMINATION_ONLY.search(detail_content(award).text()):
+        return False
+    cards = [links for _, links, _ in catalogues if _EDU_RULES in links]
+    if not cards or any(_EDU_AWARD not in links for links in cards):
+        return False
+    catalog_parents = {parent for parent in parents if parent in pages and
+                       urllib.parse.urlsplit(parent)._replace(query="").geturl()
+                       == SOURCE_URL + "konkursy"}
+    if not catalog_parents or parents - catalog_parents - {_EDU_AWARD}:
+        return False
+    return not any(urllib.parse.urldefrag(link).url == _EDU_RULES
+                   for other in set(candidates) - {_EDU_AWARD, _EDU_RULES}
+                   for link in material_links(detail_content(pages[other]), other))
+
+
 def read_pages():
     """Exhaust advertised catalogue pages and discovered current call details."""
     pages, candidates, catalogues, supporting = {}, {}, [], {}
@@ -1756,22 +1774,8 @@ def read_pages():
                 pending.append(clean)
             discovered(clean, candidates[url], url)
     if missing_rules is not None:
-        award = pages.get(_EDU_AWARD)
-        cards = [set(links) for _, links, _ in catalogues if _EDU_RULES in links]
-        # A stale rule can be omitted only for this explicitly out-of-scope
-        # award. Check the completed frontier for any other detail dependency.
-        parents = referrers.get(_EDU_RULES, set())
-        catalog_parents = {parent for parent in parents
-                           if parent in pages and
-                           urllib.parse.urlsplit(parent)._replace(query="").geturl()
-                           == SOURCE_URL + "konkursy"}
-        other_details = set(candidates) - {_EDU_AWARD, _EDU_RULES}
-        if (award is None or not _NOMINATION_ONLY.search(detail_content(award).text())
-                or not cards or any(_EDU_AWARD not in links for links in cards)
-                or not catalog_parents or parents - catalog_parents - {_EDU_AWARD}
-                or any(urllib.parse.urldefrag(link).url == _EDU_RULES
-                       for other in other_details
-                       for link in material_links(detail_content(pages[other]), other))):
+        if not excluded_edu_rules(pages, candidates, catalogues,
+                                  referrers.get(_EDU_RULES, set())):
             raise missing_rules
         del candidates[_EDU_RULES]
         supporting.get(_EDU_AWARD, set()).discard(_EDU_RULES)
