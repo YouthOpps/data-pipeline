@@ -48,7 +48,7 @@ python -B adapters/pl-frse/test_adapter.py
 
 The sole live, nonpublishing test validates all actual records and emits the complete JSON on stdout, with diagnostics on stderr. Responses and records stay in memory. Checks in that same test perturb a late field of genuine retrieved HTML, verify freshness and distinguish full closing dates from unknown/projected/event/project dates. These checks do not substitute fixtures for real retrieval. The test receives no publication credential and writes no dataset files.
 
-Preparation retains its absolute 1,800-second bound and request-start guard. Total execution remains bounded to 2,190 seconds, with separate publication/failure phases and reserved pacing export. An incomplete or oversized frontier fails rather than publishing partial data.
+Preparation retains its absolute 1,800-second bound and request-start guard. Total execution remains bounded to 2,190 seconds, with separate publication/failure phases and reserved pacing export. An incomplete or oversized frontier fails rather than publishing partial data. If a required detail page returns HTTP 404, stderr lists the referring catalogue, homepage or detail paths observed before the failure. Query parameters are omitted. For the three EDU awards, an exact rules-page 404 requires a unique official catalogue card pairing that rules URL with its overview, current eligibility evidence, and no dependency from another detail. EduInspiracje and EDUinspiracje Media are excluded only for explicit nomination-only eligibility. EDUinspirator self-applicants retain the original award ID and receive the official overview URL, with unverified edition rules and no assertion that applications are open. Explicitly expired dates and closure remain effective. Other missing required rules still fail the collection.
 
 Production remains `python -B adapters/pl-frse/adapter.py --publish`,
 atomically publishing only
@@ -452,3 +452,5 @@ in a dedicated issue #384 comment. The native-test acceptance comment is not
 that decision. Missing, malformed or native-only evidence refuses after the
 actual owned decoder, before any restored journal write or publisher access.
 Disabling the workflow externally is an additional control, not this gate.
+
+Production verifies the newest original pacing artifact before combining it with the reviewed [initial test](https://github.com/YouthOpps/data-pipeline/actions/runs/45966438770), [bounded research](https://github.com/YouthOpps/data-pipeline/actions/runs/45970910663) and [final native test](https://github.com/YouthOpps/data-pipeline/actions/runs/45972134394) timing states. The hash-bound handback preserves the terminal timers, holds, request starts and existing access history.

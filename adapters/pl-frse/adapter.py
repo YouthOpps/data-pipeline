@@ -980,6 +980,9 @@ def validate_records(records, *, allow_empty=False):
 
 def record_identity(url, reference=None):
     """Keep original URL hashes and literal recruitment-reference identities."""
+    # The official overview is the same award when its edition rules disappear.
+    if url == _EDU_AWARD_PAGES[_EDU_PRIMARY_RULES]:
+        url = _EDU_PRIMARY_RULES
     identity = url + ("|" + reference if reference else "")
     return hashlib.sha256(
         (SOURCE_ID + "|" + identity).encode()).hexdigest()[:24]
@@ -1603,9 +1606,59 @@ def read_calendar():
     return root, links
 
 
+_EDU_ORIGIN = "https://eduinspiracje.org.pl/"
+_EDU_RULES = _EDU_ORIGIN + "eduinspiracje/regulamin"
+_EDU_PRIMARY_RULES = _EDU_ORIGIN + "eduinspirator/regulamin"
+_EDU_AWARD_PAGES = {
+    _EDU_RULES: _EDU_ORIGIN + "eduinspiracje/o-konkursie",
+    _EDU_PRIMARY_RULES: _EDU_ORIGIN + "eduinspirator/o-konkursie",
+    _EDU_ORIGIN + "eduinspiracje-media/regulamin":
+        _EDU_ORIGIN + "eduinspiracje-media/o-konkursie",
+}
+_EDU_SELF_APPLICATION = re.compile(
+    r"zgłosić swoją kandydaturę poprzez wypełnienie formularza zgłoszeniowego", re.I)
+_NOMINATION_ONLY = re.compile(
+    r"nie ma możliwości samodzielnego zgłoszenia|"
+    r"nie wymaga samodzielnego zgłoszenia|"
+    r"nie muszą ubiegać się o nagrodę|"
+    r"do udziału w konkursie są zapraszane osoby wytypowane|"
+    r"pierwszym etapem jest przyznanie przez nas nominacji", re.I)
+
+
+def verified_award_overview(rules, pages, candidates, catalogues, parents):
+    """Verify the current alternative and refuse unrelated missing dependencies."""
+    overview = _EDU_AWARD_PAGES[rules]
+    if overview not in pages:
+        return False
+    text = detail_content(pages[overview]).text()
+    if rules == _EDU_PRIMARY_RULES:
+        if _NOMINATION_ONLY.search(text) or not _EDU_SELF_APPLICATION.search(text):
+            return False
+    elif not _NOMINATION_ONLY.search(text):
+        return False
+    cards = [links for _, links, _ in catalogues if rules in links]
+    if len(cards) != 1 or overview not in cards[0]:
+        return False
+    catalog_parents = {parent for parent in parents if parent in pages and
+                       urllib.parse.urlsplit(parent)._replace(query="").geturl()
+                       == SOURCE_URL + "konkursy"}
+    if not catalog_parents or parents - catalog_parents - {overview}:
+        return False
+    return not any(urllib.parse.urldefrag(link).url == rules
+                   for other in candidates if other in pages and other != overview
+                   for link in material_links(one(nodes(pages[other], "main"),
+                                                  "detail main"), other))
+
+
 def read_pages():
     """Exhaust advertised catalogue pages and discovered current call details."""
     pages, candidates, catalogues, supporting = {}, {}, [], {}
+
+    referrers = {}
+
+    def discovered(link, category, parent):
+        candidates.setdefault(link, category)
+        referrers.setdefault(link, set()).add(parent)
 
     def read(url, *, inventory=False):
         url = public_url(url)
@@ -1659,7 +1712,7 @@ def read_pages():
                                     r"laurea|/aktualnosci/",
                                     urllib.parse.urlsplit(link).path,
                                 )):
-                            candidates.setdefault(public_url(link), category)
+                            discovered(public_url(link), category, url)
             else:
                 links = {
                     absolute_link(url, node.attrs["href"])
@@ -1670,7 +1723,7 @@ def read_pages():
                     raise AdapterError("Empty catalogue page: " + url)
                 signature = tuple(sorted(links))
                 for link in sorted(links):
-                    candidates.setdefault(link, category)
+                    discovered(link, category, url)
             if signature in signatures:
                 raise AdapterError("Repeated directory page: " + url)
             signatures.add(signature)
@@ -1683,11 +1736,12 @@ def read_pages():
     for node in nodes(homepage, "a"):
         href = node.attrs.get("href", "")
         if href.startswith("/aktualnosci/") and _CALL_WORDS.search(node.text()):
-            candidates.setdefault(absolute_link(SOURCE_URL, href),
-                                  "competitions")
+            discovered(absolute_link(SOURCE_URL, href), "competitions",
+                       SOURCE_URL)
 
     pending = list(candidates)
     visited = set()
+    missing_rules = {}
     while pending:
         url = pending.pop(0)
         if url in visited:
@@ -1696,7 +1750,18 @@ def read_pages():
             raise AdapterError(
                 "Discovered detail inventory exceeds collection bound")
         visited.add(url)
-        root = read(url)
+        try:
+            root = read(url)
+        except AdapterError as error:
+            if error.stage == "fetch" and error.status == 404:
+                for parent in sorted(referrers.get(url, ())):
+                    parsed = urllib.parse.urlsplit(parent)
+                    print("Required detail linked from " + parsed.scheme +
+                          "://" + parsed.netloc + parsed.path, file=sys.stderr)
+                if url in _EDU_AWARD_PAGES:
+                    missing_rules[url] = error
+                    continue
+            raise
         main = one(nodes(root, "main"), "detail main")
         for node in nodes(root, "a"):
             href = node.attrs.get("href", "")
@@ -1725,8 +1790,17 @@ def read_pages():
             if rules:
                 supporting.setdefault(url, set()).add(clean)
             if clean not in candidates:
-                candidates[clean] = candidates[url]
                 pending.append(clean)
+            discovered(clean, candidates[url], url)
+    for rules, error in missing_rules.items():
+        if not verified_award_overview(rules, pages, candidates, catalogues,
+                                       referrers.get(rules, set())):
+            raise error
+        del candidates[rules]
+        overview = _EDU_AWARD_PAGES[rules]
+        supporting.get(overview, set()).discard(rules)
+        print("Verified official award overview for missing rules: " + overview,
+              file=sys.stderr)
     fetch_inventory_page(read, "https://erasmusplus.org.pl/dokumenty")
     return pages, candidates, catalogues, supporting
 
@@ -1974,15 +2048,23 @@ def parse_inventory(pages):
     records = {}
     excluded = []
     attachments = set().union(*supporting.values()) if supporting else set()
-    primary_rules = "https://eduinspiracje.org.pl/eduinspirator/regulamin"
+    primary_rules = _EDU_PRIMARY_RULES
+    primary_overview = _EDU_AWARD_PAGES[primary_rules]
+    overview_title = None
+    if primary_rules not in documents:
+        titles = [title for title, links, _ in catalogues
+                  if primary_rules in links and primary_overview in links]
+        if titles:
+            overview_title = one(titles, "EduInspirator catalogue title")
     support_roots = {
         "https://selfieplus.frse.org.pl/",
         "https://selfieplus.frse.org.pl/o-selfie",
-        "https://eduinspiracje.org.pl/eduinspirator/o-konkursie",
         "https://etwinning.pl/konkursy/konkursy-polskie",
         SOURCE_URL + "wydawnictwo",
         SOURCE_URL + "wydawnictwo/regulamin",
     }
+    if not overview_title:
+        support_roots.add(primary_overview)
     for url in sorted(candidates, key=lambda value: (value in ALIASES, value)):
         category = candidates[url]
         root = documents[url]
@@ -1992,6 +2074,16 @@ def parse_inventory(pages):
              "lista-plikow" in url)):
             excluded.append(
                 (url, "supporting catalogue or rules, not another call"))
+            continue
+        if url == primary_overview and overview_title:
+            record = record_from_content(url, overview_title, detail_content(root), category)
+            record["kind"] = "programme-overview"
+            if record["status"] != "expired":
+                record["status"] = "unknown"
+            record["limitations"].append(
+                "The organiser describes self-application. The catalogue rules page "
+                "is unavailable; an open round and its current terms are unverified.")
+            records[record["id"]] = record
             continue
         if category == "jobs":
             boxes = nodes(root, class_name="module_faq_box")
@@ -2015,15 +2107,7 @@ def parse_inventory(pages):
             continue
         content = detail_content(root)
         text = content.text()
-        if re.search(
-                r"nie ma możliwości samodzielnego zgłoszenia|"
-                r"nie wymaga samodzielnego zgłoszenia|"
-                r"nie muszą ubiegać się o nagrodę|"
-                r"do udziału w konkursie są zapraszane osoby wytypowane|"
-                r"pierwszym etapem jest przyznanie przez nas nominacji",
-                text,
-                re.I,
-        ):
+        if _NOMINATION_ONLY.search(text):
             excluded.append((url, "publisher explicitly requires nomination"))
             continue
         specialized = any(
@@ -4738,6 +4822,28 @@ _NATIVE_HANDOFF_STATE = {
 }
 
 
+# Completed issue #501 maintenance owners, in observed order.
+# Run 45966438770, artifact 15183924820, terminal SHA-256 873d9884758abce1851753b21ab2b937fb0d3df1f4e7e9b0d26788a43c3ddc46.
+# Run 45970910663, artifact 15184413815, terminal SHA-256 9929374843a57712e78adf38cbc2c836baa2662a3d19a4b30a96d0a629549637.
+# Run 45972134394, artifact 15187541476, terminal SHA-256 119309043cb9937668995749d61bd9d9416c387fc9e8c494dcc123101fdb6639.
+# Unchanged schema and legacy evidence are inherited from the verified seed.
+_EDU_QA_STATE = {
+    **_NATIVE_HANDOFF_STATE,
+    "completed": 1795772792.749179,
+    "inventory_completed": 1795772792.749179,
+    "observed_at": 1795772792.749179,
+    "starts": [
+        1795769866.039893, 1795769879.4925768, 1795769892.7319603,
+        1795769905.4416952, 1795769918.6568604, 1795770538.5327702,
+        1795770552.0799754, 1795770564.7522929, 1795770577.9401574,
+        1795770591.2671416, 1795772735.7853448, 1795772749.5501845,
+        1795772763.3469403, 1795772777.177056, 1795772790.4742017,
+    ],
+    "until": 1795771029.4525042,
+}
+_EDU_QA_SHA256 = "f6f2113f1598775f626385ed5b591f34c621b02b9df37ab7101e9b250290cfde"
+
+
 def production_maintenance_state(incoming):
     """Retain reviewed native MAX only after the real newest owned decoder."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
@@ -4758,7 +4864,12 @@ def production_maintenance_state(incoming):
         if (len(encoded) > 16384 or hashlib.sha256(encoded).hexdigest()
                 != _NATIVE_HANDOFF_BINDING["state_sha256"]):
             raise ValueError("Reviewed native MAX bytes changed")
-        return merge_budget(incoming, state)
+        current = validate_budget(copy.deepcopy(_EDU_QA_STATE))
+        payload = json.dumps(current, sort_keys=True, separators=(",", ":"),
+                             allow_nan=False).encode()
+        if hashlib.sha256(payload).hexdigest() != _EDU_QA_SHA256:
+            raise ValueError("Reviewed EDU award QA handback changed")
+        return merge_budget(merge_budget(incoming, state), current)
     except (ValueError, TypeError, KeyError, AdapterError) as error:
         raise AdapterError("Invalid committed native MAX handoff",
                            "access") from error
