@@ -1760,10 +1760,18 @@ def read_pages():
         cards = [set(links) for _, links, _ in catalogues if _EDU_RULES in links]
         # A stale rule can be omitted only for this explicitly out-of-scope
         # award. Check the completed frontier for any other detail dependency.
+        parents = referrers.get(_EDU_RULES, set())
+        catalog_parents = {parent for parent in parents
+                           if parent in pages and
+                           urllib.parse.urlsplit(parent)._replace(query="").geturl()
+                           == SOURCE_URL + "konkursy"}
+        other_details = set(candidates) - {_EDU_AWARD, _EDU_RULES}
         if (award is None or not _NOMINATION_ONLY.search(detail_content(award).text())
                 or not cards or any(_EDU_AWARD not in links for links in cards)
-                or any(_EDU_RULES in material_links(detail_content(pages[other]), other)
-                       for other in candidates if other not in {_EDU_AWARD, _EDU_RULES})):
+                or not catalog_parents or parents - catalog_parents - {_EDU_AWARD}
+                or any(urllib.parse.urldefrag(link).url == _EDU_RULES
+                       for other in other_details
+                       for link in material_links(detail_content(pages[other]), other))):
             raise missing_rules
         del candidates[_EDU_RULES]
         supporting.get(_EDU_AWARD, set()).discard(_EDU_RULES)
