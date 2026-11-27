@@ -1628,7 +1628,8 @@ def excluded_edu_rules(pages, candidates, catalogues, parents):
         return False
     return not any(urllib.parse.urldefrag(link).url == _EDU_RULES
                    for other in set(candidates) - {_EDU_AWARD, _EDU_RULES}
-                   for link in material_links(detail_content(pages[other]), other))
+                   for link in material_links(one(nodes(pages[other], "main"),
+                                                  "detail main"), other))
 
 
 def read_pages():
