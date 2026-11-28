@@ -3761,7 +3761,7 @@ def completed_identity(run, expected=None, revision=None):
 
 
 def latest_family_run():
-    """Restart only count-drift races, without reusing partial candidates."""
+    """Retry bounded inventory races without retaining partial candidates."""
     for attempt in range(3):
         try:
             return scan_family_history()
@@ -3774,7 +3774,7 @@ def latest_family_run():
 
 
 class InventoryRace(AdapterError):
-    """The advertised complete workflow inventory changed during reading."""
+    """The complete workflow inventory changed or omitted this attempt."""
 
 
 
@@ -4856,7 +4856,11 @@ def scan_family_history():
                     raise AdapterError(
                         "Another family publisher is active", "access"
                     )
-                candidates.append(completed_identity(run))
+                completed = completed_identity(run)
+                if identity == 46102871211:
+                    verify_reviewed_preaccess_failure(run)
+                else:
+                    candidates.append(completed)
             if count >= total:
                 if count != total:
                     raise AdapterError(
@@ -4870,7 +4874,7 @@ def scan_family_history():
                 "Family inventory exceeds bounded metadata scan", "access"
             )
     if hosted and not current_seen:
-        raise AdapterError(
+        raise InventoryRace(
             "Current attempt missing from complete family history", "access"
         )
     ordered = sorted(candidates)
@@ -4880,6 +4884,24 @@ def scan_family_history():
         raise AdapterError("Ambiguous actual family completion", "access")
     return ordered[-1][2:]
 
+
+
+
+def verify_reviewed_preaccess_failure(run):
+    """Retain the exact failed scan without inventing a publisher state."""
+    if (
+        run.get("run_attempt") != 1
+        or run.get("head_sha") != "a9451c5a168699394f80c361230e0af0dd17067d"
+        or run.get("conclusion") != "failure"
+        or _SCANNED_JOB_DIGESTS.get((46102871211, 1, 1))
+        != "d692f76059e53df2e3c4729d006d268810f383296c64517847f9fe7c695a77df"
+    ):
+        raise AdapterError("Reviewed pre-access failure changed", "access")
+    artifacts = workflow_api(
+        "/actions/runs/46102871211/artifacts?per_page=100"
+    )
+    if artifacts.get("total_count") != 0 or artifacts.get("artifacts") != []:
+        raise AdapterError("Reviewed pre-access artifacts changed", "access")
 
 
 def prepare_collection():
