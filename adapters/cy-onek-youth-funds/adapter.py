@@ -2758,7 +2758,11 @@ def read_pages():
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         if status != 200:
-            raise AdapterError("Calendar listing failed", "fetch", status)
+            raise AdapterError(
+                f"Calendar listing page {page} returned HTTP {status}",
+                "fetch",
+                status,
+            )
         result = json.loads(body)
         if (
             type(result.get("found_events")) is not bool
