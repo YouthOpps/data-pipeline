@@ -415,3 +415,8 @@ main must pass first-legacy and later-modern tests with the delivered workflow
 environment, including missing, null, mismatched, held and pending negatives.
 Binding is not production execution or site delivery. ROOT owns the separate
 enable-before-merge step and sole automatic production collection.
+
+Calendar listing failures retain the assessed HTTP status and inventory page
+in the failure message. Request payloads, nonces and response bodies are not
+written to public diagnostics. All existing access checks and state handling
+apply before this diagnostic is raised.
