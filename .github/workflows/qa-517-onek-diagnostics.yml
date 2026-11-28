@@ -1,0 +1,42 @@
+name: Verify ONEK calendar diagnostics without publisher access
+on:
+  push:
+    branches: [qa/517-onek-diagnostics]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compare unchanged behavior and diagnostic metadata
+        run: |
+          python -B - <<'PY'
+          import ast
+          import pathlib
+          import subprocess
+          path = 'adapters/cy-onek-youth-funds/adapter.py'
+          old = ast.parse(subprocess.check_output(['git', 'show', 'a9451c5a168699394f80c361230e0af0dd17067d:' + path], text=True))
+          new = ast.parse(pathlib.Path(path).read_text())
+          changes = 0
+          for before, after in zip(ast.walk(old), ast.walk(new)):
+              if isinstance(before, ast.Raise) and isinstance(before.exc, ast.Call) and before.exc.args and isinstance(before.exc.args[0], ast.Constant) and before.exc.args[0].value == 'Calendar listing failed':
+                  assert isinstance(after, ast.Raise)
+                  for status, page in [(400, 1), (404, 2), (500, 3), (503, 100)]:
+                      actual = eval(compile(ast.Expression(after.exc.args[0]), '<diagnostic>', 'eval'), {'status': status, 'page': page})
+                      assert actual == f'Calendar listing page {page} returned HTTP {status}'
+                  assert ast.dump(before.exc.args[1]) == ast.dump(after.exc.args[1])
+                  assert ast.dump(before.exc.args[2]) == ast.dump(after.exc.args[2])
+                  after.exc.args[0] = before.exc.args[0]
+                  changes += 1
+                  break
+          assert changes == 1
+          assert ast.dump(old) == ast.dump(new), 'Unexpected behavior change'
+          print('PASS: only calendar diagnostic text changes; all collector, access, state and publication code identical')
+          PY
