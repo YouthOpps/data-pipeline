@@ -424,3 +424,20 @@ ASTs, source facts, IDs, expiry rules, workflows and publication contract.
 Historical native results retain their original code/date attribution in the
 preceding sections; their raw input RAM is no longer available in this session.
 No fresh publisher collection, native replay or production run is claimed here.
+
+
+## Current-attempt visibility recovery
+
+Issue #516 covers scheduled run 46102871211, attempt 1. Its complete job log
+ends in the initial family-history scan before budget restoration, publisher
+transport or metadata publication. The failure finalizer cannot export a state
+because restoration has not succeeded. The exact completed job inventory and
+empty artifact inventory are checked before excluding this one attempt from
+publisher-state ownership. Its identity remains in the complete history used by
+the access fence. A changed attempt, head, job inventory or artifact inventory
+fails closed. The newest eligible predecessor must still provide its own valid
+artifact, preserving all retained restrictions and history.
+
+A temporarily absent current attempt now uses the existing three-scan inventory
+retry. Every scan discards its partial candidates. Invalid identities and
+persistent absence still prevent publisher access.
