@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: YouthOpps/youthopps.github.io
+          ref: 1b13d658488111d61f8aabcc5ae9a3565b9bc62c
           path: website
           persist-credentials: false
       - name: Inspect genuine preceding state and unchanged collector
